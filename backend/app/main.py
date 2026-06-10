@@ -15,8 +15,10 @@ from .models import (
     GeneratedScheduleInput,
     ImportBridgeParamsResponse,
     MinResourcesSolveRequest,
+    ProcessLibrarySaveRequest,
     ProcessNlRequest,
     ProcessNlResponse,
+    ProcessTemplate,
     ScheduleInput,
     ScenarioCompareRequest,
     ScenarioCompareResponse,
@@ -33,9 +35,10 @@ from .sample_data import (
     default_resources,
 )
 from .scenario import compare_scenarios, generate_schedule_input_from_scenario, solve_min_resources_scenario, solve_scenario
-from .scenario_data import default_scenario
+from .scenario_data import apply_resource_max_quantity_defaults, default_scenario
 from .solver import solve_schedule
 from .process_nl import apply_process_natural_language
+from .process_repository import ProcessRepositoryError, load_process_library, save_process_library
 from .wbs import generate_wbs
 
 
@@ -75,7 +78,27 @@ def demo() -> DemoPayload:
 
 @app.get("/api/demo-scenario", response_model=ScenarioInput)
 def demo_scenario() -> ScenarioInput:
-    return default_scenario()
+    try:
+        return _default_scenario_with_process_library()
+    except ProcessRepositoryError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/process-library", response_model=list[ProcessTemplate])
+def get_process_library_endpoint() -> list[ProcessTemplate]:
+    scenario = default_scenario()
+    try:
+        return load_process_library(scenario.process_library)
+    except ProcessRepositoryError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.put("/api/process-library", response_model=list[ProcessTemplate])
+def save_process_library_endpoint(request: ProcessLibrarySaveRequest) -> list[ProcessTemplate]:
+    try:
+        return save_process_library(request.process_library)
+    except ProcessRepositoryError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.post("/api/generate-wbs", response_model=WbsResponse)
@@ -166,6 +189,13 @@ def _local_workbook_path() -> Path:
     if not workbooks:
         raise HTTPException(status_code=404, detail="项目目录下未找到可导入的 Excel 工作簿。")
     return workbooks[0]
+
+
+def _default_scenario_with_process_library() -> ScenarioInput:
+    scenario = default_scenario()
+    scenario.process_library = load_process_library(scenario.process_library)
+    apply_resource_max_quantity_defaults(scenario)
+    return scenario
 
 
 async def _parse_multipart_request(request: Request) -> tuple[dict[str, str], dict[str, dict[str, bytes | str]]]:

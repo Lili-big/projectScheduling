@@ -3,3 +3,4 @@ openpyxl>=3.1
 uvicorn[standard]>=0.34
 ortools>=9.10
 pytest>=8.0
+psycopg[binary,pool]>=3.2

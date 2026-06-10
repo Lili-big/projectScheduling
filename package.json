@@ -1,0 +1,8 @@
+{
+  "name": "bridge-cpsat-scheduler-netlify",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "read-excel-file": "^9.1.1"
+  }
+}

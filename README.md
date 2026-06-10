@@ -212,6 +212,19 @@ PROCESS_NL_LLM_API_KEY=your-api-key
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/api/health
 ```
+## Supabase 工艺关系表
+
+后端启动 `/api/demo-scenario` 时会先构造默认场景，再从 Supabase `public.process_relationships` 读取工艺工效库并覆盖 `scenario.process_library`。前端“工艺工效库”页签点击“保存到 Supabase”时，会调用后端 `PUT /api/process-library`，由后端通过 PostgreSQL session pool 写入，不在浏览器端暴露 Supabase 写入凭据。
+
+需要在 `.local.env` 配置 Supabase Database 的 session pooler 连接串：
+
+```env
+SUPABASE_POSTGRES_SESSION_POOL_URL=postgresql://postgres.PROJECT_REF:PASSWORD@aws-0-region.pooler.supabase.com:5432/postgres?sslmode=require
+SUPABASE_POSTGRES_POOL_SIZE=5
+```
+
+已创建的表：`public.process_relationships`。一行对应一个工艺模板，`productivity_options` 和 `applicability` 使用 `jsonb` 存储，以保持和前端 `ProcessTemplate` 数据结构一致。
+
 ## 本地本体配置
 
 工艺逻辑规则由本地 JSON 维护，文件路径：

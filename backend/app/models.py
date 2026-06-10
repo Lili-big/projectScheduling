@@ -341,6 +341,10 @@ class ProcessNlResponse(BaseModel):
     warnings: list[str] = []
 
 
+class ProcessLibrarySaveRequest(BaseModel):
+    process_library: list[ProcessTemplate] = Field(min_length=1)
+
+
 class WbsRequest(BaseModel):
     bridge: BridgeModel
     productivity_rules: list[ProductivityRule]

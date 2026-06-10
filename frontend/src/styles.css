@@ -321,6 +321,14 @@ code {
   gap: 3px;
 }
 
+.panel-title > div:first-child span {
+  text-align: left;
+}
+
+.panel-title-action {
+  justify-items: end;
+}
+
 .panel-title h2 {
   margin: 0;
   font-size: 16px;

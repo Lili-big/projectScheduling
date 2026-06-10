@@ -388,7 +388,7 @@ type StructureFilters = {
   productivityLabel: string;
 };
 
-const apiBase = "";
+const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 
 const componentLabels: Record<ComponentType, string> = {
   pile: "桩基",
@@ -491,9 +491,10 @@ export default function App() {
   const [ganttMode, setGanttMode] = useState<GanttMode>("by_structure");
   const [savedResults, setSavedResults] = useState<ScenarioSolveResult[]>([]);
   const [comparison, setComparison] = useState<CompareResponse | null>(null);
-  const [busy, setBusy] = useState<"loading" | "generating" | "solving" | "minResources" | "comparing" | "importing" | "nl" | null>(null);
+  const [busy, setBusy] = useState<"loading" | "generating" | "solving" | "minResources" | "comparing" | "importing" | "nl" | "savingProcessLibrary" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastImport, setLastImport] = useState<ImportBridgeParamsResponse | null>(null);
+  const [processLibraryDirty, setProcessLibraryDirty] = useState(false);
 
   useEffect(() => {
     void loadScenario();
@@ -515,6 +516,7 @@ export default function App() {
       setSolveResult(null);
       setComparison(null);
       setLastImport(imported);
+      setProcessLibraryDirty(false);
       setActiveTab("project");
     } catch (err) {
       setError(errorText(err));
@@ -614,6 +616,7 @@ export default function App() {
       setSolveResult(null);
       setComparison(null);
       setLastImport(imported);
+      setProcessLibraryDirty(false);
       setActiveTab("project");
     } catch (err) {
       setError(errorText(err));
@@ -629,6 +632,9 @@ export default function App() {
     try {
       const result = await apiPost<ProcessNlResponse>("/api/apply-process-natural-language", { scenario, prompt });
       setScenario(result.scenario);
+      if (hasProcessLibraryChanged(scenario.process_library, result.scenario.process_library)) {
+        setProcessLibraryDirty(true);
+      }
       setGenerated(null);
       setSolveResult(null);
       setComparison(null);
@@ -664,6 +670,7 @@ export default function App() {
   }
 
   function updateProcess(index: number, patch: Partial<ProcessTemplate>) {
+    setProcessLibraryDirty(true);
     setScenario((current) =>
       current
         ? {
@@ -674,6 +681,26 @@ export default function App() {
           }
         : current,
     );
+  }
+
+  async function saveCurrentProcessLibrary() {
+    if (!scenario) return;
+    setBusy("savingProcessLibrary");
+    setError(null);
+    try {
+      const processLibrary = await apiPut<ProcessTemplate[]>("/api/process-library", {
+        process_library: scenario.process_library,
+      });
+      setScenario((current) => (current ? { ...current, process_library: processLibrary } : current));
+      setProcessLibraryDirty(false);
+      setGenerated(null);
+      setSolveResult(null);
+      setComparison(null);
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(null);
+    }
   }
 
   function updateLogic(index: number, patch: Partial<LogicRule>) {
@@ -800,7 +827,15 @@ export default function App() {
             importResult={lastImport}
           />
         )}
-        {scenario && activeTab === "process" && <ProcessTab scenario={scenario} onUpdateProcess={updateProcess} />}
+        {scenario && activeTab === "process" && (
+          <ProcessTab
+            scenario={scenario}
+            onUpdateProcess={updateProcess}
+            onSaveProcessLibrary={saveCurrentProcessLibrary}
+            savingProcessLibrary={busy === "savingProcessLibrary"}
+            processLibraryDirty={processLibraryDirty}
+          />
+        )}
         {scenario && activeTab === "logic" && <LogicTab scenario={scenario} onUpdateLogic={updateLogic} />}
         {scenario && activeTab === "resources" && (
           <ResourcesTab scenario={scenario} onUpdateResourcePool={updateResourcePool} />
@@ -1140,9 +1175,15 @@ function ProjectTab({
 function ProcessTab({
   scenario,
   onUpdateProcess,
+  onSaveProcessLibrary,
+  savingProcessLibrary,
+  processLibraryDirty,
 }: {
   scenario: ScenarioInput;
   onUpdateProcess: (index: number, patch: Partial<ProcessTemplate>) => void;
+  onSaveProcessLibrary: () => void;
+  savingProcessLibrary: boolean;
+  processLibraryDirty: boolean;
 }) {
   const resourcePoolByType = new Map(scenario.resource_pools.map((pool) => [pool.type, pool]));
 
@@ -1226,7 +1267,16 @@ function ProcessTab({
 
   return (
     <section className="panel full">
-      <PanelTitle title="施工工艺及工效库" subtitle="工艺模板按构件类型、适用工艺和默认资源类型维护" />
+      <PanelTitle
+        title="施工工艺及工效库"
+        subtitle="工艺模板按构件类型、适用工艺和默认资源类型维护"
+        action={
+          <button className="secondary" type="button" onClick={onSaveProcessLibrary} disabled={savingProcessLibrary || !processLibraryDirty}>
+            {savingProcessLibrary ? <Loader2 className="spin" size={16} /> : <Save size={16} />}
+            {processLibraryDirty ? "保存到 Supabase" : "已同步"}
+          </button>
+        }
+      />
       <div className="table-wrap tall">
         <table>
           <thead>
@@ -1923,11 +1973,14 @@ function Metric({
   );
 }
 
-function PanelTitle({ title, subtitle }: { title: string; subtitle: string }) {
+function PanelTitle({ title, subtitle, action }: { title: string; subtitle: string; action?: ReactNode }) {
   return (
     <div className="panel-title">
-      <h2>{title}</h2>
-      <span>{subtitle}</span>
+      <div>
+        <h2>{title}</h2>
+        <span>{subtitle}</span>
+      </div>
+      {action && <div className="panel-title-action">{action}</div>}
     </div>
   );
 }
@@ -2415,6 +2468,11 @@ function isComponentType(value: string | null | undefined): value is ComponentTy
   return Boolean(value && Object.prototype.hasOwnProperty.call(componentLabels, value));
 }
 
+function hasProcessLibraryChanged(current: ProcessTemplate[], next: ProcessTemplate[]): boolean {
+  if (current.length !== next.length) return true;
+  return current.some((process, index) => JSON.stringify(process) !== JSON.stringify(next[index]));
+}
+
 function dimensionSummary(component: ComponentModel): string {
   const properties = component.properties;
   const dimensions = properties?.dimensions_m;
@@ -2607,6 +2665,16 @@ async function apiGet<T>(path: string): Promise<T> {
 async function apiPost<T>(path: string, payload: unknown): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(await responseErrorText(response));
+  return response.json() as Promise<T>;
+}
+
+async function apiPut<T>(path: string, payload: unknown): Promise<T> {
+  const response = await fetch(`${apiBase}${path}`, {
+    method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
