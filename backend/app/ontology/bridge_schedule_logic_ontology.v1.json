@@ -1,0 +1,78 @@
+{
+  "schema_version": "bridge-schedule-logic-ontology/v1",
+  "description": "桥梁下部结构排程工艺逻辑规则库。产品经理可在本文件维护默认前后置规则，后端启动默认场景时读取 logic_rules。",
+  "logic_rules": [
+    {
+      "id": "cap_after_piles",
+      "scope": "same_structure",
+      "structure_type": null,
+      "to_component": "cap",
+      "predecessor_candidates": ["pile"],
+      "predecessor_strategy": "all",
+      "relationship": "FS",
+      "lag_days": 3,
+      "severity": "error",
+      "note": "承台在同一墩台全部桩基完成后施工。"
+    },
+    {
+      "id": "ground_tie_after_piles",
+      "scope": "same_structure",
+      "structure_type": "pier",
+      "to_component": "ground_tie_beam",
+      "predecessor_candidates": ["pile"],
+      "predecessor_strategy": "all",
+      "relationship": "FS",
+      "lag_days": 2,
+      "severity": "error",
+      "note": "地系梁在同一墩台全部桩基完成后施工。"
+    },
+    {
+      "id": "pier_body_after_cap",
+      "scope": "same_structure",
+      "structure_type": "pier",
+      "to_component": "pier_body",
+      "predecessor_candidates": ["ground_tie_beam", "cap", "pile"],
+      "predecessor_strategy": "first_available",
+      "relationship": "FS",
+      "lag_days": 5,
+      "severity": "error",
+      "note": "墩柱优先以承台前置；无承台时依次回退到地系梁或桩基。"
+    },
+    {
+      "id": "middle_tie_after_pier_body",
+      "scope": "same_structure",
+      "structure_type": "pier",
+      "to_component": "middle_tie_beam",
+      "predecessor_candidates": ["pier_body"],
+      "predecessor_strategy": "first_available",
+      "relationship": "FS",
+      "lag_days": 0,
+      "severity": "error",
+      "note": "中系梁在墩柱完成后施工。"
+    },
+    {
+      "id": "cap_beam_after_pier_body",
+      "scope": "same_structure",
+      "structure_type": "pier",
+      "to_component": "cap_beam",
+      "predecessor_candidates": ["pier_body","middle_tie_beam"],
+      "predecessor_strategy": "all",
+      "relationship": "FS",
+      "lag_days": 3,
+      "severity": "error",
+      "note": "盖梁以墩柱、中系梁为前置。"
+    },
+    {
+      "id": "abutment_body_after_cap",
+      "scope": "same_structure",
+      "structure_type": "abutment",
+      "to_component": "abutment_body",
+      "predecessor_candidates": ["cap", "pile", "spread_foundation"],
+      "predecessor_strategy": "first_available",
+      "relationship": "FS",
+      "lag_days": 5,
+      "severity": "error",
+      "note": "桥台台身优先以承台为前置；无承台时回退到桩基；无桩基时回退到扩大基础。"
+    }
+  ]
+}

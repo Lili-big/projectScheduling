@@ -1,0 +1,15 @@
+.venv/
+.npm-cache/
+.pip-cache/
+__pycache__/
+.pytest_cache/
+.git-tmp-projectScheduling/
+*.pyc
+*.log
+.local.env
+.env
+*.local.env
+frontend/node_modules/
+frontend/dist/
+backend/app/__pycache__/
+backend/tests/__pycache__/

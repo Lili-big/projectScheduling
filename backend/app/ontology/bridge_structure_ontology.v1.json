@@ -1,0 +1,108 @@
+{
+  "schema_version": "bridge-structure-ontology/v1",
+  "workpoint_types": {
+    "bridge": {
+      "label": "桥梁",
+      "aliases": ["桥", "桥梁", "大桥", "特大桥", "中桥", "小桥"]
+    },
+    "road": {
+      "label": "路基",
+      "aliases": ["路", "道路", "路基"]
+    },
+    "tunnel": {
+      "label": "隧道",
+      "aliases": ["隧", "隧道"]
+    }
+  },
+  "side_aliases": {
+    "left": ["左幅", "左线", "左侧"],
+    "right": ["右幅", "右线", "右侧"],
+    "none": ["整幅", "全幅", "无幅别"]
+  },
+  "support_rules": {
+    "pier_aliases": ["墩", "桥墩"],
+    "abutment_aliases": ["台", "桥台"],
+    "number_pattern": "(\\d+)#\\s*([墩台])"
+  },
+  "foundation_types": {
+    "pileFoundation": {
+      "label": "桩基础",
+      "aliases": ["桩基础", "桩基", "基桩", "钻孔桩基础", "挖孔桩基础"]
+    },
+    "spreadFoundation": {
+      "label": "扩大基础",
+      "aliases": ["扩大基础", "明挖扩大基础", "扩大基", "扩大基础桥台"]
+    }
+  },
+  "null_values": ["", "/", "／", "\\", "-", "—", "——", "无", "null", "None", "#VALUE!", "#DIV/0!", "#N/A", "#REF!", "#NAME?"],
+  "dimension_units": {
+    "cm_headers": ["cm", "桩径", "桩长", "尺寸", "高度"],
+    "m_headers": ["m", "桥长", "桥宽", "长度", "总长"]
+  },
+  "structure_components": {
+    "pileFoundation": {
+      "label": "桩基础",
+      "aliases": ["桩基", "桩基础", "基桩"],
+      "schedule_component_type": "pile",
+      "quantity_source": "lengthM",
+      "quantity_label_template": "直径{diameterM}m，桩长{lengthM}m"
+    },
+    "spreadFoundation": {
+      "label": "扩大基础",
+      "aliases": ["扩大基础", "明挖扩大基础", "扩大基"],
+      "schedule_component_type": "spread_foundation",
+      "quantity_source": "count"
+    },
+    "cap": {
+      "label": "承台",
+      "aliases": ["承台"],
+      "schedule_component_type": "cap",
+      "quantity_source": "count"
+    },
+    "groundTieBeam": {
+      "label": "地系梁",
+      "aliases": ["地系梁", "地梁", "桩系梁"],
+      "schedule_component_type": "ground_tie_beam",
+      "quantity_source": "count"
+    },
+    "middleTieBeam": {
+      "label": "中系梁",
+      "aliases": ["中系梁", "系梁", "柱系梁"],
+      "schedule_component_type": "middle_tie_beam",
+      "quantity_source": "count"
+    },
+    "pierColumn": {
+      "label": "墩柱",
+      "aliases": ["墩柱", "柱式墩", "矩形墩", "矩形空心墩"],
+      "schedule_component_type": "pier_body",
+      "quantity_source": "heightM_times_count"
+    },
+    "capBeam": {
+      "label": "盖梁",
+      "aliases": ["盖梁"],
+      "schedule_component_type": "cap_beam",
+      "quantity_source": "count"
+    },
+    "abutment": {
+      "label": "桥台",
+      "aliases": ["桥台", "U型台", "柱式台"],
+      "schedule_component_type": "abutment_body",
+      "quantity_source": "count"
+    }
+  },
+  "upper_structure_codes": {
+    "precastTGirder": {
+      "label": "简支T梁",
+      "aliases": ["预制T梁", "T梁"]
+    },
+    "castInPlaceContinuousBoxGirder": {
+      "label": "现浇连续梁",
+      "aliases": ["现浇箱梁", "连续梁", "刚构"]
+    }
+  },
+  "confidence_defaults": {
+    "semantic_header": 0.86,
+    "component_mapping": 0.82,
+    "unit_conversion": 0.9
+  }
+}
