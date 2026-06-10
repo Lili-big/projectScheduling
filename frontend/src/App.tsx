@@ -487,7 +487,8 @@ export default function App() {
   const [scenario, setScenario] = useState<ScenarioInput | null>(null);
   const [generated, setGenerated] = useState<GeneratedScheduleInput | null>(null);
   const [solveResult, setSolveResult] = useState<ScenarioSolveResult | null>(null);
-  const [activeTab, setActiveTab] = useState<TabKey>("project");
+  const [openTabs, setOpenTabs] = useState<TabKey[]>(["project"]);
+  const [activeTab, setActiveTab] = useState<TabKey | null>("project");
   const [ganttMode, setGanttMode] = useState<GanttMode>("by_structure");
   const [savedResults, setSavedResults] = useState<ScenarioSolveResult[]>([]);
   const [comparison, setComparison] = useState<CompareResponse | null>(null);
@@ -516,7 +517,6 @@ export default function App() {
       setSolveResult(null);
       setComparison(null);
       setLastImport(imported);
-      setProcessLibraryDirty(false);
       setActiveTab("project");
     } catch (err) {
       setError(errorText(err));
@@ -532,7 +532,7 @@ export default function App() {
     try {
       const nextGenerated = await apiPost<GeneratedScheduleInput>("/api/generate-schedule-input", scenario);
       setGenerated(nextGenerated);
-      setActiveTab("results");
+      openModule("results");
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -546,7 +546,7 @@ export default function App() {
     setError(null);
     try {
       await solveWith(scenario);
-      setActiveTab("results");
+      openModule("results");
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -571,7 +571,7 @@ export default function App() {
       });
       setGenerated(solved.generated);
       setSolveResult(solved);
-      setActiveTab("results");
+      openModule("results");
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -616,7 +616,6 @@ export default function App() {
       setSolveResult(null);
       setComparison(null);
       setLastImport(imported);
-      setProcessLibraryDirty(false);
       setActiveTab("project");
     } catch (err) {
       setError(errorText(err));
@@ -661,6 +660,25 @@ export default function App() {
 
   function patchScenario(patch: Partial<ScenarioInput>) {
     setScenario((current) => (current ? { ...current, ...patch } : current));
+  }
+
+  function openModule(tabKey: TabKey) {
+    setOpenTabs((current) => (current.includes(tabKey) ? current : [...current, tabKey]));
+    setActiveTab(tabKey);
+  }
+
+  function closeModule(tabKey: TabKey) {
+    setOpenTabs((current) => {
+      const nextTabs = current.filter((key) => key !== tabKey);
+      if (activeTab === tabKey) {
+        const closedIndex = current.indexOf(tabKey);
+        const nextIndex = Math.min(closedIndex, nextTabs.length - 1);
+        setActiveTab(nextTabs[nextIndex] ?? null);
+      } else if (activeTab && !nextTabs.includes(activeTab)) {
+        setActiveTab(nextTabs[0] ?? null);
+      }
+      return nextTabs;
+    });
   }
 
   function patchProject(patch: Partial<ProjectModel>) {
@@ -766,6 +784,53 @@ export default function App() {
     });
   }
 
+  function renderModule(tabKey: TabKey) {
+    if (!scenario && tabKey !== "results") {
+      return <div className="empty">正在加载场景...</div>;
+    }
+
+    switch (tabKey) {
+      case "project":
+        return scenario ? (
+          <ProjectTab
+            scenario={scenario}
+            flatStructures={flatStructures}
+            onPatchScenario={patchScenario}
+            onPatchProject={patchProject}
+            onUpdateComponent={updateComponent}
+            onImportBridgeParams={importBridgeParams}
+            onApplyProcessNaturalLanguage={applyProcessNaturalLanguage}
+            importing={busy === "importing"}
+            applyingProcessText={busy === "nl"}
+            importResult={lastImport}
+          />
+        ) : null;
+      case "process":
+        return scenario ? <ProcessTab scenario={scenario} onUpdateProcess={updateProcess} /> : null;
+      case "logic":
+        return scenario ? <LogicTab scenario={scenario} onUpdateLogic={updateLogic} /> : null;
+      case "resources":
+        return scenario ? <ResourcesTab scenario={scenario} onUpdateResourcePool={updateResourcePool} /> : null;
+      case "milestones":
+        return scenario ? <MilestonesTab scenario={scenario} onUpdateMilestone={updateMilestone} /> : null;
+      case "results":
+        return (
+          <ResultsTab
+            scenario={scenario}
+            generated={generated}
+            solveResult={solveResult}
+            ganttMode={ganttMode}
+            onGanttModeChange={setGanttMode}
+            onSaveCurrent={saveCurrentResult}
+            savedResults={savedResults}
+            comparison={comparison}
+            onCompare={() => void compareSavedResults()}
+            comparing={busy === "comparing"}
+          />
+        );
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -785,7 +850,16 @@ export default function App() {
         </div>
       </header>
 
-      <main className={`workspace ${activeTab === "project" ? "project-workspace" : ""}`}>
+      <div className="app-body">
+        <SideNavigation activeTab={activeTab} openTabs={openTabs} onOpen={openModule} />
+
+        <main className="workspace">
+          <WorkspaceTabStrip
+            openTabs={openTabs}
+            activeTab={activeTab}
+            onSelect={setActiveTab}
+            onClose={closeModule}
+          />
         <section className="summary-band">
           <Metric label="计划状态" value={result ? scheduleStatusLabels[result.status] : "未求解"} tone={statusTone} icon={<Server size={18} />} />
           <Metric label="总工期" value={summary.days} tone="neutral" icon={<CalendarDays size={18} />} />
@@ -827,15 +901,7 @@ export default function App() {
             importResult={lastImport}
           />
         )}
-        {scenario && activeTab === "process" && (
-          <ProcessTab
-            scenario={scenario}
-            onUpdateProcess={updateProcess}
-            onSaveProcessLibrary={saveCurrentProcessLibrary}
-            savingProcessLibrary={busy === "savingProcessLibrary"}
-            processLibraryDirty={processLibraryDirty}
-          />
-        )}
+        {scenario && activeTab === "process" && <ProcessTab scenario={scenario} onUpdateProcess={updateProcess} />}
         {scenario && activeTab === "logic" && <LogicTab scenario={scenario} onUpdateLogic={updateLogic} />}
         {scenario && activeTab === "resources" && (
           <ResourcesTab scenario={scenario} onUpdateResourcePool={updateResourcePool} />
