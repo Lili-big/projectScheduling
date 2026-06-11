@@ -17,6 +17,7 @@ from .models import (
     StructureModel,
     WorkSection,
 )
+from .process_library_defaults import historical_default_process_library
 from .sample_data import default_bridge
 
 
@@ -189,119 +190,7 @@ def _default_process_for_component(component: ComponentModel, process_library: l
 
 
 def default_process_library() -> list[ProcessTemplate]:
-    return [
-        ProcessTemplate(
-            id="pile_rotary_regular",
-            component_type="pile",
-            process_name="旋挖钻成孔",
-            method_id="rotary_drill",
-            duration_method="units_per_day",
-            quantity_source="pile_length_m",
-            productivity_value=18,
-            productivity_unit="m/天",
-            resource_type="rotary_drill",
-            is_default=True,
-        ),
-        ProcessTemplate(
-            id="pile_impact",
-            component_type="pile",
-            process_name="冲击钻成孔",
-            method_id="impact_drill",
-            duration_method="units_per_day",
-            quantity_source="pile_length_m",
-            productivity_value=10,
-            productivity_unit="m/天",
-            resource_type="impact_drill",
-        ),
-        ProcessTemplate(
-            id="pile_manual",
-            component_type="pile",
-            process_name="人工挖孔",
-            method_id="manual_pile",
-            duration_method="days_per_unit",
-            quantity_source="pile_length_m",
-            productivity_value=1,
-            productivity_unit="天/m",
-            resource_type="manual_pile_team",
-        ),
-        ProcessTemplate(
-            id="cap_standard",
-            component_type="cap",
-            process_name="承台施工",
-            duration_method="fixed_days",
-            quantity_source="count",
-            productivity_value=8,
-            productivity_unit="天/个",
-            resource_type="cap_team",
-            is_default=True,
-        ),
-        ProcessTemplate(
-            id="spread_foundation_standard",
-            component_type="spread_foundation",
-            process_name="扩大基础施工",
-            duration_method="fixed_days",
-            quantity_source="count",
-            productivity_value=8,
-            productivity_unit="天/个",
-            resource_type="spread_foundation_team",
-            is_default=True,
-        ),
-        ProcessTemplate(
-            id="ground_tie_beam_standard",
-            component_type="ground_tie_beam",
-            process_name="地系梁施工",
-            duration_method="fixed_days",
-            quantity_source="count",
-            productivity_value=4,
-            productivity_unit="天/个",
-            resource_type="tie_beam_team",
-            is_default=True,
-        ),
-        ProcessTemplate(
-            id="pier_body_standard",
-            component_type="pier_body",
-            process_name="墩柱施工",
-            duration_method="units_per_day",
-            quantity_source="pier_height_m",
-            productivity_value=1.2,
-            productivity_unit="m/天",
-            resource_type="pier_body_team",
-            is_default=True,
-        ),
-        ProcessTemplate(
-            id="middle_tie_beam_standard",
-            component_type="middle_tie_beam",
-            process_name="中系梁施工",
-            duration_method="fixed_days",
-            quantity_source="count",
-            productivity_value=4,
-            productivity_unit="天/个",
-            resource_type="tie_beam_team",
-            is_default=True,
-        ),
-        ProcessTemplate(
-            id="cap_beam_standard",
-            component_type="cap_beam",
-            process_name="盖梁施工",
-            duration_method="fixed_days",
-            quantity_source="count",
-            productivity_value=7,
-            productivity_unit="天/个",
-            resource_type="cap_beam_team",
-            is_default=True,
-        ),
-        ProcessTemplate(
-            id="abutment_body_standard",
-            component_type="abutment_body",
-            process_name="桥台施工",
-            duration_method="fixed_days",
-            quantity_source="count",
-            productivity_value=10,
-            productivity_unit="天/个",
-            resource_type="abutment_team",
-            is_default=True,
-        ),
-    ]
+    return historical_default_process_library()
 
 
 def default_scenario_logic_rules() -> list[LogicRule]:
@@ -325,6 +214,7 @@ def default_resource_calendars() -> list[ResourceCalendar]:
 def default_resource_pools() -> list[ResourcePool]:
     return [
         ResourcePool(id="pool-rotary-drill", type="rotary_drill", label="旋挖钻", quantity=3),
+        ResourcePool(id="pool-circulation-drill", type="circulation_drill", label="回旋钻", quantity=1),
         ResourcePool(id="pool-impact-drill", type="impact_drill", label="冲击钻", quantity=1),
         ResourcePool(id="pool-manual-pile", type="manual_pile_team", label="人工挖孔班", quantity=1),
         ResourcePool(id="pool-cap", type="cap_team", label="承台模板", quantity=1),
@@ -333,6 +223,12 @@ def default_resource_pools() -> list[ResourcePool]:
         ResourcePool(id="pool-pier-body", type="pier_body_team", label="墩柱班组", quantity=1),
         ResourcePool(id="pool-cap-beam", type="cap_beam_team", label="盖梁模板", quantity=1),
         ResourcePool(id="pool-abutment", type="abutment_team", label="桥台班组", quantity=1),
+        ResourcePool(id="pool-precast-beam", type="precast_beam_team", label="制梁台座", quantity=1),
+        ResourcePool(id="pool-beam-erection", type="beam_erection_team", label="架梁班组", quantity=1),
+        ResourcePool(id="pool-cast-in-place-continuous-beam", type="cast_in_place_continuous_beam_team", label="连续梁班组", quantity=1),
+        ResourcePool(id="pool-cast-in-place-box-beam", type="cast_in_place_box_beam_team", label="现浇箱梁班组", quantity=1),
+        ResourcePool(id="pool-steel-box-beam", type="steel_box_beam_team", label="钢箱梁班组", quantity=1),
+        ResourcePool(id="pool-bridge-deck-system", type="bridge_deck_system_team", label="桥面系班组", quantity=1),
     ]
 
 

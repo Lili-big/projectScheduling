@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import sys
 from datetime import date
 from pathlib import Path
@@ -9,7 +10,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.models import MilestoneConstraint, PrecedenceLink, ProductivityOption, Resource, ResourcePool, ScheduleInput, ScenarioCompareRequest, ScheduledTask, Task  # noqa: E402
+from app.models import MilestoneConstraint, PrecedenceLink, ProcessTemplate, ProductivityOption, Resource, ResourcePool, ScheduleInput, ScenarioCompareRequest, ScheduledTask, Task  # noqa: E402
+from app.process_library_defaults import upgrade_process_library  # noqa: E402
 from app.sample_data import (  # noqa: E402
     default_bridge,
     default_logic_rules,
@@ -22,10 +24,73 @@ from app.solver import _resource_path_metrics, _task_ids_for_milestone, solve_mi
 from app.wbs import calculate_duration, generate_wbs  # noqa: E402
 
 
-def test_duration_calculation_uses_units_per_day() -> None:
+def test_duration_calculation_uses_historical_days_per_pile() -> None:
     rotary = next(rule for rule in default_productivity_rules() if rule.id == "pile_rotary_regular")
-    assert calculate_duration(36, rotary) == 2
-    assert calculate_duration(37, rotary) == 3
+    assert rotary.duration_method == "days_per_unit"
+    assert rotary.quantity_source == "count"
+    assert rotary.productivity_unit == "天/根"
+    assert calculate_duration(1, rotary) == 3
+    assert calculate_duration(2, rotary) == 6
+
+
+def test_default_process_library_uses_historical_productivity_defaults() -> None:
+    process_by_id = {process.id: process for process in default_scenario().process_library}
+
+    assert process_by_id["pile_rotary_regular"].productivity_value == 3
+    assert process_by_id["pile_rotary_regular"].productivity_unit == "天/根"
+    assert process_by_id["pile_circulation"].productivity_value == 2
+    assert process_by_id["pile_impact"].productivity_value == 2
+    assert process_by_id["cap_standard"].productivity_value == 30
+    assert process_by_id["pier_body_climbing_form"].productivity_unit == "天/节"
+    assert process_by_id["pier_body_climbing_form"].quantity_source == "pier_height_m"
+    assert process_by_id["pier_body_climbing_form"].productivity_options[0].standard_section_height_m == 4.5
+    assert process_by_id["cast_in_place_continuous_zero_block"].productivity_value == 120
+    assert process_by_id["bridge_deck_system_standard"].quantity_source == "deck_length_m"
+    for process in process_by_id.values():
+        assert sum(1 for option in process.productivity_options if option.is_default) == 1
+
+
+def test_process_library_upgrade_replaces_previous_builtin_defaults_and_adds_missing_history() -> None:
+    upgraded = upgrade_process_library(
+        [
+            ProcessTemplate(
+                id="pile_rotary_regular",
+                component_type="pile",
+                process_name="旋挖钻成孔",
+                method_id="rotary_drill",
+                duration_method="units_per_day",
+                quantity_source="pile_length_m",
+                productivity_value=18,
+                productivity_unit="m/天",
+                resource_type="rotary_drill",
+                is_default=True,
+            ),
+            ProcessTemplate(
+                id="cap_standard",
+                component_type="cap",
+                process_name="承台施工",
+                duration_method="fixed_days",
+                quantity_source="count",
+                productivity_value=8,
+                productivity_unit="天/个",
+                resource_type="cap_team",
+                is_default=True,
+            ),
+        ]
+    )
+    process_by_id = {process.id: process for process in upgraded}
+
+    assert process_by_id["pile_rotary_regular"].productivity_value == 3
+    assert process_by_id["pile_rotary_regular"].quantity_source == "count"
+    assert process_by_id["cap_standard"].productivity_value == 30
+    assert process_by_id["precast_beam_standard"].productivity_unit == "天/片"
+    assert process_by_id["cast_in_place_box_beam_standard"].productivity_value == 45
+    for process in upgraded:
+        default = next(option for option in process.productivity_options if option.is_default)
+        assert process.duration_method == default.duration_method
+        assert process.quantity_source == default.quantity_source
+        assert process.productivity_value == default.productivity_value
+        assert process.productivity_unit == default.productivity_unit
 
 
 def test_default_wbs_generates_tasks_and_logic_links() -> None:
@@ -45,7 +110,7 @@ def test_pile_method_selects_impact_drill_rule() -> None:
     p01_piles = [task for task in wbs.tasks if task.id.startswith("P01-PILE")]
 
     assert {task.process_name for task in p01_piles} == {"冲击钻"}
-    assert {task.duration_days for task in p01_piles} == {4}
+    assert {task.duration_days for task in p01_piles} == {2}
     assert {task.compatible_resource_types[0] for task in p01_piles} == {"impact_drill"}
 
 
@@ -147,7 +212,7 @@ def test_scenario_pile_method_selects_process_template() -> None:
     task = next(task for task in generated.schedule_input.tasks if task.id == "P01-PILE-01")
 
     assert task.productivity_rule_id == "pile_impact:pile_impact-default"
-    assert task.duration_days == 4
+    assert task.duration_days == 2
     assert task.compatible_resource_types == ["impact_drill"]
 
 
@@ -198,6 +263,67 @@ def test_component_productivity_group_overrides_process_default() -> None:
     assert task.quantity == 1
     assert task.quantity_label == "1根"
     assert task.duration_days == 2
+
+
+def test_pier_body_days_per_section_uses_standard_section_height() -> None:
+    scenario = default_scenario()
+    p01_body = next(
+        component
+        for component in scenario.project.bridges[0].work_sections[0].structures[1].components
+        if component.component_type == "pier_body"
+    )
+    p01_body.method_id = "climbing_form"
+
+    generated = generate_schedule_input_from_scenario(scenario)
+    task = next(task for task in generated.schedule_input.tasks if task.id == p01_body.id)
+
+    assert task.productivity_rule_id == "pier_body_climbing_form:pier_body_climbing_form-default"
+    assert task.quantity == p01_body.quantity
+    assert task.quantity_label == p01_body.quantity_label
+    assert task.duration_days == math.ceil(p01_body.quantity / 4.5) * 7
+
+
+def test_pier_body_section_height_can_be_overridden_per_productivity_group() -> None:
+    scenario = default_scenario()
+    climbing = next(process for process in scenario.process_library if process.method_id == "climbing_form")
+    option = climbing.productivity_options[0]
+    option.standard_section_height_m = 3
+
+    p01_body = next(
+        component
+        for component in scenario.project.bridges[0].work_sections[0].structures[1].components
+        if component.component_type == "pier_body"
+    )
+    p01_body.method_id = "climbing_form"
+
+    generated = generate_schedule_input_from_scenario(scenario)
+    task = next(task for task in generated.schedule_input.tasks if task.id == p01_body.id)
+
+    assert task.duration_days == math.ceil(p01_body.quantity / 3) * 7
+
+
+def test_pier_body_m_per_day_uses_pier_height_quantity() -> None:
+    scenario = default_scenario()
+    climbing = next(process for process in scenario.process_library if process.method_id == "climbing_form")
+    option = climbing.productivity_options[0]
+    option.duration_method = "units_per_day"
+    option.quantity_source = "pier_height_m"
+    option.productivity_value = 2
+    option.productivity_unit = "m/天"
+    option.standard_section_height_m = None
+
+    p01_body = next(
+        component
+        for component in scenario.project.bridges[0].work_sections[0].structures[1].components
+        if component.component_type == "pier_body"
+    )
+    p01_body.method_id = "climbing_form"
+
+    generated = generate_schedule_input_from_scenario(scenario)
+    task = next(task for task in generated.schedule_input.tasks if task.id == p01_body.id)
+
+    assert task.quantity == p01_body.quantity
+    assert task.duration_days == math.ceil(p01_body.quantity / 2)
 
 
 def test_scenario_solver_satisfies_ss_logic() -> None:

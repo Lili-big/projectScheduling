@@ -29,9 +29,15 @@ COMPONENT_TYPE_LABELS: dict[str, str] = {
     "spread_foundation": "扩大基础",
     "ground_tie_beam": "地系梁",
     "middle_tie_beam": "中系梁",
-    "pier_body": "墩柱",
+    "pier_body": "墩身",
     "cap_beam": "盖梁",
     "abutment_body": "桥台",
+    "precast_beam": "制梁",
+    "beam_erection": "架梁",
+    "cast_in_place_continuous_beam": "现浇连续梁",
+    "cast_in_place_box_beam": "现浇箱梁",
+    "steel_box_beam": "钢箱梁",
+    "bridge_deck_system": "桥面系",
 }
 
 
@@ -1449,6 +1455,12 @@ def _component_rank(component_type: str) -> int:
         "middle_tie_beam": 5,
         "cap_beam": 6,
         "abutment_body": 7,
+        "precast_beam": 8,
+        "beam_erection": 9,
+        "cast_in_place_continuous_beam": 10,
+        "cast_in_place_box_beam": 11,
+        "steel_box_beam": 12,
+        "bridge_deck_system": 13,
     }
     return order.get(component_type, 99)
 

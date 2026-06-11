@@ -16,6 +16,12 @@ ComponentType = Literal[
     "pier_body",
     "cap_beam",
     "abutment_body",
+    "precast_beam",
+    "beam_erection",
+    "cast_in_place_continuous_beam",
+    "cast_in_place_box_beam",
+    "steel_box_beam",
+    "bridge_deck_system",
 ]
 WorkPointType = Literal["road", "bridge", "tunnel"]
 WorkSectionSide = Literal["left", "right", "none"]
@@ -84,6 +90,7 @@ class ProductivityRule(BaseModel):
     quantity_source: str
     productivity_value: float = Field(gt=0)
     productivity_unit: str
+    standard_section_height_m: float | None = Field(default=None, gt=0)
     resource_type: str
     is_default: bool = False
 
@@ -95,7 +102,14 @@ class ProductivityOption(BaseModel):
     quantity_source: str
     productivity_value: float = Field(gt=0)
     productivity_unit: str
+    standard_section_height_m: float | None = Field(default=None, gt=0)
     is_default: bool = False
+
+    @model_validator(mode="after")
+    def ensure_standard_section_height(self) -> "ProductivityOption":
+        if self.productivity_unit == "天/节" and self.standard_section_height_m is None:
+            self.standard_section_height_m = 4.5
+        return self
 
 
 class LogicRule(BaseModel):
@@ -241,10 +255,21 @@ class ProcessTemplate(BaseModel):
                     quantity_source=self.quantity_source,
                     productivity_value=self.productivity_value,
                     productivity_unit=self.productivity_unit,
+                    standard_section_height_m=4.5 if self.productivity_unit == "天/节" else None,
                     is_default=True,
                 )
             ]
-            return self
+
+        if self._is_segmented_pier_formwork_process():
+            for option in self.productivity_options:
+                if option.productivity_unit == "天/节":
+                    option.duration_method = "days_per_unit"
+                    option.quantity_source = "pier_height_m"
+                    if option.standard_section_height_m is None:
+                        option.standard_section_height_m = 4.5
+                elif option.productivity_unit == "m/天":
+                    option.duration_method = "units_per_day"
+                    option.quantity_source = "pier_height_m"
 
         default_index = next((index for index, option in enumerate(self.productivity_options) if option.is_default), 0)
         for index, option in enumerate(self.productivity_options):
@@ -255,6 +280,13 @@ class ProcessTemplate(BaseModel):
         self.productivity_value = default_option.productivity_value
         self.productivity_unit = default_option.productivity_unit
         return self
+
+    def _is_segmented_pier_formwork_process(self) -> bool:
+        if self.component_type != "pier_body":
+            return False
+        if self.method_id in {"climbing_form", "sliding_form", "turnover_form"}:
+            return True
+        return any(keyword in self.process_name for keyword in ("爬模", "滑模", "翻模"))
 
 
 class ResourceCalendar(BaseModel):

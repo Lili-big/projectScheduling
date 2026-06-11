@@ -27,7 +27,13 @@ type ComponentType =
   | "middle_tie_beam"
   | "pier_body"
   | "cap_beam"
-  | "abutment_body";
+  | "abutment_body"
+  | "precast_beam"
+  | "beam_erection"
+  | "cast_in_place_continuous_beam"
+  | "cast_in_place_box_beam"
+  | "steel_box_beam"
+  | "bridge_deck_system";
 type RelationshipType = "FS" | "SS";
 type WorkPointType = "road" | "bridge" | "tunnel";
 type WorkSectionSide = "left" | "right" | "none";
@@ -101,6 +107,7 @@ type ProductivityOption = {
   quantity_source: string;
   productivity_value: number;
   productivity_unit: string;
+  standard_section_height_m?: number | null;
   is_default: boolean;
 };
 
@@ -396,9 +403,15 @@ const componentLabels: Record<ComponentType, string> = {
   spread_foundation: "扩大基础",
   ground_tie_beam: "地系梁",
   middle_tie_beam: "中系梁",
-  pier_body: "墩柱",
+  pier_body: "墩身",
   cap_beam: "盖梁",
   abutment_body: "桥台",
+  precast_beam: "制梁",
+  beam_erection: "架梁",
+  cast_in_place_continuous_beam: "现浇连续梁",
+  cast_in_place_box_beam: "现浇箱梁",
+  steel_box_beam: "钢箱梁",
+  bridge_deck_system: "桥面系",
 };
 
 const durationMethodLabels: Record<string, string> = {
@@ -410,6 +423,7 @@ const durationMethodLabels: Record<string, string> = {
 const quantitySourceLabels: Record<string, string> = {
   pile_length_m: "桩长",
   pier_height_m: "墩高",
+  deck_length_m: "桥面长度",
   count: "构件数量",
 };
 
@@ -420,6 +434,52 @@ const pileProductivityUnitOptions = [
   { unit: "天/m", duration_method: "days_per_unit", quantity_source: "pile_length_m" },
 ];
 
+const segmentedPierMethodIds = new Set(["climbing_form", "sliding_form", "turnover_form"]);
+
+const segmentedPierProductivityUnitOptions = [
+  { unit: "天/节", duration_method: "days_per_unit", quantity_source: "pier_height_m" },
+  { unit: "m/天", duration_method: "units_per_day", quantity_source: "pier_height_m" },
+];
+
+function defaultStandardSectionHeightForUnit(unit: string): number | undefined {
+  return unit === "天/节" ? 4.5 : undefined;
+}
+
+function supportsSegmentedPierUnits(process: ProcessTemplate): boolean {
+  return (
+    process.component_type === "pier_body"
+    && (
+      Boolean(process.method_id && segmentedPierMethodIds.has(process.method_id))
+      || ["爬模", "滑模", "翻模"].some((keyword) => process.process_name.includes(keyword))
+    )
+  );
+}
+
+function sectionHeightForOption(option: ProductivityOption): number | undefined {
+  const value = option.standard_section_height_m;
+  return typeof value === "number" && value > 0 ? value : defaultStandardSectionHeightForUnit(option.productivity_unit);
+}
+
+function normalizeProductivityOptionForProcess(process: ProcessTemplate, option: ProductivityOption): ProductivityOption {
+  if (!supportsSegmentedPierUnits(process)) {
+    return option;
+  }
+  const unitRule = segmentedPierProductivityUnitOptions.find((item) => item.unit === option.productivity_unit);
+  if (!unitRule) {
+    return option;
+  }
+  return {
+    ...option,
+    duration_method: unitRule.duration_method,
+    quantity_source: unitRule.quantity_source,
+    standard_section_height_m: unitRule.unit === "天/节" ? sectionHeightForOption(option) : undefined,
+  };
+}
+
+function isSectionBasedPierProductivity(option: ProductivityOption): boolean {
+  return option.productivity_unit === "天/节";
+}
+
 const componentColors: Record<ComponentType, string> = {
   pile: "#2563eb",
   cap: "#0f766e",
@@ -429,6 +489,12 @@ const componentColors: Record<ComponentType, string> = {
   pier_body: "#b45309",
   cap_beam: "#7c3aed",
   abutment_body: "#be123c",
+  precast_beam: "#155e75",
+  beam_erection: "#9333ea",
+  cast_in_place_continuous_beam: "#0369a1",
+  cast_in_place_box_beam: "#16a34a",
+  steel_box_beam: "#475569",
+  bridge_deck_system: "#c2410c",
 };
 
 const componentOrder: ComponentType[] = [
@@ -440,7 +506,18 @@ const componentOrder: ComponentType[] = [
   "middle_tie_beam",
   "cap_beam",
   "abutment_body",
+  "precast_beam",
+  "beam_erection",
+  "cast_in_place_continuous_beam",
+  "cast_in_place_box_beam",
+  "steel_box_beam",
+  "bridge_deck_system",
 ];
+
+function componentSortIndex(componentType: ComponentType): number {
+  const index = componentOrder.indexOf(componentType);
+  return index >= 0 ? index : componentOrder.length;
+}
 
 const workpointLabels: Record<WorkPointType, string> = {
   road: "路",
@@ -474,6 +551,70 @@ const diagnosticLevelLabels: Record<ValidationMessage["level"], string> = {
   error: "严重偏差",
 };
 
+type MetricTone = "ok" | "warn" | "danger" | "neutral";
+
+type PlanStatusDisplay = {
+  label: string;
+  tone: MetricTone;
+  hint?: string;
+  diagnostic?: ValidationMessage;
+};
+
+function derivePlanStatus(result: ScheduleResult | null): PlanStatusDisplay {
+  if (!result) {
+    return { label: "未求解", tone: "neutral" };
+  }
+
+  const isSolved = result.status === "OPTIMAL" || result.status === "FEASIBLE";
+  if (!isSolved) {
+    return {
+      label: scheduleStatusLabels[result.status],
+      tone: result.status === "UNKNOWN" ? "warn" : "danger",
+    };
+  }
+
+  const solveMode = typeof result.objective_breakdown.solve_mode === "string"
+    ? result.objective_breakdown.solve_mode
+    : result.stats.solve_mode;
+  const isShortestDurationMode = !solveMode || solveMode === "shortest_duration_fixed_resources";
+
+  if (!isShortestDurationMode) {
+    return { label: scheduleStatusLabels[result.status], tone: "ok" };
+  }
+
+  const lateMilestones = result.milestone_results.filter((milestone) => milestone.lateness_days > 0);
+  const hardLateCount = lateMilestones.filter((milestone) => milestone.mode === "hard").length;
+  const softLateCount = lateMilestones.filter((milestone) => milestone.mode === "soft").length;
+
+  if (hardLateCount > 0) {
+    return {
+      label: "不可行",
+      tone: "danger",
+      hint: "硬里程碑未满足",
+      diagnostic: {
+        level: "error",
+        message: `工期不满足硬里程碑要求：${hardLateCount} 个强制里程碑节点未满足。`,
+        subject_id: "plan-status-hard-milestone",
+      },
+    };
+  }
+
+  if (softLateCount > 0) {
+    return {
+      label: "可行",
+      tone: "warn",
+      hint: "弱节点不满足",
+      diagnostic: {
+        level: "warning",
+        message: `弱节点不满足：${softLateCount} 个提醒里程碑节点未满足。`,
+        subject_id: "plan-status-soft-milestone",
+      },
+    };
+  }
+
+  return { label: "可行", tone: "ok", hint: "里程碑均满足" };
+}
+
 const tabs: Array<{ key: TabKey; label: string; icon: ReactNode }> = [
   { key: "project", label: "项目参数", icon: <Layers3 size={15} /> },
   { key: "process", label: "工艺工效库", icon: <Database size={15} /> },
@@ -482,6 +623,74 @@ const tabs: Array<{ key: TabKey; label: string; icon: ReactNode }> = [
   { key: "milestones", label: "里程碑", icon: <Flag size={15} /> },
   { key: "results", label: "模拟结果", icon: <CheckCircle2 size={15} /> },
 ];
+
+function SideNavigation({
+  activeTab,
+  openTabs,
+  onOpen,
+}: {
+  activeTab: TabKey | null;
+  openTabs: TabKey[];
+  onOpen: (tabKey: TabKey) => void;
+}) {
+  return (
+    <aside className="side-nav">
+      <div className="side-nav-section">
+        <div className="side-nav-heading">功能导航</div>
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            className={`side-nav-item ${activeTab === tab.key ? "active" : ""}`}
+            type="button"
+            onClick={() => onOpen(tab.key)}
+          >
+            <span className="side-nav-icon">{tab.icon}</span>
+            <span>{tab.label}</span>
+            {openTabs.includes(tab.key) && <span className="side-nav-dot" />}
+          </button>
+        ))}
+      </div>
+    </aside>
+  );
+}
+
+function WorkspaceTabStrip({
+  openTabs,
+  activeTab,
+  onSelect,
+  onClose,
+}: {
+  openTabs: TabKey[];
+  activeTab: TabKey | null;
+  onSelect: (tabKey: TabKey) => void;
+  onClose: (tabKey: TabKey) => void;
+}) {
+  return (
+    <div className="workspace-tabs" role="tablist" aria-label="已打开模块">
+      {openTabs.map((tabKey) => {
+        const tab = tabs.find((item) => item.key === tabKey);
+        if (!tab) return null;
+
+        return (
+          <div className={`workspace-tab ${activeTab === tabKey ? "active" : ""}`} key={tab.key}>
+            <button className="workspace-tab-main" type="button" onClick={() => onSelect(tab.key)}>
+              {tab.icon}
+              <span>{tab.label}</span>
+            </button>
+            <button
+              className="workspace-tab-close"
+              type="button"
+              aria-label={`关闭${tab.label}`}
+              onClick={() => onClose(tab.key)}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function App() {
   const [scenario, setScenario] = useState<ScenarioInput | null>(null);
@@ -501,10 +710,7 @@ export default function App() {
     void loadScenario();
   }, []);
 
-  const result = solveResult?.result ?? null;
-  const statusTone = result?.status === "OPTIMAL" || result?.status === "FEASIBLE" ? "ok" : "warn";
   const flatStructures = useMemo(() => (scenario ? flattenStructures(scenario.project) : []), [scenario]);
-  const summary = useMemo(() => buildSummary(scenario, generated, solveResult), [scenario, generated, solveResult]);
 
   async function loadScenario() {
     setBusy("loading");
@@ -795,18 +1001,23 @@ export default function App() {
           <ProjectTab
             scenario={scenario}
             flatStructures={flatStructures}
-            onPatchScenario={patchScenario}
-            onPatchProject={patchProject}
             onUpdateComponent={updateComponent}
             onImportBridgeParams={importBridgeParams}
             onApplyProcessNaturalLanguage={applyProcessNaturalLanguage}
             importing={busy === "importing"}
             applyingProcessText={busy === "nl"}
-            importResult={lastImport}
           />
         ) : null;
       case "process":
-        return scenario ? <ProcessTab scenario={scenario} onUpdateProcess={updateProcess} /> : null;
+        return scenario ? (
+          <ProcessTab
+            scenario={scenario}
+            onUpdateProcess={updateProcess}
+            onSaveProcessLibrary={saveCurrentProcessLibrary}
+            savingProcessLibrary={busy === "savingProcessLibrary"}
+            processLibraryDirty={processLibraryDirty}
+          />
+        ) : null;
       case "logic":
         return scenario ? <LogicTab scenario={scenario} onUpdateLogic={updateLogic} /> : null;
       case "resources":
@@ -819,6 +1030,11 @@ export default function App() {
             scenario={scenario}
             generated={generated}
             solveResult={solveResult}
+            onPatchScenario={patchScenario}
+            onPatchProject={patchProject}
+            onSolveCurrent={solveCurrent}
+            onSolveMinResources={solveMinResources}
+            busy={busy}
             ganttMode={ganttMode}
             onGanttModeChange={setGanttMode}
             onSaveCurrent={saveCurrentResult}
@@ -833,23 +1049,6 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <div>
-          <div className="eyebrow">Bridge Scenario Scheduler</div>
-          <h1>{scenario?.scenario_name ?? "桥梁场景化 CP-SAT 自动排程 Demo"}</h1>
-        </div>
-        <div className="actions">
-          <button className="primary" onClick={solveCurrent} disabled={Boolean(busy) || !scenario}>
-            {busy === "solving" || busy === "loading" ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
-            固定资源条件下，推算最短工期
-          </button>
-          <button className="secondary" onClick={solveMinResources} disabled={Boolean(busy) || !scenario}>
-            {busy === "minResources" ? <Loader2 className="spin" size={16} /> : <Server size={16} />}
-            固定工期条件下，推算最少资源
-          </button>
-        </div>
-      </header>
-
       <div className="app-body">
         <SideNavigation activeTab={activeTab} openTabs={openTabs} onOpen={openModule} />
 
@@ -860,13 +1059,6 @@ export default function App() {
             onSelect={setActiveTab}
             onClose={closeModule}
           />
-        <section className="summary-band">
-          <Metric label="计划状态" value={result ? scheduleStatusLabels[result.status] : "未求解"} tone={statusTone} icon={<Server size={18} />} />
-          <Metric label="总工期" value={summary.days} tone="neutral" icon={<CalendarDays size={18} />} />
-          <Metric label="工作项" value={summary.tasks} tone="neutral" icon={<CheckCircle2 size={18} />} />
-          <Metric label="资源 / 里程碑" value={summary.resourcesAndMilestones} tone="neutral" icon={<Flag size={18} />} />
-        </section>
-
         {error && (
           <section className="notice error">
             <AlertCircle size={18} />
@@ -874,34 +1066,27 @@ export default function App() {
           </section>
         )}
 
-        <nav className="tabs" aria-label="配置页签">
-          {tabs.map((tab) => (
-            <button
-              key={tab.key}
-              className={activeTab === tab.key ? "active" : ""}
-              onClick={() => setActiveTab(tab.key)}
-            >
-              {tab.icon}
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-
+        <div className="workspace-content">
         {scenario && activeTab === "project" && (
           <ProjectTab
             scenario={scenario}
             flatStructures={flatStructures}
-            onPatchScenario={patchScenario}
-            onPatchProject={patchProject}
             onUpdateComponent={updateComponent}
             onImportBridgeParams={importBridgeParams}
             onApplyProcessNaturalLanguage={applyProcessNaturalLanguage}
             importing={busy === "importing"}
             applyingProcessText={busy === "nl"}
-            importResult={lastImport}
           />
         )}
-        {scenario && activeTab === "process" && <ProcessTab scenario={scenario} onUpdateProcess={updateProcess} />}
+        {scenario && activeTab === "process" && (
+          <ProcessTab
+            scenario={scenario}
+            onUpdateProcess={updateProcess}
+            onSaveProcessLibrary={saveCurrentProcessLibrary}
+            savingProcessLibrary={busy === "savingProcessLibrary"}
+            processLibraryDirty={processLibraryDirty}
+          />
+        )}
         {scenario && activeTab === "logic" && <LogicTab scenario={scenario} onUpdateLogic={updateLogic} />}
         {scenario && activeTab === "resources" && (
           <ResourcesTab scenario={scenario} onUpdateResourcePool={updateResourcePool} />
@@ -914,6 +1099,11 @@ export default function App() {
             scenario={scenario}
             generated={generated}
             solveResult={solveResult}
+            onPatchScenario={patchScenario}
+            onPatchProject={patchProject}
+            onSolveCurrent={solveCurrent}
+            onSolveMinResources={solveMinResources}
+            busy={busy}
             ganttMode={ganttMode}
             onGanttModeChange={setGanttMode}
             onSaveCurrent={saveCurrentResult}
@@ -923,7 +1113,9 @@ export default function App() {
             comparing={busy === "comparing"}
           />
         )}
+        </div>
       </main>
+    </div>
     </div>
   );
 }
@@ -931,27 +1123,20 @@ export default function App() {
 function ProjectTab({
   scenario,
   flatStructures,
-  onPatchScenario,
-  onPatchProject,
   onUpdateComponent,
   onImportBridgeParams,
   onApplyProcessNaturalLanguage,
   importing,
   applyingProcessText,
-  importResult,
 }: {
   scenario: ScenarioInput;
   flatStructures: ReturnType<typeof flattenStructures>;
-  onPatchScenario: (patch: Partial<ScenarioInput>) => void;
-  onPatchProject: (patch: Partial<ProjectModel>) => void;
   onUpdateComponent: (componentId: string, patch: Partial<ComponentModel>) => void;
   onImportBridgeParams: (file: File, targetBridge: string) => void;
   onApplyProcessNaturalLanguage: (prompt: string) => Promise<ProcessNlResponse | null>;
   importing: boolean;
   applyingProcessText: boolean;
-  importResult: ImportBridgeParamsResponse | null;
 }) {
-  const [targetBridge, setTargetBridge] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [processPrompt, setProcessPrompt] = useState("");
   const [processNlResult, setProcessNlResult] = useState<ProcessNlResponse | null>(null);
@@ -968,8 +1153,6 @@ function ProjectTab({
     processLabel: "",
     productivityLabel: "",
   });
-  const importSummary = importResult?.summary ?? null;
-  const importWarnings = importResult?.warnings ?? [];
   const structureRows = buildStructureRows(scenario.project, scenario.process_library);
   const filteredStructureRows = filterStructureRows(structureRows, structureFilters);
 
@@ -986,75 +1169,29 @@ function ProjectTab({
 
   return (
     <div className="tab-grid project-tab-grid">
-      <section className="panel project-params-panel">
-        <PanelTitle title="项目桥梁参数" subtitle={`${scenario.project.bridges.length} 座桥 / 多工区结构树`} />
-        <div className="form-grid">
-          <label>
-            方案名称
-            <input value={scenario.scenario_name} onChange={(event) => onPatchScenario({ scenario_name: event.target.value })} />
-          </label>
-          <label>
-            项目名称
-            <input value={scenario.project.project_name} onChange={(event) => onPatchProject({ project_name: event.target.value })} />
-          </label>
-          <label>
-            计划开始
-            <input type="date" value={scenario.project.start_date} onChange={(event) => onPatchProject({ start_date: event.target.value })} />
-          </label>
-          <label>
-            求解时限(秒)
-            <input
-              type="number"
-              min={1}
-              value={scenario.time_limit_seconds}
-              onChange={(event) => onPatchScenario({ time_limit_seconds: Number(event.target.value) })}
-            />
-          </label>
-        </div>
-        <div className="import-strip">
-          <label>
-            目标桥名
-            <input value={targetBridge} onChange={(event) => setTargetBridge(event.target.value)} placeholder="可留空自动识别" />
-          </label>
-          <label>
-            Excel
-            <input
-              type="file"
-              accept=".xlsx,.xlsm"
-              onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
-            />
-          </label>
-          <button
-            className="secondary"
-            disabled={!selectedFile || importing}
-            onClick={() => selectedFile && onImportBridgeParams(selectedFile, targetBridge)}
-          >
-            {importing ? <Loader2 className="spin" size={16} /> : <Upload size={16} />}
-            导入参数
-          </button>
-        </div>
-        {importSummary && (
-          <div className="import-result">
-            <div>
-              <strong>{displayValue(importSummary.bridgeName)}</strong>
-              <span>
-                {displayValue(importSummary.carriagewayCount)} 幅 / {displayValue(importSummary.supportCount)} 墩台 / {importComponentCountSummary(importSummary)}
-              </span>
-            </div>
-            <code>{displayValue(importSummary.spanExpression)}</code>
-            {importWarnings.length > 0 && (
-              <div className="import-warnings">
-                {importWarnings.slice(0, 4).map((warning, index) => (
-                  <span key={`${displayValue(warning.id)}-${index}`}>{displayValue(warning.message)}</span>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </section>
-
       <section className="panel full project-structure-panel">
-        <PanelTitle title="结构构件清单" subtitle={`${filteredStructureRows.length} / ${structureRows.length} 项，结构尺寸和桩基工艺会进入任务生成层`} />
+        <PanelTitle
+          title="结构构件清单"
+          subtitle={`${filteredStructureRows.length} / ${structureRows.length} 项，结构尺寸和桩基工艺会进入任务生成层`}
+          action={
+            <div className="structure-import-action">
+              <input
+                type="file"
+                accept=".xlsx,.xlsm"
+                onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+              />
+              <button
+                className="secondary"
+                type="button"
+                disabled={!selectedFile || importing}
+                onClick={() => selectedFile && onImportBridgeParams(selectedFile, "")}
+              >
+                {importing ? <Loader2 className="spin" size={16} /> : <Upload size={16} />}
+                导入 Excel
+              </button>
+            </div>
+          }
+        />
         <div className="table-wrap tall project-structure-table">
           <table>
             <thead>
@@ -1264,6 +1401,7 @@ function ProcessTab({
             quantity_source: process.quantity_source,
             productivity_value: process.productivity_value,
             productivity_unit: process.productivity_unit,
+            standard_section_height_m: defaultStandardSectionHeightForUnit(process.productivity_unit),
             is_default: true,
           },
         ];
@@ -1279,6 +1417,16 @@ function ProcessTab({
         if (unitRule) {
           nextOption.duration_method = unitRule.duration_method;
           nextOption.quantity_source = unitRule.quantity_source;
+        }
+      }
+      if (patch.productivity_unit && supportsSegmentedPierUnits(process)) {
+        const unitRule = segmentedPierProductivityUnitOptions.find((item) => item.unit === patch.productivity_unit);
+        if (unitRule) {
+          nextOption.duration_method = unitRule.duration_method;
+          nextOption.quantity_source = unitRule.quantity_source;
+          nextOption.standard_section_height_m = unitRule.unit === "天/节"
+            ? sectionHeightForOption(nextOption)
+            : undefined;
         }
       }
       return nextOption;
@@ -1320,8 +1468,10 @@ function ProcessTab({
   }
 
   function updateProcessWithOptions(processIndex: number, options: ProductivityOption[]) {
-    const defaultOption = options.find((option) => option.is_default) ?? options[0];
-    const normalizedOptions = options.map((option) => ({ ...option, is_default: option.id === defaultOption.id }));
+    const process = scenario.process_library[processIndex];
+    const normalizedByUnit = options.map((option) => normalizeProductivityOptionForProcess(process, option));
+    const defaultOption = normalizedByUnit.find((option) => option.is_default) ?? normalizedByUnit[0];
+    const normalizedOptions = normalizedByUnit.map((option) => ({ ...option, is_default: option.id === defaultOption.id }));
     onUpdateProcess(processIndex, {
       productivity_options: normalizedOptions,
       duration_method: defaultOption.duration_method,
@@ -1331,19 +1481,33 @@ function ProcessTab({
     });
   }
 
+  const sortedProcessEntries = scenario.process_library
+    .map((process, processIndex) => ({ process, processIndex }))
+    .sort((left, right) => (
+      componentSortIndex(left.process.component_type) - componentSortIndex(right.process.component_type)
+      || left.processIndex - right.processIndex
+    ));
+
   return (
-    <section className="panel full">
+    <section className="panel full process-library-panel">
       <PanelTitle
         title="施工工艺及工效库"
         subtitle="工艺模板按构件类型、适用工艺和默认资源类型维护"
         action={
-          <button className="secondary" type="button" onClick={onSaveProcessLibrary} disabled={savingProcessLibrary || !processLibraryDirty}>
+          <button
+            className="secondary"
+            type="button"
+            onClick={onSaveProcessLibrary}
+            disabled={savingProcessLibrary || !processLibraryDirty}
+            title="演示环境使用显式保存；实际工程应改为页面实时保存。"
+            aria-label="保存工艺工效库"
+          >
             {savingProcessLibrary ? <Loader2 className="spin" size={16} /> : <Save size={16} />}
-            {processLibraryDirty ? "保存到 Supabase" : "已同步"}
+            保存
           </button>
         }
       />
-      <div className="table-wrap tall">
+      <div className="table-wrap process-library-table">
         <table>
           <thead>
             <tr>
@@ -1356,80 +1520,114 @@ function ProcessTab({
             </tr>
           </thead>
           <tbody>
-            {scenario.process_library.map((process, index) => {
+            {sortedProcessEntries.map(({ process, processIndex }) => {
               const currentPool = resourcePoolByType.get(process.resource_type);
+              const options = productivityOptions(process);
               return (
                 <tr key={process.id}>
                   <td><span className="tag">{componentLabels[process.component_type]}</span></td>
                   <td>
-                    <input
-                      className="wide-input"
-                      value={process.process_name}
-                      onChange={(event) => onUpdateProcess(index, { process_name: event.target.value })}
-                    />
+                    <span className="process-name-text">{process.process_name}</span>
                   </td>
                   <td><span className="text-pill">{durationMethodLabels[process.duration_method] ?? process.duration_method}</span></td>
                   <td><span className="text-pill">{quantitySourceLabels[process.quantity_source] ?? process.quantity_source}</span></td>
                   <td>
                     <div className="productivity-groups">
-                      {productivityOptions(process).map((option) => (
-                        <div className={`productivity-group ${option.is_default ? "default" : ""}`} key={option.id}>
-                          <input
-                            className="productivity-name-input"
-                            value={option.name}
-                            onChange={(event) => patchProductivityOption(index, option.id, { name: event.target.value })}
-                          />
-                          <input
-                            type="number"
-                            min={0.1}
-                            step={0.1}
-                            value={option.productivity_value}
-                            onChange={(event) => patchProductivityOption(index, option.id, { productivity_value: Number(event.target.value) })}
-                          />
-                          {process.component_type === "pile" ? (
-                            <select
-                              className="productivity-unit-control"
-                              value={option.productivity_unit}
-                              onChange={(event) => patchProductivityOption(index, option.id, { productivity_unit: event.target.value })}
-                            >
-                              {pileProductivityUnitOptions.map((item) => (
-                                <option value={item.unit} key={item.unit}>{item.unit}</option>
-                              ))}
-                            </select>
-                          ) : (
-                            <span className="text-pill productivity-unit-control">{option.productivity_unit}</span>
-                          )}
-                          <span className="text-pill productivity-source-pill">{quantitySourceLabels[option.quantity_source] ?? option.quantity_source}</span>
-                          {option.is_default ? (
-                            <span className="default-badge">默认分组</span>
-                          ) : (
-                            <button
+                      {options.map((option, optionIndex) => {
+                        const isSegmentedPierProcess = supportsSegmentedPierUnits(process);
+                        const showSectionHeight = isSectionBasedPierProductivity(option);
+                        const isLastOption = optionIndex === options.length - 1;
+                        return (
+                          <div className={`productivity-group ${option.is_default ? "default" : ""}`} key={option.id}>
+                            <input
+                              className="productivity-name-input"
+                              value={option.name}
+                              onChange={(event) => patchProductivityOption(processIndex, option.id, { name: event.target.value })}
+                            />
+                            <input
+                              type="number"
+                              min={0.1}
+                              step={0.1}
+                              value={option.productivity_value}
+                              onChange={(event) => patchProductivityOption(processIndex, option.id, { productivity_value: Number(event.target.value) })}
+                              aria-label="工效值"
+                            />
+                            {process.component_type === "pile" ? (
+                              <select
+                                className="productivity-unit-control"
+                                value={option.productivity_unit}
+                                onChange={(event) => patchProductivityOption(processIndex, option.id, { productivity_unit: event.target.value })}
+                              >
+                                {pileProductivityUnitOptions.map((item) => (
+                                  <option value={item.unit} key={item.unit}>{item.unit}</option>
+                                ))}
+                              </select>
+                            ) : isSegmentedPierProcess ? (
+                              <select
+                                className="productivity-unit-control"
+                                value={option.productivity_unit}
+                                onChange={(event) => patchProductivityOption(processIndex, option.id, { productivity_unit: event.target.value })}
+                              >
+                                {segmentedPierProductivityUnitOptions.map((item) => (
+                                  <option value={item.unit} key={item.unit}>{item.unit}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span className="text-pill productivity-unit-control">{option.productivity_unit}</span>
+                            )}
+                            <span className="section-height-field">
+                              {showSectionHeight ? (
+                                <>
+                                  <input
+                                    type="number"
+                                    min={0.1}
+                                    step={0.1}
+                                    value={sectionHeightForOption(option)}
+                                    onChange={(event) => patchProductivityOption(processIndex, option.id, { standard_section_height_m: Number(event.target.value) })}
+                                    aria-label="标准节高"
+                                  />
+                                  <span className="unit">m/节</span>
+                                </>
+                              ) : (
+                                <span className="section-height-placeholder">-</span>
+                              )}
+                            </span>
+                            <span className="text-pill productivity-source-pill">{quantitySourceLabels[option.quantity_source] ?? option.quantity_source}</span>
+                            {option.is_default ? (
+                              <span className="default-badge">默认分组</span>
+                            ) : (
+                              <button
                               className="mini-button set-default"
                               type="button"
-                              onClick={() => setDefaultProductivityOption(index, option.id)}
+                              onClick={() => setDefaultProductivityOption(processIndex, option.id)}
                             >
-                              设为默认
+                                设为默认
+                              </button>
+                            )}
+                            <button
+                              className="mini-button"
+                              type="button"
+                              disabled={options.length <= 1}
+                              onClick={() => removeProductivityOption(processIndex, option.id)}
+                            >
+                              删除
                             </button>
-                          )}
-                          <button
-                            className="mini-button"
-                            type="button"
-                            disabled={productivityOptions(process).length <= 1}
-                            onClick={() => removeProductivityOption(index, option.id)}
-                          >
-                            删除
-                          </button>
-                        </div>
-                      ))}
-                      <button className="mini-button add" type="button" onClick={() => addProductivityOption(index)}>
-                        新增分组
-                      </button>
+                            {isLastOption ? (
+                              <button className="mini-button add" type="button" onClick={() => addProductivityOption(processIndex)}>
+                                新增
+                              </button>
+                            ) : (
+                              <span className="productivity-add-spacer" />
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </td>
                   <td>
                     <select
                       value={process.resource_type}
-                      onChange={(event) => onUpdateProcess(index, { resource_type: event.target.value })}
+                      onChange={(event) => onUpdateProcess(processIndex, { resource_type: event.target.value })}
                     >
                       {!currentPool && <option value={process.resource_type}>{process.resource_type}</option>}
                       {scenario.resource_pools.map((pool) => (
@@ -1677,6 +1875,11 @@ function ResultsTab({
   scenario,
   generated,
   solveResult,
+  onPatchScenario,
+  onPatchProject,
+  onSolveCurrent,
+  onSolveMinResources,
+  busy,
   ganttMode,
   onGanttModeChange,
   onSaveCurrent,
@@ -1688,6 +1891,11 @@ function ResultsTab({
   scenario: ScenarioInput | null;
   generated: GeneratedScheduleInput | null;
   solveResult: ScenarioSolveResult | null;
+  onPatchScenario: (patch: Partial<ScenarioInput>) => void;
+  onPatchProject: (patch: Partial<ProjectModel>) => void;
+  onSolveCurrent: () => void;
+  onSolveMinResources: () => void;
+  busy: "loading" | "generating" | "solving" | "minResources" | "comparing" | "importing" | "nl" | "savingProcessLibrary" | null;
   ganttMode: GanttMode;
   onGanttModeChange: (mode: GanttMode) => void;
   onSaveCurrent: () => void;
@@ -1699,9 +1907,17 @@ function ResultsTab({
   const [openPredecessorTaskId, setOpenPredecessorTaskId] = useState<string | null>(null);
   const predecessorLayerRef = useRef<HTMLDivElement | null>(null);
   const result = solveResult?.result ?? null;
+  const planStatus = useMemo(() => derivePlanStatus(result), [result]);
+  const summary = useMemo(() => buildSummary(scenario, generated, solveResult), [scenario, generated, solveResult]);
   const generatedForDetails = solveResult?.generated ?? generated;
   const recommendedResourceCounts = recommendedResourceCountsFromResult(result);
   const continuityMetrics = continuityMetricsFromResult(result);
+  const diagnostics = useMemo(() => {
+    const messages = solveResult?.diagnostics ?? generated?.validation ?? [];
+    if (!planStatus.diagnostic) return messages;
+    const alreadyIncluded = messages.some((message) => message.subject_id === planStatus.diagnostic?.subject_id);
+    return alreadyIncluded ? messages : [planStatus.diagnostic, ...messages];
+  }, [generated, planStatus.diagnostic, solveResult]);
   const scheduledTaskById = useMemo(
     () => new Map((result?.tasks ?? []).map((task) => [task.id, task])),
     [result],
@@ -1751,6 +1967,57 @@ function ResultsTab({
 
   return (
     <div className="results-grid" ref={predecessorLayerRef}>
+      {scenario && (
+        <section className="panel full simulation-params-panel">
+          <PanelTitle
+            title="模拟参数"
+            subtitle="方案、计划起点和求解配置"
+            action={
+              <div className="actions inline">
+                <button className="primary" onClick={onSolveCurrent} disabled={Boolean(busy) || !scenario}>
+                  {busy === "solving" || busy === "loading" ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+                  固定资源条件下，推算最短工期
+                </button>
+                <button className="secondary" onClick={onSolveMinResources} disabled={Boolean(busy) || !scenario}>
+                  {busy === "minResources" ? <Loader2 className="spin" size={16} /> : <Server size={16} />}
+                  固定工期条件下，推算最少资源
+                </button>
+              </div>
+            }
+          />
+          <div className="form-grid">
+            <label>
+              方案名称
+              <input value={scenario.scenario_name} onChange={(event) => onPatchScenario({ scenario_name: event.target.value })} />
+            </label>
+            <label>
+              项目名称
+              <input value={scenario.project.project_name} onChange={(event) => onPatchProject({ project_name: event.target.value })} />
+            </label>
+            <label>
+              计划开始
+              <input type="date" value={scenario.project.start_date} onChange={(event) => onPatchProject({ start_date: event.target.value })} />
+            </label>
+            <label>
+              求解时限(秒)
+              <input
+                type="number"
+                min={1}
+                value={scenario.time_limit_seconds}
+                onChange={(event) => onPatchScenario({ time_limit_seconds: Number(event.target.value) })}
+              />
+            </label>
+          </div>
+        </section>
+      )}
+
+      <section className="summary-band">
+        <Metric label="计划状态" value={planStatus.label} tone={planStatus.tone} hint={planStatus.hint} icon={<Server size={18} />} />
+        <Metric label="总工期" value={summary.days} tone="neutral" icon={<CalendarDays size={18} />} />
+        <Metric label="工作项" value={summary.tasks} tone="neutral" icon={<CheckCircle2 size={18} />} />
+        <Metric label="资源 / 里程碑" value={summary.resourcesAndMilestones} tone="neutral" icon={<Flag size={18} />} />
+      </section>
+
       <section className="panel full">
         <div className="panel-title">
           <div>
@@ -1769,7 +2036,7 @@ function ResultsTab({
           </div>
         </div>
         <div className="diagnostics">
-          {(solveResult?.diagnostics ?? generated?.validation ?? []).slice(0, 12).map((message, index) => (
+          {diagnostics.slice(0, 12).map((message, index) => (
             <div className={`diagnostic ${message.level}`} key={`${message.subject_id ?? "message"}-${index}`}>
               <strong>{diagnosticLevelLabels[message.level]}</strong>
               <span>{message.message}</span>
@@ -1848,6 +2115,7 @@ function ResultsTab({
               <tr>
                 <th>工作项</th>
                 <th>构件</th>
+                <th>计划表达式</th>
                 <th>工期</th>
                 <th>计划开始</th>
                 <th>计划完成</th>
@@ -1862,6 +2130,9 @@ function ResultsTab({
                   <tr key={task.id}>
                     <td>{task.name}</td>
                     <td><span className="tag">{componentLabels[task.component_type]}</span></td>
+                    <td className="duration-expression" title={durationExpression(task, scenario)}>
+                      {durationExpression(task, scenario)}
+                    </td>
                     <td>{task.duration_days} 天</td>
                     <td>{task.start_date}</td>
                     <td>{task.finish_date}</td>
@@ -1991,12 +2262,11 @@ function PredecessorPopover({
           {details.map((detail) => (
             <div className="predecessor-item" key={`${task.id}-${detail.predecessorId}-${detail.link?.id ?? "missing"}`}>
               <div className="predecessor-item-title">
-                <strong>{detail.predecessor?.name ?? detail.predecessorId}</strong>
+                <strong>
+                  {detail.predecessor?.name ?? detail.predecessorId}
+                  {detail.link && <span className="predecessor-relation-token">{formatPrecedenceToken(detail.link)}</span>}
+                </strong>
                 <span>{detail.predecessor ? componentLabels[detail.predecessor.component_type] : "未找到工作项"}</span>
-              </div>
-              <div className="predecessor-meta">
-                <span>关系：{formatPrecedenceRelation(detail.link)}</span>
-                <span>计划：{detail.predecessor ? `${detail.predecessor.start_date} 至 ${detail.predecessor.finish_date}` : "-"}</span>
               </div>
               <div className="predecessor-rule">
                 {detail.rule ? logicRuleDisplayName(detail.rule) : `规则：${detail.link?.source_rule_id ?? "-"}`}
@@ -2011,21 +2281,22 @@ function PredecessorPopover({
   );
 }
 
-function formatPrecedenceRelation(link?: PrecedenceLink): string {
+function formatPrecedenceToken(link?: PrecedenceLink): string {
   if (!link) return "-";
-  const relationship = link.relationship === "FS" ? "完成后开始 FS" : "开始后开始 SS";
-  return `${relationship}，间隔 ${link.lag_days} 天`;
+  return `${link.relationship}+${link.lag_days}`;
 }
 
 function Metric({
   label,
   value,
   tone,
+  hint,
   icon,
 }: {
   label: string;
   value: string;
-  tone: "ok" | "warn" | "neutral";
+  tone: MetricTone;
+  hint?: string;
   icon: ReactNode;
 }) {
   return (
@@ -2034,6 +2305,7 @@ function Metric({
       <div>
         <span>{label}</span>
         <strong>{value}</strong>
+        {hint && <small>{hint}</small>}
       </div>
     </div>
   );
@@ -2300,6 +2572,7 @@ function processProductivityOptions(process: ProcessTemplate): ProductivityOptio
       quantity_source: process.quantity_source,
       productivity_value: process.productivity_value,
       productivity_unit: process.productivity_unit,
+      standard_section_height_m: defaultStandardSectionHeightForUnit(process.productivity_unit),
       is_default: true,
     },
   ];
@@ -2321,7 +2594,58 @@ function selectedProductivityOption(component: ComponentModel, process: ProcessT
 
 function productivityOptionLabel(option: ProductivityOption): string {
   const groupName = option.name.trim() === "默认工效" ? "默认" : option.name.trim() || "工效";
-  return `${groupName}-${displayValue(option.productivity_value)}${option.productivity_unit}`;
+  const base = `${groupName}-${displayValue(option.productivity_value)}${option.productivity_unit}`;
+  if (isSectionBasedPierProductivity(option)) {
+    return `${base}（${displayValue(sectionHeightForOption(option))}m/节）`;
+  }
+  return base;
+}
+
+function productivityOptionForTask(task: Task, scenario: ScenarioInput | null): ProductivityOption | null {
+  if (!scenario) return null;
+  const [processId, optionId] = task.productivity_rule_id.split(":");
+  const process = scenario.process_library.find((item) => item.id === processId)
+    ?? scenario.process_library.find((item) => item.component_type === task.component_type && item.process_name === task.process_name);
+  if (!process) return null;
+  const options = processProductivityOptions(process);
+  return options.find((option) => option.id === optionId)
+    ?? options.find((option) => option.is_default)
+    ?? options[0]
+    ?? null;
+}
+
+function durationExpression(task: Task, scenario: ScenarioInput | null): string {
+  const option = productivityOptionForTask(task, scenario);
+  if (!option) {
+    return `${displayValue(task.quantity)} -> ${task.duration_days}天`;
+  }
+
+  const quantityName = quantitySourceLabels[option.quantity_source] ?? "工程量";
+  const quantityText = `${quantityName}${displayValue(task.quantity)}${quantityUnitForSource(option.quantity_source)}`;
+  const resultText = `${task.duration_days}天`;
+
+  if (isSectionBasedPierProductivity(option)) {
+    const sectionHeight = sectionHeightForOption(option);
+    if (sectionHeight) {
+      const sectionCount = Math.max(1, Math.ceil(task.quantity / sectionHeight));
+      return `${quantityText} / ${displayValue(sectionHeight)}m/节 = ${sectionCount}节；${sectionCount} × ${displayValue(option.productivity_value)}天/节 = ${resultText}`;
+    }
+  }
+
+  if (option.duration_method === "units_per_day") {
+    return `${quantityText} / ${displayValue(option.productivity_value)}${option.productivity_unit} = ${resultText}`;
+  }
+
+  if (option.duration_method === "days_per_unit") {
+    return `${quantityText} × ${displayValue(option.productivity_value)}${option.productivity_unit} = ${resultText}`;
+  }
+
+  return `${displayValue(option.productivity_value)}${option.productivity_unit} = ${resultText}`;
+}
+
+function quantityUnitForSource(quantitySource: string): string {
+  if (quantitySource.endsWith("_m")) return "m";
+  return "";
 }
 
 function filterStructureRows(rows: StructureRow[], filters: StructureFilters): StructureRow[] {

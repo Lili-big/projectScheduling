@@ -975,6 +975,25 @@ def _component_properties(
         "confidence": 0.82,
         "import_warnings": [],
     }
+    for source_key, target_key in [
+        ("diameterM", "diameterM"),
+        ("lengthM", "lengthM"),
+        ("heightM", "heightM"),
+        ("totalLengthM", "totalLengthM"),
+        ("count", "count"),
+    ]:
+        if canonical_component.get(source_key) is not None:
+            payload[target_key] = canonical_component[source_key]
+    if canonical_component.get("diameterM") is not None:
+        payload["diameter_m"] = canonical_component["diameterM"]
+    if canonical_component.get("lengthM") is not None:
+        payload["length_m"] = canonical_component["lengthM"]
+    if canonical_component.get("heightM") is not None:
+        payload["height_m"] = canonical_component["heightM"]
+    if canonical_component.get("totalLengthM") is not None:
+        payload["total_length_m"] = canonical_component["totalLengthM"]
+    if canonical_component.get("type") is not None:
+        payload["form"] = canonical_component["type"]
     if extra:
         payload.update(extra)
     return payload

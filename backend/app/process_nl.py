@@ -5,11 +5,18 @@ import os
 import re
 import urllib.error
 import urllib.request
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
 from .models import ComponentModel, ProcessNlChange, ProcessNlResponse, ProcessTemplate, ResourcePool, ScenarioInput
+from .process_library_defaults import historical_default_process_library
+
+
+class ProcessNlNumericFilter(BaseModel):
+    field: str
+    operator: Literal["gt", "gte", "lt", "lte", "eq"]
+    value: float
 
 
 class ProcessNlIntent(BaseModel):
@@ -20,6 +27,7 @@ class ProcessNlIntent(BaseModel):
     support_nos: list[str] = Field(default_factory=list)
     component_names: list[str] = Field(default_factory=list)
     pile_nos: list[str] = Field(default_factory=list)
+    numeric_filters: list[ProcessNlNumericFilter] = Field(default_factory=list)
     target_role: str | None = None
     action: str = "自然语言工艺设置"
 
@@ -148,11 +156,13 @@ def _process_intent_instruction() -> str:
         "请把用户自然语言解析为 JSON，不要输出 Markdown，不要解释。"
         "只允许返回 {\"intents\": [...], \"warnings\": [...]}。"
         "intent 字段包括 component_type、process_method_id、process_name、sides、support_nos、"
-        "component_names、pile_nos、target_role、action。"
+        "component_names、pile_nos、numeric_filters、target_role、action。"
         "component_type 只能从构件清单和工艺库中选择，例如 pile、pier_body、cap、cap_beam、"
         "ground_tie_beam、middle_tie_beam。"
         "sides 使用 left 或 right；support_nos 使用 3#墩、0#台 这种中文编号；"
         "process_method_id 优先使用工艺库 method_id。"
+        "numeric_filters 用于数值条件，字段只能使用 pier_height_m、pile_length_m、count、diameter_m；"
+        "operator 只能使用 gt、gte、lt、lte、eq。"
         "如果用户说连续梁主墩，可设置 target_role 为 continuous_girder_main_pier。"
         "不要臆造不存在的构件或工艺，无法确认时放入 warnings。"
     )
@@ -180,6 +190,7 @@ def _process_intent_output_schema() -> dict[str, Any]:
                 "support_nos": ["3#墩", "4#墩"],
                 "component_names": [],
                 "pile_nos": [],
+                "numeric_filters": [],
                 "target_role": None,
                 "action": "指定墩桩基工艺",
             }
@@ -241,17 +252,63 @@ def _understand_process_prompt_locally(prompt: str) -> ProcessNlIntentPayload:
                     )
 
     if "爬模" in text:
-        intents.append(
-            ProcessNlIntent(
-                component_type="pier_body",
-                process_method_id="climbing_form",
-                process_name="爬模施工",
-                target_role="continuous_girder_main_pier",
-                action="连续梁主墩工艺",
+        numeric_filters = _extract_numeric_filters(text)
+        if numeric_filters:
+            intents.append(
+                ProcessNlIntent(
+                    component_type="pier_body",
+                    process_method_id="climbing_form",
+                    process_name="爬模施工",
+                    sides=_extract_sides(text),
+                    support_nos=_extract_support_nos(text),
+                    numeric_filters=numeric_filters,
+                    action="按条件设置墩柱工艺",
+                )
             )
-        )
+        else:
+            intents.append(
+                ProcessNlIntent(
+                    component_type="pier_body",
+                    process_method_id="climbing_form",
+                    process_name="爬模施工",
+                    target_role="continuous_girder_main_pier",
+                    action="连续梁主墩工艺",
+                )
+            )
 
     return ProcessNlIntentPayload(intents=intents)
+
+
+def _extract_numeric_filters(text: str) -> list[ProcessNlNumericFilter]:
+    filters: list[ProcessNlNumericFilter] = []
+    field_patterns = [
+        ("pier_height_m", r"(?:墩高|墩柱高|柱高|高度)"),
+        ("pile_length_m", r"(?:桩长|桩基长)"),
+        ("diameter_m", r"(?:桩径|直径|墩径)"),
+        ("count", r"(?:根数|数量|个数)"),
+    ]
+    operator_patterns = [
+        ("gte", r"(?:大于等于|不少于|不小于|>=|≥)"),
+        ("lte", r"(?:小于等于|不超过|不大于|<=|≤)"),
+        ("gt", r"(?:大于|超过|高于|>|＞)"),
+        ("lt", r"(?:小于|低于|少于|<|＜)"),
+        ("eq", r"(?:等于|为|=)"),
+    ]
+    unit_factor = {
+        "cm": 0.01,
+        "厘米": 0.01,
+        "m": 1.0,
+        "米": 1.0,
+        "": 1.0,
+    }
+
+    for field, field_pattern in field_patterns:
+        for operator, operator_pattern in operator_patterns:
+            pattern = re.compile(field_pattern + operator_pattern + r"(\d+(?:\.\d+)?)(cm|厘米|m|米)?")
+            for value_text, unit in pattern.findall(text):
+                value = float(value_text) * unit_factor.get(unit, 1.0)
+                filters.append(ProcessNlNumericFilter(field=field, operator=operator, value=value))
+    return filters
 
 
 def _resolve_process(scenario: ScenarioInput, intent: ProcessNlIntent) -> ProcessTemplate | None:
@@ -263,6 +320,8 @@ def _resolve_process(scenario: ScenarioInput, intent: ProcessNlIntent) -> Proces
             method_id = _pile_process_method_from_name(process_name)
         if method_id == "rotary_drill":
             return _ensure_process(scenario, "pile", "rotary_drill", "旋挖钻成孔")
+        if method_id == "circulation_drill":
+            return _ensure_process(scenario, "pile", "circulation_drill", "回旋钻")
         if method_id == "impact_drill":
             return _ensure_process(scenario, "pile", "impact_drill", "冲击钻成孔")
         if method_id == "manual_pile":
@@ -304,6 +363,8 @@ def _match_intent_components(scenario: ScenarioInput, intent: ProcessNlIntent) -
             continue
         if pile_no_set and _component_pile_no(component) not in pile_no_set:
             continue
+        if intent.numeric_filters and not _component_matches_numeric_filters(component, intent.numeric_filters):
+            continue
         targets.append(component)
     return targets
 
@@ -331,8 +392,8 @@ def _strip_json_fence(content: str) -> str:
     return text
 
 
-def _component_catalog(scenario: ScenarioInput) -> list[dict[str, str | None]]:
-    catalog: list[dict[str, str | None]] = []
+def _component_catalog(scenario: ScenarioInput) -> list[dict[str, Any]]:
+    catalog: list[dict[str, Any]] = []
     for bridge in scenario.project.bridges:
         for section in bridge.work_sections:
             for structure in section.structures:
@@ -346,14 +407,26 @@ def _component_catalog(scenario: ScenarioInput) -> list[dict[str, str | None]]:
                             "component_type": component.component_type,
                             "component_name": component.name,
                             "current_method_id": component.method_id,
+                            "measurements": _component_measurements(component),
                         }
                     )
     return catalog
 
 
+def _component_measurements(component: ComponentModel) -> dict[str, float]:
+    measurements: dict[str, float] = {}
+    for field in ("pier_height_m", "pile_length_m", "diameter_m", "count"):
+        value = _component_numeric_value(component, field)
+        if value is not None:
+            measurements[field] = value
+    return measurements
+
+
 def _pile_process_from_text(text: str) -> tuple[str, str] | None:
     if "人工挖孔" in text or "挖孔桩" in text:
         return ("manual_pile", "人工挖孔")
+    if "回旋钻" in text:
+        return ("circulation_drill", "回旋钻")
     if "冲击钻" in text:
         return ("impact_drill", "冲击钻成孔")
     if "旋挖" in text or "旋挖钻" in text:
@@ -365,6 +438,8 @@ def _pile_process_method_from_name(process_name: str) -> str | None:
     text = _normalize_text(process_name)
     if "人工挖孔" in text or "挖孔桩" in text:
         return "manual_pile"
+    if "回旋钻" in text:
+        return "circulation_drill"
     if "冲击钻" in text:
         return "impact_drill"
     if "旋挖" in text:
@@ -417,6 +492,107 @@ def _component_pile_no(component: ComponentModel) -> str:
     return match.group(1) if match else ""
 
 
+def _component_matches_numeric_filters(component: ComponentModel, filters: Iterable[ProcessNlNumericFilter]) -> bool:
+    for filter_item in filters:
+        actual = _component_numeric_value(component, filter_item.field)
+        if actual is None:
+            return False
+        if not _compare_number(actual, filter_item.operator, filter_item.value):
+            return False
+    return True
+
+
+def _component_numeric_value(component: ComponentModel, field: str) -> float | None:
+    normalized = _normalize_numeric_field(field)
+    properties = component.properties or {}
+    raw = properties.get("raw") if isinstance(properties.get("raw"), dict) else {}
+
+    if normalized == "pier_height_m":
+        return (
+            _number_from_unknown(properties.get("height_m"))
+            or _number_from_unknown(properties.get("heightM"))
+            or _number_from_dimensions(properties, "heightM")
+            or _cm_to_m(raw.get("pier_height") if isinstance(raw, dict) else None)
+            or (float(component.quantity) if component.component_type == "pier_body" and component.quantity > 0 else None)
+        )
+    if normalized == "pile_length_m":
+        return (
+            _number_from_unknown(properties.get("length_m"))
+            or _number_from_unknown(properties.get("lengthM"))
+            or _number_from_dimensions(properties, "lengthM")
+            or _cm_to_m(raw.get("pile_length") if isinstance(raw, dict) else None)
+            or (float(component.quantity) if component.component_type == "pile" and component.quantity > 0 else None)
+        )
+    if normalized == "diameter_m":
+        return (
+            _number_from_unknown(properties.get("diameter_m"))
+            or _number_from_unknown(properties.get("diameterM"))
+            or _number_from_dimensions(properties, "diameterM")
+            or _cm_to_m(raw.get("pile_diameter") if isinstance(raw, dict) else None)
+        )
+    if normalized == "count":
+        return (
+            _number_from_unknown(properties.get("count"))
+            or _number_from_unknown(raw.get("pier_count") if isinstance(raw, dict) else None)
+            or _number_from_unknown(raw.get("pile_count") if isinstance(raw, dict) else None)
+            or 1.0
+        )
+    return None
+
+
+def _normalize_numeric_field(field: str) -> str:
+    text = _normalize_text(field).lower()
+    if text in {"pier_height_m", "height_m", "heightm", "墩高", "墩柱高", "柱高", "高度"}:
+        return "pier_height_m"
+    if text in {"pile_length_m", "length_m", "lengthm", "桩长", "桩基长"}:
+        return "pile_length_m"
+    if text in {"diameter_m", "diameterm", "diameter", "桩径", "直径", "墩径"}:
+        return "diameter_m"
+    if text in {"count", "数量", "根数", "个数"}:
+        return "count"
+    return text
+
+
+def _number_from_dimensions(properties: dict[str, Any], key: str) -> float | None:
+    dimensions = properties.get("dimensions_m")
+    if isinstance(dimensions, dict):
+        return _number_from_unknown(dimensions.get(key) or dimensions.get(_camel_to_snake(key)))
+    return None
+
+
+def _camel_to_snake(text: str) -> str:
+    return re.sub(r"(?<!^)([A-Z])", r"_\1", text).lower()
+
+
+def _number_from_unknown(value: Any) -> float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    if isinstance(value, str):
+        match = re.search(r"-?\d+(?:\.\d+)?", value)
+        if match:
+            return float(match.group(0))
+    return None
+
+
+def _cm_to_m(value: Any) -> float | None:
+    number = _number_from_unknown(value)
+    return number / 100 if number is not None else None
+
+
+def _compare_number(actual: float, operator: str, expected: float) -> bool:
+    if operator == "gt":
+        return actual > expected
+    if operator == "gte":
+        return actual >= expected
+    if operator == "lt":
+        return actual < expected
+    if operator == "lte":
+        return actual <= expected
+    if operator == "eq":
+        return abs(actual - expected) <= 1e-9
+    return False
+
+
 def _iter_component_context(scenario: ScenarioInput) -> Iterable[tuple[ComponentModel, str, str | None]]:
     for bridge in scenario.project.bridges:
         for section in bridge.work_sections:
@@ -467,8 +643,15 @@ def _ensure_process(
         if process.component_type == component_type and (process.method_id == method_id or process.id == method_id):
             return process
 
+    for process in historical_default_process_library():
+        if process.component_type == component_type and (process.method_id == method_id or process.id == method_id):
+            created = process.model_copy(deep=True)
+            scenario.process_library.append(created)
+            _ensure_resource_pool(scenario, created.resource_type, process_name)
+            return created
+
     resource_by_method = {
-        "climbing_form": ("climbing_form_team", "m/天", "units_per_day", 1.0),
+        "climbing_form": ("pier_body_team", "天/节", "days_per_unit", 7.0),
     }
     resource_type, unit, duration_method, productivity = resource_by_method.get(
         method_id,

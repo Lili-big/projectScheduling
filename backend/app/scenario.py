@@ -273,6 +273,7 @@ def _process_to_productivity_rule(process: ProcessTemplate, component: Component
         quantity_source=option.quantity_source,
         productivity_value=option.productivity_value,
         productivity_unit=option.productivity_unit,
+        standard_section_height_m=option.standard_section_height_m,
         resource_type=process.resource_type,
         is_default=process.is_default,
     )
@@ -299,6 +300,13 @@ def _quantity_for_process(component: ComponentModel, quantity_source: str) -> tu
     if quantity_source == "pier_height_m":
         height = _dimension_value(component, "heightM") or component.quantity
         return float(height), component.quantity_label or f"{height:g}m"
+    if quantity_source == "deck_length_m":
+        length = (
+            _dimension_value(component, "lengthM")
+            or _dimension_value(component, "totalLengthM")
+            or component.quantity
+        )
+        return float(length), component.quantity_label or f"{length:g}m"
     return component.quantity, component.quantity_label
 
 

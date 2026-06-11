@@ -10,6 +10,7 @@ from .models import (
     ProductivityRule,
     Resource,
 )
+from .process_library_defaults import historical_default_process_library
 
 
 def default_bridge() -> BridgeModel:
@@ -56,90 +57,25 @@ def default_bridge() -> BridgeModel:
 
 
 def default_productivity_rules() -> list[ProductivityRule]:
-    return [
-        ProductivityRule(
-            id="pile_rotary_regular",
-            component_type="pile",
-            process_name="旋挖钻 / 常规桩",
-            group_name="常规桩",
-            duration_method="units_per_day",
-            quantity_source="pile_length_m",
-            productivity_value=18,
-            productivity_unit="m/天",
-            resource_type="rotary_drill",
-            is_default=True,
-        ),
-        ProductivityRule(
-            id="pile_impact",
-            component_type="pile",
-            process_name="冲击钻",
-            group_name="冲击钻",
-            duration_method="units_per_day",
-            quantity_source="pile_length_m",
-            productivity_value=10,
-            productivity_unit="m/天",
-            resource_type="impact_drill",
-        ),
-        ProductivityRule(
-            id="pile_manual",
-            component_type="pile",
-            process_name="人工挖孔",
-            group_name="人工挖孔",
-            duration_method="days_per_unit",
-            quantity_source="pile_length_m",
-            productivity_value=1,
-            productivity_unit="天/m",
-            resource_type="manual_pile_team",
-        ),
-        ProductivityRule(
-            id="cap_standard",
-            component_type="cap",
-            process_name="承台",
-            group_name="标准承台",
-            duration_method="fixed_days",
-            quantity_source="count",
-            productivity_value=8,
-            productivity_unit="天/个",
-            resource_type="cap_team",
-            is_default=True,
-        ),
-        ProductivityRule(
-            id="pier_body_standard",
-            component_type="pier_body",
-            process_name="墩身",
-            group_name="标准墩身",
-            duration_method="units_per_day",
-            quantity_source="pier_height_m",
-            productivity_value=1.2,
-            productivity_unit="m/天",
-            resource_type="pier_body_team",
-            is_default=True,
-        ),
-        ProductivityRule(
-            id="cap_beam_standard",
-            component_type="cap_beam",
-            process_name="盖梁",
-            group_name="普通盖梁",
-            duration_method="fixed_days",
-            quantity_source="count",
-            productivity_value=7,
-            productivity_unit="天/个",
-            resource_type="cap_beam_team",
-            is_default=True,
-        ),
-        ProductivityRule(
-            id="abutment_body_standard",
-            component_type="abutment_body",
-            process_name="桥台",
-            group_name="普通桥台",
-            duration_method="fixed_days",
-            quantity_source="count",
-            productivity_value=10,
-            productivity_unit="天/个",
-            resource_type="abutment_team",
-            is_default=True,
-        ),
-    ]
+    rules: list[ProductivityRule] = []
+    for process in historical_default_process_library():
+        option = next((item for item in process.productivity_options if item.is_default), process.productivity_options[0])
+        rules.append(
+            ProductivityRule(
+                id=process.id,
+                component_type=process.component_type,
+                process_name=process.process_name,
+                group_name=option.name,
+                duration_method=option.duration_method,
+                quantity_source=option.quantity_source,
+                productivity_value=option.productivity_value,
+                productivity_unit=option.productivity_unit,
+                standard_section_height_m=option.standard_section_height_m,
+                resource_type=process.resource_type,
+                is_default=process.is_default,
+            )
+        )
+    return rules
 
 
 def default_logic_rules() -> list[LogicRule]:
@@ -187,6 +123,7 @@ def default_resources() -> list[Resource]:
         Resource(id="rotary_drill_1", name="旋挖钻1", type="rotary_drill"),
         Resource(id="rotary_drill_2", name="旋挖钻2", type="rotary_drill"),
         Resource(id="rotary_drill_3", name="旋挖钻3", type="rotary_drill"),
+        Resource(id="circulation_drill_1", name="回旋钻1", type="circulation_drill"),
         Resource(id="impact_drill_1", name="冲击钻1", type="impact_drill"),
         Resource(id="manual_pile_team_1", name="人工挖孔班1", type="manual_pile_team"),
         Resource(id="cap_team_1", name="承台模板1", type="cap_team"),

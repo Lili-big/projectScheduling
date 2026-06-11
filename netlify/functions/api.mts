@@ -11,7 +11,13 @@ type ComponentType =
   | "middle_tie_beam"
   | "pier_body"
   | "cap_beam"
-  | "abutment_body";
+  | "abutment_body"
+  | "precast_beam"
+  | "beam_erection"
+  | "cast_in_place_continuous_beam"
+  | "cast_in_place_box_beam"
+  | "steel_box_beam"
+  | "bridge_deck_system";
 
 type ComponentModel = {
   id: string;
@@ -34,6 +40,7 @@ type ProcessTemplate = {
   quantity_source: string;
   productivity_value: number;
   productivity_unit: string;
+  standard_section_height_m?: number | null;
   resource_type: string;
   productivity_options?: ProductivityOption[];
   applicability: Record<string, unknown>;
@@ -47,6 +54,7 @@ type ProductivityOption = {
   quantity_source: string;
   productivity_value: number;
   productivity_unit: string;
+  standard_section_height_m?: number | null;
   is_default: boolean;
 };
 
@@ -317,6 +325,7 @@ function createDefaultScenario(): ScenarioInput {
     resource_calendars: [{ id: "continuous", name: "连续自然日", working_weekdays: [0, 1, 2, 3, 4, 5, 6], blackout_dates: [] }],
     resource_pools: [
       pool("pool-rotary-drill", "rotary_drill", "旋挖钻", 3, 24),
+      pool("pool-circulation-drill", "circulation_drill", "回旋钻", 1, 1),
       pool("pool-impact-drill", "impact_drill", "冲击钻", 1, 1),
       pool("pool-manual-pile", "manual_pile_team", "人工挖孔班", 1, 4),
       pool("pool-cap", "cap_team", "承台模板", 1, 14),
@@ -325,6 +334,12 @@ function createDefaultScenario(): ScenarioInput {
       pool("pool-pier-body", "pier_body_team", "墩柱班组", 1, 12),
       pool("pool-cap-beam", "cap_beam_team", "盖梁模板", 1, 12),
       pool("pool-abutment", "abutment_team", "桥台班组", 1, 2),
+      pool("pool-precast-beam", "precast_beam_team", "制梁台座", 1, 1),
+      pool("pool-beam-erection", "beam_erection_team", "架梁班组", 1, 1),
+      pool("pool-cast-in-place-continuous-beam", "cast_in_place_continuous_beam_team", "连续梁班组", 1, 1),
+      pool("pool-cast-in-place-box-beam", "cast_in_place_box_beam_team", "现浇箱梁班组", 1, 1),
+      pool("pool-steel-box-beam", "steel_box_beam_team", "钢箱梁班组", 1, 1),
+      pool("pool-bridge-deck-system", "bridge_deck_system_team", "桥面系班组", 1, 1),
     ],
     milestones: [
       milestone("M-contract-finish", "合同下部结构完工", "contract", "hard", "bridge", "B1", "2028-12-31", 10),
@@ -392,16 +407,29 @@ function component(
 
 function createProcessLibrary(): ProcessTemplate[] {
   return [
-    process("pile_rotary_regular", "pile", "旋挖钻成孔", "rotary_drill", "units_per_day", "pile_length_m", 18, "m/天", "rotary_drill", true),
-    process("pile_impact", "pile", "冲击钻成孔", "impact_drill", "units_per_day", "pile_length_m", 10, "m/天", "impact_drill", false),
+    process("pile_rotary_regular", "pile", "旋挖钻", "rotary_drill", "days_per_unit", "count", 3, "天/根", "rotary_drill", true),
+    process("pile_circulation", "pile", "回旋钻", "circulation_drill", "days_per_unit", "count", 2, "天/根", "circulation_drill", false),
+    process("pile_impact", "pile", "冲击钻", "impact_drill", "days_per_unit", "count", 2, "天/根", "impact_drill", false),
     process("pile_manual", "pile", "人工挖孔", "manual_pile", "days_per_unit", "pile_length_m", 1, "天/m", "manual_pile_team", false),
-    process("cap_standard", "cap", "承台施工", null, "fixed_days", "count", 8, "天/个", "cap_team", true),
+    process("ground_tie_beam_standard", "ground_tie_beam", "桩系梁施工", null, "fixed_days", "count", 3, "天/个", "tie_beam_team", true),
+    process("cap_standard", "cap", "承台施工", null, "fixed_days", "count", 30, "天/个", "cap_team", true),
     process("spread_foundation_standard", "spread_foundation", "扩大基础施工", null, "fixed_days", "count", 8, "天/个", "spread_foundation_team", true),
-    process("ground_tie_beam_standard", "ground_tie_beam", "地系梁施工", null, "fixed_days", "count", 4, "天/个", "tie_beam_team", true),
-    process("pier_body_standard", "pier_body", "墩柱施工", null, "units_per_day", "pier_height_m", 1.2, "m/天", "pier_body_team", true),
+    process("pier_body_standard", "pier_body", "整体式浇筑", "integral_casting", "fixed_days", "count", 20, "天/个", "pier_body_team", true),
+    process("pier_body_climbing_form", "pier_body", "爬模施工", "climbing_form", "days_per_unit", "pier_height_m", 7, "天/节", "pier_body_team", false, 4.5),
+    process("pier_body_sliding_form", "pier_body", "滑模施工", "sliding_form", "days_per_unit", "pier_height_m", 6, "天/节", "pier_body_team", false, 4.5),
+    process("pier_body_turnover_form", "pier_body", "翻模施工", "turnover_form", "days_per_unit", "pier_height_m", 12, "天/节", "pier_body_team", false, 4.5),
     process("middle_tie_beam_standard", "middle_tie_beam", "中系梁施工", null, "fixed_days", "count", 4, "天/个", "tie_beam_team", true),
-    process("cap_beam_standard", "cap_beam", "盖梁施工", null, "fixed_days", "count", 7, "天/个", "cap_beam_team", true),
-    process("abutment_body_standard", "abutment_body", "桥台施工", null, "fixed_days", "count", 10, "天/个", "abutment_team", true),
+    process("cap_beam_standard", "cap_beam", "盖梁施工", null, "fixed_days", "count", 10, "天/个", "cap_beam_team", true),
+    process("abutment_body_standard", "abutment_body", "桥台施工", null, "fixed_days", "count", 15, "天/个", "abutment_team", true),
+    process("precast_beam_standard", "precast_beam", "制梁", null, "fixed_days", "count", 35, "天/片", "precast_beam_team", true),
+    process("beam_erection_standard", "beam_erection", "架梁", null, "fixed_days", "count", 2, "天/片", "beam_erection_team", true),
+    process("cast_in_place_continuous_zero_block", "cast_in_place_continuous_beam", "0号块", "zero_block", "fixed_days", "count", 120, "天/块", "cast_in_place_continuous_beam_team", true),
+    process("cast_in_place_continuous_standard_segment", "cast_in_place_continuous_beam", "标准块", "standard_segment", "fixed_days", "count", 10, "天/块", "cast_in_place_continuous_beam_team", false),
+    process("cast_in_place_continuous_closure_segment", "cast_in_place_continuous_beam", "合拢段", "closure_segment", "fixed_days", "count", 30, "天/块", "cast_in_place_continuous_beam_team", false),
+    process("cast_in_place_continuous_straight_segment", "cast_in_place_continuous_beam", "直线段", "straight_segment", "fixed_days", "count", 35, "天/块", "cast_in_place_continuous_beam_team", false),
+    process("cast_in_place_box_beam_standard", "cast_in_place_box_beam", "现浇箱梁", null, "fixed_days", "count", 45, "天/联", "cast_in_place_box_beam_team", true),
+    process("steel_box_beam_standard", "steel_box_beam", "钢箱梁", null, "fixed_days", "count", 30, "天/片", "steel_box_beam_team", true),
+    process("bridge_deck_system_standard", "bridge_deck_system", "桥面系", null, "units_per_day", "deck_length_m", 30, "米/天", "bridge_deck_system_team", true),
   ];
 }
 
@@ -416,6 +444,7 @@ function process(
   productivityUnit: string,
   resourceType: string,
   isDefault: boolean,
+  standardSectionHeight: number | null = null,
 ): ProcessTemplate {
   const option = {
     id: `${id}-default`,
@@ -424,6 +453,7 @@ function process(
     quantity_source: quantitySource,
     productivity_value: productivityValue,
     productivity_unit: productivityUnit,
+    standard_section_height_m: standardSectionHeight,
     is_default: true,
   };
   return {
@@ -435,6 +465,7 @@ function process(
     quantity_source: quantitySource,
     productivity_value: productivityValue,
     productivity_unit: productivityUnit,
+    standard_section_height_m: standardSectionHeight,
     resource_type: resourceType,
     productivity_options: [option],
     applicability: {},
@@ -856,10 +887,22 @@ function quantityForProcess(componentModel: ComponentModel, quantitySource: stri
   if (quantitySource === "count") return 1;
   if (quantitySource === "pile_length_m") return Number(componentModel.properties.length_m ?? componentModel.quantity);
   if (quantitySource === "pier_height_m") return Number(componentModel.properties.height_m ?? componentModel.quantity);
+  if (quantitySource === "deck_length_m") {
+    return Number(componentModel.properties.length_m ?? componentModel.properties.total_length_m ?? componentModel.quantity);
+  }
   return componentModel.quantity;
 }
 
 function calculateDuration(quantity: number, processTemplate: ProcessTemplate) {
+  if (
+    processTemplate.component_type === "pier_body"
+    && processTemplate.quantity_source === "pier_height_m"
+    && processTemplate.productivity_unit === "天/节"
+    && processTemplate.standard_section_height_m
+  ) {
+    const sectionCount = Math.max(1, Math.ceil(quantity / processTemplate.standard_section_height_m));
+    return Math.max(1, Math.ceil(sectionCount * processTemplate.productivity_value));
+  }
   if (processTemplate.duration_method === "units_per_day") {
     return Math.max(1, Math.ceil(quantity / processTemplate.productivity_value));
   }
@@ -1305,6 +1348,7 @@ function understandProcessPromptLocally(prompt: string): ProcessIntentPayload {
 
 function pileProcessFromText(text: string) {
   if (text.includes("人工挖孔") || text.includes("挖孔桩")) return { methodId: "manual_pile", name: "人工挖孔" };
+  if (text.includes("回旋钻")) return { methodId: "circulation_drill", name: "回旋钻" };
   if (text.includes("冲击钻") || text.includes("冲孔")) return { methodId: "impact_drill", name: "冲击钻成孔" };
   if (text.includes("旋挖")) return { methodId: "rotary_drill", name: "旋挖钻成孔" };
   return null;
@@ -1317,7 +1361,7 @@ function resolveProcess(scenario: ScenarioInput, intent: ProcessIntent) {
     if (found) return found;
   }
   if (intent.component_type === "pier_body" && (methodId === "climbing_form" || (intent.process_name ?? "").includes("爬模"))) {
-    return ensureProcess(scenario, "pier_body", "climbing_form", "爬模施工", "climbing_form_team", "units_per_day", "pier_height_m", 1, "m/天");
+    return ensureProcess(scenario, "pier_body", "climbing_form", "爬模施工", "pier_body_team", "days_per_unit", "pier_height_m", 7, "天/节", 4.5);
   }
   return scenario.process_library.find((item) => {
     if (intent.component_type && item.component_type !== intent.component_type) return false;
@@ -1341,6 +1385,7 @@ function ensureProcess(
   quantitySource: string,
   productivityValue: number,
   productivityUnit: string,
+  standardSectionHeight: number | null = null,
 ) {
   const existing = scenario.process_library.find((item) => item.component_type === componentType && (item.method_id === methodId || item.id === methodId));
   if (existing) return existing;
@@ -1355,6 +1400,7 @@ function ensureProcess(
     productivityUnit,
     resourceType,
     false,
+    standardSectionHeight,
   );
   scenario.process_library.push(created);
   if (!scenario.resource_pools.some((item) => item.type === resourceType)) {
@@ -1491,6 +1537,12 @@ function isComponentType(value: unknown): value is ComponentType {
     "pier_body",
     "cap_beam",
     "abutment_body",
+    "precast_beam",
+    "beam_erection",
+    "cast_in_place_continuous_beam",
+    "cast_in_place_box_beam",
+    "steel_box_beam",
+    "bridge_deck_system",
   ].includes(String(value));
 }
 

@@ -12,6 +12,12 @@
 - 里程碑：硬节点作为 CP-SAT 日期约束，软节点转为迟延变量并进入加权目标。
 - 前端页签：项目参数、工艺工效库、工艺逻辑、资源配置、里程碑、模拟结果。
 
+## 需求文档
+
+- [项目排程系统整体说明](docs/project-scheduling-system-overview.md)：说明系统模块划分、数据输入输出、内部数据流转和后端调用关系。
+- [项目参数页面需求文档](docs/project-parameters-requirements.md)：说明项目参数页在实际工程中的页面定位、主要功能、数据来源、接口规则和验收标准。
+- [工艺工效库页面需求文档](docs/process-productivity-library-requirements.md)：说明工艺工效库页的历史数据升级、工效分组、桩基工效单位和接口保存规则。
+
 ## 后端接口
 
 - `GET /api/demo-scenario`：返回完整默认模拟场景。

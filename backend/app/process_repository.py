@@ -4,6 +4,7 @@ import os
 from typing import Any
 
 from .models import ProcessTemplate
+from .process_library_defaults import upgrade_process_library
 
 
 PROCESS_RELATIONSHIP_TABLE = "process_relationships"
@@ -19,7 +20,7 @@ def load_process_library(fallback: list[ProcessTemplate]) -> list[ProcessTemplat
     database_configured = bool(_database_url())
     pool = _get_pool(required=database_configured)
     if pool is None:
-        return fallback
+        return upgrade_process_library(fallback, fallback)
 
     try:
         with pool.connection() as connection:
@@ -56,7 +57,7 @@ def load_process_library(fallback: list[ProcessTemplate]) -> list[ProcessTemplat
         except ProcessRepositoryError:
             return fallback
 
-    return [_process_from_row(row) for row in rows]
+    return upgrade_process_library([_process_from_row(row) for row in rows], fallback)
 
 
 def save_process_library(process_library: list[ProcessTemplate]) -> list[ProcessTemplate]:
@@ -67,8 +68,9 @@ def save_process_library(process_library: list[ProcessTemplate]) -> list[Process
     if pool is None:
         raise ProcessRepositoryError("未配置 Supabase PostgreSQL session pool 连接串。")
 
-    process_ids = [process.id for process in process_library]
-    rows = [_process_to_row(process, index) for index, process in enumerate(process_library)]
+    upgraded_process_library = upgrade_process_library(process_library)
+    process_ids = [process.id for process in upgraded_process_library]
+    rows = [_process_to_row(process, index) for index, process in enumerate(upgraded_process_library)]
 
     try:
         with pool.connection() as connection:

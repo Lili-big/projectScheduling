@@ -26,6 +26,14 @@ PILE_RULE_BY_METHOD = {
 
 
 def calculate_duration(quantity: float, rule: ProductivityRule) -> int:
+    if (
+        rule.component_type == "pier_body"
+        and rule.quantity_source == "pier_height_m"
+        and rule.productivity_unit == "天/节"
+        and rule.standard_section_height_m
+    ):
+        section_count = max(1, math.ceil(quantity / rule.standard_section_height_m))
+        return max(1, math.ceil(section_count * rule.productivity_value))
     if rule.duration_method == "units_per_day":
         return max(1, math.ceil(quantity / rule.productivity_value))
     if rule.duration_method == "days_per_unit":
@@ -164,9 +172,15 @@ def _component_type_label(component_type: ComponentType) -> str:
         "spread_foundation": "扩大基础",
         "ground_tie_beam": "地系梁",
         "middle_tie_beam": "中系梁",
-        "pier_body": "墩柱",
+        "pier_body": "墩身",
         "cap_beam": "盖梁",
         "abutment_body": "桥台台身",
+        "precast_beam": "制梁",
+        "beam_erection": "架梁",
+        "cast_in_place_continuous_beam": "现浇连续梁",
+        "cast_in_place_box_beam": "现浇箱梁",
+        "steel_box_beam": "钢箱梁",
+        "bridge_deck_system": "桥面系",
     }
     return labels[component_type]
 
@@ -178,7 +192,7 @@ def _build_pier_tasks(pier: PierConfig, require_rule: Any) -> list[Task]:
 
     pile_rule = require_rule(PILE_RULE_BY_METHOD[pier.pile_method])
     for pile_no in range(1, pier.pile_count + 1):
-        quantity = pier.pile_length_m
+        quantity, quantity_label = _pile_quantity_for_rule(pier.pile_length_m, pier.pile_diameter_m, pile_rule)
         tasks.append(
             Task(
                 id=f"{structure_id}-PILE-{pile_no:02d}",
@@ -190,7 +204,7 @@ def _build_pier_tasks(pier: PierConfig, require_rule: Any) -> list[Task]:
                 process_name=pile_rule.process_name,
                 productivity_rule_id=pile_rule.id,
                 quantity=quantity,
-                quantity_label=_pile_label(pier.pile_diameter_m, pier.pile_length_m),
+                quantity_label=quantity_label,
                 duration_days=calculate_duration(quantity, pile_rule),
                 compatible_resource_types=[pile_rule.resource_type],
             )
@@ -216,6 +230,7 @@ def _build_pier_tasks(pier: PierConfig, require_rule: Any) -> list[Task]:
         )
 
     body_rule = require_rule("pier_body_standard")
+    body_quantity, body_quantity_label = _pier_body_quantity_for_rule(pier.pier_height_m, body_rule)
     tasks.append(
         Task(
             id=f"{structure_id}-BODY",
@@ -226,9 +241,9 @@ def _build_pier_tasks(pier: PierConfig, require_rule: Any) -> list[Task]:
             component_type="pier_body",
             process_name=body_rule.process_name,
             productivity_rule_id=body_rule.id,
-            quantity=pier.pier_height_m,
-            quantity_label=f"{pier.pier_height_m:g}m",
-            duration_days=calculate_duration(pier.pier_height_m, body_rule),
+            quantity=body_quantity,
+            quantity_label=body_quantity_label,
+            duration_days=calculate_duration(body_quantity, body_rule),
             compatible_resource_types=[body_rule.resource_type],
         )
     )
@@ -260,7 +275,7 @@ def _build_abutment_tasks(abutment: AbutmentConfig, require_rule: Any) -> list[T
 
     pile_rule = require_rule(PILE_RULE_BY_METHOD[abutment.pile_method])
     for pile_no in range(1, abutment.pile_count + 1):
-        quantity = abutment.pile_length_m
+        quantity, quantity_label = _pile_quantity_for_rule(abutment.pile_length_m, abutment.pile_diameter_m, pile_rule)
         tasks.append(
             Task(
                 id=f"{abutment.id}-PILE-{pile_no:02d}",
@@ -272,7 +287,7 @@ def _build_abutment_tasks(abutment: AbutmentConfig, require_rule: Any) -> list[T
                 process_name=pile_rule.process_name,
                 productivity_rule_id=pile_rule.id,
                 quantity=quantity,
-                quantity_label=_pile_label(abutment.pile_diameter_m, abutment.pile_length_m),
+                quantity_label=quantity_label,
                 duration_days=calculate_duration(quantity, pile_rule),
                 compatible_resource_types=[pile_rule.resource_type],
             )
@@ -298,6 +313,7 @@ def _build_abutment_tasks(abutment: AbutmentConfig, require_rule: Any) -> list[T
         )
 
     body_rule = require_rule("abutment_body_standard")
+    body_quantity = 1
     tasks.append(
         Task(
             id=f"{abutment.id}-BODY",
@@ -308,9 +324,9 @@ def _build_abutment_tasks(abutment: AbutmentConfig, require_rule: Any) -> list[T
             component_type="abutment_body",
             process_name=body_rule.process_name,
             productivity_rule_id=body_rule.id,
-            quantity=1,
-            quantity_label=f"{abutment.body_height_m:g}m",
-            duration_days=calculate_duration(1, body_rule),
+            quantity=body_quantity,
+            quantity_label="1个",
+            duration_days=calculate_duration(body_quantity, body_rule),
             compatible_resource_types=[body_rule.resource_type],
         )
     )
@@ -320,3 +336,15 @@ def _build_abutment_tasks(abutment: AbutmentConfig, require_rule: Any) -> list[T
 
 def _pile_label(diameter_m: float, length_m: float) -> str:
     return f"直径{diameter_m:g}m，桩长{length_m:g}m"
+
+
+def _pile_quantity_for_rule(pile_length_m: float, pile_diameter_m: float, rule: ProductivityRule) -> tuple[float, str]:
+    if rule.quantity_source == "count":
+        return 1.0, "1根"
+    return pile_length_m, _pile_label(pile_diameter_m, pile_length_m)
+
+
+def _pier_body_quantity_for_rule(pier_height_m: float, rule: ProductivityRule) -> tuple[float, str]:
+    if rule.quantity_source == "pier_height_m":
+        return pier_height_m, f"{pier_height_m:g}m"
+    return 1.0, "1个"

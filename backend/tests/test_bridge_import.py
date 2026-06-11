@@ -259,8 +259,47 @@ def test_process_natural_language_adds_climbing_form_for_continuous_girder_main_
     ]
     assert len(climbing_components) == 4
     assert all(component.method_id == "climbing_form" for component in climbing_components)
-    assert any(process.method_id == "climbing_form" for process in response.scenario.process_library)
-    assert any(pool.type == "climbing_form_team" for pool in response.scenario.resource_pools)
+    climbing_process = next(process for process in response.scenario.process_library if process.method_id == "climbing_form")
+    assert climbing_process.productivity_value == 7
+    assert climbing_process.productivity_unit == "天/节"
+    assert climbing_process.resource_type == "pier_body_team"
+    assert any(pool.type == "pier_body_team" for pool in response.scenario.resource_pools)
+
+
+def test_process_natural_language_updates_pier_bodies_by_height_condition(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROCESS_NL_LLM_PROVIDER", "local")
+    imported = import_local_bridge_params_endpoint(default_scenario()).scenario
+    pier_bodies = [
+        component
+        for section in imported.project.bridges[0].work_sections
+        for structure in section.structures
+        for component in structure.components
+        if component.component_type == "pier_body"
+    ]
+    expected_targets = [
+        component
+        for component in pier_bodies
+        if (process_nl._component_numeric_value(component, "pier_height_m") or 0) > 6
+    ]
+
+    response = apply_process_natural_language_endpoint(
+        ProcessNlRequest(
+            scenario=imported,
+            prompt="把墩高大于6m的墩柱的工艺统一设置成爬模",
+        )
+    )
+
+    updated_by_id = {
+        component.id: component
+        for section in response.scenario.project.bridges[0].work_sections
+        for structure in section.structures
+        for component in structure.components
+        if component.component_type == "pier_body"
+    }
+    assert expected_targets
+    assert all(updated_by_id[component.id].method_id == "climbing_form" for component in expected_targets)
+    assert any(change.matched_count == len(expected_targets) for change in response.changes)
+    assert not response.warnings
 
 
 def test_process_natural_language_accepts_openai_compatible_provider(monkeypatch: pytest.MonkeyPatch) -> None:
