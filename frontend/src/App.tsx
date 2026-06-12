@@ -3,6 +3,7 @@ import {
   Bot,
   CalendarDays,
   CheckCircle2,
+  ClipboardList,
   Database,
   Flag,
   GitCompare,
@@ -16,8 +17,9 @@ import {
   Workflow,
   X,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 type ComponentType =
   | "pile"
@@ -34,11 +36,12 @@ type ComponentType =
   | "cast_in_place_box_beam"
   | "steel_box_beam"
   | "bridge_deck_system";
-type RelationshipType = "FS" | "SS";
+type RelationshipType = "FS" | "SS" | "FF" | "SF";
 type WorkPointType = "road" | "bridge" | "tunnel";
 type WorkSectionSide = "left" | "right" | "none";
-type TabKey = "project" | "process" | "logic" | "resources" | "milestones" | "results";
+type TabKey = "project" | "process" | "logic" | "resources" | "milestones" | "tasks" | "results";
 type GanttMode = "by_structure" | "by_process";
+type TaskViewMode = "by_structure" | "by_process";
 
 type ComponentModel = {
   id: string;
@@ -129,7 +132,7 @@ type ProcessTemplate = {
 type LogicRule = {
   id: string;
   scope: "same_structure" | "structure_sequence";
-  structure_type?: "pier" | "abutment" | null;
+  structure_type?: "pier" | "abutment" | "upper_structure" | "continuous_beam" | null;
   to_component: ComponentType;
   predecessor_candidates: ComponentType[];
   predecessor_strategy: "all" | "first_available";
@@ -137,6 +140,14 @@ type LogicRule = {
   lag_days: number;
   severity?: "error" | "warning";
   note: string;
+};
+
+type UpperStructureLogicRule = {
+  id: string;
+  relationship: RelationshipType;
+  lag_days: number;
+  severity?: "error" | "warning";
+  note?: string;
 };
 
 type ResourceCalendar = {
@@ -175,6 +186,7 @@ type ScenarioInput = {
   project: ProjectModel;
   process_library: ProcessTemplate[];
   logic_rules: LogicRule[];
+  upper_structure_logic_rules?: UpperStructureLogicRule[];
   resource_calendars: ResourceCalendar[];
   resource_pools: ResourcePool[];
   milestones: MilestoneConstraint[];
@@ -395,7 +407,35 @@ type StructureFilters = {
   productivityLabel: string;
 };
 
+type TaskViewFilters = {
+  structureText: string;
+  processText: string;
+};
+
+type TaskViewRow = {
+  task: Task;
+  bridgeName: string;
+  bridgeOrder: number;
+  sectionName: string;
+  sectionOrder: number;
+  sideLabel: string;
+  structureLabel: string;
+  parentStructureId: string;
+  parentStructureLabel: string;
+  predecessorLinks: PrecedenceLink[];
+  searchText: string;
+};
+
+type TaskViewGroup = {
+  id: string;
+  title: string;
+  subtitle: string;
+  rows: TaskViewRow[];
+};
+
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
+const PREDECESSOR_HOVER_DELAY_MS = 450;
+const PREDECESSOR_HOVER_CLOSE_DELAY_MS = 140;
 
 const componentLabels: Record<ComponentType, string> = {
   pile: "桩基",
@@ -412,6 +452,129 @@ const componentLabels: Record<ComponentType, string> = {
   cast_in_place_box_beam: "现浇箱梁",
   steel_box_beam: "钢箱梁",
   bridge_deck_system: "桥面系",
+};
+
+type UpperStructureLogicDefinition = {
+  id: string;
+  name: string;
+  upperTarget: string;
+  lowerPredecessor: string;
+  generation: string;
+  note: string;
+};
+
+const upperStructureLogicDefinitions: UpperStructureLogicDefinition[] = [
+  {
+    id: "cast_in_place_box_beam_after_lower_structure",
+    name: "现浇箱梁前置",
+    upperTarget: "现浇箱梁现场任务",
+    lowerPredecessor: "跨组覆盖范围内墩台完成任务",
+    generation: "按现浇箱梁跨组生成任务，跨组涉及支座均作为前置。",
+    note: "现浇箱梁在对应跨组墩台下部结构完成后开始。",
+  },
+  {
+    id: "continuous_beam_zero_block_after_main_pier_lower_structure",
+    name: "连续梁0号块前置",
+    upperTarget: "主墩T构0号块",
+    lowerPredecessor: "对应主墩完成任务",
+    generation: "每个主墩T构生成1个0号块任务，对应主墩完成后开始。",
+    note: "连续梁0号块在对应主墩下部结构完成后开始。",
+  },
+  {
+    id: "continuous_beam_side_straight_after_edge_lower_structure",
+    name: "连续梁边跨连续段前置",
+    upperTarget: "边跨连续段",
+    lowerPredecessor: "对应边跨墩台完成任务",
+    generation: "每联连续梁左右边跨各生成1个连续段任务，边跨墩台完成后开始。",
+    note: "连续梁边跨连续段在对应边跨墩台下部结构完成后开始。",
+  },
+  {
+    id: "continuous_beam_t_chain",
+    name: "连续梁T构顺序",
+    upperTarget: "同一主墩T构标准段",
+    lowerPredecessor: "同一T构0号块或上一段",
+    generation: "每个T构内0号块、标准段按顺序生成前后置关系。",
+    note: "连续梁T构内0号块和标准段按顺序施工。",
+  },
+  {
+    id: "continuous_beam_side_closure",
+    name: "连续梁边跨合龙",
+    upperTarget: "边跨合龙段",
+    lowerPredecessor: "边跨连续段和相邻T构",
+    generation: "左右边跨合龙段分别以前置边跨连续段和相邻T构完成为前置。",
+    note: "连续梁边跨合龙段在边跨连续段和相邻T构完成后开始。",
+  },
+  {
+    id: "continuous_beam_middle_closure",
+    name: "连续梁中跨合龙",
+    upperTarget: "中跨合龙段",
+    lowerPredecessor: "相邻两个T构",
+    generation: "每个中跨合龙段以左右相邻T构完成为前置。",
+    note: "连续梁中跨合龙段在相邻两个T构完成后开始。",
+  },
+  {
+    id: "continuous_beam_edge_before_middle_closure",
+    name: "边跨先于中跨合龙",
+    upperTarget: "中跨合龙段",
+    lowerPredecessor: "左右边跨合龙段",
+    generation: "默认所有中跨合龙段等待边跨合龙段完成后开始。",
+    note: "连续梁默认边跨合龙先于中跨合龙。",
+  },
+  {
+    id: "continuous_beam_middle_closure_sequence",
+    name: "中跨合龙顺序",
+    upperTarget: "后序中跨合龙段",
+    lowerPredecessor: "前序中跨合龙段",
+    generation: "按连续梁配置的中跨合龙顺序生成前后置关系。",
+    note: "连续梁中跨合龙按配置顺序推进。",
+  },
+];
+
+function defaultUpperStructureLogicRules(): UpperStructureLogicRule[] {
+  return upperStructureLogicDefinitions.map((definition) => ({
+    id: definition.id,
+    relationship: "FS",
+    lag_days: 0,
+    severity: "error",
+    note: definition.note,
+  }));
+}
+
+function mergeUpperStructureLogicRules(rules: UpperStructureLogicRule[] = []): UpperStructureLogicRule[] {
+  const byId = new Map(defaultUpperStructureLogicRules().map((rule) => [rule.id, rule]));
+  for (const rule of rules) {
+    byId.set(rule.id, {
+      ...rule,
+      relationship: rule.relationship ?? "FS",
+      lag_days: rule.lag_days ?? 0,
+      severity: rule.severity ?? "error",
+    });
+  }
+  return upperStructureLogicDefinitions.map((definition) => byId.get(definition.id) ?? {
+    id: definition.id,
+    relationship: "FS",
+    lag_days: 0,
+    severity: "error",
+    note: definition.note,
+  });
+}
+
+const upperStructureCodes = {
+  simpleBeam: "precastTGirder",
+  castInPlaceBoxBeam: "castInPlaceBoxGirder",
+  continuousBeam: "castInPlaceContinuousBoxGirder",
+} as const;
+
+type UpperLowerLogicConstraint = {
+  id: string;
+  name: string;
+  upperTarget: string;
+  lowerPredecessor: string;
+  generation: string;
+  relationship: RelationshipType;
+  lagDays: number;
+  matchedText: string;
+  note: string;
 };
 
 const durationMethodLabels: Record<string, string> = {
@@ -621,6 +784,7 @@ const tabs: Array<{ key: TabKey; label: string; icon: ReactNode }> = [
   { key: "logic", label: "工艺逻辑", icon: <Workflow size={15} /> },
   { key: "resources", label: "资源配置", icon: <Server size={15} /> },
   { key: "milestones", label: "里程碑", icon: <Flag size={15} /> },
+  { key: "tasks", label: "任务视图", icon: <ClipboardList size={15} /> },
   { key: "results", label: "模拟结果", icon: <CheckCircle2 size={15} /> },
 ];
 
@@ -695,7 +859,9 @@ function WorkspaceTabStrip({
 export default function App() {
   const [scenario, setScenario] = useState<ScenarioInput | null>(null);
   const [generated, setGenerated] = useState<GeneratedScheduleInput | null>(null);
+  const [generatedScenarioFingerprint, setGeneratedScenarioFingerprint] = useState<string | null>(null);
   const [solveResult, setSolveResult] = useState<ScenarioSolveResult | null>(null);
+  const [solveResultScenarioFingerprint, setSolveResultScenarioFingerprint] = useState<string | null>(null);
   const [openTabs, setOpenTabs] = useState<TabKey[]>(["project"]);
   const [activeTab, setActiveTab] = useState<TabKey | null>("project");
   const [ganttMode, setGanttMode] = useState<GanttMode>("by_structure");
@@ -711,6 +877,24 @@ export default function App() {
   }, []);
 
   const flatStructures = useMemo(() => (scenario ? flattenStructures(scenario.project) : []), [scenario]);
+  const scenarioFingerprint = useMemo(() => (scenario ? scenarioFingerprintForSolve(scenario) : null), [scenario]);
+  const currentGenerated = scenarioFingerprint !== null && generatedScenarioFingerprint === scenarioFingerprint ? generated : null;
+  const currentSolveResult = scenarioFingerprint !== null && solveResultScenarioFingerprint === scenarioFingerprint ? solveResult : null;
+  const previousScenarioFingerprintRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (previousScenarioFingerprintRef.current === null) {
+      previousScenarioFingerprintRef.current = scenarioFingerprint;
+      return;
+    }
+    if (previousScenarioFingerprintRef.current === scenarioFingerprint) return;
+    previousScenarioFingerprintRef.current = scenarioFingerprint;
+    setGenerated(null);
+    setGeneratedScenarioFingerprint(null);
+    setSolveResult(null);
+    setSolveResultScenarioFingerprint(null);
+    setComparison(null);
+  }, [scenarioFingerprint]);
 
   async function loadScenario() {
     setBusy("loading");
@@ -720,7 +904,9 @@ export default function App() {
       const imported = await apiPost<ImportBridgeParamsResponse>("/api/import-local-bridge-params", demo);
       setScenario(imported.scenario);
       setGenerated(null);
+      setGeneratedScenarioFingerprint(null);
       setSolveResult(null);
+      setSolveResultScenarioFingerprint(null);
       setComparison(null);
       setLastImport(imported);
       setActiveTab("project");
@@ -733,12 +919,15 @@ export default function App() {
 
   async function generateOnly() {
     if (!scenario) return;
+    const requestScenario = scenario;
+    const requestFingerprint = scenarioFingerprintForSolve(requestScenario);
     setBusy("generating");
     setError(null);
     try {
-      const nextGenerated = await apiPost<GeneratedScheduleInput>("/api/generate-schedule-input", scenario);
+      const nextGenerated = await apiPost<GeneratedScheduleInput>("/api/generate-schedule-input", requestScenario);
       setGenerated(nextGenerated);
-      openModule("results");
+      setGeneratedScenarioFingerprint(requestFingerprint);
+      openModule("tasks");
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -748,10 +937,12 @@ export default function App() {
 
   async function solveCurrent() {
     if (!scenario) return;
+    const requestScenario = scenario;
+    const requestFingerprint = scenarioFingerprintForSolve(requestScenario);
     setBusy("solving");
     setError(null);
     try {
-      await solveWith(scenario);
+      await solveWith(requestScenario, requestFingerprint);
       openModule("results");
     } catch (err) {
       setError(errorText(err));
@@ -762,8 +953,11 @@ export default function App() {
 
   async function solveMinResources() {
     if (!scenario) return;
+    const requestScenario = scenario;
+    const requestFingerprint = scenarioFingerprintForSolve(requestScenario);
     const hasHardMilestone = scenario.milestones.some((milestone) => milestone.mode === "hard");
-    const fallbackTargetDays = solveResult?.result.objective_days ?? null;
+    const matchingSolveResult = solveResultScenarioFingerprint === requestFingerprint ? solveResult : null;
+    const fallbackTargetDays = matchingSolveResult?.result.objective_days ?? null;
     if (!hasHardMilestone && !fallbackTargetDays) {
       setError("请先运行“固定资源条件下，推算最短工期”，或设置至少一个可匹配的强制里程碑目标。");
       return;
@@ -772,11 +966,13 @@ export default function App() {
     setError(null);
     try {
       const solved = await apiPost<ScenarioSolveResult>("/api/solve-min-resources", {
-        scenario,
+        scenario: requestScenario,
         fallback_target_days: fallbackTargetDays,
       });
       setGenerated(solved.generated);
+      setGeneratedScenarioFingerprint(requestFingerprint);
       setSolveResult(solved);
+      setSolveResultScenarioFingerprint(requestFingerprint);
       openModule("results");
     } catch (err) {
       setError(errorText(err));
@@ -785,10 +981,12 @@ export default function App() {
     }
   }
 
-  async function solveWith(nextScenario: ScenarioInput) {
+  async function solveWith(nextScenario: ScenarioInput, fingerprint = scenarioFingerprintForSolve(nextScenario)) {
     const solved = await apiPost<ScenarioSolveResult>("/api/solve-scenario", nextScenario);
     setGenerated(solved.generated);
+    setGeneratedScenarioFingerprint(fingerprint);
     setSolveResult(solved);
+    setSolveResultScenarioFingerprint(fingerprint);
   }
 
   async function compareSavedResults(nextResults = savedResults) {
@@ -819,7 +1017,9 @@ export default function App() {
       const imported = await apiPostFormData<ImportBridgeParamsResponse>("/api/import-bridge-params", payload);
       setScenario(imported.scenario);
       setGenerated(null);
+      setGeneratedScenarioFingerprint(null);
       setSolveResult(null);
+      setSolveResultScenarioFingerprint(null);
       setComparison(null);
       setLastImport(imported);
       setActiveTab("project");
@@ -841,7 +1041,9 @@ export default function App() {
         setProcessLibraryDirty(true);
       }
       setGenerated(null);
+      setGeneratedScenarioFingerprint(null);
       setSolveResult(null);
+      setSolveResultScenarioFingerprint(null);
       setComparison(null);
       return result;
     } catch (err) {
@@ -853,11 +1055,11 @@ export default function App() {
   }
 
   function saveCurrentResult() {
-    if (!solveResult) return;
+    if (!currentSolveResult) return;
     const nextResult = {
-      ...solveResult,
-      scenario_id: `${solveResult.scenario_id}-${savedResults.length + 1}`,
-      scenario_name: `${solveResult.scenario_name} #${savedResults.length + 1}`,
+      ...currentSolveResult,
+      scenario_id: `${currentSolveResult.scenario_id}-${savedResults.length + 1}`,
+      scenario_name: `${currentSolveResult.scenario_name} #${savedResults.length + 1}`,
     };
     const nextResults = [...savedResults, nextResult];
     setSavedResults(nextResults);
@@ -918,7 +1120,9 @@ export default function App() {
       setScenario((current) => (current ? { ...current, process_library: processLibrary } : current));
       setProcessLibraryDirty(false);
       setGenerated(null);
+      setGeneratedScenarioFingerprint(null);
       setSolveResult(null);
+      setSolveResultScenarioFingerprint(null);
       setComparison(null);
     } catch (err) {
       setError(errorText(err));
@@ -934,6 +1138,19 @@ export default function App() {
             ...current,
             logic_rules: current.logic_rules.map((rule, ruleIndex) =>
               ruleIndex === index ? { ...rule, ...patch } : rule,
+            ),
+          }
+        : current,
+    );
+  }
+
+  function updateUpperStructureLogic(ruleId: string, patch: Partial<UpperStructureLogicRule>) {
+    setScenario((current) =>
+      current
+        ? {
+            ...current,
+            upper_structure_logic_rules: mergeUpperStructureLogicRules(current.upper_structure_logic_rules).map((rule) =>
+              rule.id === ruleId ? { ...rule, ...patch } : rule,
             ),
           }
         : current,
@@ -1019,17 +1236,33 @@ export default function App() {
           />
         ) : null;
       case "logic":
-        return scenario ? <LogicTab scenario={scenario} onUpdateLogic={updateLogic} /> : null;
+        return scenario ? (
+          <LogicTab
+            scenario={scenario}
+            onUpdateLogic={updateLogic}
+            onUpdateUpperStructureLogic={updateUpperStructureLogic}
+          />
+        ) : null;
       case "resources":
         return scenario ? <ResourcesTab scenario={scenario} onUpdateResourcePool={updateResourcePool} /> : null;
       case "milestones":
         return scenario ? <MilestonesTab scenario={scenario} onUpdateMilestone={updateMilestone} /> : null;
+      case "tasks":
+        return scenario ? (
+          <TaskViewTab
+            scenario={scenario}
+            generated={currentGenerated}
+            solveResult={currentSolveResult}
+            onGenerateTaskView={generateOnly}
+            busy={busy}
+          />
+        ) : null;
       case "results":
         return (
           <ResultsTab
             scenario={scenario}
-            generated={generated}
-            solveResult={solveResult}
+            generated={currentGenerated}
+            solveResult={currentSolveResult}
             onPatchScenario={patchScenario}
             onPatchProject={patchProject}
             onSolveCurrent={solveCurrent}
@@ -1087,18 +1320,33 @@ export default function App() {
             processLibraryDirty={processLibraryDirty}
           />
         )}
-        {scenario && activeTab === "logic" && <LogicTab scenario={scenario} onUpdateLogic={updateLogic} />}
+        {scenario && activeTab === "logic" && (
+          <LogicTab
+            scenario={scenario}
+            onUpdateLogic={updateLogic}
+            onUpdateUpperStructureLogic={updateUpperStructureLogic}
+          />
+        )}
         {scenario && activeTab === "resources" && (
           <ResourcesTab scenario={scenario} onUpdateResourcePool={updateResourcePool} />
         )}
         {scenario && activeTab === "milestones" && (
           <MilestonesTab scenario={scenario} onUpdateMilestone={updateMilestone} />
         )}
+        {scenario && activeTab === "tasks" && (
+          <TaskViewTab
+            scenario={scenario}
+            generated={currentGenerated}
+            solveResult={currentSolveResult}
+            onGenerateTaskView={generateOnly}
+            busy={busy}
+          />
+        )}
         {activeTab === "results" && (
           <ResultsTab
             scenario={scenario}
-            generated={generated}
-            solveResult={solveResult}
+            generated={currentGenerated}
+            solveResult={currentSolveResult}
             onPatchScenario={patchScenario}
             onPatchProject={patchProject}
             onSolveCurrent={solveCurrent}
@@ -1648,74 +1896,120 @@ function ProcessTab({
 function LogicTab({
   scenario,
   onUpdateLogic,
+  onUpdateUpperStructureLogic,
 }: {
   scenario: ScenarioInput;
   onUpdateLogic: (index: number, patch: Partial<LogicRule>) => void;
+  onUpdateUpperStructureLogic: (ruleId: string, patch: Partial<UpperStructureLogicRule>) => void;
 }) {
+  const upperLowerConstraints = buildUpperLowerLogicConstraints(scenario);
+
+  const relationshipSelect = (
+    value: RelationshipType,
+    onChange: (value: RelationshipType) => void,
+  ) => (
+    <select className="logic-relation-select" value={value} onChange={(event) => onChange(event.target.value as RelationshipType)}>
+      <option value="FS">FS</option>
+      <option value="SS">SS</option>
+      <option value="FF">FF</option>
+      <option value="SF">SF</option>
+    </select>
+  );
+  const lagInput = (value: number, onChange: (value: number) => void) => (
+    <div className="logic-lag-control">
+      <input
+        type="number"
+        min={0}
+        value={value}
+        onChange={(event) => onChange(Math.max(0, Number(event.target.value) || 0))}
+      />
+      <span className="unit">自然日</span>
+    </div>
+  );
+
   return (
-    <section className="panel full">
-      <PanelTitle title="工艺逻辑约束" subtitle="工艺逻辑作为排程必须满足的前后关系进入求解器" />
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>规则</th>
-              <th>范围</th>
-              <th>当前构件</th>
-              <th>候选前置</th>
-              <th>策略</th>
-              <th>关系</th>
-              <th>间隔</th>
-              <th>说明</th>
-            </tr>
-          </thead>
-          <tbody>
-            {scenario.logic_rules.map((rule, index) => (
-              <tr key={rule.id}>
-                <td>
-                  <div className="rule-name">{logicRuleDisplayName(rule)}</div>
-                  <code className="muted-code">{rule.id}</code>
-                </td>
-                <td>
-                  <select value={rule.scope} onChange={(event) => onUpdateLogic(index, { scope: event.target.value as LogicRule["scope"] })}>
-                    <option value="same_structure">同墩台</option>
-                    <option value="structure_sequence">跨墩台顺序</option>
-                  </select>
-                </td>
-                <td>{componentLabels[rule.to_component]}</td>
-                <td>{rule.predecessor_candidates.map((item) => componentLabels[item]).join(" / ")}</td>
-                <td>
-                  <select
-                    value={rule.predecessor_strategy}
-                    onChange={(event) => onUpdateLogic(index, { predecessor_strategy: event.target.value as LogicRule["predecessor_strategy"] })}
-                  >
-                    <option value="first_available">优先回退</option>
-                    <option value="all">全部满足</option>
-                  </select>
-                </td>
-                <td>
-                  <select
-                    value={rule.relationship}
-                    onChange={(event) => onUpdateLogic(index, { relationship: event.target.value as RelationshipType })}
-                  >
-                    <option value="FS">FS</option>
-                    <option value="SS">SS</option>
-                  </select>
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    min={0}
-                    value={rule.lag_days}
-                    onChange={(event) => onUpdateLogic(index, { lag_days: Number(event.target.value) })}
-                  />
-                  <span className="unit">天</span>
-                </td>
-                <td className="note-cell">{rule.note}</td>
+    <section className="panel full logic-panel">
+      <PanelTitle title="工艺逻辑约束" subtitle="下部结构规则与桥梁上部结构派生约束使用同一套关系和间隔配置" />
+      <div className="logic-content unified">
+        <div className="logic-section-title">
+          <div>
+            <h3>规则配置</h3>
+            <span>{scenario.logic_rules.length} 条下部规则 / {upperLowerConstraints.length} 条桥梁上部规则</span>
+          </div>
+          <span className="text-pill">关系与间隔进入排程求解</span>
+        </div>
+        <div className="table-wrap logic-unified">
+          <table className="logic-unified-table">
+            <thead>
+              <tr>
+                <th>规则</th>
+                <th>当前 / 后续</th>
+                <th>前置来源</th>
+                <th>策略 / 生成</th>
+                <th>关系</th>
+                <th>间隔</th>
+                <th>当前匹配</th>
+                <th>说明</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {scenario.logic_rules.map((rule, index) => (
+                <tr key={rule.id}>
+                  <td>
+                    <div className="logic-rule-heading">
+                      <span className="logic-source-badge lower">下部结构</span>
+                      <div className="rule-name">{logicRuleDisplayName(rule)}</div>
+                    </div>
+                    <code className="muted-code">{rule.id}</code>
+                  </td>
+                  <td>{componentLabels[rule.to_component]}</td>
+                  <td>{rule.predecessor_candidates.map((item) => componentLabels[item]).join(" / ")}</td>
+                  <td>
+                    <select
+                      value={rule.predecessor_strategy}
+                      onChange={(event) => onUpdateLogic(index, { predecessor_strategy: event.target.value as LogicRule["predecessor_strategy"] })}
+                    >
+                      <option value="first_available">优先回退</option>
+                      <option value="all">全部满足</option>
+                    </select>
+                  </td>
+                  <td>{relationshipSelect(rule.relationship, (relationship) => onUpdateLogic(index, { relationship }))}</td>
+                  <td>{lagInput(rule.lag_days, (lag_days) => onUpdateLogic(index, { lag_days }))}</td>
+                  <td><span className="logic-match muted">默认规则</span></td>
+                  <td className="note-cell">{rule.note}</td>
+                </tr>
+              ))}
+              {upperLowerConstraints.map((constraint) => (
+                <tr key={constraint.id}>
+                  <td>
+                    <div className="logic-rule-heading">
+                      <span className="logic-source-badge upper">桥梁上部</span>
+                      <div className="rule-name">{constraint.name}</div>
+                    </div>
+                    <code className="muted-code">{constraint.id}</code>
+                  </td>
+                  <td>{constraint.upperTarget}</td>
+                  <td>{constraint.lowerPredecessor}</td>
+                  <td className="note-cell">{constraint.generation}</td>
+                  <td>
+                    {relationshipSelect(
+                      constraint.relationship,
+                      (relationship) => onUpdateUpperStructureLogic(constraint.id, { relationship }),
+                    )}
+                  </td>
+                  <td>
+                    {lagInput(
+                      constraint.lagDays,
+                      (lag_days) => onUpdateUpperStructureLogic(constraint.id, { lag_days }),
+                    )}
+                  </td>
+                  <td><span className="logic-match">{constraint.matchedText}</span></td>
+                  <td className="note-cell">{constraint.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
   );
@@ -1871,6 +2165,241 @@ function MilestonesTab({
   );
 }
 
+function TaskViewTab({
+  scenario,
+  generated,
+  solveResult,
+  onGenerateTaskView,
+  busy,
+}: {
+  scenario: ScenarioInput;
+  generated: GeneratedScheduleInput | null;
+  solveResult: ScenarioSolveResult | null;
+  onGenerateTaskView: () => void;
+  busy: "loading" | "generating" | "solving" | "minResources" | "comparing" | "importing" | "nl" | "savingProcessLibrary" | null;
+}) {
+  const [groupMode, setGroupMode] = useState<TaskViewMode>("by_structure");
+  const [filters, setFilters] = useState<TaskViewFilters>({
+    structureText: "",
+    processText: "",
+  });
+  const [openPredecessorTaskId, setOpenPredecessorTaskId] = useState<string | null>(null);
+  const [predecessorAnchorRect, setPredecessorAnchorRect] = useState<DOMRect | null>(null);
+  const predecessorHoverOpenTimerRef = useRef<number | null>(null);
+  const predecessorHoverCloseTimerRef = useRef<number | null>(null);
+  const generatedForDetails = solveResult?.generated ?? generated;
+  const workSectionDisplayById = useMemo(
+    () => buildWorkSectionDisplayById(scenario.project),
+    [scenario.project],
+  );
+  const linksBySuccessor = useMemo(
+    () => buildPredecessorLinksBySuccessor(generatedForDetails),
+    [generatedForDetails],
+  );
+  const taskById = useMemo(
+    () => new Map((generatedForDetails?.schedule_input.tasks ?? []).map((task) => [task.id, task])),
+    [generatedForDetails],
+  );
+  const logicRuleById = useMemo(
+    () => new Map(scenario.logic_rules.map((rule) => [rule.id, rule])),
+    [scenario.logic_rules],
+  );
+  const rows = useMemo(
+    () => buildTaskViewRows(generatedForDetails, scenario, linksBySuccessor, workSectionDisplayById),
+    [generatedForDetails, linksBySuccessor, scenario, workSectionDisplayById],
+  );
+  const filteredRows = useMemo(() => filterTaskViewRows(rows, filters), [filters, rows]);
+  const groups = useMemo(() => buildTaskViewGroups(filteredRows, groupMode), [filteredRows, groupMode]);
+  const generating = busy === "generating";
+
+  useEffect(() => () => {
+    clearPredecessorHoverTimers(predecessorHoverOpenTimerRef, predecessorHoverCloseTimerRef);
+  }, []);
+
+  function closePredecessorPopover() {
+    setOpenPredecessorTaskId(null);
+    setPredecessorAnchorRect(null);
+  }
+
+  function showPredecessorPopover(taskId: string, anchor: HTMLElement) {
+    clearPredecessorHoverTimers(predecessorHoverOpenTimerRef, predecessorHoverCloseTimerRef);
+    predecessorHoverOpenTimerRef.current = window.setTimeout(() => {
+      setPredecessorAnchorRect(anchor.getBoundingClientRect());
+      setOpenPredecessorTaskId(taskId);
+    }, PREDECESSOR_HOVER_DELAY_MS);
+  }
+
+  function schedulePredecessorPopoverClose() {
+    clearPredecessorHoverTimer(predecessorHoverOpenTimerRef);
+    clearPredecessorHoverTimer(predecessorHoverCloseTimerRef);
+    predecessorHoverCloseTimerRef.current = window.setTimeout(closePredecessorPopover, PREDECESSOR_HOVER_CLOSE_DELAY_MS);
+  }
+
+  function keepPredecessorPopoverOpen() {
+    clearPredecessorHoverTimer(predecessorHoverCloseTimerRef);
+  }
+
+  function predecessorDetails(row: TaskViewRow): PredecessorDetail[] {
+    return row.predecessorLinks.map((link) => {
+      const predecessor = taskById.get(link.predecessor_id);
+      return {
+        predecessorId: link.predecessor_id,
+        predecessor,
+        predecessorSideLabel: predecessor ? workSectionLabelForTask(predecessor, workSectionDisplayById) : "-",
+        link,
+        rule: logicRuleById.get(link.source_rule_id),
+      };
+    });
+  }
+
+  return (
+    <div className="task-view-grid">
+      <section className="panel full task-view-header-panel">
+        <PanelTitle
+          title="任务视图"
+          subtitle="调用 OR-Tools CP-SAT 前核验结构物识别、工期计算和工艺逻辑关系"
+          action={
+            <div className="task-view-title-actions">
+              {generatedForDetails && (
+                <div className="segmented">
+                  <button className={groupMode === "by_structure" ? "active" : ""} type="button" onClick={() => setGroupMode("by_structure")}>
+                    按墩号
+                  </button>
+                  <button className={groupMode === "by_process" ? "active" : ""} type="button" onClick={() => setGroupMode("by_process")}>
+                    按工艺
+                  </button>
+                </div>
+              )}
+              <button className="secondary" type="button" onClick={onGenerateTaskView} disabled={generating || !scenario}>
+              {generating ? <Loader2 className="spin" size={16} /> : <ClipboardList size={16} />}
+              {generatedForDetails ? "刷新任务视图" : "生成任务视图"}
+              </button>
+            </div>
+          }
+        />
+        {!generatedForDetails && (
+          <div className="task-view-empty">
+            <ClipboardList size={34} />
+            <strong>尚未生成求解前任务图</strong>
+            <span>生成后可按墩号或工艺核验任务、工期和前置关系；此操作不会调用 CP-SAT。</span>
+          </div>
+        )}
+        {generatedForDetails && (
+          <div className="task-view-filters">
+            <label>
+              结构物
+              <input
+                value={filters.structureText}
+                onChange={(event) => setFilters((current) => ({ ...current, structureText: event.target.value }))}
+                placeholder="桥梁、工区、幅别、墩号、任务"
+              />
+            </label>
+            <label>
+              工艺 / 构件
+              <input
+                value={filters.processText}
+                onChange={(event) => setFilters((current) => ({ ...current, processText: event.target.value }))}
+                placeholder="工艺名称或构件类型"
+              />
+            </label>
+          </div>
+        )}
+      </section>
+
+      {generatedForDetails && (
+        <>
+          <section className="panel full task-view-panel">
+            <PanelTitle
+              title="任务清单"
+              subtitle={groupMode === "by_structure" ? "按墩号从小到大展示，组内按工序顺序排列" : "按工艺聚合，组内仍按墩号从小到大排列"}
+            />
+            <div className="task-view-groups">
+              {groups.length > 0 ? (
+                groups.map((group) => (
+                  <div className="task-view-group" key={group.id}>
+                    <div className="task-view-group-title">
+                      <strong>{group.title}</strong>
+                      <span>{taskViewGroupSubtitle(group.rows, groupMode, scenario)}</span>
+                    </div>
+                    <div className="table-wrap task-view-table-wrap">
+                      <table className="task-view-table">
+                        <thead>
+                          <tr>
+                            <th>桥梁 / 工区</th>
+                            <th>幅别</th>
+                            <th>墩号 / 结构物</th>
+                            <th>构件</th>
+                            <th>任务名称</th>
+                            <th>工艺</th>
+                            <th>工程量</th>
+                            <th>工期</th>
+                            <th>工期计算</th>
+                            <th>候选资源</th>
+                            <th>前置</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {group.rows.map((row) => {
+                            const isOpen = openPredecessorTaskId === row.task.id;
+                            return (
+                              <tr key={`${group.id}-${row.task.id}`}>
+                                <td>{row.bridgeName} / {row.sectionName}</td>
+                                <td><span className="side-tag">{row.sideLabel}</span></td>
+                                <td>{row.structureLabel}</td>
+                                <td><span className="tag">{componentLabels[row.task.component_type]}</span></td>
+                                <td>{row.task.name}</td>
+                                <td>{row.task.process_name}</td>
+                                <td>{row.task.quantity_label || displayValue(row.task.quantity)}</td>
+                                <td>{effectiveTaskDurationDays(row.task, scenario)} 天</td>
+                                <td className="duration-expression" title={durationExpression(row.task, scenario)}>
+                                  {durationExpression(row.task, scenario)}
+                                </td>
+                                <td>{row.task.compatible_resource_types.join(" / ")}</td>
+                                <td className="predecessor-cell">
+                                  {row.predecessorLinks.length > 0 ? (
+                                    <button
+                                      className="predecessor-count has-items"
+                                      type="button"
+                                      onMouseEnter={(event) => showPredecessorPopover(row.task.id, event.currentTarget)}
+                                      onMouseLeave={schedulePredecessorPopoverClose}
+                                      onFocus={(event) => showPredecessorPopover(row.task.id, event.currentTarget)}
+                                      onBlur={schedulePredecessorPopoverClose}
+                                      aria-expanded={isOpen}
+                                    >
+                                      {row.predecessorLinks.length}
+                                    </button>
+                                  ) : (
+                                    <span className="predecessor-zero">0</span>
+                                  )}
+                                  {isOpen && (
+                                    <PredecessorPopover
+                                      task={row.task}
+                                      details={predecessorDetails(row)}
+                                      anchorRect={predecessorAnchorRect}
+                                      onMouseEnter={keepPredecessorPopoverOpen}
+                                      onMouseLeave={schedulePredecessorPopoverClose}
+                                    />
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="empty">当前筛选条件下没有任务</div>
+              )}
+            </div>
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ResultsTab({
   scenario,
   generated,
@@ -1905,13 +2434,19 @@ function ResultsTab({
   comparing: boolean;
 }) {
   const [openPredecessorTaskId, setOpenPredecessorTaskId] = useState<string | null>(null);
-  const predecessorLayerRef = useRef<HTMLDivElement | null>(null);
+  const [predecessorAnchorRect, setPredecessorAnchorRect] = useState<DOMRect | null>(null);
+  const predecessorHoverOpenTimerRef = useRef<number | null>(null);
+  const predecessorHoverCloseTimerRef = useRef<number | null>(null);
   const result = solveResult?.result ?? null;
   const planStatus = useMemo(() => derivePlanStatus(result), [result]);
   const summary = useMemo(() => buildSummary(scenario, generated, solveResult), [scenario, generated, solveResult]);
   const generatedForDetails = solveResult?.generated ?? generated;
   const recommendedResourceCounts = recommendedResourceCountsFromResult(result);
   const continuityMetrics = continuityMetricsFromResult(result);
+  const workSectionDisplayById = useMemo(
+    () => buildWorkSectionDisplayById(scenario?.project ?? null),
+    [scenario?.project],
+  );
   const diagnostics = useMemo(() => {
     const messages = solveResult?.diagnostics ?? generated?.validation ?? [];
     if (!planStatus.diagnostic) return messages;
@@ -1936,19 +2471,32 @@ function ResultsTab({
     [scenario],
   );
 
-  useEffect(() => {
-    if (!openPredecessorTaskId) return;
+  useEffect(() => () => {
+    clearPredecessorHoverTimers(predecessorHoverOpenTimerRef, predecessorHoverCloseTimerRef);
+  }, []);
 
-    function closeWhenClickOutside(event: PointerEvent) {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (predecessorLayerRef.current?.contains(target)) return;
-      setOpenPredecessorTaskId(null);
-    }
+  function closePredecessorPopover() {
+    setOpenPredecessorTaskId(null);
+    setPredecessorAnchorRect(null);
+  }
 
-    document.addEventListener("pointerdown", closeWhenClickOutside);
-    return () => document.removeEventListener("pointerdown", closeWhenClickOutside);
-  }, [openPredecessorTaskId]);
+  function showPredecessorPopover(taskId: string, anchor: HTMLElement) {
+    clearPredecessorHoverTimers(predecessorHoverOpenTimerRef, predecessorHoverCloseTimerRef);
+    predecessorHoverOpenTimerRef.current = window.setTimeout(() => {
+      setPredecessorAnchorRect(anchor.getBoundingClientRect());
+      setOpenPredecessorTaskId(taskId);
+    }, PREDECESSOR_HOVER_DELAY_MS);
+  }
+
+  function schedulePredecessorPopoverClose() {
+    clearPredecessorHoverTimer(predecessorHoverOpenTimerRef);
+    clearPredecessorHoverTimer(predecessorHoverCloseTimerRef);
+    predecessorHoverCloseTimerRef.current = window.setTimeout(closePredecessorPopover, PREDECESSOR_HOVER_CLOSE_DELAY_MS);
+  }
+
+  function keepPredecessorPopoverOpen() {
+    clearPredecessorHoverTimer(predecessorHoverCloseTimerRef);
+  }
 
   function predecessorDetails(task: ScheduledTask): PredecessorDetail[] {
     const links = linksBySuccessor.get(task.id) ?? [];
@@ -1959,6 +2507,7 @@ function ResultsTab({
       return {
         predecessorId,
         predecessor,
+        predecessorSideLabel: predecessor ? workSectionLabelForTask(predecessor, workSectionDisplayById) : "-",
         link,
         rule,
       };
@@ -1966,7 +2515,7 @@ function ResultsTab({
   }
 
   return (
-    <div className="results-grid" ref={predecessorLayerRef}>
+    <div className="results-grid">
       {scenario && (
         <section className="panel full simulation-params-panel">
           <PanelTitle
@@ -2114,6 +2663,7 @@ function ResultsTab({
             <thead>
               <tr>
                 <th>工作项</th>
+                <th>幅别</th>
                 <th>构件</th>
                 <th>计划表达式</th>
                 <th>工期</th>
@@ -2129,11 +2679,12 @@ function ResultsTab({
                 return (
                   <tr key={task.id}>
                     <td>{task.name}</td>
+                    <td><span className="side-tag">{workSectionLabelForTask(task, workSectionDisplayById)}</span></td>
                     <td><span className="tag">{componentLabels[task.component_type]}</span></td>
                     <td className="duration-expression" title={durationExpression(task, scenario)}>
                       {durationExpression(task, scenario)}
                     </td>
-                    <td>{task.duration_days} 天</td>
+                    <td>{effectiveTaskDurationDays(task, scenario)} 天</td>
                     <td>{task.start_date}</td>
                     <td>{task.finish_date}</td>
                     <td>{task.assigned_resource_name ?? "-"}</td>
@@ -2142,7 +2693,10 @@ function ResultsTab({
                         <button
                           className="predecessor-count has-items"
                           type="button"
-                          onClick={() => setOpenPredecessorTaskId(isOpen ? null : task.id)}
+                          onMouseEnter={(event) => showPredecessorPopover(task.id, event.currentTarget)}
+                          onMouseLeave={schedulePredecessorPopoverClose}
+                          onFocus={(event) => showPredecessorPopover(task.id, event.currentTarget)}
+                          onBlur={schedulePredecessorPopoverClose}
                           aria-expanded={isOpen}
                         >
                           {task.predecessor_ids.length}
@@ -2154,7 +2708,9 @@ function ResultsTab({
                         <PredecessorPopover
                           task={task}
                           details={predecessorDetails(task)}
-                          onClose={() => setOpenPredecessorTaskId(null)}
+                          anchorRect={predecessorAnchorRect}
+                          onMouseEnter={keepPredecessorPopoverOpen}
+                          onMouseLeave={schedulePredecessorPopoverClose}
                         />
                       )}
                     </td>
@@ -2181,7 +2737,12 @@ function ResultsTab({
             </button>
           </div>
         </div>
-        <Gantt tasks={result?.tasks ?? []} makespan={Math.max(result?.objective_days ?? 1, 1)} mode={ganttMode} />
+        <Gantt
+          tasks={result?.tasks ?? []}
+          makespan={Math.max(result?.objective_days ?? 1, 1)}
+          mode={ganttMode}
+          workSectionDisplayById={workSectionDisplayById}
+        />
       </section>
 
       <section className="panel full">
@@ -2232,7 +2793,8 @@ function ResultsTab({
 
 type PredecessorDetail = {
   predecessorId: string;
-  predecessor?: ScheduledTask;
+  predecessor?: Task;
+  predecessorSideLabel?: string;
   link?: PrecedenceLink;
   rule?: LogicRule;
 };
@@ -2240,36 +2802,36 @@ type PredecessorDetail = {
 function PredecessorPopover({
   task,
   details,
-  onClose,
+  anchorRect,
+  onMouseEnter,
+  onMouseLeave,
 }: {
-  task: ScheduledTask;
+  task: Task;
   details: PredecessorDetail[];
-  onClose: () => void;
+  anchorRect: DOMRect | null;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
 }) {
-  return (
-    <div className="predecessor-popover">
-      <div className="predecessor-popover-head">
-        <div>
-          <strong>{task.name}</strong>
-          <span>{details.length ? `${details.length} 个前置工作` : "无前置工作"}</span>
-        </div>
-        <button className="icon-button" type="button" onClick={onClose} aria-label="关闭前置工作详情">
-          <X size={14} />
-        </button>
-      </div>
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      className="predecessor-popover"
+      style={predecessorPopoverStyle(anchorRect)}
+      onPointerDown={(event) => event.stopPropagation()}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
       {details.length ? (
         <div className="predecessor-list">
           {details.map((detail) => (
             <div className="predecessor-item" key={`${task.id}-${detail.predecessorId}-${detail.link?.id ?? "missing"}`}>
               <div className="predecessor-item-title">
-                <strong>
-                  {detail.predecessor?.name ?? detail.predecessorId}
-                  {detail.link && <span className="predecessor-relation-token">{formatPrecedenceToken(detail.link)}</span>}
-                </strong>
-                <span>{detail.predecessor ? componentLabels[detail.predecessor.component_type] : "未找到工作项"}</span>
-              </div>
-              <div className="predecessor-rule">
-                {detail.rule ? logicRuleDisplayName(detail.rule) : `规则：${detail.link?.source_rule_id ?? "-"}`}
+                {detail.predecessorSideLabel && detail.predecessorSideLabel !== "-" && (
+                  <span className="side-tag mini">{detail.predecessorSideLabel}</span>
+                )}
+                <strong>{detail.predecessor?.name ?? detail.predecessorId}</strong>
+                {detail.link && <span className="predecessor-relation-token">{formatPrecedenceToken(detail.link)}</span>}
               </div>
             </div>
           ))}
@@ -2277,8 +2839,54 @@ function PredecessorPopover({
       ) : (
         <div className="predecessor-empty">这个工作项可以直接作为起始工作安排。</div>
       )}
-    </div>
+    </div>,
+    document.body,
   );
+}
+
+function clearPredecessorHoverTimer(timerRef: { current: number | null }) {
+  if (timerRef.current === null) return;
+  window.clearTimeout(timerRef.current);
+  timerRef.current = null;
+}
+
+function clearPredecessorHoverTimers(
+  openTimerRef: { current: number | null },
+  closeTimerRef: { current: number | null },
+) {
+  clearPredecessorHoverTimer(openTimerRef);
+  clearPredecessorHoverTimer(closeTimerRef);
+}
+
+function predecessorPopoverStyle(anchorRect: DOMRect | null): CSSProperties {
+  if (typeof window === "undefined") return {};
+  const margin = 12;
+  const width = Math.min(360, Math.max(280, window.innerWidth - margin * 2));
+  const maxHeight = Math.min(360, Math.max(180, window.innerHeight - margin * 2));
+  const fallbackTop = Math.min(96, Math.max(margin, window.innerHeight - maxHeight - margin));
+
+  if (!anchorRect) {
+    return {
+      top: fallbackTop,
+      left: Math.max(margin, window.innerWidth - width - 24),
+      width,
+      maxHeight,
+    };
+  }
+
+  const preferredLeft = anchorRect.right - width;
+  const left = Math.min(
+    Math.max(margin, preferredLeft),
+    Math.max(margin, window.innerWidth - width - margin),
+  );
+  const belowTop = anchorRect.bottom + 8;
+  const shouldOpenAbove = belowTop + Math.min(maxHeight, 240) > window.innerHeight - margin
+    && anchorRect.top > window.innerHeight / 2;
+  const top = shouldOpenAbove
+    ? Math.max(margin, anchorRect.top - maxHeight - 8)
+    : Math.min(belowTop, Math.max(margin, window.innerHeight - 140));
+
+  return { top, left, width, maxHeight };
 }
 
 function formatPrecedenceToken(link?: PrecedenceLink): string {
@@ -2323,9 +2931,19 @@ function PanelTitle({ title, subtitle, action }: { title: string; subtitle: stri
   );
 }
 
-function Gantt({ tasks, makespan, mode }: { tasks: ScheduledTask[]; makespan: number; mode: GanttMode }) {
+function Gantt({
+  tasks,
+  makespan,
+  mode,
+  workSectionDisplayById,
+}: {
+  tasks: ScheduledTask[];
+  makespan: number;
+  mode: GanttMode;
+  workSectionDisplayById: Map<string, WorkSectionDisplay>;
+}) {
   if (!tasks.length) return <div className="empty">暂无排程结果</div>;
-  const groups = buildGanttGroups(tasks, mode);
+  const groups = buildGanttGroups(tasks, mode, workSectionDisplayById);
   return (
     <div className="gantt">
       {groups.map((group) => (
@@ -2334,24 +2952,30 @@ function Gantt({ tasks, makespan, mode }: { tasks: ScheduledTask[]; makespan: nu
             <strong>{group.title}</strong>
             <span>{group.startDate} 至 {group.finishDate}</span>
           </div>
-          {group.tasks.map((task) => (
-            <div className="gantt-row" key={task.id}>
-              <div className="gantt-label">{task.name}</div>
-              <div className="gantt-track">
-                <div
-                  className="gantt-bar"
-                  style={{
-                    left: `${(task.start_offset / makespan) * 100}%`,
-                    width: `${Math.max(((task.end_offset - task.start_offset) / makespan) * 100, 1.2)}%`,
-                    backgroundColor: componentColors[task.component_type],
-                  }}
-                  title={ganttTaskHoverTitle(task)}
-                >
-                  <span>{task.duration_days}d</span>
+          {group.tasks.map((task) => {
+            const sideLabel = workSectionLabelForTask(task, workSectionDisplayById);
+            return (
+              <div className="gantt-row" key={task.id}>
+                <div className="gantt-label">
+                  {sideLabel !== "-" && <span className="side-tag mini">{sideLabel}</span>}
+                  <span className="gantt-task-name">{task.name}</span>
+                </div>
+                <div className="gantt-track">
+                  <div
+                    className="gantt-bar"
+                    style={{
+                      left: `${(task.start_offset / makespan) * 100}%`,
+                      width: `${Math.max(((task.end_offset - task.start_offset) / makespan) * 100, 1.2)}%`,
+                      backgroundColor: componentColors[task.component_type],
+                    }}
+                    title={ganttTaskHoverTitle(task, sideLabel)}
+                  >
+                    <span>{task.duration_days}d</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ))}
     </div>
@@ -2420,9 +3044,10 @@ function ResourcePathChart({ resourcePaths }: { resourcePaths: ResourcePath[] })
   );
 }
 
-function ganttTaskHoverTitle(task: ScheduledTask): string {
+function ganttTaskHoverTitle(task: ScheduledTask, sideLabel = "-"): string {
   return [
     `工作项：${task.name}`,
+    `幅别：${sideLabel}`,
     `构件：${componentLabels[task.component_type]}`,
     `计划：${task.start_date} 至 ${task.finish_date}`,
     `工期：${task.duration_days} 天`,
@@ -2468,7 +3093,41 @@ function shortLocationLabel(location: string): string {
   return location.replace(/幅/g, "").replace(/号墩/g, "").replace(/号台/g, "").replace(/\s+/g, "");
 }
 
-function buildGanttGroups(tasks: ScheduledTask[], mode: GanttMode) {
+type WorkSectionDisplay = {
+  label: string;
+  shortLabel: string;
+};
+
+function buildWorkSectionDisplayById(project: ProjectModel | null): Map<string, WorkSectionDisplay> {
+  const result = new Map<string, WorkSectionDisplay>();
+  if (!project) return result;
+  for (const bridge of project.bridges) {
+    for (const section of bridge.work_sections) {
+      const hasSide = section.side && section.side !== "none";
+      const label = hasSide ? sideLabels[section.side] : section.name || "-";
+      const shortLabel = section.side === "left" ? "左" : section.side === "right" ? "右" : label;
+      result.set(section.id, { label, shortLabel });
+    }
+  }
+  return result;
+}
+
+function workSectionLabelForTask(task: Task, workSectionDisplayById: Map<string, WorkSectionDisplay>): string {
+  if (!task.work_section_id) return "-";
+  return workSectionDisplayById.get(task.work_section_id)?.label ?? "-";
+}
+
+function titleWithWorkSectionLabel(title: string, task: Task, workSectionDisplayById: Map<string, WorkSectionDisplay>): string {
+  const sideLabel = workSectionLabelForTask(task, workSectionDisplayById);
+  if (sideLabel === "-" || title.includes(sideLabel)) return title;
+  return `${sideLabel} ${title}`;
+}
+
+function buildGanttGroups(
+  tasks: ScheduledTask[],
+  mode: GanttMode,
+  workSectionDisplayById: Map<string, WorkSectionDisplay>,
+) {
   if (mode === "by_process") {
     return componentOrder
       .map((component) => {
@@ -2484,7 +3143,7 @@ function buildGanttGroups(tasks: ScheduledTask[], mode: GanttMode) {
     .sort(([left], [right]) => compareStructureIds(left, right))
     .map(([structureId, children]) => ({
       id: structureId,
-      title: children[0].structure_name,
+      title: titleWithWorkSectionLabel(children[0].structure_name, children[0], workSectionDisplayById),
       tasks: children.sort(
         (a, b) =>
           componentOrder.indexOf(a.component_type) - componentOrder.indexOf(b.component_type)
@@ -2493,6 +3152,221 @@ function buildGanttGroups(tasks: ScheduledTask[], mode: GanttMode) {
       ),
       ...taskDateRange(children),
     }));
+}
+
+function buildPredecessorLinksBySuccessor(generated: GeneratedScheduleInput | null): Map<string, PrecedenceLink[]> {
+  const links = new Map<string, PrecedenceLink[]>();
+  for (const link of generated?.schedule_input.precedence_links ?? []) {
+    const current = links.get(link.successor_id) ?? [];
+    current.push(link);
+    links.set(link.successor_id, current);
+  }
+  return links;
+}
+
+function buildTaskViewRows(
+  generated: GeneratedScheduleInput | null,
+  scenario: ScenarioInput | null,
+  linksBySuccessor: Map<string, PrecedenceLink[]>,
+  workSectionDisplayById: Map<string, WorkSectionDisplay>,
+): TaskViewRow[] {
+  if (!generated) return [];
+  const projectMaps = buildTaskViewProjectMaps(scenario?.project ?? null);
+  const rows = generated.schedule_input.tasks.map((task) => {
+    const bridge = task.bridge_id ? projectMaps.bridges.get(task.bridge_id) : undefined;
+    const section = task.work_section_id ? projectMaps.sections.get(task.work_section_id) : undefined;
+    const structure = projectMaps.structures.get(task.structure_id);
+    const bridgeName = bridge?.name ?? task.bridge_id ?? "-";
+    const sectionName = section?.name ?? task.work_section_id ?? "-";
+    const sideLabel = workSectionLabelForTask(task, workSectionDisplayById);
+    const structureLabel = structure?.label ?? task.structure_name;
+    const continuousParent = continuousTaskParentDisplay(task, projectMaps.continuousBeamGroups);
+    const componentLabel = componentLabels[task.component_type];
+    const searchText = [
+      bridgeName,
+      sectionName,
+      sideLabel,
+      structureLabel,
+      continuousParent?.label,
+      task.structure_name,
+      task.name,
+      componentLabel,
+      task.process_name,
+    ].join(" ").toLowerCase();
+
+    return {
+      task,
+      bridgeName,
+      bridgeOrder: bridge?.order ?? Number.MAX_SAFE_INTEGER,
+      sectionName,
+      sectionOrder: section?.order ?? Number.MAX_SAFE_INTEGER,
+      sideLabel,
+      structureLabel,
+      parentStructureId: continuousParent?.id ?? task.structure_id,
+      parentStructureLabel: continuousParent?.label ?? structureLabel,
+      predecessorLinks: linksBySuccessor.get(task.id) ?? [],
+      searchText,
+    };
+  });
+  return sortTaskViewRows(rows);
+}
+
+function buildTaskViewProjectMaps(project: ProjectModel | null) {
+  const bridges = new Map<string, { name: string; order: number }>();
+  const sections = new Map<string, { name: string; order: number }>();
+  const structures = new Map<string, { label: string; order: number }>();
+  const continuousBeamGroups = new Map<string, { id: string; label: string }>();
+
+  if (!project) return { bridges, sections, structures, continuousBeamGroups };
+  for (const bridge of project.bridges) {
+    bridges.set(bridge.id, { name: bridge.name, order: bridge.order });
+    for (const section of bridge.work_sections) {
+      sections.set(section.id, { name: section.name, order: section.order });
+      for (const uppers of groupUpperStructures(section.upper_structures ?? [], isContinuousBeamUpper)) {
+        const groupIndex = upperGroupIndex(uppers[0]);
+        continuousBeamGroups.set(
+          continuousTaskParentKey(bridge.id, section.id, groupIndex),
+          {
+            id: continuousTaskParentId(bridge.id, section.id, groupIndex),
+            label: continuousBeamGroupLabel(section, uppers),
+          },
+        );
+      }
+      for (const structure of section.structures) {
+        structures.set(structure.id, {
+          label: structure.support_no ?? structure.name,
+          order: structure.order,
+        });
+      }
+    }
+  }
+  return { bridges, sections, structures, continuousBeamGroups };
+}
+
+function continuousTaskParentDisplay(
+  task: Task,
+  continuousBeamGroups: Map<string, { id: string; label: string }>,
+): { id: string; label: string } | null {
+  if (task.component_type !== "cast_in_place_continuous_beam") return null;
+  if (!task.bridge_id || !task.work_section_id) return null;
+  const groupIndex = continuousTaskGroupIndex(task.structure_id);
+  if (groupIndex === null) return null;
+  return continuousBeamGroups.get(continuousTaskParentKey(task.bridge_id, task.work_section_id, groupIndex))
+    ?? {
+      id: continuousTaskParentId(task.bridge_id, task.work_section_id, groupIndex),
+      label: fallbackContinuousTaskParentLabel(task),
+    };
+}
+
+function continuousTaskParentKey(bridgeId: string, sectionId: string, groupIndex: number): string {
+  return `${bridgeId}:${sectionId}:${groupIndex}`;
+}
+
+function continuousTaskParentId(bridgeId: string, sectionId: string, groupIndex: number): string {
+  return `${bridgeId}:${sectionId}:continuous-beam:${groupIndex}`;
+}
+
+function continuousTaskGroupIndex(structureId: string): number | null {
+  const match = structureId.match(/-CB-G(\d+)/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function continuousBeamGroupLabel(section: WorkSection, uppers: UpperStructureModel[]): string {
+  const sideLabel = section.side && section.side !== "none" ? sideLabels[section.side] : "";
+  const supports = uppers.flatMap((upper) => supportIndicesFromText(upper.support_range));
+  const minSupport = supports.length ? Math.min(...supports) : Math.max(0, Math.min(...uppers.map((upper) => upper.span_index)) - 1);
+  const maxSupport = supports.length ? Math.max(...supports) : Math.max(...uppers.map((upper) => upper.span_index));
+  if (Number.isFinite(minSupport) && Number.isFinite(maxSupport)) {
+    return `${sideLabel}${minSupport}#-${maxSupport}#墩现浇连续梁`;
+  }
+  return `${sideLabel}现浇连续梁`;
+}
+
+function supportIndicesFromText(value: string): number[] {
+  return Array.from(value.matchAll(/(\d+)\s*(?:#|号)?\s*(?:墩|台)?/g))
+    .map((match) => Number(match[1]))
+    .filter((item) => Number.isFinite(item));
+}
+
+function fallbackContinuousTaskParentLabel(task: Task): string {
+  const match = task.structure_id.match(/-CB-G(\d+)/);
+  const groupSuffix = match ? `第${Number(match[1])}联` : "";
+  const sidePrefix = task.structure_name.includes("左幅") ? "左幅" : task.structure_name.includes("右幅") ? "右幅" : "";
+  return `${sidePrefix}${groupSuffix}现浇连续梁`;
+}
+
+function sortTaskViewRows(rows: TaskViewRow[]): TaskViewRow[] {
+  return [...rows].sort((left, right) => (
+    left.bridgeOrder - right.bridgeOrder
+    || left.sectionOrder - right.sectionOrder
+    || left.task.sequence_order - right.task.sequence_order
+    || compareStructureIds(left.task.structure_id, right.task.structure_id)
+    || componentSortIndex(left.task.component_type) - componentSortIndex(right.task.component_type)
+    || left.task.name.localeCompare(right.task.name)
+  ));
+}
+
+function filterTaskViewRows(rows: TaskViewRow[], filters: TaskViewFilters): TaskViewRow[] {
+  const structureNeedle = filters.structureText.trim().toLowerCase();
+  const processNeedle = filters.processText.trim().toLowerCase();
+
+  return rows.filter((row) => {
+    if (structureNeedle && !row.searchText.includes(structureNeedle)) return false;
+    if (processNeedle) {
+      const processText = `${row.task.process_name} ${componentLabels[row.task.component_type]}`.toLowerCase();
+      if (!processText.includes(processNeedle)) return false;
+    }
+    return true;
+  });
+}
+
+function buildTaskViewGroups(rows: TaskViewRow[], mode: TaskViewMode): TaskViewGroup[] {
+  const groups = new Map<string, TaskViewGroup>();
+  for (const row of rows) {
+    const id = mode === "by_process"
+      ? `${row.task.component_type}:${row.task.process_name}`
+      : `${row.task.bridge_id ?? "-"}:${row.task.work_section_id ?? "-"}:${row.parentStructureId}`;
+    const title = mode === "by_process"
+      ? `${componentLabels[row.task.component_type]} / ${row.task.process_name}`
+      : taskViewStructureTitle(row);
+    if (!groups.has(id)) {
+      groups.set(id, { id, title, subtitle: "", rows: [] });
+    }
+    groups.get(id)!.rows.push(row);
+  }
+  return Array.from(groups.values()).map((group) => ({
+    ...group,
+    subtitle: taskViewGroupSubtitle(group.rows, mode),
+  }));
+}
+
+function taskViewStructureTitle(row: TaskViewRow): string {
+  if (row.sideLabel === "-" || row.parentStructureLabel.includes(row.sideLabel)) return row.parentStructureLabel;
+  return `${row.sideLabel} ${row.parentStructureLabel}`;
+}
+
+function taskViewGroupSubtitle(rows: TaskViewRow[], mode: TaskViewMode, scenario: ScenarioInput | null = null): string {
+  if (!rows.length) return "-";
+  const first = rows[0];
+  const structureCount = new Set(rows.map((row) => `${row.task.work_section_id ?? "-"}:${row.task.structure_id}`)).size;
+  const base = mode === "by_process"
+    ? `${structureCount} 个结构物`
+    : `${first.bridgeName} / ${first.sectionName}`;
+  return `${base} · ${rows.length} 项 · 工期合计 ${taskViewDurationTotal(rows, scenario)} 天`;
+}
+
+function taskViewDurationTotal(rows: TaskViewRow[], scenario: ScenarioInput | null = null): number {
+  return rows.reduce((total, row) => total + effectiveTaskDurationDays(row.task, scenario), 0);
+}
+
+function taskViewDurationRange(rows: TaskViewRow[], scenario: ScenarioInput | null = null): string {
+  if (!rows.length) return "-";
+  const durations = rows.map((row) => effectiveTaskDurationDays(row.task, scenario));
+  const min = Math.min(...durations);
+  const max = Math.max(...durations);
+  return min === max ? `${min} 天` : `${min}-${max} 天`;
 }
 
 function flattenStructures(project: ProjectModel) {
@@ -2620,32 +3494,51 @@ function durationExpression(task: Task, scenario: ScenarioInput | null): string 
     return `${displayValue(task.quantity)} -> ${task.duration_days}天`;
   }
 
-  const quantityName = quantitySourceLabels[option.quantity_source] ?? "工程量";
-  const quantityText = `${quantityName}${displayValue(task.quantity)}${quantityUnitForSource(option.quantity_source)}`;
-  const resultText = `${task.duration_days}天`;
+  const isContinuousStandardSegment = isContinuousBeamStandardSegmentTask(task);
+  const effectiveOption = isContinuousStandardSegment
+    ? { ...option, duration_method: "days_per_unit", quantity_source: "count" }
+    : option;
+  const quantityName = quantitySourceLabels[effectiveOption.quantity_source] ?? "工程量";
+  const quantityText = isContinuousStandardSegment
+    ? (task.quantity_label || `${displayValue(task.quantity)}块`)
+    : `${quantityName}${displayValue(task.quantity)}${quantityUnitForSource(effectiveOption.quantity_source)}`;
+  const resultText = `${effectiveTaskDurationDays(task, scenario)}天`;
 
-  if (isSectionBasedPierProductivity(option)) {
-    const sectionHeight = sectionHeightForOption(option);
+  if (isSectionBasedPierProductivity(effectiveOption)) {
+    const sectionHeight = sectionHeightForOption(effectiveOption);
     if (sectionHeight) {
       const sectionCount = Math.max(1, Math.ceil(task.quantity / sectionHeight));
-      return `${quantityText} / ${displayValue(sectionHeight)}m/节 = ${sectionCount}节；${sectionCount} × ${displayValue(option.productivity_value)}天/节 = ${resultText}`;
+      return `${quantityText} / ${displayValue(sectionHeight)}m/节 = ${sectionCount}节；${sectionCount} × ${displayValue(effectiveOption.productivity_value)}天/节 = ${resultText}`;
     }
   }
 
-  if (option.duration_method === "units_per_day") {
-    return `${quantityText} / ${displayValue(option.productivity_value)}${option.productivity_unit} = ${resultText}`;
+  if (effectiveOption.duration_method === "units_per_day") {
+    return `${quantityText} / ${displayValue(effectiveOption.productivity_value)}${effectiveOption.productivity_unit} = ${resultText}`;
   }
 
-  if (option.duration_method === "days_per_unit") {
-    return `${quantityText} × ${displayValue(option.productivity_value)}${option.productivity_unit} = ${resultText}`;
+  if (effectiveOption.duration_method === "days_per_unit") {
+    return `${quantityText} × ${displayValue(effectiveOption.productivity_value)}${effectiveOption.productivity_unit} = ${resultText}`;
   }
 
-  return `${displayValue(option.productivity_value)}${option.productivity_unit} = ${resultText}`;
+  return `${displayValue(effectiveOption.productivity_value)}${effectiveOption.productivity_unit} = ${resultText}`;
 }
 
 function quantityUnitForSource(quantitySource: string): string {
   if (quantitySource.endsWith("_m")) return "m";
   return "";
+}
+
+function effectiveTaskDurationDays(task: Task, scenario: ScenarioInput | null): number {
+  const option = productivityOptionForTask(task, scenario);
+  if (option && isContinuousBeamStandardSegmentTask(task)) {
+    return Math.max(1, Math.ceil(task.quantity * option.productivity_value));
+  }
+  return task.duration_days;
+}
+
+function isContinuousBeamStandardSegmentTask(task: Task): boolean {
+  return task.component_type === "cast_in_place_continuous_beam"
+    && task.productivity_rule_id.startsWith("cast_in_place_continuous_standard_segment:");
 }
 
 function filterStructureRows(rows: StructureRow[], filters: StructureFilters): StructureRow[] {
@@ -2667,6 +3560,140 @@ function upperStructureDimensionSummary(upper: UpperStructureModel): string {
     parts.push(`联跨${upper.span_group_expression}`);
   }
   return parts.join("，");
+}
+
+function buildUpperLowerLogicConstraints(scenario: ScenarioInput): UpperLowerLogicConstraint[] {
+  const stats = countUpperLowerLogicTargets(scenario);
+  const rulesById = new Map(mergeUpperStructureLogicRules(scenario.upper_structure_logic_rules).map((rule) => [rule.id, rule]));
+  const matchedTextById: Record<string, string> = {
+    cast_in_place_box_beam_after_lower_structure: `${stats.castInPlaceBoxGroupCount} 联`,
+    continuous_beam_zero_block_after_main_pier_lower_structure: `${stats.continuousMainPierCount} 个T构`,
+    continuous_beam_side_straight_after_edge_lower_structure: `${stats.continuousSideStraightCount} 个边跨`,
+    continuous_beam_t_chain: `${stats.continuousMainPierCount} 个T构`,
+    continuous_beam_side_closure: `${stats.continuousSideClosureCount} 个边跨`,
+    continuous_beam_middle_closure: `${stats.continuousMiddleClosureCount} 个中跨`,
+    continuous_beam_edge_before_middle_closure: `${stats.continuousMiddleClosureCount} 个中跨`,
+    continuous_beam_middle_closure_sequence: `${stats.continuousMiddleClosureCount} 个中跨`,
+  };
+  return upperStructureLogicDefinitions.map((definition) => {
+    const rule = rulesById.get(definition.id);
+    return {
+      ...definition,
+      relationship: rule?.relationship ?? "FS",
+      lagDays: rule?.lag_days ?? 0,
+      matchedText: matchedTextById[definition.id] ?? "-",
+      note: rule?.note || definition.note,
+    };
+  });
+}
+
+function countUpperLowerLogicTargets(scenario: ScenarioInput) {
+  let castInPlaceBoxGroupCount = 0;
+  let continuousMainPierCount = 0;
+  let continuousSideStraightCount = 0;
+  let continuousSideClosureCount = 0;
+  let continuousMiddleClosureCount = 0;
+
+  for (const bridge of scenario.project.bridges) {
+    for (const section of bridge.work_sections) {
+      const uppers = section.upper_structures ?? [];
+      castInPlaceBoxGroupCount += groupUpperStructures(uppers, isCastInPlaceBoxBeamUpper).length;
+      const continuousGroups = groupUpperStructures(uppers, isContinuousBeamUpper);
+      for (const group of continuousGroups) {
+        const mainSupportCount = continuousMainSupportCount(group);
+        continuousMainPierCount += mainSupportCount;
+        if (mainSupportCount > 0) {
+          continuousSideStraightCount += 2;
+          continuousSideClosureCount += 2;
+          continuousMiddleClosureCount += Math.max(0, mainSupportCount - 1);
+        }
+      }
+    }
+  }
+
+  return {
+    castInPlaceBoxGroupCount,
+    continuousMainPierCount,
+    continuousSideStraightCount,
+    continuousSideClosureCount,
+    continuousMiddleClosureCount,
+  };
+}
+
+function groupUpperStructures(
+  uppers: UpperStructureModel[],
+  predicate: (upper: UpperStructureModel) => boolean,
+): UpperStructureModel[][] {
+  const groups = new Map<number, UpperStructureModel[]>();
+  for (const upper of uppers) {
+    if (!predicate(upper)) continue;
+    const groupIndex = upperGroupIndex(upper);
+    groups.set(groupIndex, [...(groups.get(groupIndex) ?? []), upper]);
+  }
+  return Array.from(groups.values())
+    .map((items) => [...items].sort((a, b) => a.span_index - b.span_index))
+    .sort((a, b) => Math.min(...a.map((item) => item.span_index)) - Math.min(...b.map((item) => item.span_index)));
+}
+
+function isSimpleBeamUpper(upper: UpperStructureModel): boolean {
+  if (upperStructureCode(upper) === upperStructureCodes.simpleBeam) return true;
+  if (isContinuousBeamUpper(upper) || isCastInPlaceBoxBeamUpper(upper)) return false;
+  return upper.structure_type.includes("简支") || upper.structure_type.includes("T梁");
+}
+
+function isCastInPlaceBoxBeamUpper(upper: UpperStructureModel): boolean {
+  if (upperStructureCode(upper) === upperStructureCodes.castInPlaceBoxBeam) return true;
+  return upper.structure_type.includes("现浇")
+    && upper.structure_type.includes("箱梁")
+    && !isContinuousBeamUpper(upper);
+}
+
+function isContinuousBeamUpper(upper: UpperStructureModel): boolean {
+  if (upperStructureCode(upper) === upperStructureCodes.continuousBeam) return true;
+  return upper.structure_type.includes("连续") || upper.structure_type.includes("刚构");
+}
+
+function upperStructureCode(upper: UpperStructureModel): string {
+  return String(upper.properties.structure_code ?? "");
+}
+
+function upperGroupIndex(upper: UpperStructureModel): number {
+  const value = Number(upper.properties.group_index ?? upper.span_index);
+  return Number.isFinite(value) ? Math.trunc(value) : upper.span_index;
+}
+
+function continuousMainSupportCount(uppers: UpperStructureModel[]): number {
+  const configured = continuousNumberListSetting(uppers, ["main_support_indices", "main_pier_indices"]);
+  if (configured.length) return new Set(configured).size;
+  const spanIndices = uppers.map((upper) => upper.span_index);
+  if (spanIndices.length < 2) return 0;
+  return Math.max(...spanIndices) - Math.min(...spanIndices);
+}
+
+function continuousNumberListSetting(uppers: UpperStructureModel[], keys: string[]): number[] {
+  for (const upper of uppers) {
+    const nested = upper.properties.continuous_beam;
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+      const record = nested as Record<string, unknown>;
+      for (const key of keys) {
+        const numbers = numberListFromUnknown(record[key]);
+        if (numbers.length) return numbers;
+      }
+    }
+    for (const key of keys) {
+      const numbers = numberListFromUnknown(upper.properties[key]);
+      if (numbers.length) return numbers;
+    }
+  }
+  return [];
+}
+
+function numberListFromUnknown(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => Number(item))
+    .filter((item) => Number.isFinite(item))
+    .map((item) => Math.trunc(item));
 }
 
 function buildSummary(
@@ -2787,21 +3814,21 @@ function milestoneStatusClass(milestone: MilestoneResult): string {
 function scopeLabel(milestone: MilestoneConstraint, scenario: ScenarioInput): string {
   const project = scenario.project;
   if (milestone.scope_type === "project") {
-    return "全项目下部结构";
+    return "全项目下部结构+上部现浇梁完成";
   }
 
   if (milestone.scope_type === "bridge") {
     const bridge = project.bridges.find((item) => item.id === milestone.scope_id) ?? project.bridges[0];
-    return bridge ? `${bridge.name}全桥下部结构` : "全桥下部结构";
+    return bridge ? `${bridge.name}全桥下部结构+上部现浇梁完成` : "全桥下部结构+上部现浇梁完成";
   }
 
   if (milestone.scope_type === "work_section") {
     const section = findWorkSection(project, milestone.scope_id ?? "");
-    if (!section) return "指定工区下部结构";
+    if (!section) return "指定工区下部结构+上部现浇梁完成";
     if (section.side && section.side !== "none") {
-      return `${sideLabels[section.side]}下部结构`;
+      return `${sideLabels[section.side]}下部结构+上部现浇梁完成`;
     }
-    return `${section.name}全部工作`;
+    return `${section.name}下部结构+上部现浇梁完成`;
   }
 
   if (milestone.scope_type === "structure") {
@@ -3037,6 +4064,10 @@ function groupBy<T>(items: T[], keyFn: (item: T) => string): Record<string, T[]>
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function scenarioFingerprintForSolve(scenario: ScenarioInput): string {
+  return JSON.stringify(scenario);
 }
 
 function formatScheduleStatus(value: unknown): string {

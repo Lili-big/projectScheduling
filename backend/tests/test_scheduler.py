@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.models import MilestoneConstraint, PrecedenceLink, ProcessTemplate, ProductivityOption, Resource, ResourcePool, ScheduleInput, ScenarioCompareRequest, ScheduledTask, Task  # noqa: E402
+from app.models import ComponentModel, MilestoneConstraint, PrecedenceLink, ProcessTemplate, ProductivityOption, Resource, ResourcePool, ScheduleInput, ScenarioCompareRequest, ScheduledTask, StructureModel, Task, UpperStructureComponent, UpperStructureLogicRule  # noqa: E402
 from app.process_library_defaults import upgrade_process_library  # noqa: E402
 from app.sample_data import (  # noqa: E402
     default_bridge,
@@ -19,7 +19,7 @@ from app.sample_data import (  # noqa: E402
     default_resources,
 )
 from app.scenario import compare_scenarios, generate_schedule_input_from_scenario, solve_scenario  # noqa: E402
-from app.scenario_data import default_scenario  # noqa: E402
+from app.scenario_data import apply_resource_max_quantity_defaults, default_scenario  # noqa: E402
 from app.solver import _resource_path_metrics, _task_ids_for_milestone, solve_min_resources_schedule, solve_schedule  # noqa: E402
 from app.wbs import calculate_duration, generate_wbs  # noqa: E402
 
@@ -45,6 +45,7 @@ def test_default_process_library_uses_historical_productivity_defaults() -> None
     assert process_by_id["pier_body_climbing_form"].quantity_source == "pier_height_m"
     assert process_by_id["pier_body_climbing_form"].productivity_options[0].standard_section_height_m == 4.5
     assert process_by_id["cast_in_place_continuous_zero_block"].productivity_value == 120
+    assert process_by_id["cast_in_place_continuous_standard_segment"].duration_method == "days_per_unit"
     assert process_by_id["bridge_deck_system_standard"].quantity_source == "deck_length_m"
     for process in process_by_id.values():
         assert sum(1 for option in process.productivity_options if option.is_default) == 1
@@ -76,6 +77,18 @@ def test_process_library_upgrade_replaces_previous_builtin_defaults_and_adds_mis
                 resource_type="cap_team",
                 is_default=True,
             ),
+            ProcessTemplate(
+                id="cast_in_place_continuous_standard_segment",
+                component_type="cast_in_place_continuous_beam",
+                process_name="标准块",
+                method_id="standard_segment",
+                duration_method="fixed_days",
+                quantity_source="count",
+                productivity_value=10,
+                productivity_unit="天/块",
+                resource_type="cast_in_place_continuous_beam_team",
+                is_default=False,
+            ),
         ]
     )
     process_by_id = {process.id: process for process in upgraded}
@@ -85,6 +98,7 @@ def test_process_library_upgrade_replaces_previous_builtin_defaults_and_adds_mis
     assert process_by_id["cap_standard"].productivity_value == 30
     assert process_by_id["precast_beam_standard"].productivity_unit == "天/片"
     assert process_by_id["cast_in_place_box_beam_standard"].productivity_value == 45
+    assert process_by_id["cast_in_place_continuous_standard_segment"].duration_method == "days_per_unit"
     for process in upgraded:
         default = next(option for option in process.productivity_options if option.is_default)
         assert process.duration_method == default.duration_method
@@ -159,6 +173,53 @@ def test_default_solver_satisfies_logic_and_resource_constraints() -> None:
             assert current.start_offset >= previous.end_offset
 
 
+def test_solver_supports_finish_based_relationships() -> None:
+    pytest.importorskip("ortools")
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="关系测试",
+            start_date=date(2026, 1, 1),
+            tasks=[
+                _solver_task("A", "前置A", 5, "crew_a"),
+                _solver_task("B", "后续B", 2, "crew_b"),
+                _solver_task("C", "前置C", 5, "crew_c"),
+                _solver_task("D", "后续D", 2, "crew_d"),
+            ],
+            precedence_links=[
+                PrecedenceLink(
+                    id="L-FF",
+                    predecessor_id="A",
+                    successor_id="B",
+                    relationship="FF",
+                    lag_days=3,
+                    source_rule_id="test_ff",
+                ),
+                PrecedenceLink(
+                    id="L-SF",
+                    predecessor_id="C",
+                    successor_id="D",
+                    relationship="SF",
+                    lag_days=4,
+                    source_rule_id="test_sf",
+                ),
+            ],
+            resources=[
+                Resource(id="crew_a_1", name="A班", type="crew_a"),
+                Resource(id="crew_b_1", name="B班", type="crew_b"),
+                Resource(id="crew_c_1", name="C班", type="crew_c"),
+                Resource(id="crew_d_1", name="D班", type="crew_d"),
+            ],
+        )
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    by_task = {task.id: task for task in result.tasks}
+    assert by_task["B"].end_offset >= by_task["A"].end_offset + 3
+    assert by_task["B"].start_offset < by_task["A"].end_offset + 3
+    assert by_task["D"].end_offset >= by_task["C"].start_offset + 4
+    assert by_task["D"].start_offset < by_task["C"].end_offset + 4
+
+
 def test_default_scenario_generates_schedule_input() -> None:
     generated = generate_schedule_input_from_scenario(default_scenario())
 
@@ -167,6 +228,216 @@ def test_default_scenario_generates_schedule_input() -> None:
     assert generated.schedule_input.resources
     assert generated.schedule_input.milestones
     assert any(task.bridge_id == "B1" and task.work_section_id == "WS-LOWER" for task in generated.schedule_input.tasks)
+
+
+def test_continuous_beam_upper_structures_generate_t_groups_and_closure_logic() -> None:
+    scenario = _scenario_with_continuous_beam(main_pier_count=4, standard_cycles=2)
+    generated = generate_schedule_input_from_scenario(scenario)
+
+    continuous_tasks = [task for task in generated.schedule_input.tasks if task.component_type == "cast_in_place_continuous_beam"]
+    links = generated.schedule_input.precedence_links
+
+    assert not any(message.level == "error" for message in generated.validation)
+    assert len(continuous_tasks) == 15
+    assert not any("第" in task.name for task in continuous_tasks)
+    assert sum(1 for task in continuous_tasks if "0号块" in task.name) == 4
+    standard_tasks = [task for task in continuous_tasks if "标准段2块" in task.name]
+    assert len(standard_tasks) == 4
+    assert {task.quantity for task in standard_tasks} == {2}
+    assert {task.quantity_label for task in standard_tasks} == {"2块"}
+    assert {task.duration_days for task in standard_tasks} == {20}
+    assert sum(1 for task in continuous_tasks if "边跨连续段" in task.name) == 2
+    assert sum(1 for task in continuous_tasks if "边跨合龙段" in task.name) == 2
+    assert sum(1 for task in continuous_tasks if "中跨合龙" in task.name) == 3
+
+    left_straight = _task_named(continuous_tasks, "左幅连续梁1#墩T构-边跨连续段")
+    left_closure = _task_named(continuous_tasks, "左幅连续梁1#墩T构-边跨合龙段")
+    first_t_standard = _task_named(continuous_tasks, "左幅连续梁1#墩T构-标准段2块")
+    mid_1 = _task_named(continuous_tasks, "中跨合龙1")
+    mid_2 = _task_named(continuous_tasks, "中跨合龙2")
+    mid_3 = _task_named(continuous_tasks, "中跨合龙3")
+
+    assert _has_link(links, left_straight.id, left_closure.id, "continuous_beam_side_closure")
+    assert _has_link(links, first_t_standard.id, left_closure.id, "continuous_beam_side_closure")
+    assert _has_link(links, left_closure.id, mid_1.id, "continuous_beam_edge_before_middle_closure")
+    assert _has_link(links, left_closure.id, mid_2.id, "continuous_beam_edge_before_middle_closure")
+    assert _has_link(links, mid_1.id, mid_2.id, "continuous_beam_middle_closure_sequence")
+    assert _has_link(links, mid_3.id, mid_2.id, "continuous_beam_middle_closure_sequence")
+
+
+def test_continuous_beam_standard_segment_duration_uses_block_count_when_process_is_legacy_fixed_days() -> None:
+    scenario = _scenario_with_continuous_beam(main_pier_count=2, standard_cycles=18)
+    process = next(process for process in scenario.process_library if process.id == "cast_in_place_continuous_standard_segment")
+    process.duration_method = "fixed_days"
+    process.quantity_source = "count"
+    process.productivity_value = 10
+    process.productivity_unit = "天/块"
+    for option in process.productivity_options:
+        option.duration_method = "fixed_days"
+        option.quantity_source = "count"
+        option.productivity_value = 10
+        option.productivity_unit = "天/块"
+
+    generated = generate_schedule_input_from_scenario(scenario)
+
+    standard_tasks = [
+        task
+        for task in generated.schedule_input.tasks
+        if task.productivity_rule_id.startswith("cast_in_place_continuous_standard_segment:")
+    ]
+    assert standard_tasks
+    assert {task.quantity for task in standard_tasks} == {18}
+    assert {task.duration_days for task in standard_tasks} == {180}
+
+
+def test_continuous_beam_middle_closure_order_is_configurable() -> None:
+    scenario = _scenario_with_continuous_beam(
+        main_pier_count=4,
+        standard_cycles=1,
+        middle_closure_order="right_to_left",
+    )
+    generated = generate_schedule_input_from_scenario(scenario)
+    continuous_tasks = [task for task in generated.schedule_input.tasks if task.component_type == "cast_in_place_continuous_beam"]
+    links = generated.schedule_input.precedence_links
+    mid_1 = _task_named(continuous_tasks, "中跨合龙1")
+    mid_2 = _task_named(continuous_tasks, "中跨合龙2")
+    mid_3 = _task_named(continuous_tasks, "中跨合龙3")
+
+    assert _has_link(links, mid_3.id, mid_2.id, "continuous_beam_middle_closure_sequence")
+    assert _has_link(links, mid_2.id, mid_1.id, "continuous_beam_middle_closure_sequence")
+    assert not _has_link(links, mid_1.id, mid_2.id, "continuous_beam_middle_closure_sequence")
+
+
+def test_continuous_beam_right_side_task_names_do_not_include_span_group_label() -> None:
+    scenario = _scenario_with_continuous_beam(main_pier_count=2, standard_cycles=1)
+    section = scenario.project.bridges[0].work_sections[0]
+    section.side = "right"
+    section.name = "右幅结构参数"
+    for upper in section.upper_structures or []:
+        upper.side = "right"
+
+    generated = generate_schedule_input_from_scenario(scenario)
+
+    continuous_tasks = [task for task in generated.schedule_input.tasks if task.component_type == "cast_in_place_continuous_beam"]
+    task_names = {task.name for task in continuous_tasks}
+    assert "右幅连续梁1#墩T构-0号块" in task_names
+    assert "右幅连续梁1#墩T构-边跨连续段" in task_names
+    assert not any("第" in task.name for task in continuous_tasks)
+
+
+def test_continuous_beam_resource_max_quantity_counts_generated_tasks() -> None:
+    scenario = _scenario_with_continuous_beam(main_pier_count=4, standard_cycles=2)
+
+    apply_resource_max_quantity_defaults(scenario)
+
+    max_by_type = {pool.type: pool.max_quantity for pool in scenario.resource_pools}
+    assert max_by_type["cast_in_place_continuous_beam_team"] == 15
+
+
+def test_simple_beam_erection_is_not_generated_in_current_phase() -> None:
+    scenario = _scenario_with_single_upper_span(
+        structure_type="简支T梁",
+        structure_code="precastTGirder",
+        support_range="1#墩~2#墩",
+    )
+    generated = generate_schedule_input_from_scenario(scenario)
+
+    assert not any(task.component_type == "beam_erection" for task in generated.schedule_input.tasks)
+    assert not any(link.source_rule_id == "simple_beam_after_lower_structure" for link in generated.schedule_input.precedence_links)
+
+
+def test_cast_in_place_box_beam_waits_for_corresponding_lower_structures() -> None:
+    scenario = _scenario_with_single_upper_span(
+        structure_type="现浇箱梁",
+        structure_code="castInPlaceBoxGirder",
+        support_range="1#墩~2#墩",
+    )
+    generated = generate_schedule_input_from_scenario(scenario)
+    box_task = next(task for task in generated.schedule_input.tasks if task.component_type == "cast_in_place_box_beam")
+    links = [
+        link
+        for link in generated.schedule_input.precedence_links
+        if link.successor_id == box_task.id and link.source_rule_id == "cast_in_place_box_beam_after_lower_structure"
+    ]
+
+    assert {link.predecessor_id for link in links} == {"P01-BODY", "P02-BODY"}
+
+
+def test_continuous_beam_zero_block_and_side_straight_wait_for_lower_structures() -> None:
+    scenario = _scenario_with_continuous_beam(main_pier_count=2, standard_cycles=1)
+    section = scenario.project.bridges[0].work_sections[0]
+    section.structures = [
+        _abutment_structure(0),
+        _pier_body_structure(1),
+        _pier_body_structure(2),
+        _pier_body_structure(3),
+    ]
+    generated = generate_schedule_input_from_scenario(scenario)
+    continuous_tasks = [task for task in generated.schedule_input.tasks if task.component_type == "cast_in_place_continuous_beam"]
+    zero_block = _task_named(continuous_tasks, "左幅连续梁1#墩T构-0号块")
+    left_straight = _task_named(continuous_tasks, "左幅连续梁1#墩T构-边跨连续段")
+    right_straight = _task_named(continuous_tasks, "左幅连续梁2#墩T构-边跨连续段")
+
+    assert _has_link(
+        generated.schedule_input.precedence_links,
+        "P01-BODY",
+        zero_block.id,
+        "continuous_beam_zero_block_after_main_pier_lower_structure",
+    )
+    assert _has_link(
+        generated.schedule_input.precedence_links,
+        "A00-BODY",
+        left_straight.id,
+        "continuous_beam_side_straight_after_edge_lower_structure",
+    )
+    assert _has_link(
+        generated.schedule_input.precedence_links,
+        "P03-BODY",
+        right_straight.id,
+        "continuous_beam_side_straight_after_edge_lower_structure",
+    )
+
+
+def test_upper_structure_logic_relationship_and_lag_are_configurable() -> None:
+    scenario = _scenario_with_continuous_beam(main_pier_count=2, standard_cycles=1)
+    section = scenario.project.bridges[0].work_sections[0]
+    section.structures = [_pier_body_structure(1), _pier_body_structure(2)]
+    scenario.upper_structure_logic_rules = [
+        UpperStructureLogicRule(
+            id="continuous_beam_zero_block_after_main_pier_lower_structure",
+            relationship="SS",
+            lag_days=4,
+        ),
+        UpperStructureLogicRule(
+            id="continuous_beam_t_chain",
+            relationship="FS",
+            lag_days=2,
+        ),
+    ]
+
+    generated = generate_schedule_input_from_scenario(scenario)
+
+    continuous_tasks = [task for task in generated.schedule_input.tasks if task.component_type == "cast_in_place_continuous_beam"]
+    zero_block = _task_named(continuous_tasks, "左幅连续梁1#墩T构-0号块")
+    standard_segment = _task_named(continuous_tasks, "左幅连续梁1#墩T构-标准段1块")
+    zero_block_link = next(
+        link
+        for link in generated.schedule_input.precedence_links
+        if link.successor_id == zero_block.id
+        and link.source_rule_id == "continuous_beam_zero_block_after_main_pier_lower_structure"
+    )
+    t_chain_link = next(
+        link
+        for link in generated.schedule_input.precedence_links
+        if link.predecessor_id == zero_block.id
+        and link.successor_id == standard_segment.id
+        and link.source_rule_id == "continuous_beam_t_chain"
+    )
+
+    assert zero_block_link.relationship == "SS"
+    assert zero_block_link.lag_days == 4
+    assert t_chain_link.relationship == "FS"
+    assert t_chain_link.lag_days == 2
 
 
 def test_default_scenario_sets_resource_max_quantity_from_component_counts() -> None:
@@ -225,6 +496,24 @@ def test_component_type_milestone_matches_all_components_of_that_type() -> None:
 
     assert scoped_task_ids == cap_task_ids
     assert len(scoped_task_ids) > 1
+
+
+def test_bridge_milestone_matches_lower_structure_and_cast_in_place_beams_only() -> None:
+    scenario = _scenario_with_mixed_upper_structures()
+    generated = generate_schedule_input_from_scenario(scenario)
+    bridge_milestone = next(milestone for milestone in scenario.milestones if milestone.scope_type == "bridge")
+    scoped_tasks = [
+        task
+        for task in generated.schedule_input.tasks
+        if task.id in set(_task_ids_for_milestone(bridge_milestone, generated.schedule_input.tasks))
+    ]
+    scoped_component_types = {task.component_type for task in scoped_tasks}
+
+    assert "pier_body" in scoped_component_types
+    assert "abutment_body" in scoped_component_types
+    assert "cast_in_place_box_beam" in scoped_component_types
+    assert "cast_in_place_continuous_beam" in scoped_component_types
+    assert "beam_erection" not in scoped_component_types
 
 
 def test_component_productivity_group_overrides_process_default() -> None:
@@ -863,6 +1152,224 @@ def test_compare_scenarios_returns_best_result() -> None:
 
     assert response.best_scenario_id == solved.scenario_id
     assert response.summaries[0]["total_days"] == solved.result.objective_days
+
+
+def _scenario_with_continuous_beam(
+    *,
+    main_pier_count: int,
+    standard_cycles: int,
+    middle_closure_order: str = "side_to_center",
+):
+    scenario = default_scenario()
+    bridge = scenario.project.bridges[0]
+    section = bridge.work_sections[0]
+    section.id = "WS-L"
+    section.name = "左幅结构参数"
+    section.side = "left"
+    section.structures = []
+    span_count = main_pier_count + 1
+    expression = "+".join("40" for _ in range(span_count))
+    section.upper_structures = [
+        UpperStructureComponent(
+            id=f"B1-L-SPAN-{span_index:02d}",
+            name=f"第{span_index}跨-现浇连续梁",
+            structure_type="现浇连续梁",
+            side="left",
+            span_index=span_index,
+            support_range=f"{span_index - 1}#墩~{span_index}#墩" if span_index > 1 else f"0#台~{span_index}#墩",
+            span_length_m=40,
+            span_group_expression=expression,
+            properties={
+                "structure_code": "castInPlaceContinuousBoxGirder",
+                "group_index": 1,
+                "continuous_beam": {
+                    "standard_segment_cycles": standard_cycles,
+                    "middle_closure_order": middle_closure_order,
+                },
+            },
+        )
+        for span_index in range(1, span_count + 1)
+    ]
+    scenario.milestones = []
+    return scenario
+
+
+def _scenario_with_single_upper_span(
+    *,
+    structure_type: str,
+    structure_code: str,
+    support_range: str,
+):
+    scenario = default_scenario()
+    bridge = scenario.project.bridges[0]
+    section = bridge.work_sections[0]
+    section.id = "WS-L"
+    section.name = "左幅结构参数"
+    section.side = "left"
+    section.structures = [_pier_body_structure(1), _pier_body_structure(2)]
+    section.upper_structures = [
+        UpperStructureComponent(
+            id="B1-L-SPAN-02",
+            name=f"{support_range}-{structure_type}",
+            structure_type=structure_type,
+            side="left",
+            span_index=2,
+            support_range=support_range,
+            span_length_m=40,
+            beam_count_per_span=5 if structure_code == "precastTGirder" else None,
+            span_group_expression="40",
+            properties={"structure_code": structure_code, "group_index": 1},
+        )
+    ]
+    scenario.milestones = []
+    return scenario
+
+
+def _scenario_with_mixed_upper_structures():
+    scenario = default_scenario()
+    bridge = scenario.project.bridges[0]
+    section = bridge.work_sections[0]
+    section.id = "WS-L"
+    section.name = "左幅结构参数"
+    section.side = "left"
+    section.structures = [
+        _abutment_structure(0),
+        _pier_body_structure(1),
+        _pier_body_structure(2),
+        _pier_body_structure(3),
+        _pier_body_structure(4),
+    ]
+    section.upper_structures = [
+        UpperStructureComponent(
+            id="B1-L-SPAN-01",
+            name="0#台~1#墩-简支T梁",
+            structure_type="简支T梁",
+            side="left",
+            span_index=1,
+            support_range="0#台~1#墩",
+            span_length_m=40,
+            beam_count_per_span=5,
+            span_group_expression="40",
+            properties={"structure_code": "precastTGirder", "group_index": 1},
+        ),
+        UpperStructureComponent(
+            id="B1-L-SPAN-02",
+            name="1#墩~2#墩-现浇箱梁",
+            structure_type="现浇箱梁",
+            side="left",
+            span_index=2,
+            support_range="1#墩~2#墩",
+            span_length_m=40,
+            span_group_expression="40",
+            properties={"structure_code": "castInPlaceBoxGirder", "group_index": 2},
+        ),
+        UpperStructureComponent(
+            id="B1-L-SPAN-03",
+            name="2#墩~3#墩-现浇连续梁",
+            structure_type="现浇连续梁",
+            side="left",
+            span_index=3,
+            support_range="2#墩~3#墩",
+            span_length_m=40,
+            span_group_expression="40+40",
+            properties={
+                "structure_code": "castInPlaceContinuousBoxGirder",
+                "group_index": 3,
+                "continuous_beam": {"standard_segment_cycles": 0},
+            },
+        ),
+        UpperStructureComponent(
+            id="B1-L-SPAN-04",
+            name="3#墩~4#墩-现浇连续梁",
+            structure_type="现浇连续梁",
+            side="left",
+            span_index=4,
+            support_range="3#墩~4#墩",
+            span_length_m=40,
+            span_group_expression="40+40",
+            properties={
+                "structure_code": "castInPlaceContinuousBoxGirder",
+                "group_index": 3,
+                "continuous_beam": {"standard_segment_cycles": 0},
+            },
+        ),
+    ]
+    return scenario
+
+
+def _pier_body_structure(pier_no: int) -> StructureModel:
+    return StructureModel(
+        id=f"P{pier_no:02d}",
+        name=f"{pier_no}#墩",
+        structure_type="pier",
+        order=pier_no,
+        support_no=f"{pier_no}#墩",
+        support_index=pier_no,
+        components=[
+            ComponentModel(
+                id=f"P{pier_no:02d}-BODY",
+                name=f"{pier_no}#墩-墩柱",
+                component_type="pier_body",
+                quantity=1,
+                quantity_label="1个",
+            )
+        ],
+    )
+
+
+def _abutment_structure(abutment_no: int) -> StructureModel:
+    return StructureModel(
+        id=f"A{abutment_no:02d}",
+        name=f"{abutment_no}#台",
+        structure_type="abutment",
+        order=abutment_no,
+        support_no=f"{abutment_no}#台",
+        support_index=abutment_no,
+        components=[
+            ComponentModel(
+                id=f"A{abutment_no:02d}-BODY",
+                name=f"{abutment_no}#台-桥台",
+                component_type="abutment_body",
+                quantity=1,
+                quantity_label="1个",
+            )
+        ],
+    )
+
+
+def _solver_task(task_id: str, name: str, duration_days: int, resource_type: str) -> Task:
+    return Task(
+        id=task_id,
+        name=name,
+        structure_id=f"S-{task_id}",
+        structure_name=name,
+        structure_type="pier",
+        component_type="pile",
+        process_name="施工",
+        productivity_rule_id="rule",
+        quantity=1,
+        quantity_label="1个",
+        duration_days=duration_days,
+        compatible_resource_types=[resource_type],
+    )
+
+
+def _task_named(tasks: list[Task], name_part: str) -> Task:
+    return next(task for task in tasks if name_part in task.name)
+
+
+def _has_link(
+    links: list[PrecedenceLink],
+    predecessor_id: str,
+    successor_id: str,
+    source_rule_id: str,
+) -> bool:
+    return any(
+        link.predecessor_id == predecessor_id
+        and link.successor_id == successor_id
+        and link.source_rule_id == source_rule_id
+        for link in links
+    )
 
 
 def _min_resource_test_input(max_resources: int) -> ScheduleInput:

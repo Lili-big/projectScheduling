@@ -58,17 +58,42 @@ type ProductivityOption = {
   is_default: boolean;
 };
 
+type RelationshipType = "FS" | "SS" | "FF" | "SF";
+
 type LogicRule = {
   id: string;
   scope: "same_structure" | "structure_sequence";
-  structure_type?: "pier" | "abutment" | null;
+  structure_type?: "pier" | "abutment" | "upper_structure" | "continuous_beam" | null;
   to_component: ComponentType;
   predecessor_candidates: ComponentType[];
   predecessor_strategy: "all" | "first_available";
-  relationship: "FS" | "SS";
+  relationship: RelationshipType;
   lag_days: number;
   severity?: "error" | "warning";
   note: string;
+};
+
+type UpperStructureLogicRule = {
+  id: string;
+  relationship: RelationshipType;
+  lag_days: number;
+  severity?: "error" | "warning";
+  note?: string;
+};
+
+type WorkSectionSide = "left" | "right" | "none";
+
+type UpperStructureModel = {
+  id: string;
+  name: string;
+  structure_type: string;
+  side: WorkSectionSide;
+  span_index: number;
+  support_range: string;
+  span_length_m: number;
+  beam_count_per_span?: number | null;
+  span_group_expression: string;
+  properties: Record<string, unknown>;
 };
 
 type ResourcePool = {
@@ -111,22 +136,23 @@ type ScenarioInput = {
         id: string;
         name: string;
         order: number;
-        side: "none";
+        side: WorkSectionSide;
         structures: Array<{
           id: string;
           name: string;
-          structure_type: "pier" | "abutment";
+          structure_type: "pier" | "abutment" | "upper_structure" | "continuous_beam";
           order: number;
           support_no?: string | null;
           support_index?: number | null;
           components: ComponentModel[];
         }>;
-        upper_structures: unknown[];
+        upper_structures: UpperStructureModel[];
       }>;
     }>;
   };
   process_library: ProcessTemplate[];
   logic_rules: LogicRule[];
+  upper_structure_logic_rules?: UpperStructureLogicRule[];
   resource_calendars: Array<{
     id: string;
     name: string;
@@ -137,6 +163,10 @@ type ScenarioInput = {
   milestones: MilestoneConstraint[];
   time_limit_seconds: number;
 };
+
+type BridgeModel = ScenarioInput["project"]["bridges"][number];
+type WorkSectionModel = BridgeModel["work_sections"][number];
+type StructureModel = WorkSectionModel["structures"][number];
 
 type Task = {
   id: string;
@@ -161,7 +191,7 @@ type PrecedenceLink = {
   id: string;
   predecessor_id: string;
   successor_id: string;
-  relationship: "FS" | "SS";
+  relationship: RelationshipType;
   lag_days: number;
   source_rule_id: string;
   severity?: "error" | "warning";
@@ -201,6 +231,21 @@ type GeneratedScheduleInput = {
   validation: Array<{ level: "info" | "warning" | "error"; message: string; subject_id?: string | null }>;
   source_summary: Record<string, unknown>;
 };
+
+const CONTINUOUS_BEAM_STRUCTURE_CODE = "castInPlaceContinuousBoxGirder";
+const CAST_IN_PLACE_BOX_BEAM_STRUCTURE_CODE = "castInPlaceBoxGirder";
+const SIMPLE_BEAM_STRUCTURE_CODE = "precastTGirder";
+const CONTINUOUS_BEAM_DEFAULT_STANDARD_SEGMENT_CYCLES = 18;
+const UPPER_STRUCTURE_LOGIC_RULE_IDS = [
+  "cast_in_place_box_beam_after_lower_structure",
+  "continuous_beam_zero_block_after_main_pier_lower_structure",
+  "continuous_beam_side_straight_after_edge_lower_structure",
+  "continuous_beam_t_chain",
+  "continuous_beam_side_closure",
+  "continuous_beam_middle_closure",
+  "continuous_beam_edge_before_middle_closure",
+  "continuous_beam_middle_closure_sequence",
+] as const;
 
 type ProcessIntent = {
   component_type?: ComponentType | null;
@@ -322,6 +367,7 @@ function createDefaultScenario(): ScenarioInput {
       rule("cap_beam_after_pier_body", "pier", "cap_beam", ["pier_body", "middle_tie_beam"], "all", 3, "盖梁以墩柱、中系梁为前置。"),
       rule("abutment_body_after_cap", "abutment", "abutment_body", ["cap", "pile", "spread_foundation"], "first_available", 5, "桥台台身优先以承台为前置。"),
     ],
+    upper_structure_logic_rules: defaultUpperStructureLogicRules(),
     resource_calendars: [{ id: "continuous", name: "连续自然日", working_weekdays: [0, 1, 2, 3, 4, 5, 6], blackout_dates: [] }],
     resource_pools: [
       pool("pool-rotary-drill", "rotary_drill", "旋挖钻", 3, 24),
@@ -342,8 +388,8 @@ function createDefaultScenario(): ScenarioInput {
       pool("pool-bridge-deck-system", "bridge_deck_system_team", "桥面系班组", 1, 1),
     ],
     milestones: [
-      milestone("M-contract-finish", "合同下部结构完工", "contract", "hard", "bridge", "B1", "2028-12-31", 10),
-      milestone("M-control-ws-lower", "下部结构强控节点", "control", "hard", "bridge", "B1", "2028-12-15", 10),
+      milestone("M-contract-finish", "合同下部结构及上部现浇梁完工", "contract", "hard", "bridge", "B1", "2028-12-31", 10),
+      milestone("M-control-ws-lower", "下部结构及上部现浇梁强控节点", "control", "hard", "bridge", "B1", "2028-12-15", 10),
       milestone("M-internal-cap", "承台内部目标", "internal", "soft", "component", "cap", "2027-05-25", 20),
     ],
     time_limit_seconds: 10,
@@ -414,8 +460,8 @@ function createProcessLibrary(): ProcessTemplate[] {
     process("ground_tie_beam_standard", "ground_tie_beam", "桩系梁施工", null, "fixed_days", "count", 3, "天/个", "tie_beam_team", true),
     process("cap_standard", "cap", "承台施工", null, "fixed_days", "count", 30, "天/个", "cap_team", true),
     process("spread_foundation_standard", "spread_foundation", "扩大基础施工", null, "fixed_days", "count", 8, "天/个", "spread_foundation_team", true),
-    process("pier_body_standard", "pier_body", "整体式浇筑", "integral_casting", "fixed_days", "count", 20, "天/个", "pier_body_team", true),
     process("pier_body_climbing_form", "pier_body", "爬模施工", "climbing_form", "days_per_unit", "pier_height_m", 7, "天/节", "pier_body_team", false, 4.5),
+    process("pier_body_standard", "pier_body", "整体式浇筑", "integral_casting", "fixed_days", "count", 20, "天/个", "pier_body_team", true),
     process("pier_body_sliding_form", "pier_body", "滑模施工", "sliding_form", "days_per_unit", "pier_height_m", 6, "天/节", "pier_body_team", false, 4.5),
     process("pier_body_turnover_form", "pier_body", "翻模施工", "turnover_form", "days_per_unit", "pier_height_m", 12, "天/节", "pier_body_team", false, 4.5),
     process("middle_tie_beam_standard", "middle_tie_beam", "中系梁施工", null, "fixed_days", "count", 4, "天/个", "tie_beam_team", true),
@@ -424,7 +470,7 @@ function createProcessLibrary(): ProcessTemplate[] {
     process("precast_beam_standard", "precast_beam", "制梁", null, "fixed_days", "count", 35, "天/片", "precast_beam_team", true),
     process("beam_erection_standard", "beam_erection", "架梁", null, "fixed_days", "count", 2, "天/片", "beam_erection_team", true),
     process("cast_in_place_continuous_zero_block", "cast_in_place_continuous_beam", "0号块", "zero_block", "fixed_days", "count", 120, "天/块", "cast_in_place_continuous_beam_team", true),
-    process("cast_in_place_continuous_standard_segment", "cast_in_place_continuous_beam", "标准块", "standard_segment", "fixed_days", "count", 10, "天/块", "cast_in_place_continuous_beam_team", false),
+    process("cast_in_place_continuous_standard_segment", "cast_in_place_continuous_beam", "标准块", "standard_segment", "days_per_unit", "count", 10, "天/块", "cast_in_place_continuous_beam_team", false),
     process("cast_in_place_continuous_closure_segment", "cast_in_place_continuous_beam", "合拢段", "closure_segment", "fixed_days", "count", 30, "天/块", "cast_in_place_continuous_beam_team", false),
     process("cast_in_place_continuous_straight_segment", "cast_in_place_continuous_beam", "直线段", "straight_segment", "fixed_days", "count", 35, "天/块", "cast_in_place_continuous_beam_team", false),
     process("cast_in_place_box_beam_standard", "cast_in_place_box_beam", "现浇箱梁", null, "fixed_days", "count", 45, "天/联", "cast_in_place_box_beam_team", true),
@@ -493,6 +539,95 @@ function rule(
     lag_days: lagDays,
     severity: "error",
     note,
+  };
+}
+
+function defaultUpperStructureLogicRules(): UpperStructureLogicRule[] {
+  return [
+    {
+      id: "cast_in_place_box_beam_after_lower_structure",
+      relationship: "FS",
+      lag_days: 0,
+      severity: "error",
+      note: "现浇箱梁在对应跨组墩台下部结构完成后开始。",
+    },
+    {
+      id: "continuous_beam_zero_block_after_main_pier_lower_structure",
+      relationship: "FS",
+      lag_days: 0,
+      severity: "error",
+      note: "连续梁0号块在对应主墩下部结构完成后开始。",
+    },
+    {
+      id: "continuous_beam_side_straight_after_edge_lower_structure",
+      relationship: "FS",
+      lag_days: 0,
+      severity: "error",
+      note: "连续梁边跨连续段在对应边跨墩台下部结构完成后开始。",
+    },
+    {
+      id: "continuous_beam_t_chain",
+      relationship: "FS",
+      lag_days: 0,
+      severity: "error",
+      note: "连续梁T构内0号块和标准段按顺序施工。",
+    },
+    {
+      id: "continuous_beam_side_closure",
+      relationship: "FS",
+      lag_days: 0,
+      severity: "error",
+      note: "连续梁边跨合龙段在边跨连续段和相邻T构完成后开始。",
+    },
+    {
+      id: "continuous_beam_middle_closure",
+      relationship: "FS",
+      lag_days: 0,
+      severity: "error",
+      note: "连续梁中跨合龙段在相邻两个T构完成后开始。",
+    },
+    {
+      id: "continuous_beam_edge_before_middle_closure",
+      relationship: "FS",
+      lag_days: 0,
+      severity: "error",
+      note: "连续梁默认边跨合龙先于中跨合龙。",
+    },
+    {
+      id: "continuous_beam_middle_closure_sequence",
+      relationship: "FS",
+      lag_days: 0,
+      severity: "error",
+      note: "连续梁中跨合龙按配置顺序推进。",
+    },
+  ];
+}
+
+function upperStructureLogicRulesById(rules: UpperStructureLogicRule[] = []) {
+  const merged = new Map<string, UpperStructureLogicRule>();
+  for (const rule of defaultUpperStructureLogicRules()) {
+    merged.set(rule.id, rule);
+  }
+  for (const rule of rules) {
+    merged.set(rule.id, {
+      ...rule,
+      relationship: rule.relationship ?? "FS",
+      lag_days: rule.lag_days ?? 0,
+      severity: rule.severity ?? "error",
+    });
+  }
+  return merged;
+}
+
+function upperStructureLogicRule(
+  rules: Map<string, UpperStructureLogicRule> | undefined,
+  ruleId: string,
+): UpperStructureLogicRule {
+  return rules?.get(ruleId) ?? {
+    id: ruleId,
+    relationship: "FS",
+    lag_days: 0,
+    severity: "error",
   };
 }
 
@@ -797,6 +932,7 @@ function stripExtension(fileName: string) {
 
 function applyResourceMaxQuantityDefaults(scenario: ScenarioInput) {
   const counts = new Map<string, number>();
+  const upperLogicRules = upperStructureLogicRulesById(scenario.upper_structure_logic_rules);
   for (const bridge of scenario.project.bridges) {
     for (const section of bridge.work_sections) {
       for (const structure of section.structures) {
@@ -804,6 +940,11 @@ function applyResourceMaxQuantityDefaults(scenario: ScenarioInput) {
           const selected = selectProcess(item, scenario.process_library);
           if (selected) counts.set(selected.resource_type, (counts.get(selected.resource_type) ?? 0) + 1);
         }
+      }
+      const upper = buildUpperStructureTasks(bridge.id, section, scenario.process_library, [], 1, upperLogicRules);
+      for (const task of upper.tasks) {
+        const resourceType = task.compatible_resource_types[0];
+        counts.set(resourceType, (counts.get(resourceType) ?? 0) + 1);
       }
     }
   }
@@ -814,8 +955,12 @@ function applyResourceMaxQuantityDefaults(scenario: ScenarioInput) {
 }
 
 function generateScheduleInput(scenario: ScenarioInput, useMaxResources = false): GeneratedScheduleInput {
-  const tasks = buildTasks(scenario);
-  const precedenceLinks = buildPrecedenceLinks(tasks, scenario.logic_rules);
+  const built = buildTasks(scenario);
+  const tasks = built.tasks;
+  const precedenceLinks = [
+    ...buildPrecedenceLinks(tasks, scenario.logic_rules),
+    ...built.generatedLinks,
+  ];
   const resources = expandResources(scenario.resource_pools, useMaxResources);
   return {
     schedule_input: {
@@ -836,14 +981,18 @@ function generateScheduleInput(scenario: ScenarioInput, useMaxResources = false)
       process_count: scenario.process_library.length,
       resource_pool_count: scenario.resource_pools.length,
       milestone_count: scenario.milestones.length,
+      continuous_beam_task_count: tasks.filter((task) => task.structure_type === "continuous_beam").length,
     },
   };
 }
 
-function buildTasks(scenario: ScenarioInput): Task[] {
+function buildTasks(scenario: ScenarioInput): { tasks: Task[]; generatedLinks: PrecedenceLink[] } {
   const tasks: Task[] = [];
+  const generatedLinks: PrecedenceLink[] = [];
+  const upperLogicRules = upperStructureLogicRulesById(scenario.upper_structure_logic_rules);
   for (const bridge of [...scenario.project.bridges].sort((a, b) => a.order - b.order)) {
     for (const section of [...bridge.work_sections].sort((a, b) => a.order - b.order)) {
+      const sectionLowerStart = tasks.length;
       for (const structure of [...section.structures].sort((a, b) => a.order - b.order)) {
         structure.components.forEach((item, index) => {
           if (!item.enabled) return;
@@ -870,9 +1019,754 @@ function buildTasks(scenario: ScenarioInput): Task[] {
           });
         });
       }
+      const sectionLowerTasks = tasks.slice(sectionLowerStart);
+      const upper = buildUpperStructureTasks(
+        bridge.id,
+        section,
+        scenario.process_library,
+        sectionLowerTasks,
+        generatedLinks.length + 1,
+        upperLogicRules,
+      );
+      tasks.push(...upper.tasks);
+      generatedLinks.push(...upper.links);
     }
   }
+  return { tasks, generatedLinks };
+}
+
+function buildUpperStructureTasks(
+  bridgeId: string,
+  section: WorkSectionModel,
+  processLibrary: ProcessTemplate[],
+  lowerTasks: Task[],
+  linkStart: number,
+  upperLogicRules: Map<string, UpperStructureLogicRule>,
+): { tasks: Task[]; links: PrecedenceLink[] } {
+  const supportCompletions = lowerCompletionTasksBySupport(section, lowerTasks);
+  const tasks: Task[] = [];
+  const links: PrecedenceLink[] = [];
+
+  // 本期简支梁只保留为结构参数，不生成架梁排程任务。
+
+  const box = buildCastInPlaceBoxBeamTasks(
+    bridgeId,
+    section,
+    processLibrary,
+    supportCompletions,
+    linkStart + links.length,
+    upperLogicRules,
+  );
+  tasks.push(...box.tasks);
+  links.push(...box.links);
+
+  const continuous = buildContinuousBeamTasks(
+    bridgeId,
+    section,
+    processLibrary,
+    supportCompletions,
+    linkStart + links.length,
+    upperLogicRules,
+  );
+  tasks.push(...continuous.tasks);
+  links.push(...continuous.links);
+
+  return { tasks, links };
+}
+
+function buildSimpleBeamErectionTasks(
+  bridgeId: string,
+  section: WorkSectionModel,
+  processLibrary: ProcessTemplate[],
+  supportCompletions: Map<string, Task[]>,
+): { tasks: Task[]; links: PrecedenceLink[] } {
+  const tasks: Task[] = [];
+  const links: PrecedenceLink[] = [];
+  const sideCode = sideCodeFor(section.side);
+  const sideLabel = sideLabelFor(section.side);
+
+  for (const upper of [...(section.upper_structures ?? [])].sort((a, b) => a.span_index - b.span_index)) {
+    if (!isSimpleBeamUpper(upper)) continue;
+    const task = appendUpperTask(tasks, {
+      componentId: `${upper.id}-ERECTION`,
+      name: `${sideLabel}第${upper.span_index}跨简支梁架梁`,
+      componentType: "beam_erection",
+      quantity: Number(upper.beam_count_per_span ?? 1) || 1,
+      quantityLabel: upper.beam_count_per_span ? `${upper.beam_count_per_span}片` : "1跨",
+      bridgeId,
+      workSectionId: section.id,
+      sequenceOrder: 90000 + upper.span_index,
+      structureId: `${bridgeId}-${sideCode}-SPAN-${String(upper.span_index).padStart(2, "0")}-ERECTION`,
+      structureName: `${sideLabel}第${upper.span_index}跨简支梁架梁`,
+      processLibrary,
+      properties: {
+        upper_structure_id: upper.id,
+        support_range: upper.support_range,
+        span_index: upper.span_index,
+      },
+    });
+    links.push(...buildLowerToUpperLinks({
+      successor: task,
+      supportRefs: supportRefsFromUpper(upper),
+      supportCompletions,
+      sourceRuleId: "simple_beam_after_lower_structure",
+      linkPrefix: `LUB-${bridgeId}-${section.id}-S${String(upper.span_index).padStart(2, "0")}`,
+    }));
+  }
+
+  return { tasks, links };
+}
+
+function buildCastInPlaceBoxBeamTasks(
+  bridgeId: string,
+  section: WorkSectionModel,
+  processLibrary: ProcessTemplate[],
+  supportCompletions: Map<string, Task[]>,
+  linkStart: number,
+  upperLogicRules: Map<string, UpperStructureLogicRule>,
+): { tasks: Task[]; links: PrecedenceLink[] } {
+  const tasks: Task[] = [];
+  const links: PrecedenceLink[] = [];
+  const sideCode = sideCodeFor(section.side);
+  const sideLabel = sideLabelFor(section.side);
+  let linkNo = linkStart;
+
+  for (const uppers of castInPlaceBoxBeamGroups(section.upper_structures ?? [])) {
+    const groupIndex = upperGroupIndex(uppers[0]);
+    const spanIndices = uppers.map((upper) => upper.span_index);
+    const task = appendUpperTask(tasks, {
+      componentId: `${bridgeId}-${sideCode}-BOX-G${String(groupIndex).padStart(2, "0")}-CAST`,
+      name: `${sideLabel}第${groupIndex}联现浇箱梁`,
+      componentType: "cast_in_place_box_beam",
+      quantity: 1,
+      quantityLabel: "1联",
+      bridgeId,
+      workSectionId: section.id,
+      sequenceOrder: 95000 + groupIndex,
+      structureId: `${bridgeId}-${sideCode}-BOX-G${String(groupIndex).padStart(2, "0")}`,
+      structureName: `${sideLabel}第${groupIndex}联现浇箱梁`,
+      processLibrary,
+      properties: {
+        upper_structure_ids: uppers.map((upper) => upper.id),
+        span_start_index: Math.min(...spanIndices),
+        span_end_index: Math.max(...spanIndices),
+      },
+    });
+    const nextLinks = buildLowerToUpperLinks({
+      successor: task,
+      supportRefs: supportRefsForUpperGroup(uppers),
+      supportCompletions,
+      sourceRuleId: "cast_in_place_box_beam_after_lower_structure",
+      linkPrefix: `LUB-${bridgeId}-${section.id}-BOX-G${String(groupIndex).padStart(2, "0")}`,
+      startIndex: linkNo,
+      upperLogicRules,
+    });
+    links.push(...nextLinks);
+    linkNo += nextLinks.length;
+  }
+
+  return { tasks, links };
+}
+
+function appendUpperTask(
+  tasks: Task[],
+  input: {
+    componentId: string;
+    name: string;
+    componentType: ComponentType;
+    quantity: number;
+    quantityLabel: string;
+    bridgeId: string;
+    workSectionId: string;
+    sequenceOrder: number;
+    structureId: string;
+    structureName: string;
+    processLibrary: ProcessTemplate[];
+    properties?: Record<string, unknown>;
+    methodId?: string | null;
+    structureType?: string;
+  },
+) {
+  const component: ComponentModel = {
+    id: input.componentId,
+    name: input.name,
+    component_type: input.componentType,
+    quantity: input.quantity,
+    quantity_label: input.quantityLabel,
+    method_id: input.methodId ?? null,
+    productivity_option_id: null,
+    enabled: true,
+    properties: input.properties ?? {},
+  };
+  const selected = selectProcess(component, input.processLibrary);
+  if (!selected) return null;
+  const effectiveProcess = effectiveProcessForComponent(selected, component);
+  const quantity = quantityForProcess(component, effectiveProcess.quantity_source);
+  const task: Task = {
+    id: component.id,
+    name: component.name,
+    bridge_id: input.bridgeId,
+    work_section_id: input.workSectionId,
+    component_id: component.id,
+    sequence_order: input.sequenceOrder,
+    structure_id: input.structureId,
+    structure_name: input.structureName,
+    structure_type: input.structureType ?? "upper_structure",
+    component_type: component.component_type,
+    process_name: effectiveProcess.process_name,
+    productivity_rule_id: effectiveProcess.id,
+    quantity,
+    quantity_label: component.quantity_label,
+    duration_days: calculateDuration(quantity, effectiveProcess),
+    compatible_resource_types: [effectiveProcess.resource_type],
+  };
+  tasks.push(task);
+  return task;
+}
+
+function buildLowerToUpperLinks(input: {
+  successor: Task | null;
+  supportRefs: string[];
+  supportCompletions: Map<string, Task[]>;
+  sourceRuleId: string;
+  linkPrefix: string;
+  startIndex?: number;
+  upperLogicRules?: Map<string, UpperStructureLogicRule>;
+}) {
+  if (!input.successor) return [];
+  const links: PrecedenceLink[] = [];
+  const seenRefs = new Set<string>();
+  let linkNo = input.startIndex ?? 1;
+  const rule = upperStructureLogicRule(input.upperLogicRules, input.sourceRuleId);
+
+  for (const supportRef of input.supportRefs) {
+    const normalizedRef = normalizeSupportLabel(supportRef);
+    if (!normalizedRef || seenRefs.has(normalizedRef)) continue;
+    seenRefs.add(normalizedRef);
+    const predecessors = input.supportCompletions.get(normalizedRef) ?? [];
+    for (const predecessor of predecessors) {
+      links.push({
+        id: `${input.linkPrefix}-${String(linkNo).padStart(4, "0")}`,
+        predecessor_id: predecessor.id,
+        successor_id: input.successor.id,
+        relationship: rule.relationship,
+        lag_days: rule.lag_days,
+        source_rule_id: input.sourceRuleId,
+        severity: rule.severity ?? "error",
+      });
+      linkNo += 1;
+    }
+  }
+  return links;
+}
+
+function lowerCompletionTasksBySupport(section: WorkSectionModel, lowerTasks: Task[]) {
+  const tasksByStructure = groupBy(lowerTasks, (task) => task.structure_id);
+  const result = new Map<string, Task[]>();
+
+  for (const structure of section.structures) {
+    const completionTasks = selectLowerCompletionTasks(structure, tasksByStructure.get(structure.id) ?? []);
+    if (!completionTasks.length) continue;
+    for (const key of supportKeysForStructure(structure)) {
+      result.set(key, completionTasks);
+    }
+  }
+  return result;
+}
+
+function selectLowerCompletionTasks(structure: StructureModel, tasks: Task[]) {
+  const priorities: Record<string, ComponentType[]> = {
+    pier: ["cap_beam", "middle_tie_beam", "pier_body", "cap", "ground_tie_beam", "spread_foundation", "pile"],
+    abutment: ["abutment_body", "cap", "spread_foundation", "pile"],
+  };
+  for (const componentType of priorities[structure.structure_type] ?? []) {
+    const matches = tasks.filter((task) => task.component_type === componentType);
+    if (matches.length) return matches;
+  }
   return tasks;
+}
+
+function supportKeysForStructure(structure: StructureModel) {
+  const keys = new Set<string>();
+  for (const value of [structure.support_no, structure.name]) {
+    const normalized = normalizeSupportLabel(value);
+    if (normalized) keys.add(normalized);
+  }
+  if (structure.support_index !== undefined && structure.support_index !== null) {
+    const label = structure.structure_type === "pier" ? "墩" : "台";
+    keys.add(`${structure.support_index}#${label}`);
+  }
+  return keys;
+}
+
+function supportRefsFromUpper(upper: UpperStructureModel) {
+  const refs = parseSupportRefs(upper.support_range);
+  if (refs.length) return refs;
+  const leftIndex = upper.span_index - 1;
+  return [supportLabelFromIndex(leftIndex, true), `${upper.span_index}#墩`];
+}
+
+function supportRefsForUpperGroup(uppers: UpperStructureModel[]) {
+  const refs = uppers
+    .sort((a, b) => a.span_index - b.span_index)
+    .flatMap((upper) => supportRefsFromUpper(upper));
+  return dedupeSupportRefs(refs);
+}
+
+function edgeSupportRefs(uppers: UpperStructureModel[], edge: "left" | "right") {
+  const ordered = [...uppers].sort((a, b) => a.span_index - b.span_index);
+  if (!ordered.length) return [];
+  const edgeUpper = edge === "left" ? ordered[0] : ordered[ordered.length - 1];
+  const refs = parseSupportRefs(edgeUpper.support_range);
+  if (refs.length) return [edge === "left" ? refs[0] : refs[refs.length - 1]];
+  if (edge === "left") return [supportLabelFromIndex(edgeUpper.span_index - 1, true)];
+  return [`${edgeUpper.span_index}#墩`];
+}
+
+function parseSupportRefs(supportRange: string) {
+  const refs: string[] = [];
+  for (const match of supportRange.matchAll(/(\d+)\s*(?:#|号)?\s*(墩|台)/g)) {
+    refs.push(`${Number(match[1])}#${match[2]}`);
+  }
+  return dedupeSupportRefs(refs);
+}
+
+function dedupeSupportRefs(refs: string[]) {
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const ref of refs) {
+    const normalized = normalizeSupportLabel(ref);
+    if (normalized && !seen.has(normalized)) {
+      deduped.push(normalized);
+      seen.add(normalized);
+    }
+  }
+  return deduped;
+}
+
+function normalizeSupportLabel(value: unknown) {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim().replace(/\s+/g, "").replace(/号/g, "#");
+  const match = text.match(/(\d+)\s*#?\s*(墩|台)/);
+  return match ? `${Number(match[1])}#${match[2]}` : text || null;
+}
+
+function supportLabelFromIndex(index: number, isLeftEdge = false) {
+  if (index === 0 && isLeftEdge) return "0#台";
+  return `${index}#墩`;
+}
+
+function castInPlaceBoxBeamGroups(upperStructures: UpperStructureModel[]) {
+  const groups = new Map<number, UpperStructureModel[]>();
+  for (const upper of upperStructures) {
+    if (!isCastInPlaceBoxBeamUpper(upper)) continue;
+    const groupIndex = upperGroupIndex(upper);
+    groups.set(groupIndex, [...(groups.get(groupIndex) ?? []), upper]);
+  }
+  return [...groups.values()]
+    .map((items) => items.sort((a, b) => a.span_index - b.span_index))
+    .sort((a, b) => Math.min(...a.map((item) => item.span_index)) - Math.min(...b.map((item) => item.span_index)));
+}
+
+function isSimpleBeamUpper(upper: UpperStructureModel) {
+  if (upper.properties.structure_code === SIMPLE_BEAM_STRUCTURE_CODE) return true;
+  if (isContinuousBeamUpper(upper) || isCastInPlaceBoxBeamUpper(upper)) return false;
+  return upper.structure_type.includes("简支") || upper.structure_type.includes("T梁");
+}
+
+function isCastInPlaceBoxBeamUpper(upper: UpperStructureModel) {
+  if (upper.properties.structure_code === CAST_IN_PLACE_BOX_BEAM_STRUCTURE_CODE) return true;
+  return upper.structure_type.includes("现浇")
+    && upper.structure_type.includes("箱梁")
+    && !isContinuousBeamUpper(upper);
+}
+
+function upperGroupIndex(upper: UpperStructureModel) {
+  const value = Number(upper.properties.group_index ?? upper.span_index);
+  return Number.isFinite(value) ? Math.trunc(value) : upper.span_index;
+}
+
+function buildContinuousBeamTasks(
+  bridgeId: string,
+  section: WorkSectionModel,
+  processLibrary: ProcessTemplate[],
+  supportCompletions: Map<string, Task[]>,
+  linkStart: number,
+  upperLogicRules: Map<string, UpperStructureLogicRule>,
+): { tasks: Task[]; links: PrecedenceLink[] } {
+  const tasks: Task[] = [];
+  const links: PrecedenceLink[] = [];
+  let linkNo = linkStart;
+
+  const addLink = (predecessor: Task | null, successor: Task | null, sourceRuleId: string) => {
+    if (!predecessor || !successor) return;
+    const rule = upperStructureLogicRule(upperLogicRules, sourceRuleId);
+    links.push({
+      id: `LCB-${bridgeId}-${section.id}-${String(linkNo).padStart(4, "0")}`,
+      predecessor_id: predecessor.id,
+      successor_id: successor.id,
+      relationship: rule.relationship,
+      lag_days: rule.lag_days,
+      source_rule_id: sourceRuleId,
+      severity: rule.severity ?? "error",
+    });
+    linkNo += 1;
+  };
+
+  for (const uppers of continuousBeamGroups(section.upper_structures ?? [])) {
+    const groupIndex = continuousGroupIndex(uppers[0]);
+    const spanIndices = [...new Set(uppers.map((upper) => upper.span_index))].sort((a, b) => a - b);
+    const mainSupports = continuousMainSupports(uppers, spanIndices);
+    if (!mainSupports.length) continue;
+
+    const standardCycles = continuousIntSetting(
+      uppers,
+      ["standard_segment_cycles", "standard_block_cycles", "standard_blocks_per_side"],
+      CONTINUOUS_BEAM_DEFAULT_STANDARD_SEGMENT_CYCLES,
+      0,
+    );
+    const sideCode = sideCodeFor(section.side);
+    const sideLabel = sideLabelFor(section.side);
+    const prefix = `${bridgeId}-${sideCode}-CB-G${String(groupIndex).padStart(2, "0")}`;
+    const groupLabel = sideLabel ? `${sideLabel}连续梁` : "连续梁";
+    const baseOrder = 100000 + groupIndex * 10000;
+    const tCompletionTasks: Array<Task | null> = [];
+
+    mainSupports.forEach((supportIndex, supportOffset) => {
+      const tIndex = supportOffset + 1;
+      const structureId = `${prefix}-T${String(tIndex).padStart(2, "0")}-P${String(supportIndex).padStart(2, "0")}`;
+      const structureName = `${groupLabel}${supportIndex}#墩T构`;
+      let previous = appendContinuousTask(tasks, {
+        componentId: `${structureId}-ZERO`,
+        name: `${structureName}-0号块`,
+        methodId: "zero_block",
+        quantityLabel: "1块",
+        bridgeId,
+        workSectionId: section.id,
+        sequenceOrder: baseOrder + tIndex * 1000,
+        structureId,
+        structureName,
+        processLibrary,
+      });
+      const zeroBlockLinks = buildLowerToUpperLinks({
+        successor: previous,
+        supportRefs: [`${supportIndex}#墩`],
+        supportCompletions,
+        sourceRuleId: "continuous_beam_zero_block_after_main_pier_lower_structure",
+        linkPrefix: `LUB-${bridgeId}-${section.id}-CB-G${String(groupIndex).padStart(2, "0")}-T${String(tIndex).padStart(2, "0")}`,
+        startIndex: linkNo,
+        upperLogicRules,
+      });
+      links.push(...zeroBlockLinks);
+      linkNo += zeroBlockLinks.length;
+      if (standardCycles > 0) {
+        const current = appendContinuousTask(tasks, {
+          componentId: `${structureId}-STD`,
+          name: `${structureName}-标准段${standardCycles}块`,
+          methodId: "standard_segment",
+          quantity: standardCycles,
+          quantityLabel: `${standardCycles}块`,
+          bridgeId,
+          workSectionId: section.id,
+          sequenceOrder: baseOrder + tIndex * 1000 + 1,
+          structureId,
+          structureName,
+          processLibrary,
+        });
+        addLink(previous, current, "continuous_beam_t_chain");
+        if (current) previous = current;
+      }
+      tCompletionTasks.push(previous);
+    });
+
+    const leftEdgeStructureName = `${groupLabel}${mainSupports[0]}#墩T构`;
+    const rightEdgeStructureName = `${groupLabel}${mainSupports[mainSupports.length - 1]}#墩T构`;
+
+    const leftStraight = appendContinuousTask(tasks, {
+      componentId: `${prefix}-LEFT-STRAIGHT`,
+      name: `${leftEdgeStructureName}-边跨连续段`,
+      methodId: "straight_segment",
+      quantityLabel: "1段",
+      bridgeId,
+      workSectionId: section.id,
+      sequenceOrder: baseOrder + 9000,
+      structureId: `${prefix}-LEFT-P${String(mainSupports[0]).padStart(2, "0")}`,
+      structureName: leftEdgeStructureName,
+      processLibrary,
+    });
+    const leftClosure = appendContinuousTask(tasks, {
+      componentId: `${prefix}-LEFT-CLOSURE`,
+      name: `${leftEdgeStructureName}-边跨合龙段`,
+      methodId: "closure_segment",
+      quantityLabel: "1段",
+      bridgeId,
+      workSectionId: section.id,
+      sequenceOrder: baseOrder + 9100,
+      structureId: `${prefix}-LEFT-P${String(mainSupports[0]).padStart(2, "0")}`,
+      structureName: leftEdgeStructureName,
+      processLibrary,
+    });
+    const rightStraight = appendContinuousTask(tasks, {
+      componentId: `${prefix}-RIGHT-STRAIGHT`,
+      name: `${rightEdgeStructureName}-边跨连续段`,
+      methodId: "straight_segment",
+      quantityLabel: "1段",
+      bridgeId,
+      workSectionId: section.id,
+      sequenceOrder: baseOrder + 9200,
+      structureId: `${prefix}-RIGHT-P${String(mainSupports[mainSupports.length - 1]).padStart(2, "0")}`,
+      structureName: rightEdgeStructureName,
+      processLibrary,
+    });
+    const rightClosure = appendContinuousTask(tasks, {
+      componentId: `${prefix}-RIGHT-CLOSURE`,
+      name: `${rightEdgeStructureName}-边跨合龙段`,
+      methodId: "closure_segment",
+      quantityLabel: "1段",
+      bridgeId,
+      workSectionId: section.id,
+      sequenceOrder: baseOrder + 9300,
+      structureId: `${prefix}-RIGHT-P${String(mainSupports[mainSupports.length - 1]).padStart(2, "0")}`,
+      structureName: rightEdgeStructureName,
+      processLibrary,
+    });
+    addLink(leftStraight, leftClosure, "continuous_beam_side_closure");
+    const leftStraightLinks = buildLowerToUpperLinks({
+      successor: leftStraight,
+      supportRefs: edgeSupportRefs(uppers, "left"),
+      supportCompletions,
+      sourceRuleId: "continuous_beam_side_straight_after_edge_lower_structure",
+      linkPrefix: `LUB-${bridgeId}-${section.id}-CB-G${String(groupIndex).padStart(2, "0")}-LEFT`,
+      startIndex: linkNo,
+      upperLogicRules,
+    });
+    links.push(...leftStraightLinks);
+    linkNo += leftStraightLinks.length;
+    addLink(tCompletionTasks[0], leftClosure, "continuous_beam_side_closure");
+    addLink(rightStraight, rightClosure, "continuous_beam_side_closure");
+    const rightStraightLinks = buildLowerToUpperLinks({
+      successor: rightStraight,
+      supportRefs: edgeSupportRefs(uppers, "right"),
+      supportCompletions,
+      sourceRuleId: "continuous_beam_side_straight_after_edge_lower_structure",
+      linkPrefix: `LUB-${bridgeId}-${section.id}-CB-G${String(groupIndex).padStart(2, "0")}-RIGHT`,
+      startIndex: linkNo,
+      upperLogicRules,
+    });
+    links.push(...rightStraightLinks);
+    linkNo += rightStraightLinks.length;
+    addLink(tCompletionTasks[tCompletionTasks.length - 1], rightClosure, "continuous_beam_side_closure");
+
+    const midClosures: Array<Task | null> = [];
+    for (let index = 0; index < mainSupports.length - 1; index += 1) {
+      const closureIndex = index + 1;
+      const leftSupport = mainSupports[index];
+      const rightSupport = mainSupports[index + 1];
+      const midClosure = appendContinuousTask(tasks, {
+        componentId: `${prefix}-MID-${String(closureIndex).padStart(2, "0")}-CLOSURE`,
+        name: `${groupLabel}${leftSupport}#墩-${rightSupport}#墩-中跨合龙${closureIndex}`,
+        methodId: "closure_segment",
+        quantityLabel: "1段",
+        bridgeId,
+        workSectionId: section.id,
+        sequenceOrder: baseOrder + 9400 + closureIndex,
+        structureId: `${prefix}-MID-${String(closureIndex).padStart(2, "0")}-P${String(leftSupport).padStart(2, "0")}-P${String(rightSupport).padStart(2, "0")}`,
+        structureName: `${groupLabel}${leftSupport}#墩-${rightSupport}#墩中跨`,
+        processLibrary,
+      });
+      addLink(tCompletionTasks[index], midClosure, "continuous_beam_middle_closure");
+      addLink(tCompletionTasks[index + 1], midClosure, "continuous_beam_middle_closure");
+      addLink(leftClosure, midClosure, "continuous_beam_edge_before_middle_closure");
+      addLink(rightClosure, midClosure, "continuous_beam_edge_before_middle_closure");
+      midClosures.push(midClosure);
+    }
+
+    const levels = middleClosureLevels(uppers, midClosures.length);
+    levels.slice(1).forEach((currentLevel, levelIndex) => {
+      const previousLevel = levels[levelIndex];
+      for (const predecessorIndex of previousLevel) {
+        for (const successorIndex of currentLevel) {
+          addLink(
+            midClosures[predecessorIndex - 1],
+            midClosures[successorIndex - 1],
+            "continuous_beam_middle_closure_sequence",
+          );
+        }
+      }
+    });
+  }
+
+  return { tasks, links };
+}
+
+function appendContinuousTask(
+  tasks: Task[],
+  input: {
+    componentId: string;
+    name: string;
+    methodId: string;
+    quantity?: number;
+    quantityLabel: string;
+    bridgeId: string;
+    workSectionId: string;
+    sequenceOrder: number;
+    structureId: string;
+    structureName: string;
+    processLibrary: ProcessTemplate[];
+  },
+) {
+  const component: ComponentModel = {
+    id: input.componentId,
+    name: input.name,
+    component_type: "cast_in_place_continuous_beam",
+    quantity: input.quantity ?? 1,
+    quantity_label: input.quantityLabel,
+    method_id: input.methodId,
+    productivity_option_id: null,
+    enabled: true,
+    properties: {},
+  };
+  const selected = selectProcess(component, input.processLibrary);
+  if (!selected) return null;
+  const effectiveProcess = effectiveProcessForComponent(selected, component);
+  const quantity = quantityForProcess(component, effectiveProcess.quantity_source);
+  const task: Task = {
+    id: component.id,
+    name: component.name,
+    bridge_id: input.bridgeId,
+    work_section_id: input.workSectionId,
+    component_id: component.id,
+    sequence_order: input.sequenceOrder,
+    structure_id: input.structureId,
+    structure_name: input.structureName,
+    structure_type: "continuous_beam",
+    component_type: component.component_type,
+    process_name: effectiveProcess.process_name,
+    productivity_rule_id: effectiveProcess.id,
+    quantity,
+    quantity_label: component.quantity_label,
+    duration_days: calculateDuration(quantity, effectiveProcess),
+    compatible_resource_types: [effectiveProcess.resource_type],
+  };
+  tasks.push(task);
+  return task;
+}
+
+function continuousBeamGroups(upperStructures: UpperStructureModel[]) {
+  const groups = new Map<number, UpperStructureModel[]>();
+  for (const upper of upperStructures) {
+    if (!isContinuousBeamUpper(upper)) continue;
+    const groupIndex = continuousGroupIndex(upper);
+    groups.set(groupIndex, [...(groups.get(groupIndex) ?? []), upper]);
+  }
+  return [...groups.values()]
+    .map((items) => items.sort((a, b) => a.span_index - b.span_index))
+    .sort((a, b) => Math.min(...a.map((item) => item.span_index)) - Math.min(...b.map((item) => item.span_index)));
+}
+
+function isContinuousBeamUpper(upper: UpperStructureModel) {
+  return upper.properties.structure_code === CONTINUOUS_BEAM_STRUCTURE_CODE
+    || upper.structure_type.includes("连续")
+    || upper.structure_type.includes("刚构");
+}
+
+function continuousGroupIndex(upper: UpperStructureModel) {
+  return Number(upper.properties.group_index ?? upper.span_index);
+}
+
+function continuousMainSupports(uppers: UpperStructureModel[], spanIndices: number[]) {
+  const configured = continuousListSetting(uppers, ["main_support_indices", "main_pier_indices"]);
+  if (configured.length) return [...new Set(configured)].sort((a, b) => a - b);
+  if (spanIndices.length < 2) return [];
+  const result: number[] = [];
+  for (let support = Math.min(...spanIndices); support < Math.max(...spanIndices); support += 1) {
+    result.push(support);
+  }
+  return result;
+}
+
+function middleClosureLevels(uppers: UpperStructureModel[], middleCount: number) {
+  if (middleCount <= 1) return Array.from({ length: middleCount }, (_, index) => [index + 1]);
+  const configured = continuousNestedListSetting(uppers, ["middle_closure_sequence", "mid_span_closure_sequence"]);
+  if (configured.length) return validMiddleClosureLevels(configured, middleCount);
+  const strategy = String(continuousSetting(uppers, ["middle_closure_order", "mid_span_closure_order", "closure_order"]) ?? "side_to_center");
+  if (strategy === "left_to_right" || strategy === "one_side_to_other") {
+    return Array.from({ length: middleCount }, (_, index) => [index + 1]);
+  }
+  if (strategy === "right_to_left") {
+    return Array.from({ length: middleCount }, (_, index) => [middleCount - index]);
+  }
+  const levels: number[][] = [];
+  let left = 1;
+  let right = middleCount;
+  while (left <= right) {
+    levels.push(left === right ? [left] : [left, right]);
+    left += 1;
+    right -= 1;
+  }
+  return levels;
+}
+
+function validMiddleClosureLevels(levels: number[][], middleCount: number) {
+  const seen = new Set<number>();
+  const valid = levels
+    .map((level) => level.filter((index) => index >= 1 && index <= middleCount && !seen.has(index) && (seen.add(index) || true)))
+    .filter((level) => level.length);
+  for (let index = 1; index <= middleCount; index += 1) {
+    if (!seen.has(index)) valid.push([index]);
+  }
+  return valid;
+}
+
+function continuousIntSetting(uppers: UpperStructureModel[], keys: string[], defaultValue: number, minimum: number) {
+  const value = Number(continuousSetting(uppers, keys));
+  return Number.isFinite(value) ? Math.max(minimum, Math.trunc(value)) : defaultValue;
+}
+
+function continuousListSetting(uppers: UpperStructureModel[], keys: string[]) {
+  const value = continuousSetting(uppers, keys);
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => Number(item)).filter((item) => Number.isFinite(item));
+}
+
+function continuousNestedListSetting(uppers: UpperStructureModel[], keys: string[]) {
+  const value = continuousSetting(uppers, keys);
+  if (!Array.isArray(value)) return [];
+  if (value.every((item) => !Array.isArray(item))) {
+    return continuousListSettingFromValue(value).map((item) => [item]);
+  }
+  return value
+    .filter((item): item is unknown[] => Array.isArray(item))
+    .map((item) => continuousListSettingFromValue(item))
+    .filter((item) => item.length);
+}
+
+function continuousListSettingFromValue(value: unknown[]) {
+  return value.map((item) => Number(item)).filter((item) => Number.isFinite(item));
+}
+
+function continuousSetting(uppers: UpperStructureModel[], keys: string[]) {
+  for (const upper of uppers) {
+    const nested = upper.properties.continuous_beam;
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+      const record = nested as Record<string, unknown>;
+      for (const key of keys) {
+        if (record[key] !== undefined && record[key] !== null) return record[key];
+      }
+    }
+    for (const key of keys) {
+      if (upper.properties[key] !== undefined && upper.properties[key] !== null) return upper.properties[key];
+    }
+  }
+  return null;
+}
+
+function sideCodeFor(side: WorkSectionSide) {
+  return ({ left: "L", right: "R", none: "N" } as const)[side] ?? "N";
+}
+
+function sideLabelFor(side: WorkSectionSide) {
+  return ({ left: "左幅", right: "右幅", none: "" } as const)[side] ?? "";
 }
 
 function selectProcess(componentModel: ComponentModel, processLibrary: ProcessTemplate[]) {
@@ -883,8 +1777,24 @@ function selectProcess(componentModel: ComponentModel, processLibrary: ProcessTe
   return options.find((item) => item.is_default) ?? options[0] ?? null;
 }
 
+function effectiveProcessForComponent(processTemplate: ProcessTemplate, componentModel: ComponentModel): ProcessTemplate {
+  if (componentModel.component_type === "cast_in_place_continuous_beam" && componentModel.method_id === "standard_segment") {
+    return {
+      ...processTemplate,
+      duration_method: "days_per_unit",
+      quantity_source: "count",
+    };
+  }
+  return processTemplate;
+}
+
 function quantityForProcess(componentModel: ComponentModel, quantitySource: string) {
-  if (quantitySource === "count") return 1;
+  if (quantitySource === "count") {
+    if (componentModel.component_type === "cast_in_place_continuous_beam" && componentModel.method_id === "standard_segment") {
+      return componentModel.quantity;
+    }
+    return 1;
+  }
   if (quantitySource === "pile_length_m") return Number(componentModel.properties.length_m ?? componentModel.quantity);
   if (quantitySource === "pier_height_m") return Number(componentModel.properties.height_m ?? componentModel.quantity);
   if (quantitySource === "deck_length_m") {
@@ -894,6 +1804,12 @@ function quantityForProcess(componentModel: ComponentModel, quantitySource: stri
 }
 
 function calculateDuration(quantity: number, processTemplate: ProcessTemplate) {
+  if (
+    processTemplate.component_type === "cast_in_place_continuous_beam"
+    && processTemplate.id.startsWith("cast_in_place_continuous_standard_segment")
+  ) {
+    return Math.max(1, Math.ceil(quantity * processTemplate.productivity_value));
+  }
   if (
     processTemplate.component_type === "pier_body"
     && processTemplate.quantity_source === "pier_height_m"
@@ -999,6 +1915,19 @@ function solveScenario(scenario: ScenarioInput, useMaxResources: boolean) {
   };
 }
 
+function earliestStartFromPrecedenceLink(link: PrecedenceLink, predecessor: ScheduledTask, successor: Task) {
+  if (link.relationship === "SS") {
+    return predecessor.start_offset + link.lag_days;
+  }
+  if (link.relationship === "FF") {
+    return predecessor.end_offset + link.lag_days - successor.duration_days;
+  }
+  if (link.relationship === "SF") {
+    return predecessor.start_offset + link.lag_days - successor.duration_days;
+  }
+  return predecessor.end_offset + link.lag_days;
+}
+
 function schedule(generated: GeneratedScheduleInput) {
   const input = generated.schedule_input;
   const predecessorLinks = groupBy(input.precedence_links, (link) => link.successor_id);
@@ -1019,7 +1948,7 @@ function schedule(generated: GeneratedScheduleInput) {
     const readyAt = Math.max(0, ...links.map((link) => {
       const predecessor = scheduledById.get(link.predecessor_id);
       if (!predecessor) return 0;
-      return (link.relationship === "SS" ? predecessor.start_offset : predecessor.end_offset) + link.lag_days;
+      return earliestStartFromPrecedenceLink(link, predecessor, task);
     }));
     const candidates = task.compatible_resource_types.flatMap((type) => resourcesByType.get(type) ?? []);
     const assigned = candidates.reduce<Resource | null>((best, current) => {
@@ -1109,6 +2038,12 @@ function milestoneResults(milestones: MilestoneConstraint[], tasks: ScheduledTas
   });
 }
 
+function isLowerOrCastInPlaceBeamTask(task: Task) {
+  return ["pier", "abutment"].includes(task.structure_type)
+    || task.component_type === "cast_in_place_continuous_beam"
+    || task.component_type === "cast_in_place_box_beam";
+}
+
 function tasksForMilestone(milestoneModel: MilestoneConstraint, tasks: ScheduledTask[]) {
   if (milestoneModel.scope_type === "component" && milestoneModel.scope_id) {
     return tasks.filter((task) => task.component_type === milestoneModel.scope_id || task.component_id === milestoneModel.scope_id);
@@ -1117,12 +2052,12 @@ function tasksForMilestone(milestoneModel: MilestoneConstraint, tasks: Scheduled
     return tasks.filter((task) => task.structure_id === milestoneModel.scope_id);
   }
   if (milestoneModel.scope_type === "work_section" && milestoneModel.scope_id) {
-    return tasks.filter((task) => task.work_section_id === milestoneModel.scope_id);
+    return tasks.filter((task) => task.work_section_id === milestoneModel.scope_id && isLowerOrCastInPlaceBeamTask(task));
   }
   if (milestoneModel.scope_type === "bridge" && milestoneModel.scope_id) {
-    return tasks.filter((task) => task.bridge_id === milestoneModel.scope_id);
+    return tasks.filter((task) => task.bridge_id === milestoneModel.scope_id && isLowerOrCastInPlaceBeamTask(task));
   }
-  return tasks;
+  return tasks.filter(isLowerOrCastInPlaceBeamTask);
 }
 
 async function applyProcessNaturalLanguage(scenario: ScenarioInput, prompt: string) {

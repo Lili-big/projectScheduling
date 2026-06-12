@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .models import (
     ComponentModel,
+    ComponentType,
     LogicRule,
     MilestoneConstraint,
     ProcessTemplate,
@@ -15,6 +16,8 @@ from .models import (
     ResourcePool,
     ScenarioInput,
     StructureModel,
+    UpperStructureComponent,
+    UpperStructureLogicRule,
     WorkSection,
 )
 from .process_library_defaults import historical_default_process_library
@@ -22,6 +25,9 @@ from .sample_data import default_bridge
 
 
 SCHEDULE_LOGIC_ONTOLOGY_PATH = Path(__file__).resolve().parent / "ontology" / "bridge_schedule_logic_ontology.v1.json"
+CONTINUOUS_BEAM_STRUCTURE_CODE = "castInPlaceContinuousBoxGirder"
+CONTINUOUS_BEAM_DEFAULT_STANDARD_SEGMENT_CYCLES = 18
+CAST_IN_PLACE_BOX_BEAM_STRUCTURE_CODE = "castInPlaceBoxGirder"
 
 
 def default_scenario() -> ScenarioInput:
@@ -147,6 +153,7 @@ def default_scenario() -> ScenarioInput:
         project=project,
         process_library=default_process_library(),
         logic_rules=default_scenario_logic_rules(),
+        upper_structure_logic_rules=default_upper_structure_logic_rules(),
         resource_calendars=default_resource_calendars(),
         resource_pools=default_resource_pools(),
         milestones=default_milestones(),
@@ -179,7 +186,170 @@ def _component_counts_by_resource_type(scenario: ScenarioInput) -> dict[str, int
                     if process is None:
                         continue
                     counts[process.resource_type] = counts.get(process.resource_type, 0) + 1
+            for resource_type, task_count in _upper_structure_counts_by_resource_type(
+                section.upper_structures,
+                scenario.process_library,
+            ).items():
+                counts[resource_type] = counts.get(resource_type, 0) + task_count
     return counts
+
+
+def _upper_structure_counts_by_resource_type(
+    upper_structures: list[UpperStructureComponent],
+    process_library: list[ProcessTemplate],
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    box_count = len(_cast_in_place_box_beam_groups(upper_structures))
+    _add_upper_count(counts, process_library, "cast_in_place_box_beam", None, box_count)
+
+    method_counts: dict[str, int] = {}
+    for uppers in _continuous_beam_groups(upper_structures):
+        span_indices = sorted({upper.span_index for upper in uppers})
+        main_support_count = _continuous_main_support_count(uppers, span_indices)
+        if main_support_count <= 0:
+            continue
+        standard_cycles = _continuous_int_setting(
+            uppers,
+            ["standard_segment_cycles", "standard_block_cycles", "standard_blocks_per_side"],
+            default=CONTINUOUS_BEAM_DEFAULT_STANDARD_SEGMENT_CYCLES,
+            minimum=0,
+        )
+        method_counts["zero_block"] = method_counts.get("zero_block", 0) + main_support_count
+        if standard_cycles > 0:
+            method_counts["standard_segment"] = method_counts.get("standard_segment", 0) + main_support_count
+        method_counts["straight_segment"] = method_counts.get("straight_segment", 0) + 2
+        method_counts["closure_segment"] = method_counts.get("closure_segment", 0) + main_support_count + 1
+
+    for process in process_library:
+        if process.component_type != "cast_in_place_continuous_beam" or not process.method_id:
+            continue
+        task_count = method_counts.get(process.method_id, 0)
+        if task_count:
+            counts[process.resource_type] = counts.get(process.resource_type, 0) + task_count
+    return counts
+
+
+def _add_upper_count(
+    counts: dict[str, int],
+    process_library: list[ProcessTemplate],
+    component_type: ComponentType,
+    method_id: str | None,
+    task_count: int,
+) -> None:
+    if task_count <= 0:
+        return
+    process = _default_process_for_component(
+        ComponentModel(
+            id="upper-count-probe",
+            name="上部结构计数探针",
+            component_type=component_type,
+            quantity=1,
+            method_id=method_id,
+        ),
+        process_library,
+    )
+    if process is not None:
+        counts[process.resource_type] = counts.get(process.resource_type, 0) + task_count
+
+
+def _continuous_beam_groups(upper_structures: list[UpperStructureComponent]) -> list[list[UpperStructureComponent]]:
+    groups: dict[int, list[UpperStructureComponent]] = {}
+    for upper in upper_structures:
+        if not _is_continuous_beam_upper(upper):
+            continue
+        groups.setdefault(_continuous_group_index(upper), []).append(upper)
+    return [
+        sorted(group, key=lambda item: item.span_index)
+        for _, group in sorted(groups.items(), key=lambda item: (min(upper.span_index for upper in item[1]), item[0]))
+    ]
+
+
+def _is_continuous_beam_upper(upper: UpperStructureComponent) -> bool:
+    if upper.properties.get("structure_code") == CONTINUOUS_BEAM_STRUCTURE_CODE:
+        return True
+    return any(keyword in upper.structure_type for keyword in ("连续", "刚构"))
+
+
+def _cast_in_place_box_beam_groups(upper_structures: list[UpperStructureComponent]) -> list[list[UpperStructureComponent]]:
+    groups: dict[int, list[UpperStructureComponent]] = {}
+    for upper in upper_structures:
+        if not _is_cast_in_place_box_beam_upper(upper):
+            continue
+        groups.setdefault(_upper_group_index(upper), []).append(upper)
+    return [
+        sorted(group, key=lambda item: item.span_index)
+        for _, group in sorted(groups.items(), key=lambda item: (min(upper.span_index for upper in item[1]), item[0]))
+    ]
+
+
+def _is_cast_in_place_box_beam_upper(upper: UpperStructureComponent) -> bool:
+    structure_code = upper.properties.get("structure_code")
+    if structure_code == CAST_IN_PLACE_BOX_BEAM_STRUCTURE_CODE:
+        return True
+    return "现浇" in upper.structure_type and "箱梁" in upper.structure_type and not _is_continuous_beam_upper(upper)
+
+
+def _upper_group_index(upper: UpperStructureComponent) -> int:
+    try:
+        return int(upper.properties.get("group_index"))
+    except (TypeError, ValueError):
+        return upper.span_index
+
+
+def _continuous_group_index(upper: UpperStructureComponent) -> int:
+    try:
+        return int(upper.properties.get("group_index"))
+    except (TypeError, ValueError):
+        return upper.span_index
+
+
+def _continuous_main_support_count(uppers: list[UpperStructureComponent], span_indices: list[int]) -> int:
+    configured = _continuous_list_setting(uppers, ["main_support_indices", "main_pier_indices"])
+    if configured:
+        return len(set(configured))
+    if len(span_indices) < 2:
+        return 0
+    return max(span_indices) - min(span_indices)
+
+
+def _continuous_int_setting(
+    uppers: list[UpperStructureComponent],
+    keys: list[str],
+    *,
+    default: int,
+    minimum: int,
+) -> int:
+    value = _continuous_setting(uppers, keys)
+    try:
+        return max(minimum, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _continuous_list_setting(uppers: list[UpperStructureComponent], keys: list[str]) -> list[int]:
+    value = _continuous_setting(uppers, keys)
+    if not isinstance(value, list):
+        return []
+    result = []
+    for item in value:
+        try:
+            result.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+def _continuous_setting(uppers: list[UpperStructureComponent], keys: list[str]) -> object:
+    for upper in uppers:
+        nested = upper.properties.get("continuous_beam")
+        if isinstance(nested, dict):
+            for key in keys:
+                if key in nested and nested[key] is not None:
+                    return nested[key]
+        for key in keys:
+            if key in upper.properties and upper.properties[key] is not None:
+                return upper.properties[key]
+    return None
 
 
 def _default_process_for_component(component: ComponentModel, process_library: list[ProcessTemplate]) -> ProcessTemplate | None:
@@ -198,6 +368,43 @@ def default_scenario_logic_rules() -> list[LogicRule]:
     if data.get("schema_version") != "bridge-schedule-logic-ontology/v1":
         raise ValueError(f"工艺逻辑本体版本不支持: {data.get('schema_version')}")
     return [LogicRule.model_validate(item) for item in data.get("logic_rules", [])]
+
+
+def default_upper_structure_logic_rules() -> list[UpperStructureLogicRule]:
+    return [
+        UpperStructureLogicRule(
+            id="cast_in_place_box_beam_after_lower_structure",
+            note="现浇箱梁在对应跨组墩台下部结构完成后开始。",
+        ),
+        UpperStructureLogicRule(
+            id="continuous_beam_zero_block_after_main_pier_lower_structure",
+            note="连续梁0号块在对应主墩下部结构完成后开始。",
+        ),
+        UpperStructureLogicRule(
+            id="continuous_beam_side_straight_after_edge_lower_structure",
+            note="连续梁边跨连续段在对应边跨墩台下部结构完成后开始。",
+        ),
+        UpperStructureLogicRule(
+            id="continuous_beam_t_chain",
+            note="连续梁T构内0号块和标准段按顺序施工。",
+        ),
+        UpperStructureLogicRule(
+            id="continuous_beam_side_closure",
+            note="连续梁边跨合龙段在边跨连续段和相邻T构完成后开始。",
+        ),
+        UpperStructureLogicRule(
+            id="continuous_beam_middle_closure",
+            note="连续梁中跨合龙段在相邻两个T构完成后开始。",
+        ),
+        UpperStructureLogicRule(
+            id="continuous_beam_edge_before_middle_closure",
+            note="连续梁默认边跨合龙先于中跨合龙。",
+        ),
+        UpperStructureLogicRule(
+            id="continuous_beam_middle_closure_sequence",
+            note="连续梁中跨合龙按配置顺序推进。",
+        ),
+    ]
 
 
 def default_resource_calendars() -> list[ResourceCalendar]:
@@ -236,7 +443,7 @@ def default_milestones() -> list[MilestoneConstraint]:
     return [
         MilestoneConstraint(
             id="M-contract-finish",
-            name="合同下部结构完工",
+            name="合同下部结构及上部现浇梁完工",
             level="contract",
             mode="hard",
             scope_type="bridge",
@@ -246,7 +453,7 @@ def default_milestones() -> list[MilestoneConstraint]:
         ),
         MilestoneConstraint(
             id="M-control-ws-lower",
-            name="下部结构强控节点",
+            name="下部结构及上部现浇梁强控节点",
             level="control",
             mode="hard",
             scope_type="bridge",

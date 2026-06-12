@@ -53,7 +53,8 @@ def test_bridge_excel_import_understands_sample_workbook() -> None:
     right_0 = next(support for support in carriageways["right"]["supports"] if support["supportNo"] == "0#台")
     assert right_0["foundationType"] == "扩大基础"
 
-    assert any(warning["id"] == "formula_error_normalized" for warning in response.warnings)
+    assert any(warning["id"] == "continuous_beam_blocks_missing_left" for warning in response.warnings)
+    assert any(warning["id"] == "continuous_beam_blocks_missing_right" for warning in response.warnings)
     assert any(check["id"] == "support_count_right" and check["status"] == "passed" for check in response.quality_checks)
 
 

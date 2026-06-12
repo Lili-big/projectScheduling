@@ -390,10 +390,18 @@ def _upper_structures_from_span_groups(
                     properties={
                         "structure_code": group.get("structureCode"),
                         "group_index": group.get("groupIndex"),
+                        "span_start_index": group.get("spanStartIndex"),
+                        "span_end_index": group.get("spanEndIndex"),
+                        "span_lengths_m": group.get("spanLengthsM"),
                         "span_count_per_unit": group.get("spanCountPerUnit"),
                         "same_type_span_count": group.get("sameTypeSpanCount"),
                         "total_span_count": group.get("totalSpanCount"),
                         "source": group.get("source"),
+                        "continuous_beam": (
+                            {"middle_closure_order": "side_to_center"}
+                            if group.get("structureCode") == "castInPlaceContinuousBoxGirder"
+                            else None
+                        ),
                     },
                 )
             )
@@ -693,8 +701,9 @@ def _build_span_groups(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         previous = current[-1]
         same_continuous = span["code"] == previous["code"] == "castInPlaceContinuousBoxGirder"
+        same_cast_in_place_box = span["code"] == previous["code"] == "castInPlaceBoxGirder"
         same_simple = span["code"] == previous["code"] and span["length"] == previous["length"]
-        if same_continuous or same_simple:
+        if same_continuous or same_cast_in_place_box or same_simple:
             current.append(span)
         else:
             groups.append(_span_group_payload(current, len(groups) + 1))
@@ -712,7 +721,13 @@ def _build_span_groups(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _span_group_payload(spans: list[dict[str, Any]], index: int) -> dict[str, Any]:
     code = spans[0]["code"]
     lengths = [span["length"] for span in spans]
+    if _looks_like_continuous_box_group(code, lengths):
+        code = "castInPlaceContinuousBoxGirder"
     if code == "castInPlaceContinuousBoxGirder":
+        expression = "+".join(_format_number(length) for length in lengths)
+        same_type_count = 1
+        span_count_per_unit = len(spans)
+    elif code == "castInPlaceBoxGirder":
         expression = "+".join(_format_number(length) for length in lengths)
         same_type_count = 1
         span_count_per_unit = len(spans)
@@ -720,6 +735,7 @@ def _span_group_payload(spans: list[dict[str, Any]], index: int) -> dict[str, An
         expression = f"{len(spans)}*{_format_number(lengths[0])}" if len(spans) > 1 else _format_number(lengths[0])
         same_type_count = len(spans)
         span_count_per_unit = 1
+    structure_type = "现浇连续梁" if code == "castInPlaceContinuousBoxGirder" else "现浇箱梁" if code == "castInPlaceBoxGirder" else "简支T梁"
     return {
         "groupIndex": index,
         "expression": expression,
@@ -729,7 +745,7 @@ def _span_group_payload(spans: list[dict[str, Any]], index: int) -> dict[str, An
         "spanLengthsM": lengths,
         "spanStartIndex": None,
         "spanEndIndex": None,
-        "structureType": "现浇连续梁" if code == "castInPlaceContinuousBoxGirder" else "简支T梁",
+        "structureType": structure_type,
         "structureCode": code,
         "beamHeightM": None,
         "beamCountPerSpan": spans[0].get("count"),
@@ -737,6 +753,14 @@ def _span_group_payload(spans: list[dict[str, Any]], index: int) -> dict[str, An
         "horizontalOffsetM": None,
         "source": "upperStructureAtSupport",
     }
+
+
+def _looks_like_continuous_box_group(code: str, lengths: list[float]) -> bool:
+    return (
+        code == "castInPlaceBoxGirder"
+        and len(lengths) >= 2
+        and len({round(length, 3) for length in lengths}) > 1
+    )
 
 
 def _append_support_count_check(
@@ -1208,8 +1232,10 @@ def _side_label(side: str) -> str:
 
 
 def _upper_structure_code(text: str) -> str:
-    if any(token in text for token in ["现浇", "连续", "刚构"]):
+    if any(token in text for token in ["连续", "刚构"]):
         return "castInPlaceContinuousBoxGirder"
+    if "现浇" in text and "箱梁" in text:
+        return "castInPlaceBoxGirder"
     return "precastTGirder"
 
 

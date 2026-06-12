@@ -74,7 +74,7 @@ ProjectModel
       -> UpperStructureComponent
 ```
 
-下部结构 `ComponentModel` 会进入任务生成；上部结构 `UpperStructureComponent` 当前用于展示和辅助判断连续梁主墩等规则，不直接生成下部结构任务。
+下部结构 `ComponentModel` 会进入任务生成；本期上部结构仅对现浇箱梁、现浇连续梁/连续刚构派生上部施工任务并挂接下部完成前置。简支梁暂只保留为结构参数和展示信息，不生成现场架梁排程任务；现浇箱梁按跨组生成现浇/安装任务，现浇连续梁/连续刚构按 T 构、边跨直线段、边跨合龙段和中跨合龙段派生排程任务，纳入桥梁完工和后续通道判断。
 
 ### 3.3 求解输入模型
 
@@ -213,7 +213,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-  A["ScenarioInput"] --> B["遍历 ProjectModel 下部构件"]
+  A["ScenarioInput"] --> B["遍历 ProjectModel 下部构件和上部结构"]
   B --> C["按构件类型和 method_id 匹配 ProcessTemplate"]
   C --> D["按 productivity_option_id 匹配 ProductivityOption"]
   D --> E["计算工程量和 duration_days"]

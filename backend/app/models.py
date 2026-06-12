@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 
-StructureType = Literal["pier", "abutment"]
+StructureType = Literal["pier", "abutment", "upper_structure", "continuous_beam"]
 ComponentType = Literal[
     "pile",
     "cap",
@@ -27,7 +27,7 @@ WorkPointType = Literal["road", "bridge", "tunnel"]
 WorkSectionSide = Literal["left", "right", "none"]
 DurationMethod = Literal["units_per_day", "days_per_unit", "fixed_days"]
 PredecessorStrategy = Literal["all", "first_available"]
-RelationshipType = Literal["FS", "SS"]
+RelationshipType = Literal["FS", "SS", "FF", "SF"]
 LogicScope = Literal["same_structure", "structure_sequence"]
 LogicSeverity = Literal["error", "warning"]
 PileMethod = Literal["rotary_drill", "impact_drill", "manual_pile"]
@@ -121,6 +121,14 @@ class LogicRule(BaseModel):
     predecessor_strategy: PredecessorStrategy = "first_available"
     relationship: RelationshipType = "FS"
     lag_days: int = Field(ge=0)
+    severity: LogicSeverity = "error"
+    note: str = ""
+
+
+class UpperStructureLogicRule(BaseModel):
+    id: str
+    relationship: RelationshipType = "FS"
+    lag_days: int = Field(default=0, ge=0)
     severity: LogicSeverity = "error"
     note: str = ""
 
@@ -347,6 +355,7 @@ class ScenarioInput(BaseModel):
     project: ProjectModel
     process_library: list[ProcessTemplate]
     logic_rules: list[LogicRule]
+    upper_structure_logic_rules: list[UpperStructureLogicRule] = []
     resource_calendars: list[ResourceCalendar] = []
     resource_pools: list[ResourcePool]
     milestones: list[MilestoneConstraint] = []

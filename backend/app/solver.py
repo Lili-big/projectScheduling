@@ -41,6 +41,44 @@ COMPONENT_TYPE_LABELS: dict[str, str] = {
 }
 
 
+def _add_precedence_constraint(model: Any, starts: dict[str, Any], ends: dict[str, Any], link: PrecedenceLink) -> None:
+    if link.relationship == "SS":
+        model.Add(starts[link.successor_id] >= starts[link.predecessor_id] + link.lag_days)
+    elif link.relationship == "FF":
+        model.Add(ends[link.successor_id] >= ends[link.predecessor_id] + link.lag_days)
+    elif link.relationship == "SF":
+        model.Add(ends[link.successor_id] >= starts[link.predecessor_id] + link.lag_days)
+    else:
+        model.Add(starts[link.successor_id] >= ends[link.predecessor_id] + link.lag_days)
+
+
+def _successor_earliest_start_from_link(
+    *,
+    predecessor_start: int,
+    predecessor_duration: int,
+    successor_duration: int,
+    link: PrecedenceLink,
+) -> int:
+    predecessor_end = predecessor_start + predecessor_duration
+    if link.relationship == "SS":
+        return predecessor_start + link.lag_days
+    if link.relationship == "FF":
+        return predecessor_end + link.lag_days - successor_duration
+    if link.relationship == "SF":
+        return predecessor_start + link.lag_days - successor_duration
+    return predecessor_end + link.lag_days
+
+
+def _precedence_violated(predecessor: ScheduledTask, successor: ScheduledTask, link: PrecedenceLink) -> bool:
+    if link.relationship == "SS":
+        return successor.start_offset < predecessor.start_offset + link.lag_days
+    if link.relationship == "FF":
+        return successor.end_offset < predecessor.end_offset + link.lag_days
+    if link.relationship == "SF":
+        return successor.end_offset < predecessor.start_offset + link.lag_days
+    return successor.start_offset < predecessor.end_offset + link.lag_days
+
+
 def solve_schedule(schedule_input: ScheduleInput) -> ScheduleResult:
     enabled_resources = [resource for resource in schedule_input.resources if resource.enabled]
     resource_candidates = _resource_candidates_by_task(schedule_input.tasks, enabled_resources)
@@ -111,10 +149,7 @@ def solve_schedule(schedule_input: ScheduleInput) -> ScheduleResult:
                 )
             )
             continue
-        if link.relationship == "SS":
-            model.Add(starts[successor.id] >= starts[predecessor.id] + link.lag_days)
-        else:
-            model.Add(starts[successor.id] >= ends[predecessor.id] + link.lag_days)
+        _add_precedence_constraint(model, starts, ends, link)
 
     for intervals in resource_intervals.values():
         model.AddNoOverlap(intervals)
@@ -510,10 +545,7 @@ def _solve_resource_model(
                 ValidationMessage(level="warning", subject_id=link.id, message=f"已跳过逻辑关系 {link.id}：前置或后续工作项不存在。")
             )
             continue
-        if link.relationship == "SS":
-            model.Add(starts[successor.id] >= starts[predecessor.id] + link.lag_days)
-        else:
-            model.Add(starts[successor.id] >= ends[predecessor.id] + link.lag_days)
+        _add_precedence_constraint(model, starts, ends, link)
 
     for intervals in resource_intervals.values():
         model.AddNoOverlap(intervals)
@@ -673,10 +705,7 @@ def _solve_capacity_model(
                 ValidationMessage(level="warning", subject_id=link.id, message=f"已跳过逻辑关系 {link.id}：前置或后续工作项不存在。")
             )
             continue
-        if link.relationship == "SS":
-            model.Add(starts[successor.id] >= starts[predecessor.id] + link.lag_days)
-        else:
-            model.Add(starts[successor.id] >= ends[predecessor.id] + link.lag_days)
+        _add_precedence_constraint(model, starts, ends, link)
 
     makespan = model.NewIntVar(0, horizon, "makespan")
     model.AddMaxEquality(makespan, [ends[task.id] for task in schedule_input.tasks])
@@ -1421,6 +1450,8 @@ def _task_location(task: Task) -> dict[str, Any]:
 
 def _side_code_from_structure_id(structure_id: str) -> str | None:
     parts = structure_id.split("-")
+    if len(parts) >= 2 and parts[1] in {"L", "R", "N"}:
+        return parts[1]
     if len(parts) >= 3 and parts[-2] in {"L", "R", "N"}:
         return parts[-2]
     return None
@@ -1428,6 +1459,12 @@ def _side_code_from_structure_id(structure_id: str) -> str | None:
 
 def _support_index_from_structure_id(structure_id: str) -> int | None:
     parts = structure_id.split("-")
+    if len(parts) >= 2 and parts[1] in {"L", "R", "N"}:
+        for part in reversed(parts[2:]):
+            support_index = _extract_first_int(part)
+            if support_index is not None:
+                return support_index
+        return None
     if len(parts) >= 3 and parts[-2] in {"L", "R", "N"}:
         return _extract_first_int(parts[-1])
     return _extract_first_int(parts[-1] if parts else structure_id)
@@ -1497,12 +1534,14 @@ def _critical_path_schedule(schedule_input: ScheduleInput) -> dict[str, Any]:
         processed_count += 1
         predecessor = task_by_id[task_id]
         predecessor_start = starts[task_id]
-        predecessor_end = predecessor_start + predecessor.duration_days
         for link in outgoing.get(task_id, []):
-            if link.relationship == "SS":
-                candidate_start = predecessor_start + link.lag_days
-            else:
-                candidate_start = predecessor_end + link.lag_days
+            successor = task_by_id[link.successor_id]
+            candidate_start = _successor_earliest_start_from_link(
+                predecessor_start=predecessor_start,
+                predecessor_duration=predecessor.duration_days,
+                successor_duration=successor.duration_days,
+                link=link,
+            )
             if candidate_start > starts[link.successor_id]:
                 starts[link.successor_id] = candidate_start
             incoming_count[link.successor_id] -= 1
@@ -1702,11 +1741,7 @@ def _validate_solution(
         successor = by_task.get(link.successor_id)
         if not predecessor or not successor:
             continue
-        if link.relationship == "SS":
-            violated = successor.start_offset < predecessor.start_offset + link.lag_days
-        else:
-            violated = successor.start_offset < predecessor.end_offset + link.lag_days
-        if violated:
+        if _precedence_violated(predecessor, successor, link):
             logic_violations += 1
 
     overlap_violations = 0
@@ -1747,13 +1782,28 @@ def _build_horizon(schedule_input: ScheduleInput) -> int:
     return max(1, total_duration + total_lag + 30)
 
 
+def _is_lower_or_cast_in_place_beam_task(task: Task) -> bool:
+    return task.structure_type in {"pier", "abutment"} or task.component_type in {
+        "cast_in_place_continuous_beam",
+        "cast_in_place_box_beam",
+    }
+
+
 def _task_ids_for_milestone(milestone: MilestoneConstraint, tasks: list[Task]) -> list[str]:
     if milestone.scope_type == "project":
-        return [task.id for task in tasks]
+        return [task.id for task in tasks if _is_lower_or_cast_in_place_beam_task(task)]
     if milestone.scope_type == "bridge":
-        return [task.id for task in tasks if task.bridge_id == milestone.scope_id]
+        return [
+            task.id
+            for task in tasks
+            if task.bridge_id == milestone.scope_id and _is_lower_or_cast_in_place_beam_task(task)
+        ]
     if milestone.scope_type == "work_section":
-        return [task.id for task in tasks if task.work_section_id == milestone.scope_id]
+        return [
+            task.id
+            for task in tasks
+            if task.work_section_id == milestone.scope_id and _is_lower_or_cast_in_place_beam_task(task)
+        ]
     if milestone.scope_type == "structure":
         return [task.id for task in tasks if task.structure_id == milestone.scope_id]
     if milestone.scope_type == "component":

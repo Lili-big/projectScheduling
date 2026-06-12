@@ -27,6 +27,11 @@ PILE_RULE_BY_METHOD = {
 
 def calculate_duration(quantity: float, rule: ProductivityRule) -> int:
     if (
+        rule.component_type == "cast_in_place_continuous_beam"
+        and rule.id.startswith("cast_in_place_continuous_standard_segment")
+    ):
+        return max(1, math.ceil(quantity * rule.productivity_value))
+    if (
         rule.component_type == "pier_body"
         and rule.quantity_source == "pier_height_m"
         and rule.productivity_unit == "天/节"

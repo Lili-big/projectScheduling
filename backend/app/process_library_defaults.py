@@ -14,7 +14,6 @@ def historical_default_process_library() -> list[ProcessTemplate]:
         _process("ground_tie_beam_standard", "ground_tie_beam", "桩系梁施工", None, "fixed_days", "count", 3, "天/个", "tie_beam_team", True),
         _process("cap_standard", "cap", "承台施工", None, "fixed_days", "count", 30, "天/个", "cap_team", True),
         _process("spread_foundation_standard", "spread_foundation", "扩大基础施工", None, "fixed_days", "count", 8, "天/个", "spread_foundation_team", True),
-        _process("pier_body_standard", "pier_body", "整体式浇筑", "integral_casting", "fixed_days", "count", 20, "天/个", "pier_body_team", True),
         _process(
             "pier_body_climbing_form",
             "pier_body",
@@ -28,6 +27,7 @@ def historical_default_process_library() -> list[ProcessTemplate]:
             False,
             standard_section_height_m=4.5,
         ),
+        _process("pier_body_standard", "pier_body", "整体式浇筑", "integral_casting", "fixed_days", "count", 20, "天/个", "pier_body_team", True),
         _process(
             "pier_body_sliding_form",
             "pier_body",
@@ -60,7 +60,7 @@ def historical_default_process_library() -> list[ProcessTemplate]:
         _process("precast_beam_standard", "precast_beam", "制梁", None, "fixed_days", "count", 35, "天/片", "precast_beam_team", True),
         _process("beam_erection_standard", "beam_erection", "架梁", None, "fixed_days", "count", 2, "天/片", "beam_erection_team", True),
         _process("cast_in_place_continuous_zero_block", "cast_in_place_continuous_beam", "0号块", "zero_block", "fixed_days", "count", 120, "天/块", "cast_in_place_continuous_beam_team", True),
-        _process("cast_in_place_continuous_standard_segment", "cast_in_place_continuous_beam", "标准块", "standard_segment", "fixed_days", "count", 10, "天/块", "cast_in_place_continuous_beam_team", False),
+        _process("cast_in_place_continuous_standard_segment", "cast_in_place_continuous_beam", "标准块", "standard_segment", "days_per_unit", "count", 10, "天/块", "cast_in_place_continuous_beam_team", False),
         _process("cast_in_place_continuous_closure_segment", "cast_in_place_continuous_beam", "合拢段", "closure_segment", "fixed_days", "count", 30, "天/块", "cast_in_place_continuous_beam_team", False),
         _process("cast_in_place_continuous_straight_segment", "cast_in_place_continuous_beam", "直线段", "straight_segment", "fixed_days", "count", 35, "天/块", "cast_in_place_continuous_beam_team", False),
         _process("cast_in_place_box_beam_standard", "cast_in_place_box_beam", "现浇箱梁", None, "fixed_days", "count", 45, "天/联", "cast_in_place_box_beam_team", True),
@@ -122,6 +122,7 @@ _PREVIOUS_BUILTIN_DEFAULTS: dict[str, tuple[str, str, float, str]] = {
     "middle_tie_beam_standard": ("fixed_days", "count", 4, "天/个"),
     "cap_beam_standard": ("fixed_days", "count", 7, "天/个"),
     "abutment_body_standard": ("fixed_days", "count", 10, "天/个"),
+    "cast_in_place_continuous_standard_segment": ("fixed_days", "count", 10, "天/块"),
 }
 
 
