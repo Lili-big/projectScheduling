@@ -24,10 +24,10 @@ def historical_default_process_library() -> list[ProcessTemplate]:
             7,
             "天/节",
             "pier_body_team",
-            False,
+            True,
             standard_section_height_m=4.5,
         ),
-        _process("pier_body_standard", "pier_body", "整体式浇筑", "integral_casting", "fixed_days", "count", 20, "天/个", "pier_body_team", True),
+        _process("pier_body_standard", "pier_body", "整体式浇筑", "integral_casting", "fixed_days", "count", 20, "天/个", "pier_body_team", False),
         _process(
             "pier_body_sliding_form",
             "pier_body",
@@ -87,6 +87,7 @@ def upgrade_process_library(process_library: list[ProcessTemplate], defaults: li
         if process.id not in seen_ids:
             upgraded.append(_validated_copy(process))
 
+    _apply_default_process_migrations(upgraded)
     return _sort_process_library(upgraded)
 
 
@@ -124,6 +125,21 @@ _PREVIOUS_BUILTIN_DEFAULTS: dict[str, tuple[str, str, float, str]] = {
     "abutment_body_standard": ("fixed_days", "count", 10, "天/个"),
     "cast_in_place_continuous_standard_segment": ("fixed_days", "count", 10, "天/块"),
 }
+
+
+_PROCESS_ID_ORDER = {
+    "pier_body_climbing_form": 0,
+    "pier_body_standard": 1,
+    "pier_body_sliding_form": 2,
+    "pier_body_turnover_form": 3,
+}
+
+
+def _apply_default_process_migrations(process_library: list[ProcessTemplate]) -> None:
+    if any(process.id == "pier_body_climbing_form" for process in process_library):
+        for process in process_library:
+            if process.component_type == "pier_body":
+                process.is_default = process.id == "pier_body_climbing_form"
 
 
 def _process(
@@ -177,7 +193,11 @@ def _sort_process_library(process_library: list[ProcessTemplate]) -> list[Proces
         item
         for _, item in sorted(
             enumerate(process_library),
-            key=lambda indexed: (_COMPONENT_TYPE_ORDER.get(indexed[1].component_type, 999), indexed[0]),
+            key=lambda indexed: (
+                _COMPONENT_TYPE_ORDER.get(indexed[1].component_type, 999),
+                _PROCESS_ID_ORDER.get(indexed[1].id, indexed[0] + len(_PROCESS_ID_ORDER)),
+                indexed[0],
+            ),
         )
     ]
 

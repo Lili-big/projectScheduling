@@ -58,6 +58,11 @@ type ProductivityOption = {
   is_default: boolean;
 };
 
+type TaskOverride = {
+  method_id?: string | null;
+  productivity_option_id?: string | null;
+};
+
 type RelationshipType = "FS" | "SS" | "FF" | "SF";
 
 type LogicRule = {
@@ -100,7 +105,8 @@ type ResourcePool = {
   id: string;
   type: string;
   label: string;
-  quantity: number;
+  resource_mode?: "LIMITED" | "UNLIMITED";
+  quantity: number | null;
   max_quantity?: number | null;
   calendar_id: string;
   enabled: boolean;
@@ -153,6 +159,7 @@ type ScenarioInput = {
   process_library: ProcessTemplate[];
   logic_rules: LogicRule[];
   upper_structure_logic_rules?: UpperStructureLogicRule[];
+  task_overrides?: Record<string, TaskOverride>;
   resource_calendars: Array<{
     id: string;
     name: string;
@@ -236,6 +243,35 @@ const CONTINUOUS_BEAM_STRUCTURE_CODE = "castInPlaceContinuousBoxGirder";
 const CAST_IN_PLACE_BOX_BEAM_STRUCTURE_CODE = "castInPlaceBoxGirder";
 const SIMPLE_BEAM_STRUCTURE_CODE = "precastTGirder";
 const CONTINUOUS_BEAM_DEFAULT_STANDARD_SEGMENT_CYCLES = 18;
+const DEFAULT_RESOURCE_MAX_QUANTITIES: Record<string, number> = {
+  rotary_drill: 5,
+  circulation_drill: 5,
+  impact_drill: 5,
+  manual_pile_team: 10,
+  cap_team: 5,
+  pier_body_team: 5,
+  cap_beam_team: 5,
+};
+const KEY_RESOURCE_COMPONENT_TYPES = new Set<ComponentType>(["pile", "cap", "pier_body", "cap_beam", "cast_in_place_continuous_beam"]);
+const DEFAULT_RESOURCE_TYPE_BY_COMPONENT: Partial<Record<ComponentType, string>> = {
+  cap: "cap_team",
+  pier_body: "pier_body_team",
+  cap_beam: "cap_beam_team",
+  cast_in_place_continuous_beam: "cast_in_place_continuous_beam_team",
+};
+const PILE_RESOURCE_TYPE_BY_PROCESS: Record<string, string> = {
+  pile_rotary_regular: "rotary_drill",
+  pile_circulation: "circulation_drill",
+  pile_impact: "impact_drill",
+  pile_manual: "manual_pile_team",
+};
+const PILE_RESOURCE_TYPE_BY_METHOD: Record<string, string> = {
+  rotary_drill: "rotary_drill",
+  circulation_drill: "circulation_drill",
+  impact_drill: "impact_drill",
+  manual_pile: "manual_pile_team",
+  manual_excavation: "manual_pile_team",
+};
 const UPPER_STRUCTURE_LOGIC_RULE_IDS = [
   "cast_in_place_box_beam_after_lower_structure",
   "continuous_beam_zero_block_after_main_pier_lower_structure",
@@ -370,22 +406,14 @@ function createDefaultScenario(): ScenarioInput {
     upper_structure_logic_rules: defaultUpperStructureLogicRules(),
     resource_calendars: [{ id: "continuous", name: "连续自然日", working_weekdays: [0, 1, 2, 3, 4, 5, 6], blackout_dates: [] }],
     resource_pools: [
-      pool("pool-rotary-drill", "rotary_drill", "旋挖钻", 3, 24),
-      pool("pool-circulation-drill", "circulation_drill", "回旋钻", 1, 1),
-      pool("pool-impact-drill", "impact_drill", "冲击钻", 1, 1),
-      pool("pool-manual-pile", "manual_pile_team", "人工挖孔班", 1, 4),
-      pool("pool-cap", "cap_team", "承台模板", 1, 14),
-      pool("pool-spread-foundation", "spread_foundation_team", "扩大基础班组", 1, 1),
-      pool("pool-tie-beam", "tie_beam_team", "系梁班组", 1, 1),
-      pool("pool-pier-body", "pier_body_team", "墩柱班组", 1, 12),
-      pool("pool-cap-beam", "cap_beam_team", "盖梁模板", 1, 12),
-      pool("pool-abutment", "abutment_team", "桥台班组", 1, 2),
-      pool("pool-precast-beam", "precast_beam_team", "制梁台座", 1, 1),
-      pool("pool-beam-erection", "beam_erection_team", "架梁班组", 1, 1),
+      pool("pool-rotary-drill", "rotary_drill", "旋挖钻", 3, 5),
+      pool("pool-circulation-drill", "circulation_drill", "回旋钻", 1, 5),
+      pool("pool-impact-drill", "impact_drill", "冲击钻", 1, 5),
+      pool("pool-manual-pile", "manual_pile_team", "人工挖孔班组", 1, 10),
+      pool("pool-cap", "cap_team", "承台模板", 1, 5),
+      pool("pool-pier-body", "pier_body_team", "墩柱模板", 1, 5),
+      pool("pool-cap-beam", "cap_beam_team", "盖梁模板", 1, 5),
       pool("pool-cast-in-place-continuous-beam", "cast_in_place_continuous_beam_team", "连续梁班组", 1, 1),
-      pool("pool-cast-in-place-box-beam", "cast_in_place_box_beam_team", "现浇箱梁班组", 1, 1),
-      pool("pool-steel-box-beam", "steel_box_beam_team", "钢箱梁班组", 1, 1),
-      pool("pool-bridge-deck-system", "bridge_deck_system_team", "桥面系班组", 1, 1),
     ],
     milestones: [
       milestone("M-contract-finish", "合同下部结构及上部现浇梁完工", "contract", "hard", "bridge", "B1", "2028-12-31", 10),
@@ -460,8 +488,8 @@ function createProcessLibrary(): ProcessTemplate[] {
     process("ground_tie_beam_standard", "ground_tie_beam", "桩系梁施工", null, "fixed_days", "count", 3, "天/个", "tie_beam_team", true),
     process("cap_standard", "cap", "承台施工", null, "fixed_days", "count", 30, "天/个", "cap_team", true),
     process("spread_foundation_standard", "spread_foundation", "扩大基础施工", null, "fixed_days", "count", 8, "天/个", "spread_foundation_team", true),
-    process("pier_body_climbing_form", "pier_body", "爬模施工", "climbing_form", "days_per_unit", "pier_height_m", 7, "天/节", "pier_body_team", false, 4.5),
-    process("pier_body_standard", "pier_body", "整体式浇筑", "integral_casting", "fixed_days", "count", 20, "天/个", "pier_body_team", true),
+    process("pier_body_climbing_form", "pier_body", "爬模施工", "climbing_form", "days_per_unit", "pier_height_m", 7, "天/节", "pier_body_team", true, 4.5),
+    process("pier_body_standard", "pier_body", "整体式浇筑", "integral_casting", "fixed_days", "count", 20, "天/个", "pier_body_team", false),
     process("pier_body_sliding_form", "pier_body", "滑模施工", "sliding_form", "days_per_unit", "pier_height_m", 6, "天/节", "pier_body_team", false, 4.5),
     process("pier_body_turnover_form", "pier_body", "翻模施工", "turnover_form", "days_per_unit", "pier_height_m", 12, "天/节", "pier_body_team", false, 4.5),
     process("middle_tie_beam_standard", "middle_tie_beam", "中系梁施工", null, "fixed_days", "count", 4, "天/个", "tie_beam_team", true),
@@ -636,6 +664,7 @@ function pool(id: string, type: string, label: string, quantity: number, maxQuan
     id,
     type,
     label,
+    resource_mode: "LIMITED",
     quantity,
     max_quantity: maxQuantity,
     calendar_id: "continuous",
@@ -931,32 +960,118 @@ function stripExtension(fileName: string) {
 }
 
 function applyResourceMaxQuantityDefaults(scenario: ScenarioInput) {
-  const counts = new Map<string, number>();
-  const upperLogicRules = upperStructureLogicRulesById(scenario.upper_structure_logic_rules);
+  const continuousTCount = continuousBeamTStructureCount(scenario);
+  scenario.resource_pools = scenario.resource_pools.map((item) => ({
+    ...item,
+    max_quantity: (item.resource_mode ?? "LIMITED") === "UNLIMITED"
+      ? item.max_quantity ?? item.quantity ?? null
+      : Math.max(
+        item.quantity ?? 0,
+        item.type === "cast_in_place_continuous_beam_team"
+          ? continuousTCount
+          : DEFAULT_RESOURCE_MAX_QUANTITIES[item.type] ?? item.max_quantity ?? item.quantity ?? 0,
+      ),
+  }));
+}
+
+function continuousBeamTStructureCount(scenario: ScenarioInput) {
+  let count = 0;
   for (const bridge of scenario.project.bridges) {
     for (const section of bridge.work_sections) {
-      for (const structure of section.structures) {
-        for (const item of structure.components) {
-          const selected = selectProcess(item, scenario.process_library);
-          if (selected) counts.set(selected.resource_type, (counts.get(selected.resource_type) ?? 0) + 1);
-        }
-      }
-      const upper = buildUpperStructureTasks(bridge.id, section, scenario.process_library, [], 1, upperLogicRules);
-      for (const task of upper.tasks) {
-        const resourceType = task.compatible_resource_types[0];
-        counts.set(resourceType, (counts.get(resourceType) ?? 0) + 1);
+      for (const group of continuousBeamGroups(section.upper_structures ?? [])) {
+        const spanIndices = [...new Set(group.map((upper) => upper.span_index))].sort((a, b) => a - b);
+        count += continuousMainSupports(group, spanIndices).length;
       }
     }
   }
-  scenario.resource_pools = scenario.resource_pools.map((item) => ({
-    ...item,
-    max_quantity: Math.max(item.quantity, counts.get(item.type) ?? item.max_quantity ?? item.quantity),
+  return count;
+}
+
+function applyRequiredResourceTypes(
+  tasks: Task[],
+  resourcePools: ResourcePool[],
+  validation: GeneratedScheduleInput["validation"],
+): Task[] {
+  const poolsByType = new Map(resourcePools.map((poolModel) => [poolModel.type, poolModel]));
+  const warningKeys = new Set<string>();
+  return tasks.map((task) => ({
+    ...task,
+    compatible_resource_types: requiredResourceTypesForTask(task, poolsByType, validation, warningKeys),
   }));
+}
+
+function requiredResourceTypesForTask(
+  task: Task,
+  poolsByType: Map<string, ResourcePool>,
+  validation: GeneratedScheduleInput["validation"],
+  warningKeys: Set<string>,
+): string[] {
+  const resourceType = defaultResourceTypeForTask(task);
+  if (!resourceType) return [];
+  const poolModel = poolsByType.get(resourceType);
+  if (isLimitedPoolAvailable(poolModel)) return [resourceType];
+  if (KEY_RESOURCE_COMPONENT_TYPES.has(task.component_type)) {
+    appendUnboundedResourceWarning(resourceType, poolModel, validation, warningKeys);
+    return [];
+  }
+  if (poolModel && (poolModel.resource_mode ?? "LIMITED") === "LIMITED") {
+    appendUnboundedResourceWarning(resourceType, poolModel, validation, warningKeys);
+  }
+  return [];
+}
+
+function defaultResourceTypeForTask(task: Task): string | null {
+  const fallback = task.compatible_resource_types[0] ?? null;
+  const processId = task.productivity_rule_id.split(":")[0];
+  const methodId = methodIdFromProcessId(processId);
+  if (task.component_type === "pile") {
+    return PILE_RESOURCE_TYPE_BY_PROCESS[processId] ?? (methodId ? PILE_RESOURCE_TYPE_BY_METHOD[methodId] : null) ?? fallback;
+  }
+  return DEFAULT_RESOURCE_TYPE_BY_COMPONENT[task.component_type] ?? fallback;
+}
+
+function methodIdFromProcessId(processId: string): string | null {
+  return Object.keys(PILE_RESOURCE_TYPE_BY_METHOD).find((methodId) => processId.includes(methodId)) ?? null;
+}
+
+function isLimitedPoolAvailable(poolModel: ResourcePool | undefined): boolean {
+  return Boolean(
+    poolModel
+      && poolModel.enabled
+      && (poolModel.resource_mode ?? "LIMITED") === "LIMITED"
+      && (poolModel.quantity ?? 0) > 0,
+  );
+}
+
+function appendUnboundedResourceWarning(
+  resourceType: string,
+  poolModel: ResourcePool | undefined,
+  validation: GeneratedScheduleInput["validation"],
+  warningKeys: Set<string>,
+) {
+  const reason = resourceUnboundedReason(poolModel);
+  const key = `${resourceType}:${reason}`;
+  if (warningKeys.has(key)) return;
+  warningKeys.add(key);
+  validation.push({
+    level: "warning",
+    subject_id: poolModel?.id ?? resourceType,
+    message: `资源“${poolModel?.label ?? resourceType}”${reason}，相关工作项按资源默认充足处理，不产生资源等待。`,
+  });
+}
+
+function resourceUnboundedReason(poolModel: ResourcePool | undefined): string {
+  if (!poolModel) return "未配置";
+  if (!poolModel.enabled) return "未启用";
+  if ((poolModel.resource_mode ?? "LIMITED") === "UNLIMITED") return "设置为默认充足";
+  if ((poolModel.quantity ?? 0) <= 0) return "限制数量为 0";
+  return "不可用";
 }
 
 function generateScheduleInput(scenario: ScenarioInput, useMaxResources = false): GeneratedScheduleInput {
   const built = buildTasks(scenario);
-  const tasks = built.tasks;
+  const resourceWarnings: GeneratedScheduleInput["validation"] = [];
+  const tasks = applyRequiredResourceTypes(built.tasks, scenario.resource_pools, resourceWarnings);
   const precedenceLinks = [
     ...buildPrecedenceLinks(tasks, scenario.logic_rules),
     ...built.generatedLinks,
@@ -972,10 +1087,14 @@ function generateScheduleInput(scenario: ScenarioInput, useMaxResources = false)
       milestones: scenario.milestones,
       time_limit_seconds: scenario.time_limit_seconds,
     },
-    validation: [{
-      level: "info",
-      message: `Netlify Functions 已生成 ${tasks.length} 个工作项、${precedenceLinks.length} 条工艺逻辑关系、${resources.length} 个命名资源。`,
-    }],
+    validation: [
+      ...resourceWarnings,
+      ...(resources.length ? [] : [{ level: "info" as const, message: "未生成受限命名资源，当前场景将按资源默认充足排程。" }]),
+      {
+        level: "info",
+        message: `Netlify Functions 已生成 ${tasks.length} 个工作项、${precedenceLinks.length} 条工艺逻辑关系、${resources.length} 个受限命名资源。`,
+      },
+    ],
     source_summary: {
       bridge_count: scenario.project.bridges.length,
       process_count: scenario.process_library.length,
@@ -990,6 +1109,7 @@ function buildTasks(scenario: ScenarioInput): { tasks: Task[]; generatedLinks: P
   const tasks: Task[] = [];
   const generatedLinks: PrecedenceLink[] = [];
   const upperLogicRules = upperStructureLogicRulesById(scenario.upper_structure_logic_rules);
+  const taskOverrides = scenario.task_overrides ?? {};
   for (const bridge of [...scenario.project.bridges].sort((a, b) => a.order - b.order)) {
     for (const section of [...bridge.work_sections].sort((a, b) => a.order - b.order)) {
       const sectionLowerStart = tasks.length;
@@ -998,7 +1118,8 @@ function buildTasks(scenario: ScenarioInput): { tasks: Task[]; generatedLinks: P
           if (!item.enabled) return;
           const selected = selectProcess(item, scenario.process_library);
           if (!selected) return;
-          const quantity = quantityForProcess(item, selected.quantity_source);
+          const effectiveProcess = effectiveProcessForComponent(selected, item);
+          const quantity = quantityForProcess(item, effectiveProcess.quantity_source);
           tasks.push({
             id: item.id,
             name: item.name,
@@ -1010,12 +1131,12 @@ function buildTasks(scenario: ScenarioInput): { tasks: Task[]; generatedLinks: P
             structure_name: structure.name,
             structure_type: structure.structure_type,
             component_type: item.component_type,
-            process_name: selected.process_name,
-            productivity_rule_id: selected.id,
+            process_name: effectiveProcess.process_name,
+            productivity_rule_id: effectiveProcess.id,
             quantity,
             quantity_label: item.quantity_label,
-            duration_days: calculateDuration(quantity, selected),
-            compatible_resource_types: [selected.resource_type],
+            duration_days: calculateDuration(quantity, effectiveProcess),
+            compatible_resource_types: [effectiveProcess.resource_type],
           });
         });
       }
@@ -1027,6 +1148,7 @@ function buildTasks(scenario: ScenarioInput): { tasks: Task[]; generatedLinks: P
         sectionLowerTasks,
         generatedLinks.length + 1,
         upperLogicRules,
+        taskOverrides,
       );
       tasks.push(...upper.tasks);
       generatedLinks.push(...upper.links);
@@ -1042,6 +1164,7 @@ function buildUpperStructureTasks(
   lowerTasks: Task[],
   linkStart: number,
   upperLogicRules: Map<string, UpperStructureLogicRule>,
+  taskOverrides: Record<string, TaskOverride>,
 ): { tasks: Task[]; links: PrecedenceLink[] } {
   const supportCompletions = lowerCompletionTasksBySupport(section, lowerTasks);
   const tasks: Task[] = [];
@@ -1056,6 +1179,7 @@ function buildUpperStructureTasks(
     supportCompletions,
     linkStart + links.length,
     upperLogicRules,
+    taskOverrides,
   );
   tasks.push(...box.tasks);
   links.push(...box.links);
@@ -1067,6 +1191,7 @@ function buildUpperStructureTasks(
     supportCompletions,
     linkStart + links.length,
     upperLogicRules,
+    taskOverrides,
   );
   tasks.push(...continuous.tasks);
   links.push(...continuous.links);
@@ -1124,6 +1249,7 @@ function buildCastInPlaceBoxBeamTasks(
   supportCompletions: Map<string, Task[]>,
   linkStart: number,
   upperLogicRules: Map<string, UpperStructureLogicRule>,
+  taskOverrides: Record<string, TaskOverride>,
 ): { tasks: Task[]; links: PrecedenceLink[] } {
   const tasks: Task[] = [];
   const links: PrecedenceLink[] = [];
@@ -1146,6 +1272,7 @@ function buildCastInPlaceBoxBeamTasks(
       structureId: `${bridgeId}-${sideCode}-BOX-G${String(groupIndex).padStart(2, "0")}`,
       structureName: `${sideLabel}第${groupIndex}联现浇箱梁`,
       processLibrary,
+      taskOverrides,
       properties: {
         upper_structure_ids: uppers.map((upper) => upper.id),
         span_start_index: Math.min(...spanIndices),
@@ -1182,12 +1309,13 @@ function appendUpperTask(
     structureId: string;
     structureName: string;
     processLibrary: ProcessTemplate[];
+    taskOverrides?: Record<string, TaskOverride>;
     properties?: Record<string, unknown>;
     methodId?: string | null;
     structureType?: string;
   },
 ) {
-  const component: ComponentModel = {
+  const component = applyTaskOverride({
     id: input.componentId,
     name: input.name,
     component_type: input.componentType,
@@ -1197,7 +1325,7 @@ function appendUpperTask(
     productivity_option_id: null,
     enabled: true,
     properties: input.properties ?? {},
-  };
+  }, input.taskOverrides);
   const selected = selectProcess(component, input.processLibrary);
   if (!selected) return null;
   const effectiveProcess = effectiveProcessForComponent(selected, component);
@@ -1393,6 +1521,7 @@ function buildContinuousBeamTasks(
   supportCompletions: Map<string, Task[]>,
   linkStart: number,
   upperLogicRules: Map<string, UpperStructureLogicRule>,
+  taskOverrides: Record<string, TaskOverride>,
 ): { tasks: Task[]; links: PrecedenceLink[] } {
   const tasks: Task[] = [];
   const links: PrecedenceLink[] = [];
@@ -1447,6 +1576,7 @@ function buildContinuousBeamTasks(
         structureId,
         structureName,
         processLibrary,
+        taskOverrides,
       });
       const zeroBlockLinks = buildLowerToUpperLinks({
         successor: previous,
@@ -1472,6 +1602,7 @@ function buildContinuousBeamTasks(
           structureId,
           structureName,
           processLibrary,
+          taskOverrides,
         });
         addLink(previous, current, "continuous_beam_t_chain");
         if (current) previous = current;
@@ -1493,6 +1624,7 @@ function buildContinuousBeamTasks(
       structureId: `${prefix}-LEFT-P${String(mainSupports[0]).padStart(2, "0")}`,
       structureName: leftEdgeStructureName,
       processLibrary,
+      taskOverrides,
     });
     const leftClosure = appendContinuousTask(tasks, {
       componentId: `${prefix}-LEFT-CLOSURE`,
@@ -1505,6 +1637,7 @@ function buildContinuousBeamTasks(
       structureId: `${prefix}-LEFT-P${String(mainSupports[0]).padStart(2, "0")}`,
       structureName: leftEdgeStructureName,
       processLibrary,
+      taskOverrides,
     });
     const rightStraight = appendContinuousTask(tasks, {
       componentId: `${prefix}-RIGHT-STRAIGHT`,
@@ -1517,6 +1650,7 @@ function buildContinuousBeamTasks(
       structureId: `${prefix}-RIGHT-P${String(mainSupports[mainSupports.length - 1]).padStart(2, "0")}`,
       structureName: rightEdgeStructureName,
       processLibrary,
+      taskOverrides,
     });
     const rightClosure = appendContinuousTask(tasks, {
       componentId: `${prefix}-RIGHT-CLOSURE`,
@@ -1529,6 +1663,7 @@ function buildContinuousBeamTasks(
       structureId: `${prefix}-RIGHT-P${String(mainSupports[mainSupports.length - 1]).padStart(2, "0")}`,
       structureName: rightEdgeStructureName,
       processLibrary,
+      taskOverrides,
     });
     addLink(leftStraight, leftClosure, "continuous_beam_side_closure");
     const leftStraightLinks = buildLowerToUpperLinks({
@@ -1573,6 +1708,7 @@ function buildContinuousBeamTasks(
         structureId: `${prefix}-MID-${String(closureIndex).padStart(2, "0")}-P${String(leftSupport).padStart(2, "0")}-P${String(rightSupport).padStart(2, "0")}`,
         structureName: `${groupLabel}${leftSupport}#墩-${rightSupport}#墩中跨`,
         processLibrary,
+        taskOverrides,
       });
       addLink(tCompletionTasks[index], midClosure, "continuous_beam_middle_closure");
       addLink(tCompletionTasks[index + 1], midClosure, "continuous_beam_middle_closure");
@@ -1613,9 +1749,10 @@ function appendContinuousTask(
     structureId: string;
     structureName: string;
     processLibrary: ProcessTemplate[];
+    taskOverrides?: Record<string, TaskOverride>;
   },
 ) {
-  const component: ComponentModel = {
+  const component = applyTaskOverride({
     id: input.componentId,
     name: input.name,
     component_type: "cast_in_place_continuous_beam",
@@ -1625,7 +1762,7 @@ function appendContinuousTask(
     productivity_option_id: null,
     enabled: true,
     properties: {},
-  };
+  }, input.taskOverrides);
   const selected = selectProcess(component, input.processLibrary);
   if (!selected) return null;
   const effectiveProcess = effectiveProcessForComponent(selected, component);
@@ -1769,6 +1906,16 @@ function sideLabelFor(side: WorkSectionSide) {
   return ({ left: "左幅", right: "右幅", none: "" } as const)[side] ?? "";
 }
 
+function applyTaskOverride(component: ComponentModel, taskOverrides?: Record<string, TaskOverride>): ComponentModel {
+  const override = taskOverrides?.[component.id];
+  if (!override) return component;
+  return {
+    ...component,
+    method_id: override.method_id ?? component.method_id,
+    productivity_option_id: override.productivity_option_id ?? component.productivity_option_id,
+  };
+}
+
 function selectProcess(componentModel: ComponentModel, processLibrary: ProcessTemplate[]) {
   const options = processLibrary.filter((item) => item.component_type === componentModel.component_type);
   if (componentModel.method_id) {
@@ -1778,14 +1925,36 @@ function selectProcess(componentModel: ComponentModel, processLibrary: ProcessTe
 }
 
 function effectiveProcessForComponent(processTemplate: ProcessTemplate, componentModel: ComponentModel): ProcessTemplate {
+  const selectedOption = selectedProductivityOption(componentModel, processTemplate);
+  const processWithOption = selectedOption
+    ? {
+      ...processTemplate,
+      id: `${processTemplate.id}:${selectedOption.id}`,
+      duration_method: selectedOption.duration_method,
+      quantity_source: selectedOption.quantity_source,
+      productivity_value: selectedOption.productivity_value,
+      productivity_unit: selectedOption.productivity_unit,
+      standard_section_height_m: selectedOption.standard_section_height_m ?? processTemplate.standard_section_height_m,
+    }
+    : processTemplate;
   if (componentModel.component_type === "cast_in_place_continuous_beam" && componentModel.method_id === "standard_segment") {
     return {
-      ...processTemplate,
+      ...processWithOption,
       duration_method: "days_per_unit",
       quantity_source: "count",
     };
   }
-  return processTemplate;
+  return processWithOption;
+}
+
+function selectedProductivityOption(componentModel: ComponentModel, processTemplate: ProcessTemplate): ProductivityOption | null {
+  const options = processTemplate.productivity_options ?? [];
+  if (!options.length) return null;
+  if (componentModel.productivity_option_id) {
+    const selected = options.find((option) => option.id === componentModel.productivity_option_id);
+    if (selected) return selected;
+  }
+  return options.find((option) => option.is_default) ?? options[0] ?? null;
 }
 
 function quantityForProcess(componentModel: ComponentModel, quantitySource: string) {
@@ -1873,8 +2042,8 @@ function selectPredecessors(tasks: Task[], logicRule: LogicRule) {
 
 function expandResources(pools: ResourcePool[], useMaxResources: boolean): Resource[] {
   return pools.flatMap((poolModel) => {
-    if (!poolModel.enabled) return [];
-    const count = useMaxResources ? (poolModel.max_quantity ?? poolModel.quantity) : poolModel.quantity;
+    if (!poolModel.enabled || (poolModel.resource_mode ?? "LIMITED") === "UNLIMITED") return [];
+    const count = useMaxResources ? (poolModel.max_quantity ?? poolModel.quantity ?? 0) : (poolModel.quantity ?? 0);
     return Array.from({ length: count }, (_, index) => ({
       id: `${poolModel.type}_${index + 1}`,
       name: `${poolModel.label}${index + 1}`,

@@ -31,6 +31,7 @@ RelationshipType = Literal["FS", "SS", "FF", "SF"]
 LogicScope = Literal["same_structure", "structure_sequence"]
 LogicSeverity = Literal["error", "warning"]
 PileMethod = Literal["rotary_drill", "impact_drill", "manual_pile"]
+ResourceMode = Literal["LIMITED", "UNLIMITED"]
 MilestoneLevel = Literal["contract", "control", "internal"]
 MilestoneMode = Literal["hard", "soft"]
 MilestoneScopeType = Literal["project", "bridge", "work_section", "structure", "component"]
@@ -159,7 +160,7 @@ class Task(BaseModel):
     quantity: float
     quantity_label: str
     duration_days: int = Field(ge=1)
-    compatible_resource_types: list[str] = Field(min_length=1)
+    compatible_resource_types: list[str] = Field(default_factory=list)
 
 
 class PrecedenceLink(BaseModel):
@@ -308,7 +309,8 @@ class ResourcePool(BaseModel):
     id: str
     type: str
     label: str
-    quantity: int = Field(ge=0)
+    resource_mode: ResourceMode = "LIMITED"
+    quantity: int | None = Field(default=0, ge=0)
     max_quantity: int | None = Field(default=None, ge=0)
     calendar_id: str = "continuous"
     enabled: bool = True
@@ -316,8 +318,11 @@ class ResourcePool(BaseModel):
 
     @model_validator(mode="after")
     def ensure_max_quantity(self) -> "ResourcePool":
-        if self.max_quantity is None or self.max_quantity < self.quantity:
-            self.max_quantity = self.quantity
+        if self.resource_mode == "UNLIMITED":
+            return self
+        quantity = self.quantity or 0
+        if self.max_quantity is None or self.max_quantity < quantity:
+            self.max_quantity = quantity
         return self
 
 
@@ -349,6 +354,11 @@ class MilestoneResult(BaseModel):
     status: Literal["met", "late", "not_evaluated"] = "not_evaluated"
 
 
+class TaskOverride(BaseModel):
+    method_id: str | None = None
+    productivity_option_id: str | None = None
+
+
 class ScenarioInput(BaseModel):
     scenario_id: str
     scenario_name: str
@@ -356,6 +366,7 @@ class ScenarioInput(BaseModel):
     process_library: list[ProcessTemplate]
     logic_rules: list[LogicRule]
     upper_structure_logic_rules: list[UpperStructureLogicRule] = []
+    task_overrides: dict[str, TaskOverride] = Field(default_factory=dict)
     resource_calendars: list[ResourceCalendar] = []
     resource_pools: list[ResourcePool]
     milestones: list[MilestoneConstraint] = []

@@ -22,6 +22,8 @@ from .models import (
 CONTINUITY_PRIMARY_WEIGHT = 1_000_000
 SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT = 1_000
 SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT = 1
+SCHEDULER_RANDOM_SEED = 0
+SCHEDULER_SEARCH_WORKERS = 1
 
 COMPONENT_TYPE_LABELS: dict[str, str] = {
     "pile": "桩基",
@@ -77,6 +79,13 @@ def _precedence_violated(predecessor: ScheduledTask, successor: ScheduledTask, l
     if link.relationship == "SF":
         return successor.end_offset < predecessor.start_offset + link.lag_days
     return successor.start_offset < predecessor.end_offset + link.lag_days
+
+
+def _configure_solver(solver: Any, time_limit_seconds: float) -> None:
+    solver.parameters.max_time_in_seconds = time_limit_seconds
+    solver.parameters.num_search_workers = SCHEDULER_SEARCH_WORKERS
+    solver.parameters.random_seed = SCHEDULER_RANDOM_SEED
+    solver.parameters.randomize_search = False
 
 
 def solve_schedule(schedule_input: ScheduleInput) -> ScheduleResult:
@@ -135,7 +144,8 @@ def solve_schedule(schedule_input: ScheduleInput) -> ScheduleResult:
             choices.append(assigned)
             assignment_vars[(task.id, resource.id)] = assigned
             resource_intervals[resource.id].append(interval)
-        model.AddExactlyOne(choices)
+        if choices:
+            model.AddExactlyOne(choices)
 
     for link in schedule_input.precedence_links:
         predecessor = task_by_id.get(link.predecessor_id)
@@ -197,8 +207,7 @@ def solve_schedule(schedule_input: ScheduleInput) -> ScheduleResult:
     model.Minimize(primary_objective * CONTINUITY_PRIMARY_WEIGHT + continuity_objective)
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = schedule_input.time_limit_seconds
-    solver.parameters.num_search_workers = 8
+    _configure_solver(solver, schedule_input.time_limit_seconds)
     status_code = solver.Solve(model)
     status = _status_name(status_code, cp_model)
 
@@ -207,6 +216,8 @@ def solve_schedule(schedule_input: ScheduleInput) -> ScheduleResult:
         "wall_time_seconds": solver.WallTime(),
         "conflicts": solver.NumConflicts(),
         "branches": solver.NumBranches(),
+        "random_seed": SCHEDULER_RANDOM_SEED,
+        "search_workers": SCHEDULER_SEARCH_WORKERS,
     }
 
     if status not in {"OPTIMAL", "FEASIBLE"}:
@@ -422,32 +433,8 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
         for group in groups
     ]
 
-    final = _solve_resource_model(
-        schedule_input,
-        cp_model=cp_model,
-        fixed_counts=fixed_counts,
-        minimize_group_key=None,
-        fallback_target_days=target_days if hard_match_count == 0 else None,
-        enforce_fixed_duration=True,
-        feasibility_only=False,
-    )
-    if final["status"] not in {"OPTIMAL", "FEASIBLE"}:
-        return ScheduleResult(
-            status=final["status"],
-            plan_start_date=schedule_input.start_date,
-            validation=validation
-            + final["validation"]
-            + [ValidationMessage(level="error", message="推荐资源数量固定后未找到可行排程。")],
-            stats={
-                **final["stats"],
-                "reason": "recommended_resource_counts_infeasible",
-                "solve_mode": "min_resources_fixed_duration",
-                "target_days": target_days,
-                "recommended_resource_counts": _recommended_resource_counts(groups, fixed_counts),
-            },
-        )
-
-    result = _resource_model_result(schedule_input, final)
+    result = _capacity_model_result(schedule_input, capacity_optimization, fixed_counts)
+    result.validation = validation + result.validation
     recommended = _recommended_resource_counts(groups, fixed_counts)
     result.stats.update(
         {
@@ -455,6 +442,7 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
             "target_days": target_days,
             "recommended_resource_counts": recommended,
             "resource_optimization_phases": phase_stats,
+            "schedule_source": "capacity_model",
         }
     )
     result.objective_breakdown.update(
@@ -587,7 +575,9 @@ def _solve_resource_model(
         late_var * _milestone_by_id(schedule_input.milestones, milestone_id).penalty_per_day
         for milestone_id, late_var in soft_lateness_vars.items()
     ]
-    continuity_terms = _build_continuity_soft_terms(model, schedule_input.tasks, resource_candidates, assignment_vars)
+    continuity_terms = {"split_terms": [], "spatial_terms": [], "spatial_term_details": []}
+    if not feasibility_only:
+        continuity_terms = _build_continuity_soft_terms(model, schedule_input.tasks, resource_candidates, assignment_vars)
     if feasibility_only:
         pass
     elif minimize_group_key:
@@ -600,8 +590,7 @@ def _solve_resource_model(
         model.Minimize(primary_objective * CONTINUITY_PRIMARY_WEIGHT + continuity_objective)
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = schedule_input.time_limit_seconds
-    solver.parameters.num_search_workers = 8
+    _configure_solver(solver, schedule_input.time_limit_seconds)
     status_code = solver.Solve(model)
     status = _status_name(status_code, cp_model)
     group_counts = {
@@ -628,6 +617,8 @@ def _solve_resource_model(
             "wall_time_seconds": solver.WallTime(),
             "conflicts": solver.NumConflicts(),
             "branches": solver.NumBranches(),
+            "random_seed": SCHEDULER_RANDOM_SEED,
+            "search_workers": SCHEDULER_SEARCH_WORKERS,
         },
     }
 
@@ -651,7 +642,9 @@ def _solve_capacity_model(
     group_by_type = {group["resource_type"]: group for group in groups}
     intervals_by_group: dict[str, list[Any]] = defaultdict(list)
     demands_by_group: dict[str, list[int]] = defaultdict(list)
+    assignment_vars: dict[tuple[str, str], Any] = {}
     milestone_vars: dict[str, Any] = {}
+    milestone_target_offsets: dict[str, int] = {}
     soft_lateness_vars: dict[str, Any] = {}
     count_vars: dict[str, Any] = {}
 
@@ -673,16 +666,17 @@ def _solve_capacity_model(
                 f"capacity_interval_{_safe(task.id)}_{_safe(group['key'])}",
             )
             choices.append(assigned)
+            assignment_vars[(task.id, group["key"])] = assigned
             intervals_by_group[group["key"]].append(interval)
             demands_by_group[group["key"]].append(1)
         if choices:
             model.AddExactlyOne(choices)
-        else:
+        elif task.compatible_resource_types:
             validation.append(
                 ValidationMessage(
-                    level="error",
+                    level="warning",
                     subject_id=task.id,
-                    message=f"“{task.name}”没有可用于容量校验的兼容资源池。",
+                    message=f"“{task.name}”没有可用于容量校验的受限资源池，已按资源默认充足处理。",
                 )
             )
 
@@ -727,6 +721,7 @@ def _solve_capacity_model(
 
         target_offset = _target_offset(schedule_input.start_date, milestone)
         milestone_vars[milestone.id] = event_var
+        milestone_target_offsets[milestone.id] = target_offset
         if milestone.mode == "hard" and enforce_fixed_duration:
             hard_match_count += 1
             model.Add(event_var <= target_offset)
@@ -743,18 +738,27 @@ def _solve_capacity_model(
         model.Minimize(sum(count_vars.values()) * (horizon + 1) + makespan)
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = schedule_input.time_limit_seconds
-    solver.parameters.num_search_workers = 8
+    _configure_solver(solver, schedule_input.time_limit_seconds)
     status_code = solver.Solve(model)
     status = _status_name(status_code, cp_model)
     return {
         "status": status,
+        "solver": solver,
+        "starts": starts,
+        "ends": ends,
+        "assignment_vars": assignment_vars,
+        "milestone_vars": milestone_vars,
+        "milestone_target_offsets": milestone_target_offsets,
+        "soft_lateness_vars": soft_lateness_vars,
+        "makespan": makespan,
         "validation": validation,
         "stats": {
             "horizon_days": horizon,
             "wall_time_seconds": solver.WallTime(),
             "conflicts": solver.NumConflicts(),
             "branches": solver.NumBranches(),
+            "random_seed": SCHEDULER_RANDOM_SEED,
+            "search_workers": SCHEDULER_SEARCH_WORKERS,
         },
         "group_counts": (
             {key: solver.Value(count_var) for key, count_var in count_vars.items()}
@@ -762,6 +766,141 @@ def _solve_capacity_model(
             else (counts if counts is not None and status in {"OPTIMAL", "FEASIBLE"} else {})
         ),
     }
+
+
+def _capacity_model_result(
+    schedule_input: ScheduleInput,
+    solved: dict[str, Any],
+    fixed_counts: dict[str, int],
+) -> ScheduleResult:
+    solver = solved["solver"]
+    starts = solved["starts"]
+    ends = solved["ends"]
+    assignment_vars = solved.get("assignment_vars", {})
+    validation = list(solved["validation"])
+
+    selected_group_by_task_id: dict[str, str] = {}
+    for (task_id, group_key), assignment in assignment_vars.items():
+        if solver.Value(assignment):
+            selected_group_by_task_id[task_id] = group_key
+
+    limited_resources = _apply_resource_limits(
+        [resource for resource in schedule_input.resources if resource.enabled],
+        fixed_counts,
+    )
+    resources_by_group = {
+        group["key"]: sorted(group["resources"], key=_resource_sort_key)
+        for group in _resource_groups(limited_resources)
+    }
+    resource_ready = {resource.id: 0 for resource in limited_resources}
+    assigned_resource_by_task_id: dict[str, Resource] = {}
+
+    ordered_tasks = sorted(schedule_input.tasks, key=lambda item: (solver.Value(starts[item.id]), item.id))
+    for task in ordered_tasks:
+        group_key = selected_group_by_task_id.get(task.id)
+        if not group_key:
+            continue
+        candidates = resources_by_group.get(group_key, [])
+        start_offset = solver.Value(starts[task.id])
+        end_offset = solver.Value(ends[task.id])
+        assigned_resource = next((resource for resource in candidates if resource_ready[resource.id] <= start_offset), None)
+        if not assigned_resource and candidates:
+            assigned_resource = min(candidates, key=lambda resource: resource_ready[resource.id])
+        if not assigned_resource:
+            validation.append(
+                ValidationMessage(
+                    level="error",
+                    subject_id=task.id,
+                    message=f"“{task.name}”已选择资源池 {group_key}，但推荐数量中没有可用命名资源。",
+                )
+            )
+            continue
+        assigned_resource_by_task_id[task.id] = assigned_resource
+        resource_ready[assigned_resource.id] = end_offset
+
+    predecessors_by_successor: dict[str, list[str]] = defaultdict(list)
+    for link in schedule_input.precedence_links:
+        predecessors_by_successor[link.successor_id].append(link.predecessor_id)
+
+    scheduled_tasks: list[ScheduledTask] = []
+    allocations: list[ResourceAllocation] = []
+    for task in ordered_tasks:
+        assigned_resource = assigned_resource_by_task_id.get(task.id)
+        start_offset = solver.Value(starts[task.id])
+        end_offset = solver.Value(ends[task.id])
+        scheduled_tasks.append(
+            ScheduledTask(
+                **task.model_dump(),
+                start_offset=start_offset,
+                end_offset=end_offset,
+                start_date=_offset_date(schedule_input.start_date, start_offset),
+                finish_date=_finish_date(schedule_input.start_date, end_offset),
+                assigned_resource_id=assigned_resource.id if assigned_resource else None,
+                assigned_resource_name=assigned_resource.name if assigned_resource else None,
+                assigned_resource_type=assigned_resource.type if assigned_resource else None,
+                predecessor_ids=predecessors_by_successor.get(task.id, []),
+            )
+        )
+        if assigned_resource:
+            allocations.append(
+                ResourceAllocation(
+                    resource_id=assigned_resource.id,
+                    resource_name=assigned_resource.name,
+                    resource_type=assigned_resource.type,
+                    task_id=task.id,
+                    task_name=task.name,
+                    start_offset=start_offset,
+                    end_offset=end_offset,
+                    start_date=_offset_date(schedule_input.start_date, start_offset),
+                    finish_date=_finish_date(schedule_input.start_date, end_offset),
+                )
+            )
+
+    objective_days = solver.Value(solved["makespan"])
+    milestone_results = _build_milestone_results(
+        schedule_input=schedule_input,
+        milestone_vars=solved["milestone_vars"],
+        milestone_target_offsets=solved["milestone_target_offsets"],
+        soft_lateness_vars=solved["soft_lateness_vars"],
+        solver=solver,
+    )
+    validation.extend(_validate_solution(schedule_input, scheduled_tasks, allocations))
+    validation.extend(_validate_milestone_results(milestone_results))
+    continuity_metrics = _build_continuity_metrics(scheduled_tasks)
+    validation.extend(_continuity_validation_messages(continuity_metrics))
+    soft_milestone_penalty = sum(result.penalty for result in milestone_results if result.mode == "soft")
+
+    stats = {
+        **solved["stats"],
+        "capacity_model_schedule": True,
+        "continuity_metrics": continuity_metrics,
+        "continuity_objective": {
+            "same_structure_craft_split_penalty": 0,
+            "spatial_assignment_penalty": 0,
+            "primary_weight": CONTINUITY_PRIMARY_WEIGHT,
+            "same_structure_craft_split_weight": SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT,
+            "spatial_resource_assignment_weight": SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT,
+        },
+    }
+    return ScheduleResult(
+        status=solved["status"],
+        objective_days=objective_days,
+        plan_start_date=schedule_input.start_date,
+        plan_finish_date=_finish_date(schedule_input.start_date, objective_days),
+        tasks=scheduled_tasks,
+        resource_allocations=sorted(allocations, key=lambda item: (item.resource_name, item.start_offset, item.task_name)),
+        milestone_results=milestone_results,
+        validation=validation,
+        stats=stats,
+        objective_breakdown={
+            "makespan_days": objective_days,
+            "soft_milestone_penalty": soft_milestone_penalty,
+            "same_structure_craft_split_penalty": 0,
+            "spatial_assignment_penalty": 0,
+            "continuity_score": continuity_metrics["continuity_score"],
+            "weighted_objective": objective_days + soft_milestone_penalty,
+        },
+    )
 
 
 def _fixed_duration_infeasible_result(
@@ -1648,7 +1787,7 @@ def _resource_capacity_lower_bound_messages(
 
 def _resource_groups(resources: list[Resource]) -> list[dict[str, Any]]:
     groups: dict[str, dict[str, Any]] = {}
-    for resource in resources:
+    for resource in sorted(resources, key=_resource_sort_key):
         key = resource.pool_id or resource.type
         if key not in groups:
             groups[key] = {
@@ -1660,13 +1799,13 @@ def _resource_groups(resources: list[Resource]) -> list[dict[str, Any]]:
             }
         groups[key]["resources"].append(resource)
         groups[key]["max_quantity"] += 1
-    return list(groups.values())
+    return sorted(groups.values(), key=lambda group: (group["resource_type"], group["key"], group["label"]))
 
 
 def _apply_resource_limits(resources: list[Resource], limits: dict[str, int]) -> list[Resource]:
     used_counts: dict[str, int] = defaultdict(int)
     limited: list[Resource] = []
-    for resource in resources:
+    for resource in sorted(resources, key=_resource_sort_key):
         key = resource.pool_id or resource.type
         limit = limits.get(key)
         if limit is None:
@@ -1695,9 +1834,10 @@ def _resource_candidates_by_task(
     tasks: list[Task], resources: list[Resource]
 ) -> dict[str, list[Resource]]:
     candidates: dict[str, list[Resource]] = {}
+    ordered_resources = sorted(resources, key=_resource_sort_key)
     for task in tasks:
         compatible_types = set(task.compatible_resource_types)
-        candidates[task.id] = [resource for resource in resources if resource.type in compatible_types]
+        candidates[task.id] = [resource for resource in ordered_resources if resource.type in compatible_types]
     return candidates
 
 
@@ -1705,23 +1845,36 @@ def _validate_resource_coverage(
     tasks: list[Task], candidates: dict[str, list[Resource]]
 ) -> list[ValidationMessage]:
     messages: list[ValidationMessage] = []
+    constrained_task_count = 0
+    missing_candidate_count = 0
     for task in tasks:
+        if not task.compatible_resource_types:
+            continue
+        constrained_task_count += 1
         if not candidates.get(task.id):
+            missing_candidate_count += 1
             messages.append(
                 ValidationMessage(
-                    level="error",
+                    level="warning",
                     subject_id=task.id,
                     message=(
                         f"“{task.name}”需要以下资源类型之一：{', '.join(task.compatible_resource_types)}，"
-                        "但当前没有启用的兼容资源。"
+                        "但当前没有启用的受限兼容资源，已按资源默认充足处理。"
                     ),
                 )
             )
-    if not messages:
+    if constrained_task_count == 0:
         messages.append(
             ValidationMessage(
                 level="info",
-                message="所有工作项都至少有一个已启用的兼容资源。",
+                message="当前没有工作项需要受限资源，排程仅受工艺逻辑、工期和里程碑影响。",
+            )
+        )
+    elif missing_candidate_count == 0:
+        messages.append(
+            ValidationMessage(
+                level="info",
+                message="所有需要受限资源的工作项都至少有一个已启用的兼容资源。",
             )
         )
     return messages

@@ -25,6 +25,7 @@ from .models import (
     ScenarioSolveResult,
     StructureModel,
     Task,
+    TaskOverride,
     UpperStructureComponent,
     UpperStructureLogicRule,
     ValidationMessage,
@@ -49,6 +50,26 @@ UPPER_STRUCTURE_LOGIC_RULE_IDS = (
     "continuous_beam_edge_before_middle_closure",
     "continuous_beam_middle_closure_sequence",
 )
+KEY_RESOURCE_COMPONENT_TYPES = {"pile", "cap", "pier_body", "cap_beam", CONTINUOUS_BEAM_COMPONENT_TYPE}
+DEFAULT_RESOURCE_TYPE_BY_COMPONENT: dict[str, str] = {
+    "cap": "cap_team",
+    "pier_body": "pier_body_team",
+    "cap_beam": "cap_beam_team",
+    CONTINUOUS_BEAM_COMPONENT_TYPE: "cast_in_place_continuous_beam_team",
+}
+PILE_RESOURCE_TYPE_BY_PROCESS: dict[str, str] = {
+    "pile_rotary_regular": "rotary_drill",
+    "pile_circulation": "circulation_drill",
+    "pile_impact": "impact_drill",
+    "pile_manual": "manual_pile_team",
+}
+PILE_RESOURCE_TYPE_BY_METHOD: dict[str, str] = {
+    "rotary_drill": "rotary_drill",
+    "circulation_drill": "circulation_drill",
+    "impact_drill": "impact_drill",
+    "manual_pile": "manual_pile_team",
+    "manual_excavation": "manual_pile_team",
+}
 
 
 def _upper_structure_logic_rule_by_id(rules: list[UpperStructureLogicRule]) -> dict[str, UpperStructureLogicRule]:
@@ -70,6 +91,7 @@ def _upper_structure_logic_rule(
 def generate_schedule_input_from_scenario(scenario: ScenarioInput, *, use_max_resources: bool = False) -> GeneratedScheduleInput:
     validation: list[ValidationMessage] = []
     tasks, generated_links = _build_tasks(scenario, validation)
+    tasks = _apply_required_resource_types(tasks, scenario.resource_pools, validation)
     same_structure_rules = [rule for rule in scenario.logic_rules if rule.scope == "same_structure"]
     precedence_links, link_messages = build_precedence_links(tasks, same_structure_rules)
     precedence_links.extend(generated_links)
@@ -89,7 +111,7 @@ def generate_schedule_input_from_scenario(scenario: ScenarioInput, *, use_max_re
     if not tasks:
         validation.append(ValidationMessage(level="error", message="未生成任何启用的工作项。"))
     if not resources:
-        validation.append(ValidationMessage(level="error", message="未生成任何启用的资源。"))
+        validation.append(ValidationMessage(level="info", message="未生成受限命名资源，当前场景将按资源默认充足排程。"))
 
     schedule_input = ScheduleInput(
         project_name=scenario.project.project_name,
@@ -105,7 +127,7 @@ def generate_schedule_input_from_scenario(scenario: ScenarioInput, *, use_max_re
             level="info",
             message=(
                 f"场景已生成 {len(tasks)} 个工作项、{len(precedence_links)} 条工艺逻辑关系、"
-                f"{len(resources)} 个命名资源。"
+                f"{len(resources)} 个受限命名资源。"
             ),
         )
     )
@@ -210,11 +232,114 @@ def compare_scenarios(request: ScenarioCompareRequest) -> ScenarioCompareRespons
     return ScenarioCompareResponse(summaries=summaries, best_scenario_id=best_scenario_id, notes=notes)
 
 
+def _apply_required_resource_types(
+    tasks: list[Task],
+    resource_pools: list[ResourcePool],
+    validation: list[ValidationMessage],
+) -> list[Task]:
+    pools_by_type = {pool.type: pool for pool in resource_pools}
+    warning_keys: set[str] = set()
+    return [
+        task.model_copy(
+            update={
+                "compatible_resource_types": _required_resource_types_for_task(
+                    task,
+                    pools_by_type,
+                    validation,
+                    warning_keys,
+                )
+            }
+        )
+        for task in tasks
+    ]
+
+
+def _required_resource_types_for_task(
+    task: Task,
+    pools_by_type: dict[str, ResourcePool],
+    validation: list[ValidationMessage],
+    warning_keys: set[str],
+) -> list[str]:
+    default_resource_type = _default_resource_type_for_task(task)
+    if not default_resource_type:
+        return []
+
+    pool = pools_by_type.get(default_resource_type)
+    if _is_limited_pool_available(pool):
+        return [default_resource_type]
+
+    if task.component_type in KEY_RESOURCE_COMPONENT_TYPES:
+        _append_unbounded_resource_warning(task, default_resource_type, pool, validation, warning_keys)
+        return []
+
+    if pool is not None and pool.resource_mode == "LIMITED":
+        _append_unbounded_resource_warning(task, default_resource_type, pool, validation, warning_keys)
+    return []
+
+
+def _default_resource_type_for_task(task: Task) -> str | None:
+    fallback = task.compatible_resource_types[0] if task.compatible_resource_types else None
+    process_id = task.productivity_rule_id.split(":", 1)[0]
+    method_id = _method_id_from_process_id(process_id)
+    if task.component_type == "pile":
+        return (
+            PILE_RESOURCE_TYPE_BY_PROCESS.get(process_id)
+            or (PILE_RESOURCE_TYPE_BY_METHOD.get(method_id) if method_id else None)
+            or fallback
+        )
+    return DEFAULT_RESOURCE_TYPE_BY_COMPONENT.get(task.component_type, fallback)
+
+
+def _method_id_from_process_id(process_id: str) -> str | None:
+    for method_id in PILE_RESOURCE_TYPE_BY_METHOD:
+        if method_id in process_id:
+            return method_id
+    return None
+
+
+def _is_limited_pool_available(pool: ResourcePool | None) -> bool:
+    return bool(pool and pool.enabled and pool.resource_mode == "LIMITED" and (pool.quantity or 0) > 0)
+
+
+def _append_unbounded_resource_warning(
+    task: Task,
+    resource_type: str,
+    pool: ResourcePool | None,
+    validation: list[ValidationMessage],
+    warning_keys: set[str],
+) -> None:
+    reason = _resource_unbounded_reason(pool)
+    key = f"{resource_type}:{reason}"
+    if key in warning_keys:
+        return
+    warning_keys.add(key)
+    label = pool.label if pool else resource_type
+    validation.append(
+        ValidationMessage(
+            level="warning",
+            subject_id=pool.id if pool else resource_type,
+            message=f"资源“{label}”{reason}，相关工作项按资源默认充足处理，不产生资源等待。",
+        )
+    )
+
+
+def _resource_unbounded_reason(pool: ResourcePool | None) -> str:
+    if pool is None:
+        return "未配置"
+    if not pool.enabled:
+        return "未启用"
+    if pool.resource_mode == "UNLIMITED":
+        return "设置为默认充足"
+    if (pool.quantity or 0) <= 0:
+        return "限制数量为 0"
+    return "不可用"
+
+
 def expand_resource_pools(resource_pools: list[ResourcePool], *, use_max_quantity: bool = False) -> tuple[list[Resource], list[ValidationMessage]]:
     resources: list[Resource] = []
     validation: list[ValidationMessage] = []
     for pool in resource_pools:
-        if not pool.enabled:
+        if not pool.enabled or pool.resource_mode == "UNLIMITED":
             continue
         quantity = pool.max_quantity if use_max_quantity else pool.quantity
         quantity = quantity or 0
@@ -242,6 +367,7 @@ def _build_tasks(scenario: ScenarioInput, validation: list[ValidationMessage]) -
     tasks: list[Task] = []
     generated_links: list[PrecedenceLink] = []
     upper_logic_rules = _upper_structure_logic_rule_by_id(scenario.upper_structure_logic_rules)
+    task_overrides = scenario.task_overrides
     for bridge in sorted(scenario.project.bridges, key=lambda item: item.order):
         for section in sorted(bridge.work_sections, key=lambda item: item.order):
             section_lower_start = len(tasks)
@@ -271,6 +397,7 @@ def _build_tasks(scenario: ScenarioInput, validation: list[ValidationMessage]) -
                 validation=validation,
                 lower_tasks=section_lower_tasks,
                 upper_logic_rules=upper_logic_rules,
+                task_overrides=task_overrides,
             )
             tasks.extend(upper_tasks)
             generated_links.extend(upper_links)
@@ -331,6 +458,18 @@ def _task_from_component(
     )
 
 
+def _apply_task_override(component: ComponentModel, task_overrides: dict[str, TaskOverride]) -> ComponentModel:
+    override = task_overrides.get(component.id)
+    if override is None:
+        return component
+    patch: dict[str, str | None] = {}
+    if override.method_id is not None:
+        patch["method_id"] = override.method_id
+    if override.productivity_option_id is not None:
+        patch["productivity_option_id"] = override.productivity_option_id
+    return component.model_copy(update=patch) if patch else component
+
+
 def _build_upper_structure_tasks(
     *,
     bridge: ProjectBridge,
@@ -339,10 +478,12 @@ def _build_upper_structure_tasks(
     validation: list[ValidationMessage],
     lower_tasks: list[Task],
     upper_logic_rules: dict[str, UpperStructureLogicRule],
+    task_overrides: dict[str, TaskOverride] | None = None,
 ) -> tuple[list[Task], list[PrecedenceLink]]:
     support_completions = _lower_completion_tasks_by_support(section, lower_tasks)
     tasks: list[Task] = []
     links: list[PrecedenceLink] = []
+    overrides = task_overrides or {}
 
     # 本期简支梁只保留为结构参数，不生成架梁排程任务。
 
@@ -354,6 +495,7 @@ def _build_upper_structure_tasks(
         support_completions=support_completions,
         link_start=len(links) + 1,
         upper_logic_rules=upper_logic_rules,
+        task_overrides=overrides,
     )
     tasks.extend(box_tasks)
     links.extend(box_links)
@@ -366,6 +508,7 @@ def _build_upper_structure_tasks(
         support_completions=support_completions,
         link_start=len(links) + 1,
         upper_logic_rules=upper_logic_rules,
+        task_overrides=overrides,
     )
     tasks.extend(continuous_tasks)
     links.extend(continuous_links)
@@ -429,6 +572,7 @@ def _build_cast_in_place_box_beam_tasks(
     support_completions: dict[str, list[Task]],
     link_start: int,
     upper_logic_rules: dict[str, UpperStructureLogicRule],
+    task_overrides: dict[str, TaskOverride],
 ) -> tuple[list[Task], list[PrecedenceLink]]:
     tasks: list[Task] = []
     links: list[PrecedenceLink] = []
@@ -454,6 +598,7 @@ def _build_cast_in_place_box_beam_tasks(
             structure_name=f"{side_label}第{group_index}联现浇箱梁",
             process_library=process_library,
             validation=validation,
+            task_overrides=task_overrides,
             properties={
                 "upper_structure_ids": [upper.id for upper in uppers],
                 "span_start_index": first_span,
@@ -491,9 +636,10 @@ def _append_upper_task(
     process_library: list[ProcessTemplate],
     validation: list[ValidationMessage],
     properties: dict[str, Any],
+    task_overrides: dict[str, TaskOverride],
     method_id: str | None = None,
 ) -> Task | None:
-    component = ComponentModel(
+    component = _apply_task_override(ComponentModel(
         id=component_id,
         name=name,
         component_type=component_type,
@@ -501,7 +647,7 @@ def _append_upper_task(
         quantity_label=quantity_label,
         method_id=method_id,
         properties=properties,
-    )
+    ), task_overrides or {})
     task = _task_from_component(
         component=component,
         process_library=process_library,
@@ -713,6 +859,7 @@ def _build_continuous_beam_tasks(
     support_completions: dict[str, list[Task]],
     link_start: int,
     upper_logic_rules: dict[str, UpperStructureLogicRule],
+    task_overrides: dict[str, TaskOverride],
 ) -> tuple[list[Task], list[PrecedenceLink]]:
     tasks: list[Task] = []
     links: list[PrecedenceLink] = []
@@ -760,6 +907,7 @@ def _build_continuous_beam_tasks(
             support_completions=support_completions,
             link_start=link_start + len(links),
             upper_logic_rules=upper_logic_rules,
+            task_overrides=task_overrides,
         )
         tasks.extend(group_tasks)
         links.extend(group_links)
@@ -779,6 +927,7 @@ def _build_continuous_beam_group_tasks(
     support_completions: dict[str, list[Task]],
     link_start: int,
     upper_logic_rules: dict[str, UpperStructureLogicRule],
+    task_overrides: dict[str, TaskOverride],
 ) -> tuple[list[Task], list[PrecedenceLink]]:
     side_code = _side_code(section.side)
     side_label = _side_label(section.side)
@@ -824,6 +973,7 @@ def _build_continuous_beam_group_tasks(
             structure_name=structure_name,
             process_library=process_library,
             validation=validation,
+            task_overrides=task_overrides,
             properties={
                 "continuous_task_type": "zero_block",
                 "group_index": group_index,
@@ -858,6 +1008,7 @@ def _build_continuous_beam_group_tasks(
                 structure_name=structure_name,
                 process_library=process_library,
                 validation=validation,
+                task_overrides=task_overrides,
                 properties={
                     "continuous_task_type": "standard_segment_batch",
                     "group_index": group_index,
@@ -888,6 +1039,7 @@ def _build_continuous_beam_group_tasks(
         structure_name=left_edge_structure_name,
         process_library=process_library,
         validation=validation,
+        task_overrides=task_overrides,
         properties={"continuous_task_type": "side_straight_segment", "group_index": group_index, "side": "left"},
     )
     left_closure = _append_continuous_task(
@@ -903,6 +1055,7 @@ def _build_continuous_beam_group_tasks(
         structure_name=left_edge_structure_name,
         process_library=process_library,
         validation=validation,
+        task_overrides=task_overrides,
         properties={"continuous_task_type": "side_closure_segment", "group_index": group_index, "side": "left"},
     )
     right_straight = _append_continuous_task(
@@ -918,6 +1071,7 @@ def _build_continuous_beam_group_tasks(
         structure_name=right_edge_structure_name,
         process_library=process_library,
         validation=validation,
+        task_overrides=task_overrides,
         properties={"continuous_task_type": "side_straight_segment", "group_index": group_index, "side": "right"},
     )
     right_closure = _append_continuous_task(
@@ -933,6 +1087,7 @@ def _build_continuous_beam_group_tasks(
         structure_name=right_edge_structure_name,
         process_library=process_library,
         validation=validation,
+        task_overrides=task_overrides,
         properties={"continuous_task_type": "side_closure_segment", "group_index": group_index, "side": "right"},
     )
     add_link(left_straight, left_closure, "continuous_beam_side_closure")
@@ -981,6 +1136,7 @@ def _build_continuous_beam_group_tasks(
             structure_name=f"{group_label}{left_support}#墩-{right_support}#墩中跨",
             process_library=process_library,
             validation=validation,
+            task_overrides=task_overrides,
             properties={
                 "continuous_task_type": "middle_closure_segment",
                 "group_index": group_index,
@@ -1024,8 +1180,9 @@ def _append_continuous_task(
     process_library: list[ProcessTemplate],
     validation: list[ValidationMessage],
     properties: dict[str, Any],
+    task_overrides: dict[str, TaskOverride] | None = None,
 ) -> Task | None:
-    component = ComponentModel(
+    component = _apply_task_override(ComponentModel(
         id=component_id,
         name=name,
         component_type=CONTINUOUS_BEAM_COMPONENT_TYPE,
@@ -1033,7 +1190,7 @@ def _append_continuous_task(
         quantity_label=quantity_label,
         method_id=method_id,
         properties=properties,
-    )
+    ), task_overrides or {})
     task = _task_from_component(
         component=component,
         process_library=process_library,

@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.models import ComponentModel, MilestoneConstraint, PrecedenceLink, ProcessTemplate, ProductivityOption, Resource, ResourcePool, ScheduleInput, ScenarioCompareRequest, ScheduledTask, StructureModel, Task, UpperStructureComponent, UpperStructureLogicRule  # noqa: E402
+from app.models import ComponentModel, MilestoneConstraint, PrecedenceLink, ProcessTemplate, ProductivityOption, Resource, ResourcePool, ScheduleInput, ScenarioCompareRequest, ScheduledTask, StructureModel, Task, TaskOverride, UpperStructureComponent, UpperStructureLogicRule  # noqa: E402
 from app.process_library_defaults import upgrade_process_library  # noqa: E402
 from app.sample_data import (  # noqa: E402
     default_bridge,
@@ -44,6 +44,8 @@ def test_default_process_library_uses_historical_productivity_defaults() -> None
     assert process_by_id["pier_body_climbing_form"].productivity_unit == "天/节"
     assert process_by_id["pier_body_climbing_form"].quantity_source == "pier_height_m"
     assert process_by_id["pier_body_climbing_form"].productivity_options[0].standard_section_height_m == 4.5
+    assert process_by_id["pier_body_climbing_form"].is_default is True
+    assert process_by_id["pier_body_standard"].is_default is False
     assert process_by_id["cast_in_place_continuous_zero_block"].productivity_value == 120
     assert process_by_id["cast_in_place_continuous_standard_segment"].duration_method == "days_per_unit"
     assert process_by_id["bridge_deck_system_standard"].quantity_source == "deck_length_m"
@@ -99,12 +101,33 @@ def test_process_library_upgrade_replaces_previous_builtin_defaults_and_adds_mis
     assert process_by_id["precast_beam_standard"].productivity_unit == "天/片"
     assert process_by_id["cast_in_place_box_beam_standard"].productivity_value == 45
     assert process_by_id["cast_in_place_continuous_standard_segment"].duration_method == "days_per_unit"
+    assert process_by_id["pier_body_climbing_form"].is_default is True
+    assert process_by_id["pier_body_standard"].is_default is False
     for process in upgraded:
         default = next(option for option in process.productivity_options if option.is_default)
         assert process.duration_method == default.duration_method
         assert process.quantity_source == default.quantity_source
         assert process.productivity_value == default.productivity_value
         assert process.productivity_unit == default.productivity_unit
+
+
+def test_pier_body_without_selected_method_uses_climbing_form_by_default() -> None:
+    scenario = default_scenario()
+    body = next(
+        component
+        for bridge in scenario.project.bridges
+        for section in bridge.work_sections
+        for structure in section.structures
+        for component in structure.components
+        if component.component_type == "pier_body"
+    )
+    assert body.method_id is None
+
+    generated = generate_schedule_input_from_scenario(scenario)
+    task = next(task for task in generated.schedule_input.tasks if task.component_id == body.id)
+
+    assert task.process_name == "爬模施工"
+    assert task.productivity_rule_id == "pier_body_climbing_form:pier_body_climbing_form-default"
 
 
 def test_default_wbs_generates_tasks_and_logic_links() -> None:
@@ -128,7 +151,8 @@ def test_pile_method_selects_impact_drill_rule() -> None:
     assert {task.compatible_resource_types[0] for task in p01_piles} == {"impact_drill"}
 
 
-def test_missing_resource_returns_infeasible_without_solving() -> None:
+def test_missing_resource_is_treated_as_unlimited_with_warning() -> None:
+    pytest.importorskip("ortools")
     bridge = default_bridge()
     wbs = generate_wbs(bridge, default_productivity_rules(), default_logic_rules())
     resources = [resource for resource in default_resources() if resource.type != "cap_team"]
@@ -141,8 +165,8 @@ def test_missing_resource_returns_infeasible_without_solving() -> None:
             resources=resources,
         )
     )
-    assert result.status == "INFEASIBLE"
-    assert any(message.level == "error" and "承台" in message.message for message in result.validation)
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert any(message.level == "warning" and "默认充足" in message.message for message in result.validation)
 
 
 def test_default_solver_satisfies_logic_and_resource_constraints() -> None:
@@ -171,6 +195,32 @@ def test_default_solver_satisfies_logic_and_resource_constraints() -> None:
         ordered = sorted(allocations, key=lambda item: item.start_offset)
         for previous, current in zip(ordered, ordered[1:]):
             assert current.start_offset >= previous.end_offset
+
+
+def test_solver_returns_repeatable_schedule_for_same_input() -> None:
+    pytest.importorskip("ortools")
+    schedule_input = ScheduleInput(
+        project_name="repeatability",
+        start_date=date(2026, 1, 1),
+        tasks=[_solver_task(f"T{index}", f"Task {index}", 2, "crew") for index in range(1, 7)],
+        precedence_links=[],
+        resources=[
+            Resource(id="crew_2", name="Crew 2", type="crew"),
+            Resource(id="crew_1", name="Crew 1", type="crew"),
+        ],
+        time_limit_seconds=5,
+    )
+
+    results = [solve_schedule(schedule_input) for _ in range(5)]
+    signatures = [
+        tuple((task.id, task.start_offset, task.end_offset, task.assigned_resource_id) for task in result.tasks)
+        for result in results
+    ]
+
+    assert all(result.status in {"OPTIMAL", "FEASIBLE"} for result in results)
+    assert len(set(signatures)) == 1
+    assert results[0].stats["random_seed"] == 0
+    assert results[0].stats["search_workers"] == 1
 
 
 def test_solver_supports_finish_based_relationships() -> None:
@@ -290,6 +340,36 @@ def test_continuous_beam_standard_segment_duration_uses_block_count_when_process
     assert {task.duration_days for task in standard_tasks} == {180}
 
 
+def test_continuous_beam_task_override_selects_productivity_option_for_derived_task() -> None:
+    scenario = _scenario_with_continuous_beam(main_pier_count=2, standard_cycles=18)
+    process = next(process for process in scenario.process_library if process.id == "cast_in_place_continuous_standard_segment")
+    process.productivity_options.append(
+        ProductivityOption(
+            id="continuous-standard-fast",
+            name="fast",
+            duration_method="days_per_unit",
+            quantity_source="count",
+            productivity_value=5,
+            productivity_unit="days/block",
+        )
+    )
+    scenario.task_overrides = {
+        "B1-L-CB-G01-T01-P01-STD": TaskOverride(
+            method_id="standard_segment",
+            productivity_option_id="continuous-standard-fast",
+        )
+    }
+
+    generated = generate_schedule_input_from_scenario(scenario)
+    target = next(task for task in generated.schedule_input.tasks if task.id == "B1-L-CB-G01-T01-P01-STD")
+    peer = next(task for task in generated.schedule_input.tasks if task.id == "B1-L-CB-G01-T02-P02-STD")
+
+    assert target.productivity_rule_id == "cast_in_place_continuous_standard_segment:continuous-standard-fast"
+    assert target.quantity == 18
+    assert target.duration_days == 90
+    assert peer.duration_days == 180
+
+
 def test_continuous_beam_middle_closure_order_is_configurable() -> None:
     scenario = _scenario_with_continuous_beam(
         main_pier_count=4,
@@ -325,13 +405,13 @@ def test_continuous_beam_right_side_task_names_do_not_include_span_group_label()
     assert not any("第" in task.name for task in continuous_tasks)
 
 
-def test_continuous_beam_resource_max_quantity_counts_generated_tasks() -> None:
+def test_continuous_beam_resource_max_quantity_counts_t_structures() -> None:
     scenario = _scenario_with_continuous_beam(main_pier_count=4, standard_cycles=2)
 
     apply_resource_max_quantity_defaults(scenario)
 
     max_by_type = {pool.type: pool.max_quantity for pool in scenario.resource_pools}
-    assert max_by_type["cast_in_place_continuous_beam_team"] == 15
+    assert max_by_type["cast_in_place_continuous_beam_team"] == 4
 
 
 def test_simple_beam_erection_is_not_generated_in_current_phase() -> None:
@@ -440,22 +520,42 @@ def test_upper_structure_logic_relationship_and_lag_are_configurable() -> None:
     assert t_chain_link.lag_days == 2
 
 
-def test_default_scenario_sets_resource_max_quantity_from_component_counts() -> None:
+def test_default_scenario_sets_resource_max_quantity_from_business_defaults() -> None:
     scenario = default_scenario()
     max_by_type = {pool.type: pool.max_quantity for pool in scenario.resource_pools}
 
-    assert max_by_type["rotary_drill"] == 24
-    assert max_by_type["manual_pile_team"] == 4
-    assert max_by_type["cap_team"] == 14
-    assert max_by_type["pier_body_team"] == 12
-    assert max_by_type["cap_beam_team"] == 12
-    assert max_by_type["abutment_team"] == 2
+    assert set(max_by_type) == {
+        "rotary_drill",
+        "circulation_drill",
+        "impact_drill",
+        "manual_pile_team",
+        "cap_team",
+        "pier_body_team",
+        "cap_beam_team",
+        "cast_in_place_continuous_beam_team",
+    }
+    assert max_by_type["rotary_drill"] == 5
+    assert max_by_type["circulation_drill"] == 5
+    assert max_by_type["impact_drill"] == 5
+    assert max_by_type["manual_pile_team"] == 10
+    assert max_by_type["cap_team"] == 5
+    assert max_by_type["pier_body_team"] == 5
+    assert max_by_type["cap_beam_team"] == 5
+    assert max_by_type["cast_in_place_continuous_beam_team"] == 1
 
 
 def test_resource_pool_max_quantity_defaults_to_quantity() -> None:
     pool = ResourcePool.model_validate({"id": "pool-team", "type": "team", "label": "班组", "quantity": 2})
 
     assert pool.max_quantity == 2
+
+
+def test_unlimited_resource_pool_does_not_require_quantity() -> None:
+    pool = ResourcePool.model_validate({"id": "pool-team", "type": "team", "label": "班组", "resource_mode": "UNLIMITED", "quantity": None})
+
+    assert pool.resource_mode == "UNLIMITED"
+    assert pool.quantity is None
+    assert pool.max_quantity is None
 
 
 def test_schedule_input_uses_default_or_max_resource_quantity() -> None:
@@ -485,6 +585,118 @@ def test_scenario_pile_method_selects_process_template() -> None:
     assert task.productivity_rule_id == "pile_impact:pile_impact-default"
     assert task.duration_days == 2
     assert task.compatible_resource_types == ["impact_drill"]
+
+
+def test_all_unlimited_resources_do_not_generate_resource_waiting() -> None:
+    pytest.importorskip("ortools")
+    scenario = _small_resource_scenario()
+    for pool in scenario.resource_pools:
+        pool.resource_mode = "UNLIMITED"
+
+    generated = generate_schedule_input_from_scenario(scenario)
+    result = solve_schedule(generated.schedule_input)
+
+    assert generated.schedule_input.resources == []
+    assert all(not task.compatible_resource_types for task in generated.schedule_input.tasks)
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.resource_allocations == []
+    assert not any(message.level == "error" and "资源" in message.message for message in result.validation)
+
+
+def test_limited_rotary_drill_caps_parallel_pile_tasks() -> None:
+    pytest.importorskip("ortools")
+    scenario = _small_resource_scenario()
+    _set_all_resource_modes(scenario, "UNLIMITED")
+    rotary = _resource_pool(scenario, "rotary_drill")
+    rotary.resource_mode = "LIMITED"
+    rotary.quantity = 2
+    rotary.max_quantity = 2
+
+    result = solve_scenario(scenario).result
+    rotary_allocations = [allocation for allocation in result.resource_allocations if allocation.resource_type == "rotary_drill"]
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert rotary_allocations
+    assert _max_parallel_allocations(rotary_allocations) <= 2
+
+
+def test_limited_cap_formwork_serializes_cap_tasks() -> None:
+    pytest.importorskip("ortools")
+    scenario = _small_resource_scenario()
+    _set_all_resource_modes(scenario, "UNLIMITED")
+    cap_pool = _resource_pool(scenario, "cap_team")
+    cap_pool.resource_mode = "LIMITED"
+    cap_pool.quantity = 1
+    cap_pool.max_quantity = 1
+
+    solved = solve_scenario(scenario)
+    cap_allocations = [allocation for allocation in solved.result.resource_allocations if allocation.resource_type == "cap_team"]
+
+    assert solved.result.status in {"OPTIMAL", "FEASIBLE"}
+    assert cap_allocations
+    assert _max_parallel_allocations(cap_allocations) <= 1
+
+
+def test_switching_resource_to_unlimited_releases_constraint() -> None:
+    pytest.importorskip("ortools")
+    limited = _small_resource_scenario()
+    _set_all_resource_modes(limited, "UNLIMITED")
+    limited_cap = _resource_pool(limited, "cap_team")
+    limited_cap.resource_mode = "LIMITED"
+    limited_cap.quantity = 1
+    limited_cap.max_quantity = 1
+
+    unlimited = limited.model_copy(deep=True)
+    unlimited_cap = _resource_pool(unlimited, "cap_team")
+    unlimited_cap.resource_mode = "UNLIMITED"
+
+    limited_result = solve_scenario(limited).result
+    unlimited_result = solve_scenario(unlimited).result
+    unlimited_cap_tasks = [task for task in unlimited_result.tasks if task.component_type == "cap"]
+
+    assert limited_result.status in {"OPTIMAL", "FEASIBLE"}
+    assert unlimited_result.status in {"OPTIMAL", "FEASIBLE"}
+    assert unlimited_result.objective_days is not None
+    assert limited_result.objective_days is not None
+    assert unlimited_result.objective_days < limited_result.objective_days
+    assert all(task.assigned_resource_id is None for task in unlimited_cap_tasks)
+
+
+def test_missing_key_resource_pool_warns_and_uses_unlimited_strategy() -> None:
+    pytest.importorskip("ortools")
+    scenario = _small_resource_scenario()
+    scenario.resource_pools = [pool for pool in scenario.resource_pools if pool.type != "cap_team"]
+
+    solved = solve_scenario(scenario)
+    cap_tasks = [task for task in solved.generated.schedule_input.tasks if task.component_type == "cap"]
+
+    assert solved.result.status in {"OPTIMAL", "FEASIBLE"}
+    assert cap_tasks
+    assert all(task.compatible_resource_types == [] for task in cap_tasks)
+    assert any(message.level == "warning" and "未配置" in message.message for message in solved.diagnostics)
+
+
+def test_noncritical_component_can_opt_into_limited_resource_pool() -> None:
+    pytest.importorskip("ortools")
+    scenario = _abutment_resource_scenario()
+    scenario.resource_pools.append(
+        ResourcePool(
+            id="pool-abutment",
+            type="abutment_team",
+            label="桥台班组",
+            quantity=1,
+            max_quantity=1,
+        )
+    )
+
+    solved = solve_scenario(scenario)
+    abutment_tasks = [task for task in solved.generated.schedule_input.tasks if task.component_type == "abutment_body"]
+    abutment_allocations = [allocation for allocation in solved.result.resource_allocations if allocation.resource_type == "abutment_team"]
+
+    assert solved.result.status in {"OPTIMAL", "FEASIBLE"}
+    assert len(abutment_tasks) == 2
+    assert {tuple(task.compatible_resource_types) for task in abutment_tasks} == {("abutment_team",)}
+    assert _max_parallel_allocations(abutment_allocations) <= 1
 
 
 def test_component_type_milestone_matches_all_components_of_that_type() -> None:
@@ -1356,6 +1568,51 @@ def _solver_task(task_id: str, name: str, duration_days: int, resource_type: str
 
 def _task_named(tasks: list[Task], name_part: str) -> Task:
     return next(task for task in tasks if name_part in task.name)
+
+
+def _small_resource_scenario():
+    scenario = default_scenario()
+    section = scenario.project.bridges[0].work_sections[0]
+    section.structures = section.structures[:5]
+    section.upper_structures = []
+    scenario.milestones = []
+    scenario.time_limit_seconds = 5
+    return scenario
+
+
+def _abutment_resource_scenario():
+    scenario = default_scenario()
+    section = scenario.project.bridges[0].work_sections[0]
+    section.structures = [structure for structure in section.structures if structure.structure_type == "abutment"]
+    section.upper_structures = []
+    scenario.resource_pools = [pool for pool in scenario.resource_pools if pool.type != "abutment_team"]
+    _set_all_resource_modes(scenario, "UNLIMITED")
+    scenario.milestones = []
+    scenario.time_limit_seconds = 5
+    return scenario
+
+
+def _set_all_resource_modes(scenario, mode: str) -> None:
+    for pool in scenario.resource_pools:
+        pool.resource_mode = mode
+
+
+def _resource_pool(scenario, resource_type: str) -> ResourcePool:
+    return next(pool for pool in scenario.resource_pools if pool.type == resource_type)
+
+
+def _max_parallel_allocations(allocations) -> int:
+    events: list[tuple[int, int]] = []
+    for allocation in allocations:
+        events.append((allocation.start_offset, 1))
+        events.append((allocation.end_offset, -1))
+
+    current = 0
+    maximum = 0
+    for _, delta in sorted(events, key=lambda item: (item[0], item[1])):
+        current += delta
+        maximum = max(maximum, current)
+    return maximum
 
 
 def _has_link(

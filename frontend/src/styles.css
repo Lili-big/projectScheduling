@@ -486,11 +486,6 @@ code {
   gap: 16px;
 }
 
-.project-tab-grid {
-  min-height: 0;
-  grid-template-rows: minmax(0, 1fr) auto;
-}
-
 .panel {
   background: #fff;
   border: 1px solid #dbe4ed;
@@ -510,37 +505,6 @@ code {
   gap: 12px;
   align-items: center;
   border-bottom: 1px solid #e2e8f0;
-}
-
-.project-structure-panel .panel-title {
-  min-height: 42px;
-  padding: 9px 14px;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  row-gap: 8px;
-}
-
-.project-structure-panel .panel-title h2 {
-  font-size: 15px;
-}
-
-.project-structure-panel .panel-title > div:first-child {
-  flex: 1 1 360px;
-  min-width: 0;
-}
-
-.project-structure-panel .panel-title > div:first-child span {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-structure-panel .panel-title-action {
-  flex: 1 1 360px;
-  min-width: min(100%, 360px);
-  display: flex;
-  justify-content: flex-end;
 }
 
 .panel-title > div {
@@ -615,35 +579,6 @@ code {
   gap: 10px;
   align-items: center;
   background: #f8fafc;
-}
-
-.project-structure-panel {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.structure-import-action {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.structure-import-action input[type="file"] {
-  flex: 1 1 220px;
-  width: 220px;
-  min-width: 0;
-  max-width: 260px;
-  background: #fff;
-}
-
-.structure-import-action .secondary {
-  flex: 0 0 auto;
-  white-space: nowrap;
 }
 
 .process-library-panel {
@@ -946,12 +881,6 @@ code {
   max-height: none;
 }
 
-.table-wrap.project-structure-table {
-  flex: 1;
-  max-height: none;
-  min-height: 0;
-}
-
 .table-wrap.logic {
   max-height: 260px;
 }
@@ -1157,6 +1086,20 @@ code {
   flex-wrap: wrap;
 }
 
+.task-view-import-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.task-view-import-action input[type="file"] {
+  width: 230px;
+  min-width: 0;
+  max-width: 260px;
+  background: #fff;
+}
+
 .task-view-filters {
   padding: 12px;
   display: grid;
@@ -1202,17 +1145,55 @@ code {
   background: #fff;
 }
 
+.task-view-parent-group {
+  min-width: 0;
+  border: 1px solid #dbe4ed;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.task-view-parent-title,
 .task-view-group-title {
+  width: 100%;
+  height: auto;
   min-height: 40px;
   padding: 9px 12px;
   display: flex;
   justify-content: space-between;
   gap: 12px;
   align-items: center;
+  border-radius: 0;
   border-bottom: 1px solid #edf2f7;
+  background: #f8fafc;
+  color: inherit;
+  text-align: left;
+}
+
+.task-view-parent-title {
+  background: #eef8f8;
+}
+
+.task-view-child-groups {
+  padding: 10px;
+  display: grid;
+  gap: 10px;
   background: #f8fafc;
 }
 
+.task-view-group.nested {
+  border-color: #e2e8f0;
+}
+
+.task-view-group-heading {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
+}
+
+.task-view-parent-title strong,
 .task-view-group-title strong {
   min-width: 0;
   overflow: hidden;
@@ -1221,7 +1202,8 @@ code {
   color: #0f2742;
 }
 
-.task-view-group-title span {
+.task-view-parent-title > span:last-child,
+.task-view-group-title > span:last-child {
   flex: 0 0 auto;
   color: #64748b;
   font-size: 12px;
@@ -1233,7 +1215,7 @@ code {
 }
 
 .task-view-table {
-  min-width: 1420px;
+  min-width: 1540px;
 }
 
 .task-view-table th,
@@ -1243,9 +1225,16 @@ code {
 
 .task-view-table td:nth-child(5),
 .task-view-table td:nth-child(6),
-.task-view-table td:nth-child(9),
-.task-view-table td:nth-child(10) {
+.task-view-table td:nth-child(7),
+.task-view-table td:nth-child(10),
+.task-view-table td:nth-child(11) {
   white-space: normal;
+}
+
+.task-view-table td select {
+  width: 100%;
+  min-width: 120px;
+  max-width: 190px;
 }
 
 .table-wrap.plan {
@@ -1388,35 +1377,6 @@ thead tr:nth-child(2) th {
   background: #f1f5f9;
 }
 
-.project-structure-table th,
-.project-structure-table td {
-  padding: 7px 10px;
-}
-
-.project-structure-table thead tr:nth-child(2) th {
-  top: 33px;
-  padding-top: 4px;
-  padding-bottom: 4px;
-}
-
-.project-structure-table .filter-row input,
-.project-structure-table .filter-row select {
-  height: 26px;
-  padding: 3px 6px;
-}
-
-.project-structure-table td select {
-  width: 100%;
-  min-width: 112px;
-  max-width: 168px;
-}
-
-.project-structure-table td .text-pill {
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .filter-row input,
 .filter-row select {
   width: 100%;
@@ -1494,7 +1454,8 @@ tbody tr:hover {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   grid-template-areas:
     "title title title enabled"
-    "quantity maximum calendar calendar";
+    "mode quantity maximum calendar"
+    "note note note note";
   gap: 10px 12px;
   align-items: start;
   overflow: hidden;
@@ -1530,14 +1491,18 @@ tbody tr:hover {
 }
 
 .resource-card label:nth-of-type(1) {
-  grid-area: quantity;
+  grid-area: mode;
 }
 
 .resource-card label:nth-of-type(2) {
-  grid-area: maximum;
+  grid-area: quantity;
 }
 
 .resource-card label:nth-of-type(3) {
+  grid-area: maximum;
+}
+
+.resource-card label:nth-of-type(4) {
   grid-area: calendar;
 }
 
@@ -1545,6 +1510,18 @@ tbody tr:hover {
 .resource-card select {
   width: 100%;
   min-width: 0;
+}
+
+.resource-card input:disabled {
+  color: #64748b;
+  background: #f8fafc;
+}
+
+.resource-mode-note {
+  grid-area: note;
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
 }
 
 .check-row {
@@ -1938,12 +1915,14 @@ tbody tr:hover {
     grid-template-columns: 1fr;
   }
 
+  .task-view-parent-title,
   .task-view-group-title {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .task-view-group-title span {
+  .task-view-parent-title > span:last-child,
+  .task-view-group-title > span:last-child {
     white-space: normal;
   }
 
@@ -1951,10 +1930,12 @@ tbody tr:hover {
     grid-template-columns: 1fr;
     grid-template-areas:
       "title"
+      "mode"
       "quantity"
       "maximum"
       "calendar"
-      "enabled";
+      "enabled"
+      "note";
   }
 
   .check-row {

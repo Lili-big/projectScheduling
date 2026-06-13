@@ -3,11 +3,12 @@ import {
   Bot,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   ClipboardList,
   Database,
   Flag,
   GitCompare,
-  Layers3,
   Loader2,
   Play,
   Save,
@@ -39,7 +40,8 @@ type ComponentType =
 type RelationshipType = "FS" | "SS" | "FF" | "SF";
 type WorkPointType = "road" | "bridge" | "tunnel";
 type WorkSectionSide = "left" | "right" | "none";
-type TabKey = "project" | "process" | "logic" | "resources" | "milestones" | "tasks" | "results";
+type ResourceMode = "LIMITED" | "UNLIMITED";
+type TabKey = "process" | "logic" | "resources" | "milestones" | "tasks" | "results";
 type GanttMode = "by_structure" | "by_process";
 type TaskViewMode = "by_structure" | "by_process";
 
@@ -114,6 +116,11 @@ type ProductivityOption = {
   is_default: boolean;
 };
 
+type TaskOverride = {
+  method_id?: string | null;
+  productivity_option_id?: string | null;
+};
+
 type ProcessTemplate = {
   id: string;
   component_type: ComponentType;
@@ -161,7 +168,8 @@ type ResourcePool = {
   id: string;
   type: string;
   label: string;
-  quantity: number;
+  resource_mode?: ResourceMode;
+  quantity: number | null;
   max_quantity?: number | null;
   calendar_id: string;
   enabled: boolean;
@@ -187,6 +195,7 @@ type ScenarioInput = {
   process_library: ProcessTemplate[];
   logic_rules: LogicRule[];
   upper_structure_logic_rules?: UpperStructureLogicRule[];
+  task_overrides?: Record<string, TaskOverride>;
   resource_calendars: ResourceCalendar[];
   resource_pools: ResourcePool[];
   milestones: MilestoneConstraint[];
@@ -392,21 +401,6 @@ type ContinuityMetrics = {
   resource_paths: ResourcePath[];
 };
 
-type StructureRow = ReturnType<typeof buildStructureRows>[number];
-
-type StructureFilters = {
-  workpointLabel: string;
-  bridgeAndSection: string;
-  structureLevel: string;
-  sideLabel: string;
-  location: string;
-  name: string;
-  typeLabel: string;
-  dimension: string;
-  processLabel: string;
-  productivityLabel: string;
-};
-
 type TaskViewFilters = {
   structureText: string;
   processText: string;
@@ -431,6 +425,14 @@ type TaskViewGroup = {
   title: string;
   subtitle: string;
   rows: TaskViewRow[];
+};
+
+type TaskViewParentGroup = {
+  id: string;
+  title: string;
+  subtitle: string;
+  rows: TaskViewRow[];
+  groups: TaskViewGroup[];
 };
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -565,6 +567,35 @@ const upperStructureCodes = {
   continuousBeam: "castInPlaceContinuousBoxGirder",
 } as const;
 
+const resourceModeLabels: Record<ResourceMode, string> = {
+  LIMITED: "限制数量",
+  UNLIMITED: "默认充足",
+};
+
+const keyResourceComponentTypes = new Set<ComponentType>(["pile", "cap", "pier_body", "cap_beam", "cast_in_place_continuous_beam"]);
+
+const defaultResourceTypeByComponent: Partial<Record<ComponentType, string>> = {
+  cap: "cap_team",
+  pier_body: "pier_body_team",
+  cap_beam: "cap_beam_team",
+  cast_in_place_continuous_beam: "cast_in_place_continuous_beam_team",
+};
+
+const pileResourceTypeByProcess: Record<string, string> = {
+  pile_rotary_regular: "rotary_drill",
+  pile_circulation: "circulation_drill",
+  pile_impact: "impact_drill",
+  pile_manual: "manual_pile_team",
+};
+
+const pileResourceTypeByMethod: Record<string, string> = {
+  rotary_drill: "rotary_drill",
+  circulation_drill: "circulation_drill",
+  impact_drill: "impact_drill",
+  manual_pile: "manual_pile_team",
+  manual_excavation: "manual_pile_team",
+};
+
 type UpperLowerLogicConstraint = {
   id: string;
   name: string;
@@ -682,12 +713,6 @@ function componentSortIndex(componentType: ComponentType): number {
   return index >= 0 ? index : componentOrder.length;
 }
 
-const workpointLabels: Record<WorkPointType, string> = {
-  road: "路",
-  bridge: "桥",
-  tunnel: "隧",
-};
-
 const sideLabels: Record<WorkSectionSide, string> = {
   left: "左幅",
   right: "右幅",
@@ -779,13 +804,12 @@ function derivePlanStatus(result: ScheduleResult | null): PlanStatusDisplay {
 }
 
 const tabs: Array<{ key: TabKey; label: string; icon: ReactNode }> = [
-  { key: "project", label: "项目参数", icon: <Layers3 size={15} /> },
   { key: "process", label: "工艺工效库", icon: <Database size={15} /> },
   { key: "logic", label: "工艺逻辑", icon: <Workflow size={15} /> },
+  { key: "tasks", label: "任务视图", icon: <ClipboardList size={15} /> },
   { key: "resources", label: "资源配置", icon: <Server size={15} /> },
   { key: "milestones", label: "里程碑", icon: <Flag size={15} /> },
-  { key: "tasks", label: "任务视图", icon: <ClipboardList size={15} /> },
-  { key: "results", label: "模拟结果", icon: <CheckCircle2 size={15} /> },
+  { key: "results", label: "模拟求解", icon: <CheckCircle2 size={15} /> },
 ];
 
 function SideNavigation({
@@ -862,8 +886,8 @@ export default function App() {
   const [generatedScenarioFingerprint, setGeneratedScenarioFingerprint] = useState<string | null>(null);
   const [solveResult, setSolveResult] = useState<ScenarioSolveResult | null>(null);
   const [solveResultScenarioFingerprint, setSolveResultScenarioFingerprint] = useState<string | null>(null);
-  const [openTabs, setOpenTabs] = useState<TabKey[]>(["project"]);
-  const [activeTab, setActiveTab] = useState<TabKey | null>("project");
+  const [openTabs, setOpenTabs] = useState<TabKey[]>(["tasks"]);
+  const [activeTab, setActiveTab] = useState<TabKey | null>("tasks");
   const [ganttMode, setGanttMode] = useState<GanttMode>("by_structure");
   const [savedResults, setSavedResults] = useState<ScenarioSolveResult[]>([]);
   const [comparison, setComparison] = useState<CompareResponse | null>(null);
@@ -876,7 +900,6 @@ export default function App() {
     void loadScenario();
   }, []);
 
-  const flatStructures = useMemo(() => (scenario ? flattenStructures(scenario.project) : []), [scenario]);
   const scenarioFingerprint = useMemo(() => (scenario ? scenarioFingerprintForSolve(scenario) : null), [scenario]);
   const currentGenerated = scenarioFingerprint !== null && generatedScenarioFingerprint === scenarioFingerprint ? generated : null;
   const currentSolveResult = scenarioFingerprint !== null && solveResultScenarioFingerprint === scenarioFingerprint ? solveResult : null;
@@ -909,7 +932,8 @@ export default function App() {
       setSolveResultScenarioFingerprint(null);
       setComparison(null);
       setLastImport(imported);
-      setActiveTab("project");
+      setOpenTabs((current) => (current.includes("tasks") ? current : [...current, "tasks"]));
+      setActiveTab("tasks");
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -917,17 +941,26 @@ export default function App() {
     }
   }
 
+  async function generateTaskViewForScenario(
+    requestScenario: ScenarioInput,
+    options: { openTasks?: boolean } = {},
+  ) {
+    const requestFingerprint = scenarioFingerprintForSolve(requestScenario);
+    const nextGenerated = await apiPost<GeneratedScheduleInput>("/api/generate-schedule-input", requestScenario);
+    setGenerated(nextGenerated);
+    setGeneratedScenarioFingerprint(requestFingerprint);
+    if (options.openTasks !== false) {
+      openModule("tasks");
+    }
+    return nextGenerated;
+  }
+
   async function generateOnly() {
     if (!scenario) return;
-    const requestScenario = scenario;
-    const requestFingerprint = scenarioFingerprintForSolve(requestScenario);
     setBusy("generating");
     setError(null);
     try {
-      const nextGenerated = await apiPost<GeneratedScheduleInput>("/api/generate-schedule-input", requestScenario);
-      setGenerated(nextGenerated);
-      setGeneratedScenarioFingerprint(requestFingerprint);
-      openModule("tasks");
+      await generateTaskViewForScenario(scenario, { openTasks: true });
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -1015,14 +1048,17 @@ export default function App() {
         payload.append("target_bridge", targetBridge.trim());
       }
       const imported = await apiPostFormData<ImportBridgeParamsResponse>("/api/import-bridge-params", payload);
-      setScenario(imported.scenario);
+      const nextScenario: ScenarioInput = { ...imported.scenario, task_overrides: {} };
+      const nextFingerprint = scenarioFingerprintForSolve(nextScenario);
+      previousScenarioFingerprintRef.current = nextFingerprint;
+      setScenario(nextScenario);
       setGenerated(null);
       setGeneratedScenarioFingerprint(null);
       setSolveResult(null);
       setSolveResultScenarioFingerprint(null);
       setComparison(null);
-      setLastImport(imported);
-      setActiveTab("project");
+      setLastImport({ ...imported, scenario: nextScenario });
+      await generateTaskViewForScenario(nextScenario, { openTasks: true });
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -1036,15 +1072,16 @@ export default function App() {
     setError(null);
     try {
       const result = await apiPost<ProcessNlResponse>("/api/apply-process-natural-language", { scenario, prompt });
+      const resultFingerprint = scenarioFingerprintForSolve(result.scenario);
+      previousScenarioFingerprintRef.current = resultFingerprint;
       setScenario(result.scenario);
       if (hasProcessLibraryChanged(scenario.process_library, result.scenario.process_library)) {
         setProcessLibraryDirty(true);
       }
-      setGenerated(null);
-      setGeneratedScenarioFingerprint(null);
       setSolveResult(null);
       setSolveResultScenarioFingerprint(null);
       setComparison(null);
+      await generateTaskViewForScenario(result.scenario, { openTasks: false });
       return result;
     } catch (err) {
       setError(errorText(err));
@@ -1183,28 +1220,18 @@ export default function App() {
     );
   }
 
-  function updateComponent(componentId: string, patch: Partial<ComponentModel>) {
-    setScenario((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        project: {
-          ...current.project,
-          bridges: current.project.bridges.map((bridge) => ({
-            ...bridge,
-            work_sections: bridge.work_sections.map((section) => ({
-              ...section,
-              structures: section.structures.map((structure) => ({
-                ...structure,
-                components: structure.components.map((component) =>
-                  component.id === componentId ? { ...component, ...patch } : component,
-                ),
-              })),
-            })),
-          })),
-        },
-      };
-    });
+  function updateTaskProcessAndGenerate(task: Task, patch: TaskOverride) {
+    if (!scenario) return;
+    const nextScenario = scenarioWithTaskProcessPatch(scenario, task, patch);
+    const nextFingerprint = scenarioFingerprintForSolve(nextScenario);
+    const nextGenerated = patchGeneratedScheduleInputForTask(currentGenerated, task.id, nextScenario);
+    previousScenarioFingerprintRef.current = nextFingerprint;
+    setScenario(nextScenario);
+    setGenerated(nextGenerated);
+    setGeneratedScenarioFingerprint(nextGenerated ? nextFingerprint : null);
+    setSolveResult(null);
+    setSolveResultScenarioFingerprint(null);
+    setComparison(null);
   }
 
   function renderModule(tabKey: TabKey) {
@@ -1213,18 +1240,6 @@ export default function App() {
     }
 
     switch (tabKey) {
-      case "project":
-        return scenario ? (
-          <ProjectTab
-            scenario={scenario}
-            flatStructures={flatStructures}
-            onUpdateComponent={updateComponent}
-            onImportBridgeParams={importBridgeParams}
-            onApplyProcessNaturalLanguage={applyProcessNaturalLanguage}
-            importing={busy === "importing"}
-            applyingProcessText={busy === "nl"}
-          />
-        ) : null;
       case "process":
         return scenario ? (
           <ProcessTab
@@ -1254,6 +1269,8 @@ export default function App() {
             generated={currentGenerated}
             solveResult={currentSolveResult}
             onGenerateTaskView={generateOnly}
+            onImportBridgeParams={importBridgeParams}
+            onUpdateTaskProcess={updateTaskProcessAndGenerate}
             busy={busy}
           />
         ) : null;
@@ -1300,17 +1317,6 @@ export default function App() {
         )}
 
         <div className="workspace-content">
-        {scenario && activeTab === "project" && (
-          <ProjectTab
-            scenario={scenario}
-            flatStructures={flatStructures}
-            onUpdateComponent={updateComponent}
-            onImportBridgeParams={importBridgeParams}
-            onApplyProcessNaturalLanguage={applyProcessNaturalLanguage}
-            importing={busy === "importing"}
-            applyingProcessText={busy === "nl"}
-          />
-        )}
         {scenario && activeTab === "process" && (
           <ProcessTab
             scenario={scenario}
@@ -1339,6 +1345,8 @@ export default function App() {
             generated={currentGenerated}
             solveResult={currentSolveResult}
             onGenerateTaskView={generateOnly}
+            onImportBridgeParams={importBridgeParams}
+            onUpdateTaskProcess={updateTaskProcessAndGenerate}
             busy={busy}
           />
         )}
@@ -1363,262 +1371,13 @@ export default function App() {
         )}
         </div>
       </main>
-    </div>
-    </div>
-  );
-}
-
-function ProjectTab({
-  scenario,
-  flatStructures,
-  onUpdateComponent,
-  onImportBridgeParams,
-  onApplyProcessNaturalLanguage,
-  importing,
-  applyingProcessText,
-}: {
-  scenario: ScenarioInput;
-  flatStructures: ReturnType<typeof flattenStructures>;
-  onUpdateComponent: (componentId: string, patch: Partial<ComponentModel>) => void;
-  onImportBridgeParams: (file: File, targetBridge: string) => void;
-  onApplyProcessNaturalLanguage: (prompt: string) => Promise<ProcessNlResponse | null>;
-  importing: boolean;
-  applyingProcessText: boolean;
-}) {
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [processPrompt, setProcessPrompt] = useState("");
-  const [processNlResult, setProcessNlResult] = useState<ProcessNlResponse | null>(null);
-  const [assistantOpen, setAssistantOpen] = useState(true);
-  const [structureFilters, setStructureFilters] = useState<StructureFilters>({
-    workpointLabel: "",
-    bridgeAndSection: "",
-    structureLevel: "",
-    sideLabel: "",
-    location: "",
-    name: "",
-    typeLabel: "",
-    dimension: "",
-    processLabel: "",
-    productivityLabel: "",
-  });
-  const structureRows = buildStructureRows(scenario.project, scenario.process_library);
-  const filteredStructureRows = filterStructureRows(structureRows, structureFilters);
-
-  async function submitProcessPrompt() {
-    if (!processPrompt.trim() || applyingProcessText) return;
-    const result = await onApplyProcessNaturalLanguage(processPrompt);
-    if (result) setProcessNlResult(result);
-  }
-
-  function useAssistantExample(prompt: string) {
-    setProcessPrompt(prompt);
-    setAssistantOpen(true);
-  }
-
-  return (
-    <div className="tab-grid project-tab-grid">
-      <section className="panel full project-structure-panel">
-        <PanelTitle
-          title="结构构件清单"
-          subtitle={`${filteredStructureRows.length} / ${structureRows.length} 项，结构尺寸和桩基工艺会进入任务生成层`}
-          action={
-            <div className="structure-import-action">
-              <input
-                type="file"
-                accept=".xlsx,.xlsm"
-                onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
-              />
-              <button
-                className="secondary"
-                type="button"
-                disabled={!selectedFile || importing}
-                onClick={() => selectedFile && onImportBridgeParams(selectedFile, "")}
-              >
-                {importing ? <Loader2 className="spin" size={16} /> : <Upload size={16} />}
-                导入 Excel
-              </button>
-            </div>
-          }
+      {scenario && (
+        <GlobalProcessAssistant
+          onApplyProcessNaturalLanguage={applyProcessNaturalLanguage}
+          applyingProcessText={busy === "nl"}
         />
-        <div className="table-wrap tall project-structure-table">
-          <table>
-            <thead>
-              <tr>
-                <th>工点</th>
-                <th>桥梁 / 工区</th>
-                <th>结构层级</th>
-                <th>幅别</th>
-                <th>位置</th>
-                <th>构件</th>
-                <th>类型</th>
-                <th>结构尺寸</th>
-                <th>工艺</th>
-                <th>工效</th>
-              </tr>
-              <tr className="filter-row">
-                <th>
-                  <input value={structureFilters.workpointLabel} onChange={(event) => setStructureFilters((current) => ({ ...current, workpointLabel: event.target.value }))} placeholder="筛选" />
-                </th>
-                <th>
-                  <input value={structureFilters.bridgeAndSection} onChange={(event) => setStructureFilters((current) => ({ ...current, bridgeAndSection: event.target.value }))} placeholder="筛选" />
-                </th>
-                <th>
-                  <select value={structureFilters.structureLevel} onChange={(event) => setStructureFilters((current) => ({ ...current, structureLevel: event.target.value }))}>
-                    <option value="">全部</option>
-                    <option value="下部结构">下部结构</option>
-                    <option value="上部结构">上部结构</option>
-                  </select>
-                </th>
-                <th>
-                  <select value={structureFilters.sideLabel} onChange={(event) => setStructureFilters((current) => ({ ...current, sideLabel: event.target.value }))}>
-                    <option value="">全部</option>
-                    <option value="左幅">左幅</option>
-                    <option value="右幅">右幅</option>
-                    <option value="无幅别">无幅别</option>
-                  </select>
-                </th>
-                <th>
-                  <input value={structureFilters.location} onChange={(event) => setStructureFilters((current) => ({ ...current, location: event.target.value }))} placeholder="筛选" />
-                </th>
-                <th>
-                  <input value={structureFilters.name} onChange={(event) => setStructureFilters((current) => ({ ...current, name: event.target.value }))} placeholder="筛选" />
-                </th>
-                <th>
-                  <input value={structureFilters.typeLabel} onChange={(event) => setStructureFilters((current) => ({ ...current, typeLabel: event.target.value }))} placeholder="筛选" />
-                </th>
-                <th>
-                  <input value={structureFilters.dimension} onChange={(event) => setStructureFilters((current) => ({ ...current, dimension: event.target.value }))} placeholder="筛选" />
-                </th>
-                <th>
-                  <input value={structureFilters.processLabel} onChange={(event) => setStructureFilters((current) => ({ ...current, processLabel: event.target.value }))} placeholder="筛选" />
-                </th>
-                <th>
-                  <input value={structureFilters.productivityLabel} onChange={(event) => setStructureFilters((current) => ({ ...current, productivityLabel: event.target.value }))} placeholder="筛选" />
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredStructureRows.map((row) => {
-                const processOptions = row.component ? processOptionsForComponent(row.component, scenario.process_library) : [];
-                const selectedProcess = row.component ? selectedProcessForComponent(row.component, scenario.process_library) : null;
-                const productivityOptions = selectedProcess ? processProductivityOptions(selectedProcess) : [];
-                const selectedProductivity = row.component && selectedProcess ? selectedProductivityOption(row.component, selectedProcess) : null;
-                const showProcessSelect = processOptions.length > 1 || (processOptions.length > 0 && !selectedProcess);
-                const showProductivitySelect = Boolean(selectedProcess && selectedProductivity && productivityOptions.length > 1);
-
-                return (
-                  <tr key={row.id}>
-                    <td><span className="tag">{row.workpointLabel}</span></td>
-                    <td>{row.bridgeAndSection}</td>
-                    <td><span className="tag">{row.structureLevel}</span></td>
-                    <td>{row.sideLabel}</td>
-                    <td>{row.location}</td>
-                    <td>{row.name}</td>
-                    <td><span className="tag">{row.typeLabel}</span></td>
-                    <td className="note-cell">{row.dimension}</td>
-                    <td>
-                      {row.component && processOptions.length > 0 ? (
-                        showProcessSelect ? (
-                          <select
-                            value={selectedProcess?.id ?? ""}
-                            onChange={(event) => {
-                              const nextProcess = processOptions.find((process) => process.id === event.target.value);
-                              if (!nextProcess) return;
-                              const nextDefault = defaultProductivityOption(nextProcess);
-                              onUpdateComponent(row.component!.id, {
-                                method_id: nextProcess.method_id ?? nextProcess.id,
-                                productivity_option_id: nextDefault?.id ?? null,
-                              });
-                            }}
-                          >
-                            {!selectedProcess && <option value="">请选择工艺</option>}
-                            {processOptions.map((process) => (
-                              <option key={process.id} value={process.id}>{process.process_name}</option>
-                            ))}
-                          </select>
-                        ) : (
-                          <code>-</code>
-                        )
-                      ) : (
-                        <code>-</code>
-                      )}
-                    </td>
-                    <td>
-                      {selectedProcess && selectedProductivity ? (
-                        showProductivitySelect ? (
-                          <select
-                            value={selectedProductivity.id}
-                            onChange={(event) => onUpdateComponent(row.component!.id, { productivity_option_id: event.target.value })}
-                          >
-                            {productivityOptions.map((option) => (
-                              <option key={option.id} value={option.id}>{productivityOptionLabel(option)}</option>
-                            ))}
-                          </select>
-                        ) : (
-                          <span className="text-pill">{productivityOptionLabel(selectedProductivity)}</span>
-                        )
-                      ) : (
-                        <code>{row.productivityLabel}</code>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </section>
-      {assistantOpen ? (
-        <aside className="nl-process-panel" aria-label="AI 操作助手">
-          <div className="nl-process-title">
-            <div className="nl-process-heading">
-              <span className="assistant-mark"><Bot size={16} /></span>
-              <div>
-                <strong>AI 操作助手</strong>
-                <span>自然语言快捷设置</span>
-              </div>
-            </div>
-            <button className="icon-button" type="button" aria-label="收起 AI 操作助手" onClick={() => setAssistantOpen(false)}>
-              <X size={16} />
-            </button>
-          </div>
-          <textarea
-            value={processPrompt}
-            onChange={(event) => setProcessPrompt(event.target.value)}
-            placeholder="例如：左幅的3#墩和4#墩的桩基工艺设置成人工挖孔。"
-          />
-          <div className="assistant-examples" aria-label="快捷示例">
-            <button type="button" onClick={() => useAssistantExample("桩基默认采用旋挖钻施工，其中1#墩-1桩基、1#墩-2桩基采用人工挖孔桩。")}>
-              默认旋挖
-            </button>
-            <button type="button" onClick={() => useAssistantExample("渠溪河大桥连续梁主墩使用爬模施工。")}>
-              主墩爬模
-            </button>
-            <button type="button" onClick={() => useAssistantExample("左幅的3#墩和4#墩的桩基工艺设置成人工挖孔。")}>
-              指定墩位
-            </button>
-          </div>
-          <button className="primary assistant-submit" disabled={!processPrompt.trim() || applyingProcessText} onClick={submitProcessPrompt}>
-            {applyingProcessText ? <Loader2 className="spin" size={16} /> : <Sparkles size={16} />}
-            让助手执行
-          </button>
-          {processNlResult && (
-            <div className="nl-process-result">
-              {processNlResult.changes.map((change, index) => (
-                <span key={`${change.action}-${index}`}>{change.message}</span>
-              ))}
-              {processNlResult.warnings.map((warning, index) => (
-                <span className="warn" key={`${warning}-${index}`}>{warning}</span>
-              ))}
-            </div>
-          )}
-        </aside>
-      ) : (
-        <button className="assistant-launcher" type="button" aria-label="打开 AI 操作助手" onClick={() => setAssistantOpen(true)}>
-          <Bot size={18} />
-          <span>AI 助手</span>
-        </button>
       )}
+    </div>
     </div>
   );
 }
@@ -1636,8 +1395,6 @@ function ProcessTab({
   savingProcessLibrary: boolean;
   processLibraryDirty: boolean;
 }) {
-  const resourcePoolByType = new Map(scenario.resource_pools.map((pool) => [pool.type, pool]));
-
   function productivityOptions(process: ProcessTemplate): ProductivityOption[] {
     return process.productivity_options?.length
       ? process.productivity_options
@@ -1740,7 +1497,7 @@ function ProcessTab({
     <section className="panel full process-library-panel">
       <PanelTitle
         title="施工工艺及工效库"
-        subtitle="工艺模板按构件类型、适用工艺和默认资源类型维护"
+        subtitle="工艺模板按构件类型和适用工艺维护，关键资源由工艺规则自动匹配"
         action={
           <button
             className="secondary"
@@ -1769,7 +1526,6 @@ function ProcessTab({
           </thead>
           <tbody>
             {sortedProcessEntries.map(({ process, processIndex }) => {
-              const currentPool = resourcePoolByType.get(process.resource_type);
               const options = productivityOptions(process);
               return (
                 <tr key={process.id}>
@@ -1873,15 +1629,7 @@ function ProcessTab({
                     </div>
                   </td>
                   <td>
-                    <select
-                      value={process.resource_type}
-                      onChange={(event) => onUpdateProcess(processIndex, { resource_type: event.target.value })}
-                    >
-                      {!currentPool && <option value={process.resource_type}>{process.resource_type}</option>}
-                      {scenario.resource_pools.map((pool) => (
-                        <option value={pool.type} key={pool.id}>{pool.label}</option>
-                      ))}
-                    </select>
+                    {processResourceLabel(process, scenario.resource_pools)}
                   </td>
                 </tr>
               );
@@ -2032,53 +1780,89 @@ function ResourcesTab({
 }) {
   return (
     <section className="panel full">
-      <PanelTitle title="资源配置约束" subtitle="资源池按数量自动展开为命名资源，求解器自动从候选资源中选择" />
+      <PanelTitle title="资源配置约束" subtitle="仅限制数量的资源会参与容量判断；默认充足资源不会产生等待" />
       <div className="resource-grid">
-        {scenario.resource_pools.map((pool, index) => (
-          <div className="resource-card" key={pool.id}>
-            <div>
-              <strong>{pool.label}</strong>
-              <code>{pool.type}</code>
+        {scenario.resource_pools.map((pool, index) => {
+          const mode = resourcePoolMode(pool);
+          const isLimited = mode === "LIMITED";
+          const quantity = resourcePoolQuantity(pool);
+          const maxQuantity = Math.max(pool.max_quantity ?? quantity, quantity);
+          return (
+            <div className="resource-card" key={pool.id}>
+              <div>
+                <strong>{pool.label}</strong>
+                <code>{pool.type}</code>
+              </div>
+              <label className="resource-mode-field">
+                资源级别
+                <select
+                  value={mode}
+                  onChange={(event) => {
+                    const nextMode = event.target.value as ResourceMode;
+                    if (nextMode === "LIMITED") {
+                      const nextQuantity = Math.max(1, quantity);
+                      onUpdateResourcePool(index, {
+                        resource_mode: nextMode,
+                        quantity: nextQuantity,
+                        max_quantity: Math.max(maxQuantity, nextQuantity),
+                      });
+                    } else {
+                      onUpdateResourcePool(index, { resource_mode: nextMode });
+                    }
+                  }}
+                >
+                  <option value="LIMITED">{resourceModeLabels.LIMITED}</option>
+                  <option value="UNLIMITED">{resourceModeLabels.UNLIMITED}</option>
+                </select>
+              </label>
+              <label>
+                限制数量
+                <input
+                  type="number"
+                  min={1}
+                  disabled={!isLimited}
+                  value={isLimited ? quantity : ""}
+                  placeholder="默认充足"
+                  onChange={(event) => {
+                    const nextQuantity = Math.max(1, Number(event.target.value));
+                    onUpdateResourcePool(index, {
+                      quantity: nextQuantity,
+                      max_quantity: Math.max(maxQuantity, nextQuantity),
+                    });
+                  }}
+                />
+              </label>
+              <label>
+                最大数量
+                <input
+                  type="number"
+                  min={Math.max(1, quantity)}
+                  disabled={!isLimited}
+                  value={isLimited ? maxQuantity : ""}
+                  placeholder="默认充足"
+                  onChange={(event) => onUpdateResourcePool(index, { max_quantity: Math.max(Number(event.target.value), Math.max(1, quantity)) })}
+                />
+              </label>
+              <label>
+                日历
+                <select value={pool.calendar_id} onChange={(event) => onUpdateResourcePool(index, { calendar_id: event.target.value })}>
+                  {scenario.resource_calendars.map((calendar) => (
+                    <option value={calendar.id} key={calendar.id}>{calendar.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={pool.enabled}
+                  onChange={(event) => onUpdateResourcePool(index, { enabled: event.target.checked })}
+                />
+                启用
+              </label>
+              {!isLimited && <p className="resource-mode-note">该资源按默认充足处理，不限制并行任务数。</p>}
             </div>
-            <label>
-              默认数量
-              <input
-                type="number"
-                min={0}
-                value={pool.quantity}
-                onChange={(event) => {
-                  const quantity = Number(event.target.value);
-                  onUpdateResourcePool(index, { quantity, max_quantity: Math.max(pool.max_quantity ?? pool.quantity, quantity) });
-                }}
-              />
-            </label>
-            <label>
-              最大数量
-              <input
-                type="number"
-                min={pool.quantity}
-                value={pool.max_quantity ?? pool.quantity}
-                onChange={(event) => onUpdateResourcePool(index, { max_quantity: Math.max(Number(event.target.value), pool.quantity) })}
-              />
-            </label>
-            <label>
-              日历
-              <select value={pool.calendar_id} onChange={(event) => onUpdateResourcePool(index, { calendar_id: event.target.value })}>
-                {scenario.resource_calendars.map((calendar) => (
-                  <option value={calendar.id} key={calendar.id}>{calendar.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={pool.enabled}
-                onChange={(event) => onUpdateResourcePool(index, { enabled: event.target.checked })}
-              />
-              启用
-            </label>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
@@ -2165,24 +1949,107 @@ function MilestonesTab({
   );
 }
 
+function GlobalProcessAssistant({
+  onApplyProcessNaturalLanguage,
+  applyingProcessText,
+}: {
+  onApplyProcessNaturalLanguage: (prompt: string) => Promise<ProcessNlResponse | null>;
+  applyingProcessText: boolean;
+}) {
+  const [processPrompt, setProcessPrompt] = useState("");
+  const [processNlResult, setProcessNlResult] = useState<ProcessNlResponse | null>(null);
+  const [assistantOpen, setAssistantOpen] = useState(true);
+
+  async function submitProcessPrompt() {
+    const prompt = processPrompt.trim();
+    if (!prompt || applyingProcessText) return;
+    const result = await onApplyProcessNaturalLanguage(prompt);
+    if (result) setProcessNlResult(result);
+  }
+
+  function useAssistantExample(prompt: string) {
+    setProcessPrompt(prompt);
+    setAssistantOpen(true);
+  }
+
+  return assistantOpen ? (
+    <aside className="nl-process-panel" aria-label="全局 AI 操作助手">
+      <div className="nl-process-title">
+        <div className="nl-process-heading">
+          <span className="assistant-mark"><Bot size={16} /></span>
+          <div>
+            <strong>AI 操作助手</strong>
+            <span>自然语言录入工艺和工效</span>
+          </div>
+        </div>
+        <button className="icon-button" type="button" aria-label="收起 AI 操作助手" onClick={() => setAssistantOpen(false)}>
+          <X size={16} />
+        </button>
+      </div>
+      <textarea
+        value={processPrompt}
+        onChange={(event) => setProcessPrompt(event.target.value)}
+        placeholder="例如：左幅的3#墩和4#墩的桩基工艺设置成人工挖孔。"
+      />
+      <div className="assistant-examples" aria-label="快捷示例">
+        <button type="button" onClick={() => useAssistantExample("桩基默认采用旋挖钻施工，其中1#墩-1桩基、1#墩-2桩基采用人工挖孔桩。")}>
+          默认旋挖
+        </button>
+        <button type="button" onClick={() => useAssistantExample("渠溪河大桥连续梁主墩使用爬模施工。")}>
+          主墩爬模
+        </button>
+        <button type="button" onClick={() => useAssistantExample("左幅的3#墩和4#墩的桩基工艺设置成人工挖孔。")}>
+          指定墩位
+        </button>
+      </div>
+      <button className="primary assistant-submit" disabled={!processPrompt.trim() || applyingProcessText} onClick={submitProcessPrompt}>
+        {applyingProcessText ? <Loader2 className="spin" size={16} /> : <Sparkles size={16} />}
+        让助手执行
+      </button>
+      {processNlResult && (
+        <div className="nl-process-result">
+          {processNlResult.changes.map((change, index) => (
+            <span key={`${change.action}-${index}`}>{change.message}</span>
+          ))}
+          {processNlResult.warnings.map((warning, index) => (
+            <span className="warn" key={`${warning}-${index}`}>{warning}</span>
+          ))}
+        </div>
+      )}
+    </aside>
+  ) : (
+    <button className="assistant-launcher" type="button" aria-label="打开 AI 操作助手" onClick={() => setAssistantOpen(true)}>
+      <Bot size={18} />
+      <span>AI 助手</span>
+    </button>
+  );
+}
+
 function TaskViewTab({
   scenario,
   generated,
   solveResult,
   onGenerateTaskView,
+  onImportBridgeParams,
+  onUpdateTaskProcess,
   busy,
 }: {
   scenario: ScenarioInput;
   generated: GeneratedScheduleInput | null;
   solveResult: ScenarioSolveResult | null;
   onGenerateTaskView: () => void;
+  onImportBridgeParams: (file: File, targetBridge: string) => void;
+  onUpdateTaskProcess: (task: Task, patch: TaskOverride) => void;
   busy: "loading" | "generating" | "solving" | "minResources" | "comparing" | "importing" | "nl" | "savingProcessLibrary" | null;
 }) {
   const [groupMode, setGroupMode] = useState<TaskViewMode>("by_structure");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [filters, setFilters] = useState<TaskViewFilters>({
     structureText: "",
     processText: "",
   });
+  const [collapsedTaskParents, setCollapsedTaskParents] = useState<Set<string>>(() => new Set());
+  const [collapsedTaskGroups, setCollapsedTaskGroups] = useState<Set<string>>(() => new Set());
   const [openPredecessorTaskId, setOpenPredecessorTaskId] = useState<string | null>(null);
   const [predecessorAnchorRect, setPredecessorAnchorRect] = useState<DOMRect | null>(null);
   const predecessorHoverOpenTimerRef = useRef<number | null>(null);
@@ -2209,8 +2076,11 @@ function TaskViewTab({
     [generatedForDetails, linksBySuccessor, scenario, workSectionDisplayById],
   );
   const filteredRows = useMemo(() => filterTaskViewRows(rows, filters), [filters, rows]);
-  const groups = useMemo(() => buildTaskViewGroups(filteredRows, groupMode), [filteredRows, groupMode]);
+  const structureParents = useMemo(() => buildTaskViewStructureParents(filteredRows, scenario), [filteredRows, scenario]);
+  const processGroups = useMemo(() => buildTaskViewGroups(filteredRows, "by_process"), [filteredRows]);
+  const importing = busy === "importing";
   const generating = busy === "generating";
+  const refreshingTaskGraph = generating || importing;
 
   useEffect(() => () => {
     clearPredecessorHoverTimers(predecessorHoverOpenTimerRef, predecessorHoverCloseTimerRef);
@@ -2252,6 +2122,157 @@ function TaskViewTab({
     });
   }
 
+  function toggleParentGroup(groupId: string) {
+    setCollapsedTaskParents((current) => toggleStringSet(current, groupId));
+  }
+
+  function toggleTaskGroup(groupId: string) {
+    setCollapsedTaskGroups((current) => toggleStringSet(current, groupId));
+  }
+
+  function updateTaskProcess(task: Task, processId: string) {
+    const component = editableComponentForTask(task, scenario);
+    const nextProcess = processOptionsForComponent(component, scenario.process_library).find((process) => process.id === processId);
+    if (!nextProcess) return;
+    const nextDefault = defaultProductivityOption(nextProcess);
+    onUpdateTaskProcess(task, {
+      method_id: nextProcess.method_id ?? nextProcess.id,
+      productivity_option_id: nextDefault?.id ?? null,
+    });
+  }
+
+  function renderTaskRows(group: TaskViewGroup) {
+    return group.rows.map((row) => {
+      const isOpen = openPredecessorTaskId === row.task.id;
+      const editableComponent = editableComponentForTask(row.task, scenario);
+      const processOptions = processOptionsForComponent(editableComponent, scenario.process_library);
+      const selectedProcess = selectedProcessForComponent(editableComponent, scenario.process_library);
+      const productivityOptions = selectedProcess ? processProductivityOptions(selectedProcess) : [];
+      const selectedProductivity = selectedProcess ? selectedProductivityOption(editableComponent, selectedProcess) : null;
+      const showProcessSelect = processOptions.length > 1 || (processOptions.length > 0 && !selectedProcess);
+      const showProductivitySelect = Boolean(selectedProcess && selectedProductivity && productivityOptions.length > 1);
+
+      return (
+        <tr key={`${group.id}-${row.task.id}`}>
+          <td>{row.bridgeName} / {row.sectionName}</td>
+          <td><span className="side-tag">{row.sideLabel}</span></td>
+          <td>{row.structureLabel}</td>
+          <td><span className="tag">{componentLabels[row.task.component_type]}</span></td>
+          <td>{row.task.name}</td>
+          <td>
+            {processOptions.length > 0 ? (
+              showProcessSelect ? (
+                <select
+                  value={selectedProcess?.id ?? ""}
+                  disabled={refreshingTaskGraph}
+                  onChange={(event) => updateTaskProcess(row.task, event.target.value)}
+                >
+                  {!selectedProcess && <option value="">请选择工艺</option>}
+                  {processOptions.map((process) => (
+                    <option key={process.id} value={process.id}>{process.process_name}</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="text-pill">{selectedProcess?.process_name ?? row.task.process_name}</span>
+              )
+            ) : (
+              <span className="text-pill">{row.task.process_name}</span>
+            )}
+          </td>
+          <td>
+            {selectedProcess && selectedProductivity ? (
+              showProductivitySelect ? (
+                <select
+                  value={selectedProductivity.id}
+                  disabled={refreshingTaskGraph}
+                  onChange={(event) => onUpdateTaskProcess(row.task, { productivity_option_id: event.target.value })}
+                >
+                  {productivityOptions.map((option) => (
+                    <option key={option.id} value={option.id}>{productivityOptionLabel(option)}</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="text-pill">{productivityOptionLabel(selectedProductivity)}</span>
+              )
+            ) : (
+              <code>-</code>
+            )}
+          </td>
+          <td>{row.task.quantity_label || displayValue(row.task.quantity)}</td>
+          <td>{effectiveTaskDurationDays(row.task, scenario)} 天</td>
+          <td className="duration-expression" title={durationExpression(row.task, scenario)}>
+            {durationExpression(row.task, scenario)}
+          </td>
+          <td>{taskResourceTypesLabel(row.task, scenario.resource_pools)}</td>
+          <td className="predecessor-cell">
+            {row.predecessorLinks.length > 0 ? (
+              <button
+                className="predecessor-count has-items"
+                type="button"
+                onMouseEnter={(event) => showPredecessorPopover(row.task.id, event.currentTarget)}
+                onMouseLeave={schedulePredecessorPopoverClose}
+                onFocus={(event) => showPredecessorPopover(row.task.id, event.currentTarget)}
+                onBlur={schedulePredecessorPopoverClose}
+                aria-expanded={isOpen}
+              >
+                {row.predecessorLinks.length}
+              </button>
+            ) : (
+              <span className="predecessor-zero">0</span>
+            )}
+            {isOpen && (
+              <PredecessorPopover
+                task={row.task}
+                details={predecessorDetails(row)}
+                anchorRect={predecessorAnchorRect}
+                onMouseEnter={keepPredecessorPopoverOpen}
+                onMouseLeave={schedulePredecessorPopoverClose}
+              />
+            )}
+          </td>
+        </tr>
+      );
+    });
+  }
+
+  function renderTaskGroup(group: TaskViewGroup, mode: TaskViewMode, nested = false) {
+    const collapsed = collapsedTaskGroups.has(group.id);
+    return (
+      <div className={`task-view-group${nested ? " nested" : ""}`} key={group.id}>
+        <button className="task-view-group-title" type="button" onClick={() => toggleTaskGroup(group.id)}>
+          <span className="task-view-group-heading">
+            {collapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
+            <strong>{group.title}</strong>
+          </span>
+          <span>{taskViewGroupSubtitle(group.rows, mode, scenario)}</span>
+        </button>
+        {!collapsed && (
+          <div className="table-wrap task-view-table-wrap">
+            <table className="task-view-table">
+              <thead>
+                <tr>
+                  <th>桥梁 / 工区</th>
+                  <th>幅别</th>
+                  <th>墩号 / 结构物</th>
+                  <th>构件</th>
+                  <th>任务名称</th>
+                  <th>工艺</th>
+                  <th>工效</th>
+                  <th>工程量</th>
+                  <th>工期</th>
+                  <th>工期计算</th>
+                  <th>资源配置</th>
+                  <th>前置</th>
+                </tr>
+              </thead>
+              <tbody>{renderTaskRows(group)}</tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="task-view-grid">
       <section className="panel full task-view-header-panel">
@@ -2260,6 +2281,22 @@ function TaskViewTab({
           subtitle="调用 OR-Tools CP-SAT 前核验结构物识别、工期计算和工艺逻辑关系"
           action={
             <div className="task-view-title-actions">
+              <div className="task-view-import-action">
+                <input
+                  type="file"
+                  accept=".xlsx,.xlsm"
+                  onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+                />
+                <button
+                  className="secondary"
+                  type="button"
+                  disabled={!selectedFile || importing}
+                  onClick={() => selectedFile && onImportBridgeParams(selectedFile, "")}
+                >
+                  {importing ? <Loader2 className="spin" size={16} /> : <Upload size={16} />}
+                  导入 Excel
+                </button>
+              </div>
               {generatedForDetails && (
                 <div className="segmented">
                   <button className={groupMode === "by_structure" ? "active" : ""} type="button" onClick={() => setGroupMode("by_structure")}>
@@ -2270,7 +2307,7 @@ function TaskViewTab({
                   </button>
                 </div>
               )}
-              <button className="secondary" type="button" onClick={onGenerateTaskView} disabled={generating || !scenario}>
+              <button className="secondary" type="button" onClick={onGenerateTaskView} disabled={refreshingTaskGraph || !scenario}>
               {generating ? <Loader2 className="spin" size={16} /> : <ClipboardList size={16} />}
               {generatedForDetails ? "刷新任务视图" : "生成任务视图"}
               </button>
@@ -2311,84 +2348,33 @@ function TaskViewTab({
           <section className="panel full task-view-panel">
             <PanelTitle
               title="任务清单"
-              subtitle={groupMode === "by_structure" ? "按墩号从小到大展示，组内按工序顺序排列" : "按工艺聚合，组内仍按墩号从小到大排列"}
+              subtitle={groupMode === "by_structure" ? "按桥梁 / 工区展开，墩号从小到大展示，组内按工序顺序排列" : "按工艺聚合，组内仍按桥梁 / 工区、墩号、工序排序"}
             />
             <div className="task-view-groups">
-              {groups.length > 0 ? (
-                groups.map((group) => (
-                  <div className="task-view-group" key={group.id}>
-                    <div className="task-view-group-title">
-                      <strong>{group.title}</strong>
-                      <span>{taskViewGroupSubtitle(group.rows, groupMode, scenario)}</span>
-                    </div>
-                    <div className="table-wrap task-view-table-wrap">
-                      <table className="task-view-table">
-                        <thead>
-                          <tr>
-                            <th>桥梁 / 工区</th>
-                            <th>幅别</th>
-                            <th>墩号 / 结构物</th>
-                            <th>构件</th>
-                            <th>任务名称</th>
-                            <th>工艺</th>
-                            <th>工程量</th>
-                            <th>工期</th>
-                            <th>工期计算</th>
-                            <th>候选资源</th>
-                            <th>前置</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {group.rows.map((row) => {
-                            const isOpen = openPredecessorTaskId === row.task.id;
-                            return (
-                              <tr key={`${group.id}-${row.task.id}`}>
-                                <td>{row.bridgeName} / {row.sectionName}</td>
-                                <td><span className="side-tag">{row.sideLabel}</span></td>
-                                <td>{row.structureLabel}</td>
-                                <td><span className="tag">{componentLabels[row.task.component_type]}</span></td>
-                                <td>{row.task.name}</td>
-                                <td>{row.task.process_name}</td>
-                                <td>{row.task.quantity_label || displayValue(row.task.quantity)}</td>
-                                <td>{effectiveTaskDurationDays(row.task, scenario)} 天</td>
-                                <td className="duration-expression" title={durationExpression(row.task, scenario)}>
-                                  {durationExpression(row.task, scenario)}
-                                </td>
-                                <td>{row.task.compatible_resource_types.join(" / ")}</td>
-                                <td className="predecessor-cell">
-                                  {row.predecessorLinks.length > 0 ? (
-                                    <button
-                                      className="predecessor-count has-items"
-                                      type="button"
-                                      onMouseEnter={(event) => showPredecessorPopover(row.task.id, event.currentTarget)}
-                                      onMouseLeave={schedulePredecessorPopoverClose}
-                                      onFocus={(event) => showPredecessorPopover(row.task.id, event.currentTarget)}
-                                      onBlur={schedulePredecessorPopoverClose}
-                                      aria-expanded={isOpen}
-                                    >
-                                      {row.predecessorLinks.length}
-                                    </button>
-                                  ) : (
-                                    <span className="predecessor-zero">0</span>
-                                  )}
-                                  {isOpen && (
-                                    <PredecessorPopover
-                                      task={row.task}
-                                      details={predecessorDetails(row)}
-                                      anchorRect={predecessorAnchorRect}
-                                      onMouseEnter={keepPredecessorPopoverOpen}
-                                      onMouseLeave={schedulePredecessorPopoverClose}
-                                    />
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                ))
+              {filteredRows.length > 0 ? (
+                groupMode === "by_structure" ? (
+                  structureParents.map((parent) => {
+                    const collapsed = collapsedTaskParents.has(parent.id);
+                    return (
+                      <div className="task-view-parent-group" key={parent.id}>
+                        <button className="task-view-parent-title" type="button" onClick={() => toggleParentGroup(parent.id)}>
+                          <span className="task-view-group-heading">
+                            {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+                            <strong>{parent.title}</strong>
+                          </span>
+                          <span>{parent.subtitle}</span>
+                        </button>
+                        {!collapsed && (
+                          <div className="task-view-child-groups">
+                            {parent.groups.map((group) => renderTaskGroup(group, "by_structure", true))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                ) : (
+                  processGroups.map((group) => renderTaskGroup(group, "by_process"))
+                )
               ) : (
                 <div className="empty">当前筛选条件下没有任务</div>
               )}
@@ -3322,6 +3308,31 @@ function filterTaskViewRows(rows: TaskViewRow[], filters: TaskViewFilters): Task
   });
 }
 
+function buildTaskViewStructureParents(rows: TaskViewRow[], scenario: ScenarioInput | null): TaskViewParentGroup[] {
+  const parents = new Map<string, TaskViewParentGroup>();
+  for (const row of rows) {
+    const id = `${row.task.bridge_id ?? "-"}:${row.task.work_section_id ?? "-"}`;
+    if (!parents.has(id)) {
+      parents.set(id, {
+        id,
+        title: `${row.bridgeName} / ${row.sectionName}`,
+        subtitle: "",
+        rows: [],
+        groups: [],
+      });
+    }
+    parents.get(id)!.rows.push(row);
+  }
+  return Array.from(parents.values()).map((parent) => {
+    const groups = buildTaskViewGroups(parent.rows, "by_structure");
+    return {
+      ...parent,
+      groups,
+      subtitle: `${groups.length} 个结构物 · ${parent.rows.length} 项 · 工期合计 ${taskViewDurationTotal(parent.rows, scenario)} 天`,
+    };
+  });
+}
+
 function buildTaskViewGroups(rows: TaskViewRow[], mode: TaskViewMode): TaskViewGroup[] {
   const groups = new Map<string, TaskViewGroup>();
   for (const row of rows) {
@@ -3369,61 +3380,31 @@ function taskViewDurationRange(rows: TaskViewRow[], scenario: ScenarioInput | nu
   return min === max ? `${min} 天` : `${min}-${max} 天`;
 }
 
-function flattenStructures(project: ProjectModel) {
-  return project.bridges.flatMap((bridge) =>
-    bridge.work_sections.flatMap((section) =>
-      section.structures.map((structure) => ({ bridge, section, structure })),
-    ),
-  );
-}
-
-function buildStructureRows(project: ProjectModel, processLibrary: ProcessTemplate[]) {
-  return project.bridges.flatMap((bridge) =>
-    bridge.work_sections.flatMap((section) => {
-      const lowerRows = section.structures.flatMap((structure) =>
-        structure.components.map((component) => {
-          const processes = processOptionsForComponent(component, processLibrary);
-          const process = selectedProcessForComponent(component, processLibrary);
-          const productivityOption = process ? selectedProductivityOption(component, process) : null;
-          return {
-            id: component.id,
-            workpointLabel: workpointLabels[bridge.workpoint_type ?? "bridge"],
-            bridgeAndSection: `${bridge.name} / ${section.name}`,
-            structureLevel: "下部结构",
-            sideLabel: sideLabels[section.side ?? "none"],
-            location: structure.support_no ?? structure.name,
-            name: component.name,
-            typeLabel: componentLabels[component.component_type],
-            dimension: dimensionSummary(component),
-            processLabel: processes.length > 1 ? process?.process_name ?? "未匹配工艺" : "-",
-            productivityLabel: productivityOption ? productivityOptionLabel(productivityOption) : "-",
-            order: structure.order * 100 + componentOrder.indexOf(component.component_type),
-            component,
-          };
-        }),
-      );
-      const upperRows = (section.upper_structures ?? []).map((upper) => ({
-        id: upper.id,
-        workpointLabel: workpointLabels[bridge.workpoint_type ?? "bridge"],
-        bridgeAndSection: `${bridge.name} / ${section.name}`,
-        structureLevel: "上部结构",
-        sideLabel: sideLabels[section.side ?? "none"],
-        location: `第${upper.span_index}跨 ${upper.support_range}`,
-        name: upper.name,
-        typeLabel: upper.structure_type,
-        dimension: upperStructureDimensionSummary(upper),
-        processLabel: "-",
-        productivityLabel: "-",
-        order: 100000 + upper.span_index,
-        component: undefined,
-      }));
-      return [...lowerRows, ...upperRows].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
-    }),
-  );
-}
-
 function processOptionsForComponent(component: ComponentModel, processLibrary: ProcessTemplate[]): ProcessTemplate[] {
   return processLibrary.filter((process) => process.component_type === component.component_type);
+}
+
+function editableComponentForTask(task: Task, scenario: ScenarioInput): ComponentModel {
+  const source = task.component_id ? findComponent(scenario.project, task.component_id) : null;
+  if (source) return source.component;
+
+  const override = scenario.task_overrides?.[task.id] ?? {};
+  const [processId, optionId] = task.productivity_rule_id.split(":");
+  const process = scenario.process_library.find((item) => item.id === override.method_id || item.method_id === override.method_id)
+    ?? scenario.process_library.find((item) => item.id === processId)
+    ?? scenario.process_library.find((item) => item.component_type === task.component_type && item.process_name === task.process_name);
+
+  return {
+    id: task.id,
+    name: task.name,
+    component_type: task.component_type,
+    quantity: task.quantity,
+    quantity_label: task.quantity_label,
+    method_id: override.method_id ?? process?.method_id ?? process?.id ?? processId ?? null,
+    productivity_option_id: override.productivity_option_id ?? optionId ?? null,
+    enabled: true,
+    properties: {},
+  };
 }
 
 function selectedProcessForComponent(component: ComponentModel, processLibrary: ProcessTemplate[]): ProcessTemplate | null {
@@ -3464,6 +3445,270 @@ function selectedProductivityOption(component: ComponentModel, process: ProcessT
     if (selected) return selected;
   }
   return options.find((option) => option.is_default) ?? options[0] ?? null;
+}
+
+type LocalProductivityRule = ProductivityOption & {
+  component_type: ComponentType;
+  process_name: string;
+  resource_type: string;
+};
+
+function patchGeneratedScheduleInputForTask(
+  generated: GeneratedScheduleInput | null,
+  taskId: string,
+  scenario: ScenarioInput,
+): GeneratedScheduleInput | null {
+  if (!generated) return null;
+  let patched = false;
+  const tasks = generated.schedule_input.tasks.map((task) => {
+    if (task.id !== taskId) return task;
+    const nextTask = taskWithScenarioProcessPatch(task, scenario);
+    patched = nextTask !== task;
+    return nextTask;
+  });
+  if (!patched) return generated;
+  return {
+    ...generated,
+    schedule_input: {
+      ...generated.schedule_input,
+      tasks,
+    },
+  };
+}
+
+function taskWithScenarioProcessPatch(task: Task, scenario: ScenarioInput): Task {
+  const component = editableComponentForTask(task, scenario);
+  const process = selectedProcessForComponent(component, scenario.process_library);
+  if (!process) return task;
+  const option = selectedProductivityOption(component, process);
+  const rule = localProductivityRuleFor(process, component, option);
+  const quantity = localQuantityForTask(component, task, rule.quantity_source);
+  const patchedTask = {
+    ...task,
+    process_name: rule.process_name,
+    productivity_rule_id: rule.id,
+    quantity: quantity.value,
+    quantity_label: quantity.label,
+    duration_days: calculateLocalDurationDays(quantity.value, rule),
+    compatible_resource_types: [rule.resource_type],
+  };
+  return applyRequiredResourceTypesToTasks([patchedTask], scenario.resource_pools)[0] ?? patchedTask;
+}
+
+function applyRequiredResourceTypesToTasks(tasks: Task[], resourcePools: ResourcePool[]): Task[] {
+  const poolsByType = new Map(resourcePools.map((pool) => [pool.type, pool]));
+  return tasks.map((task) => ({
+    ...task,
+    compatible_resource_types: requiredResourceTypesForTask(task, poolsByType),
+  }));
+}
+
+function requiredResourceTypesForTask(task: Task, poolsByType: Map<string, ResourcePool>): string[] {
+  const resourceType = defaultResourceTypeForTask(task);
+  if (!resourceType) return [];
+  const pool = poolsByType.get(resourceType);
+  if (isLimitedResourcePoolAvailable(pool)) return [resourceType];
+  if (keyResourceComponentTypes.has(task.component_type)) return [];
+  if (pool && resourcePoolMode(pool) === "LIMITED") return [];
+  return [];
+}
+
+function defaultResourceTypeForTask(task: Task): string | null {
+  const fallback = task.compatible_resource_types[0] ?? null;
+  const processId = task.productivity_rule_id.split(":")[0];
+  const methodId = methodIdFromProcessId(processId);
+  if (task.component_type === "pile") {
+    return pileResourceTypeByProcess[processId] ?? (methodId ? pileResourceTypeByMethod[methodId] : null) ?? fallback;
+  }
+  return defaultResourceTypeByComponent[task.component_type] ?? fallback;
+}
+
+function methodIdFromProcessId(processId: string): string | null {
+  return Object.keys(pileResourceTypeByMethod).find((methodId) => processId.includes(methodId)) ?? null;
+}
+
+function isLimitedResourcePoolAvailable(pool: ResourcePool | undefined): boolean {
+  return Boolean(pool && pool.enabled && resourcePoolMode(pool) === "LIMITED" && resourcePoolQuantity(pool) > 0);
+}
+
+function resourcePoolMode(pool: ResourcePool): ResourceMode {
+  return pool.resource_mode ?? "LIMITED";
+}
+
+function resourcePoolQuantity(pool: ResourcePool): number {
+  return typeof pool.quantity === "number" && Number.isFinite(pool.quantity) ? pool.quantity : 0;
+}
+
+function taskResourceTypesLabel(task: Task, resourcePools: ResourcePool[]): string {
+  if (!task.compatible_resource_types.length) return "-";
+  const labelByType = new Map(resourcePools.map((pool) => [pool.type, pool.label]));
+  return task.compatible_resource_types.map((type) => labelByType.get(type) ?? type).join(" / ");
+}
+
+function processResourceLabel(process: ProcessTemplate, resourcePools: ResourcePool[]): string {
+  const resourceType = defaultResourceTypeForProcess(process);
+  if (!resourceType) return "";
+  return new Map(resourcePools.map((pool) => [pool.type, pool.label])).get(resourceType) ?? "";
+}
+
+function defaultResourceTypeForProcess(process: ProcessTemplate): string | null {
+  if (process.component_type === "pile") {
+    return (
+      pileResourceTypeByProcess[process.id]
+      ?? (process.method_id ? pileResourceTypeByMethod[process.method_id] : null)
+      ?? process.resource_type
+      ?? null
+    );
+  }
+  return defaultResourceTypeByComponent[process.component_type] ?? null;
+}
+
+function localProductivityRuleFor(
+  process: ProcessTemplate,
+  component: ComponentModel,
+  option: ProductivityOption | null,
+): LocalProductivityRule {
+  const rule: LocalProductivityRule = option
+    ? {
+        ...option,
+        id: `${process.id}:${option.id}`,
+        component_type: process.component_type,
+        process_name: process.process_name,
+        resource_type: process.resource_type,
+      }
+    : {
+        id: process.id,
+        name: process.process_name,
+        duration_method: process.duration_method,
+        quantity_source: process.quantity_source,
+        productivity_value: process.productivity_value,
+        productivity_unit: process.productivity_unit,
+        standard_section_height_m: defaultStandardSectionHeightForUnit(process.productivity_unit),
+        is_default: process.is_default,
+        component_type: process.component_type,
+        process_name: process.process_name,
+        resource_type: process.resource_type,
+      };
+
+  if (isContinuousStandardSegmentComponent(component, process)) {
+    return {
+      ...rule,
+      duration_method: "days_per_unit",
+      quantity_source: "count",
+    };
+  }
+  return rule;
+}
+
+function isContinuousStandardSegmentComponent(component: ComponentModel, process: ProcessTemplate): boolean {
+  return component.component_type === "cast_in_place_continuous_beam"
+    && (component.method_id === "standard_segment" || process.id.startsWith("cast_in_place_continuous_standard_segment"));
+}
+
+function localQuantityForTask(
+  component: ComponentModel,
+  task: Task,
+  quantitySource: string,
+): { value: number; label: string } {
+  const value = localQuantityValueForTask(component, task, quantitySource);
+  if (quantitySource === "count" && component.component_type === "pile") {
+    return { value, label: displayValue(value) };
+  }
+  if (quantitySource === "count" && isContinuousStandardSegmentQuantity(component, task)) {
+    return { value, label: component.quantity_label || task.quantity_label || displayValue(value) };
+  }
+  return {
+    value,
+    label: component.quantity_label || task.quantity_label || `${displayValue(value)}${quantityUnitForSource(quantitySource)}`,
+  };
+}
+
+function localQuantityValueForTask(component: ComponentModel, task: Task, quantitySource: string): number {
+  if (quantitySource === "count") {
+    if (isContinuousStandardSegmentQuantity(component, task)) {
+      return positiveNumber(component.quantity, task.quantity, 1);
+    }
+    return 1;
+  }
+  if (quantitySource === "pile_length_m") {
+    return positiveNumber(
+      componentPropertyNumber(component, ["lengthM", "length_m", "pileLengthM", "pile_length_m", "totalLengthM", "total_length_m"]),
+      component.quantity,
+      task.quantity,
+      1,
+    );
+  }
+  if (quantitySource === "pier_height_m") {
+    return positiveNumber(
+      componentPropertyNumber(component, ["heightM", "height_m", "pierHeightM", "pier_height_m"]),
+      component.quantity,
+      task.quantity,
+      1,
+    );
+  }
+  if (quantitySource === "deck_length_m") {
+    return positiveNumber(
+      componentPropertyNumber(component, ["lengthM", "length_m", "totalLengthM", "total_length_m", "deckLengthM", "deck_length_m"]),
+      component.quantity,
+      task.quantity,
+      1,
+    );
+  }
+  return positiveNumber(component.quantity, task.quantity, 1);
+}
+
+function isContinuousStandardSegmentQuantity(component: ComponentModel, task: Task): boolean {
+  return component.component_type === "cast_in_place_continuous_beam"
+    && (component.method_id === "standard_segment" || isContinuousBeamStandardSegmentTask(task));
+}
+
+function componentPropertyNumber(component: ComponentModel, keys: string[]): number | null {
+  for (const key of keys) {
+    const direct = numberFromUnknown(component.properties[key]);
+    if (direct !== null) return direct;
+  }
+  const dimensions = component.properties.dimensions_m;
+  if (isRecord(dimensions)) {
+    for (const key of keys) {
+      const dimension = numberFromUnknown(dimensions[key]);
+      if (dimension !== null) return dimension;
+    }
+  }
+  return null;
+}
+
+function numberFromUnknown(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function positiveNumber(...values: Array<number | null | undefined>): number {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  }
+  return 1;
+}
+
+function calculateLocalDurationDays(quantity: number, rule: LocalProductivityRule): number {
+  const productivity = positiveNumber(rule.productivity_value, 1);
+  if (rule.component_type === "pier_body" && rule.quantity_source === "pier_height_m" && isSectionBasedPierProductivity(rule)) {
+    const sectionHeight = sectionHeightForOption(rule);
+    if (sectionHeight) {
+      const sectionCount = Math.max(1, Math.ceil(quantity / sectionHeight));
+      return Math.max(1, Math.ceil(sectionCount * productivity));
+    }
+  }
+  if (rule.duration_method === "units_per_day") {
+    return Math.max(1, Math.ceil(quantity / productivity));
+  }
+  if (rule.duration_method === "days_per_unit") {
+    return Math.max(1, Math.ceil(quantity * productivity));
+  }
+  return Math.max(1, Math.ceil(productivity));
 }
 
 function productivityOptionLabel(option: ProductivityOption): string {
@@ -3539,27 +3784,6 @@ function effectiveTaskDurationDays(task: Task, scenario: ScenarioInput | null): 
 function isContinuousBeamStandardSegmentTask(task: Task): boolean {
   return task.component_type === "cast_in_place_continuous_beam"
     && task.productivity_rule_id.startsWith("cast_in_place_continuous_standard_segment:");
-}
-
-function filterStructureRows(rows: StructureRow[], filters: StructureFilters): StructureRow[] {
-  return rows.filter((row) =>
-    Object.entries(filters).every(([key, value]) => {
-      const needle = value.trim().toLowerCase();
-      if (!needle) return true;
-      return String(row[key as keyof StructureFilters]).toLowerCase().includes(needle);
-    }),
-  );
-}
-
-function upperStructureDimensionSummary(upper: UpperStructureModel): string {
-  const parts = [`跨径${displayValue(upper.span_length_m)}m`];
-  if (upper.beam_count_per_span) {
-    parts.push(`${displayValue(upper.beam_count_per_span)}片`);
-  }
-  if (upper.structure_type.includes("连续") && upper.span_group_expression) {
-    parts.push(`联跨${upper.span_group_expression}`);
-  }
-  return parts.join("，");
 }
 
 function buildUpperLowerLogicConstraints(scenario: ScenarioInput): UpperLowerLogicConstraint[] {
@@ -3705,7 +3929,7 @@ function buildSummary(
   const resourceCount = recommendedCounts.length
     ? recommendedCounts.reduce((sum, item) => sum + item.recommended_quantity, 0)
     : generated?.schedule_input.resources.length
-    ?? scenario?.resource_pools.reduce((sum, pool) => sum + (pool.enabled ? pool.quantity : 0), 0)
+    ?? scenario?.resource_pools.reduce((sum, pool) => sum + (pool.enabled && resourcePoolMode(pool) === "LIMITED" ? resourcePoolQuantity(pool) : 0), 0)
     ?? 0;
   const milestoneCount = scenario?.milestones.length ?? 0;
   return {
@@ -3881,6 +4105,57 @@ function findComponent(project: ProjectModel, componentId: string): { section: W
   return null;
 }
 
+function scenarioWithTaskProcessPatch(scenario: ScenarioInput, task: Task, patch: TaskOverride): ScenarioInput {
+  const componentId = task.component_id ?? task.id;
+  if (findComponent(scenario.project, componentId)) {
+    return scenarioWithComponentPatch(scenario, componentId, patch);
+  }
+  return scenarioWithTaskOverridePatch(scenario, task.id, patch);
+}
+
+function scenarioWithComponentPatch(scenario: ScenarioInput, componentId: string, patch: TaskOverride): ScenarioInput {
+  return {
+    ...scenario,
+    project: {
+      ...scenario.project,
+      bridges: scenario.project.bridges.map((bridge) => ({
+        ...bridge,
+        work_sections: bridge.work_sections.map((section) => ({
+          ...section,
+          structures: section.structures.map((structure) => ({
+            ...structure,
+            components: structure.components.map((component) =>
+              component.id === componentId ? { ...component, ...patch } : component,
+            ),
+          })),
+        })),
+      })),
+    },
+  };
+}
+
+function scenarioWithTaskOverridePatch(scenario: ScenarioInput, taskId: string, patch: TaskOverride): ScenarioInput {
+  const overrides = { ...(scenario.task_overrides ?? {}) };
+  const nextOverride = compactTaskOverride({ ...(overrides[taskId] ?? {}), ...patch });
+  if (nextOverride) {
+    overrides[taskId] = nextOverride;
+  } else {
+    delete overrides[taskId];
+  }
+  return { ...scenario, task_overrides: overrides };
+}
+
+function compactTaskOverride(override: TaskOverride): TaskOverride | null {
+  const next: TaskOverride = {};
+  if (override.method_id !== undefined && override.method_id !== null) {
+    next.method_id = override.method_id;
+  }
+  if (override.productivity_option_id !== undefined && override.productivity_option_id !== null) {
+    next.productivity_option_id = override.productivity_option_id;
+  }
+  return next.method_id !== undefined || next.productivity_option_id !== undefined ? next : null;
+}
+
 function isComponentType(value: string | null | undefined): value is ComponentType {
   return Boolean(value && Object.prototype.hasOwnProperty.call(componentLabels, value));
 }
@@ -3888,124 +4163,6 @@ function isComponentType(value: string | null | undefined): value is ComponentTy
 function hasProcessLibraryChanged(current: ProcessTemplate[], next: ProcessTemplate[]): boolean {
   if (current.length !== next.length) return true;
   return current.some((process, index) => JSON.stringify(process) !== JSON.stringify(next[index]));
-}
-
-function dimensionSummary(component: ComponentModel): string {
-  const properties = component.properties;
-  const dimensions = properties?.dimensions_m;
-  if (component.component_type === "pier_body") {
-    const pierSummary = pierBodyDimensionSummary(component, dimensions);
-    if (pierSummary) return pierSummary;
-  }
-  if (Array.isArray(dimensions) && dimensions.length) {
-    return dimensions.map((item) => `${displayValue(item)}m`).join(" × ");
-  }
-  if (isRecord(dimensions)) {
-    const parts = Object.entries(dimensions)
-      .filter(([, value]) => value !== null && value !== undefined)
-      .map(([key, value]) => dimensionPartSummary(component, key, value));
-    if (parts.length) return parts.join("，");
-  }
-  if (isRecord(properties)) {
-    const propertyParts = Object.entries(properties)
-      .filter(([key, value]) => isDimensionKey(key) && value !== null && value !== undefined)
-      .map(([key, value]) => dimensionPartSummary(component, key, value));
-    if (propertyParts.length) return propertyParts.join("，");
-  }
-  const raw = properties?.raw;
-  if (isRecord(raw)) {
-    const rawValues = Object.values(raw).filter((value) => value !== null && value !== undefined);
-    if (rawValues.length) return rawValues.map(displayValue).join(" / ");
-  }
-  return "-";
-}
-
-function pierBodyDimensionSummary(component: ComponentModel, dimensions: unknown): string | null {
-  const sectionDimensions = Array.isArray(dimensions) ? dimensions.filter(isNumber) : [];
-  const raw = isRecord(component.properties?.raw) ? component.properties.raw : {};
-  const pierForm = displayValue(raw.pier_form ?? component.properties?.form ?? "");
-  const heightM = numberFromUnknown(component.properties?.height_m)
-    ?? numberFromUnknown(component.properties?.heightM)
-    ?? cmToM(raw.pier_height);
-  const count = numberFromUnknown(component.properties?.count) ?? numberFromUnknown(raw.pier_count);
-  const parts: string[] = [];
-
-  if (sectionDimensions.length === 1 || pierForm.includes("柱式")) {
-    const diameter = sectionDimensions[0];
-    if (diameter !== undefined) parts.push(`直径${displayValue(diameter)}m`);
-  } else if (sectionDimensions.length >= 2) {
-    parts.push(`截面${sectionDimensions.map((item) => `${displayValue(item)}m`).join(" × ")}`);
-  }
-  if (heightM !== null) parts.push(`墩高${displayValue(heightM)}m`);
-  if (count !== null && count > 1) parts.push(`${displayValue(count)}根`);
-  return parts.length ? parts.join("，") : null;
-}
-
-function isDimensionKey(key: string): boolean {
-  return [
-    "diameterM",
-    "diameter_m",
-    "lengthM",
-    "length_m",
-    "heightM",
-    "height_m",
-    "widthM",
-    "width_m",
-    "thicknessM",
-    "thickness_m",
-    "totalLengthM",
-    "total_length_m",
-  ].includes(key);
-}
-
-function isNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function numberFromUnknown(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const match = value.match(/-?\d+(?:\.\d+)?/);
-    if (match) return Number(match[0]);
-  }
-  return null;
-}
-
-function cmToM(value: unknown): number | null {
-  const number = numberFromUnknown(value);
-  return number === null ? null : number / 100;
-}
-
-function dimensionPartSummary(component: ComponentModel, key: string, value: unknown): string {
-  const unit = key.endsWith("M") || key.endsWith("_m") ? "m" : "";
-  return `${dimensionLabel(component, key)}${displayValue(value)}${unit}`;
-}
-
-function dimensionLabel(component: ComponentModel, key: string): string {
-  const labels: Record<string, string> = {
-    diameterM: "直径",
-    diameter_m: "直径",
-    heightM: "高度",
-    height_m: "高度",
-    widthM: "宽度",
-    width_m: "宽度",
-    thicknessM: "厚度",
-    thickness_m: "厚度",
-    totalLengthM: "总长",
-    total_length_m: "总长",
-  };
-  if (key === "lengthM" || key === "length_m") {
-    return component.component_type === "pile" ? "桩长" : "长度";
-  }
-  return labels[key] ?? key;
-}
-
-function sourceSummary(component: ComponentModel): string {
-  const source = component.properties?.source_trace;
-  if (!isRecord(source)) return "-";
-  const sheet = displayValue(source.sheet);
-  const row = source.row ? `#${displayValue(source.row)}` : "";
-  return `${sheet}${row}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -4060,6 +4217,16 @@ function groupBy<T>(items: T[], keyFn: (item: T) => string): Record<string, T[]>
     acc[key].push(item);
     return acc;
   }, {});
+}
+
+function toggleStringSet(current: Set<string>, value: string): Set<string> {
+  const next = new Set(current);
+  if (next.has(value)) {
+    next.delete(value);
+  } else {
+    next.add(value);
+  }
+  return next;
 }
 
 function errorText(err: unknown): string {

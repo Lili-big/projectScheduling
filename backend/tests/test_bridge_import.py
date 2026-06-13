@@ -89,6 +89,9 @@ def test_bridge_excel_import_maps_to_schedulable_scenario() -> None:
     assert generated.schedule_input.tasks
     assert not any(message.level == "error" for message in generated.validation)
     assert any(task.bridge_id == "B1" and task.work_section_id == "WS-RIGHT" for task in generated.schedule_input.tasks)
+    pier_body_task = next(task for task in generated.schedule_input.tasks if task.component_type == "pier_body")
+    assert pier_body_task.process_name == "爬模施工"
+    assert pier_body_task.productivity_rule_id == "pier_body_climbing_form:pier_body_climbing_form-default"
     upper_ids = {upper.id for section in bridge.work_sections for upper in section.upper_structures}
     assert not any(task.component_id in upper_ids for task in generated.schedule_input.tasks)
 
@@ -121,11 +124,12 @@ def test_import_local_bridge_params_endpoint_uses_project_workbook() -> None:
     assert response.scenario.project.bridges[0].work_sections[0].structures[1].support_no == "1#墩"
     assert response.scenario.process_library[0].id == scenario.process_library[0].id
     max_by_type = {pool.type: pool.max_quantity for pool in response.scenario.resource_pools}
-    assert max_by_type["rotary_drill"] == 166
-    assert max_by_type["spread_foundation_team"] == 2
-    assert max_by_type["cap_team"] == 25
-    assert max_by_type["pier_body_team"] == 46
-    assert max_by_type["cap_beam_team"] == 42
+    assert max_by_type["rotary_drill"] == 5
+    assert "spread_foundation_team" not in max_by_type
+    assert max_by_type["cap_team"] == 5
+    assert max_by_type["pier_body_team"] == 5
+    assert max_by_type["cap_beam_team"] == 5
+    assert max_by_type["cast_in_place_continuous_beam_team"] == 4
 
 
 def test_imported_spread_foundation_can_precede_abutment_body() -> None:

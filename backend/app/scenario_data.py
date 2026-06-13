@@ -6,7 +6,6 @@ from pathlib import Path
 
 from .models import (
     ComponentModel,
-    ComponentType,
     LogicRule,
     MilestoneConstraint,
     ProcessTemplate,
@@ -27,7 +26,15 @@ from .sample_data import default_bridge
 SCHEDULE_LOGIC_ONTOLOGY_PATH = Path(__file__).resolve().parent / "ontology" / "bridge_schedule_logic_ontology.v1.json"
 CONTINUOUS_BEAM_STRUCTURE_CODE = "castInPlaceContinuousBoxGirder"
 CONTINUOUS_BEAM_DEFAULT_STANDARD_SEGMENT_CYCLES = 18
-CAST_IN_PLACE_BOX_BEAM_STRUCTURE_CODE = "castInPlaceBoxGirder"
+DEFAULT_RESOURCE_MAX_QUANTITIES: dict[str, int] = {
+    "rotary_drill": 5,
+    "circulation_drill": 5,
+    "impact_drill": 5,
+    "manual_pile_team": 10,
+    "cap_team": 5,
+    "pier_body_team": 5,
+    "cap_beam_team": 5,
+}
 
 
 def default_scenario() -> ScenarioInput:
@@ -164,92 +171,28 @@ def default_scenario() -> ScenarioInput:
 
 
 def apply_resource_max_quantity_defaults(scenario: ScenarioInput) -> ScenarioInput:
-    resource_type_counts = _component_counts_by_resource_type(scenario)
+    continuous_t_count = _continuous_beam_t_structure_count(scenario)
     for pool in scenario.resource_pools:
-        component_count = resource_type_counts.get(pool.type)
-        if component_count is not None:
-            pool.max_quantity = max(pool.quantity, component_count)
+        quantity = pool.quantity or 0
+        if pool.resource_mode == "UNLIMITED":
+            continue
+        if pool.type == "cast_in_place_continuous_beam_team":
+            pool.max_quantity = max(quantity, continuous_t_count)
+        elif pool.type in DEFAULT_RESOURCE_MAX_QUANTITIES:
+            pool.max_quantity = max(quantity, DEFAULT_RESOURCE_MAX_QUANTITIES[pool.type])
         elif pool.max_quantity is None:
-            pool.max_quantity = pool.quantity
+            pool.max_quantity = quantity
     return scenario
 
 
-def _component_counts_by_resource_type(scenario: ScenarioInput) -> dict[str, int]:
-    counts: dict[str, int] = {}
+def _continuous_beam_t_structure_count(scenario: ScenarioInput) -> int:
+    count = 0
     for bridge in scenario.project.bridges:
         for section in bridge.work_sections:
-            for structure in section.structures:
-                for component in structure.components:
-                    if not component.enabled or component.quantity <= 0:
-                        continue
-                    process = _default_process_for_component(component, scenario.process_library)
-                    if process is None:
-                        continue
-                    counts[process.resource_type] = counts.get(process.resource_type, 0) + 1
-            for resource_type, task_count in _upper_structure_counts_by_resource_type(
-                section.upper_structures,
-                scenario.process_library,
-            ).items():
-                counts[resource_type] = counts.get(resource_type, 0) + task_count
-    return counts
-
-
-def _upper_structure_counts_by_resource_type(
-    upper_structures: list[UpperStructureComponent],
-    process_library: list[ProcessTemplate],
-) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    box_count = len(_cast_in_place_box_beam_groups(upper_structures))
-    _add_upper_count(counts, process_library, "cast_in_place_box_beam", None, box_count)
-
-    method_counts: dict[str, int] = {}
-    for uppers in _continuous_beam_groups(upper_structures):
-        span_indices = sorted({upper.span_index for upper in uppers})
-        main_support_count = _continuous_main_support_count(uppers, span_indices)
-        if main_support_count <= 0:
-            continue
-        standard_cycles = _continuous_int_setting(
-            uppers,
-            ["standard_segment_cycles", "standard_block_cycles", "standard_blocks_per_side"],
-            default=CONTINUOUS_BEAM_DEFAULT_STANDARD_SEGMENT_CYCLES,
-            minimum=0,
-        )
-        method_counts["zero_block"] = method_counts.get("zero_block", 0) + main_support_count
-        if standard_cycles > 0:
-            method_counts["standard_segment"] = method_counts.get("standard_segment", 0) + main_support_count
-        method_counts["straight_segment"] = method_counts.get("straight_segment", 0) + 2
-        method_counts["closure_segment"] = method_counts.get("closure_segment", 0) + main_support_count + 1
-
-    for process in process_library:
-        if process.component_type != "cast_in_place_continuous_beam" or not process.method_id:
-            continue
-        task_count = method_counts.get(process.method_id, 0)
-        if task_count:
-            counts[process.resource_type] = counts.get(process.resource_type, 0) + task_count
-    return counts
-
-
-def _add_upper_count(
-    counts: dict[str, int],
-    process_library: list[ProcessTemplate],
-    component_type: ComponentType,
-    method_id: str | None,
-    task_count: int,
-) -> None:
-    if task_count <= 0:
-        return
-    process = _default_process_for_component(
-        ComponentModel(
-            id="upper-count-probe",
-            name="上部结构计数探针",
-            component_type=component_type,
-            quantity=1,
-            method_id=method_id,
-        ),
-        process_library,
-    )
-    if process is not None:
-        counts[process.resource_type] = counts.get(process.resource_type, 0) + task_count
+            for uppers in _continuous_beam_groups(section.upper_structures):
+                span_indices = sorted({upper.span_index for upper in uppers})
+                count += _continuous_main_support_count(uppers, span_indices)
+    return count
 
 
 def _continuous_beam_groups(upper_structures: list[UpperStructureComponent]) -> list[list[UpperStructureComponent]]:
@@ -268,32 +211,6 @@ def _is_continuous_beam_upper(upper: UpperStructureComponent) -> bool:
     if upper.properties.get("structure_code") == CONTINUOUS_BEAM_STRUCTURE_CODE:
         return True
     return any(keyword in upper.structure_type for keyword in ("连续", "刚构"))
-
-
-def _cast_in_place_box_beam_groups(upper_structures: list[UpperStructureComponent]) -> list[list[UpperStructureComponent]]:
-    groups: dict[int, list[UpperStructureComponent]] = {}
-    for upper in upper_structures:
-        if not _is_cast_in_place_box_beam_upper(upper):
-            continue
-        groups.setdefault(_upper_group_index(upper), []).append(upper)
-    return [
-        sorted(group, key=lambda item: item.span_index)
-        for _, group in sorted(groups.items(), key=lambda item: (min(upper.span_index for upper in item[1]), item[0]))
-    ]
-
-
-def _is_cast_in_place_box_beam_upper(upper: UpperStructureComponent) -> bool:
-    structure_code = upper.properties.get("structure_code")
-    if structure_code == CAST_IN_PLACE_BOX_BEAM_STRUCTURE_CODE:
-        return True
-    return "现浇" in upper.structure_type and "箱梁" in upper.structure_type and not _is_continuous_beam_upper(upper)
-
-
-def _upper_group_index(upper: UpperStructureComponent) -> int:
-    try:
-        return int(upper.properties.get("group_index"))
-    except (TypeError, ValueError):
-        return upper.span_index
 
 
 def _continuous_group_index(upper: UpperStructureComponent) -> int:
@@ -420,22 +337,14 @@ def default_resource_calendars() -> list[ResourceCalendar]:
 
 def default_resource_pools() -> list[ResourcePool]:
     return [
-        ResourcePool(id="pool-rotary-drill", type="rotary_drill", label="旋挖钻", quantity=3),
-        ResourcePool(id="pool-circulation-drill", type="circulation_drill", label="回旋钻", quantity=1),
-        ResourcePool(id="pool-impact-drill", type="impact_drill", label="冲击钻", quantity=1),
-        ResourcePool(id="pool-manual-pile", type="manual_pile_team", label="人工挖孔班", quantity=1),
-        ResourcePool(id="pool-cap", type="cap_team", label="承台模板", quantity=1),
-        ResourcePool(id="pool-spread-foundation", type="spread_foundation_team", label="扩大基础班组", quantity=1),
-        ResourcePool(id="pool-tie-beam", type="tie_beam_team", label="系梁班组", quantity=1),
-        ResourcePool(id="pool-pier-body", type="pier_body_team", label="墩柱班组", quantity=1),
-        ResourcePool(id="pool-cap-beam", type="cap_beam_team", label="盖梁模板", quantity=1),
-        ResourcePool(id="pool-abutment", type="abutment_team", label="桥台班组", quantity=1),
-        ResourcePool(id="pool-precast-beam", type="precast_beam_team", label="制梁台座", quantity=1),
-        ResourcePool(id="pool-beam-erection", type="beam_erection_team", label="架梁班组", quantity=1),
+        ResourcePool(id="pool-rotary-drill", type="rotary_drill", label="旋挖钻", quantity=3, max_quantity=5),
+        ResourcePool(id="pool-circulation-drill", type="circulation_drill", label="回旋钻", quantity=1, max_quantity=5),
+        ResourcePool(id="pool-impact-drill", type="impact_drill", label="冲击钻", quantity=1, max_quantity=5),
+        ResourcePool(id="pool-manual-pile", type="manual_pile_team", label="人工挖孔班组", quantity=1, max_quantity=10),
+        ResourcePool(id="pool-cap", type="cap_team", label="承台模板", quantity=1, max_quantity=5),
+        ResourcePool(id="pool-pier-body", type="pier_body_team", label="墩柱模板", quantity=1, max_quantity=5),
+        ResourcePool(id="pool-cap-beam", type="cap_beam_team", label="盖梁模板", quantity=1, max_quantity=5),
         ResourcePool(id="pool-cast-in-place-continuous-beam", type="cast_in_place_continuous_beam_team", label="连续梁班组", quantity=1),
-        ResourcePool(id="pool-cast-in-place-box-beam", type="cast_in_place_box_beam_team", label="现浇箱梁班组", quantity=1),
-        ResourcePool(id="pool-steel-box-beam", type="steel_box_beam_team", label="钢箱梁班组", quantity=1),
-        ResourcePool(id="pool-bridge-deck-system", type="bridge_deck_system_team", label="桥面系班组", quantity=1),
     ]
 
 
