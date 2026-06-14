@@ -455,6 +455,263 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
     return result
 
 
+def solve_resource_cost_schedule(
+    schedule_input: ScheduleInput,
+    resource_linear_costs_by_pool: dict[str, dict[str, Any]],
+    fallback_target_days: int | None = None,
+) -> ScheduleResult:
+    enabled_resources = [resource for resource in schedule_input.resources if resource.enabled]
+    resource_candidates = _resource_candidates_by_task(schedule_input.tasks, enabled_resources)
+    validation = _validate_resource_coverage(schedule_input.tasks, resource_candidates)
+    if any(message.level == "error" for message in validation):
+        return ScheduleResult(
+            status="INFEASIBLE",
+            plan_start_date=schedule_input.start_date,
+            validation=validation,
+            stats={"reason": "missing_compatible_resource", "solve_mode": "resource_cost_optimization"},
+        )
+
+    hard_match_count = _matched_hard_milestone_count(schedule_input)
+    target_days = _min_resource_target_days(schedule_input, fallback_target_days)
+    if hard_match_count == 0 and target_days is None:
+        return ScheduleResult(
+            status="MODEL_INVALID",
+            plan_start_date=schedule_input.start_date,
+            validation=validation
+            + _unmatched_hard_milestone_warnings(schedule_input)
+            + [
+                ValidationMessage(
+                    level="error",
+                    message="资源成本优化排程需要至少一个可匹配的强制里程碑目标，或先运行固定资源最短工期作为固定工期目标。",
+                )
+            ],
+            stats={"reason": "missing_target_duration", "solve_mode": "resource_cost_optimization"},
+        )
+
+    try:
+        from ortools.sat.python import cp_model
+    except ImportError:
+        return ScheduleResult(
+            status="MODEL_INVALID",
+            plan_start_date=schedule_input.start_date,
+            validation=[ValidationMessage(level="error", message="未安装 OR-Tools，请先安装后端依赖再执行求解。")],
+            stats={"reason": "ortools_missing", "solve_mode": "resource_cost_optimization"},
+        )
+
+    groups = _resource_groups(enabled_resources)
+    normalized_costs = _normalized_resource_linear_costs(groups, resource_linear_costs_by_pool)
+    fixed_duration_check = _solve_capacity_model(
+        schedule_input,
+        cp_model=cp_model,
+        groups=groups,
+        counts={group["key"]: group["max_quantity"] for group in groups},
+        fallback_target_days=target_days if hard_match_count == 0 else None,
+        enforce_fixed_duration=True,
+    )
+    if fixed_duration_check["status"] in {"INFEASIBLE", "MODEL_INVALID"}:
+        critical_path = _critical_path_schedule(schedule_input)
+        capacity_window_days = _capacity_window_days(schedule_input, target_days)
+        result = _fixed_duration_infeasible_result(
+            schedule_input=schedule_input,
+            checked=fixed_duration_check,
+            critical_path=critical_path,
+            validation=validation,
+            groups=groups,
+            target_days=target_days,
+            capacity_window_days=capacity_window_days,
+        )
+        result.stats.update(
+            {
+                "reason": "resource_cost_upper_bound_or_deadline_infeasible",
+                "solve_mode": "resource_cost_optimization",
+                "target_days": target_days,
+            }
+        )
+        result.objective_breakdown.update(
+            {
+                "solve_mode": "resource_cost_optimization",
+                "target_days": target_days,
+            }
+        )
+        return result
+    if fixed_duration_check["status"] == "UNKNOWN":
+        validation.append(
+            ValidationMessage(
+                level="warning",
+                message="最大资源固定工期可行性预检在限定时间内未完成，已继续尝试资源成本优化。",
+            )
+        )
+
+    cost_optimization = _solve_capacity_model(
+        schedule_input,
+        cp_model=cp_model,
+        groups=groups,
+        counts=None,
+        fallback_target_days=target_days if hard_match_count == 0 else None,
+        enforce_fixed_duration=True,
+        minimize_total_cost=True,
+        resource_linear_costs_by_group=normalized_costs,
+    )
+    if cost_optimization["status"] not in {"OPTIMAL", "FEASIBLE"}:
+        return ScheduleResult(
+            status=cost_optimization["status"],
+            plan_start_date=schedule_input.start_date,
+            validation=validation
+            + cost_optimization["validation"]
+            + [
+                ValidationMessage(
+                    level="error",
+                    message="在线性资源成本、资源上限、工艺逻辑和固定工期约束下，未能找到可行的资源成本优化排程。",
+                )
+            ],
+            stats={
+                **cost_optimization["stats"],
+                "reason": "resource_cost_optimization_failed",
+                "solve_mode": "resource_cost_optimization",
+                "target_days": target_days,
+            },
+        )
+
+    fixed_counts = {key: int(value) for key, value in cost_optimization["group_counts"].items()}
+    result = _capacity_model_result(schedule_input, cost_optimization, fixed_counts)
+    result.validation = validation + result.validation
+
+    selected_costs = cost_optimization.get("selected_resource_costs", [])
+    resource_incremental_cost = int(cost_optimization.get("resource_incremental_cost", 0))
+    soft_milestone_penalty = sum(item.penalty for item in result.milestone_results if item.mode == "soft")
+    total_cost = resource_incremental_cost + soft_milestone_penalty
+    recommended = _recommended_resource_counts(groups, fixed_counts)
+    explanation = _resource_cost_business_explanation(
+        selected_resources=selected_costs,
+        resource_incremental_cost=resource_incremental_cost,
+        soft_milestone_penalty=soft_milestone_penalty,
+        total_cost=total_cost,
+        milestone_results=result.milestone_results,
+    )
+
+    result.stats.update(
+        {
+            "solve_mode": "resource_cost_optimization",
+            "target_days": target_days,
+            "recommended_resource_counts": recommended,
+            "selected_resource_costs": selected_costs,
+            "resource_incremental_cost": resource_incremental_cost,
+            "soft_milestone_penalty": soft_milestone_penalty,
+            "total_cost": total_cost,
+            "business_explanation": explanation,
+            "schedule_source": "resource_cost_capacity_model",
+        }
+    )
+    result.objective_breakdown.update(
+        {
+            "solve_mode": "resource_cost_optimization",
+            "target_days": target_days,
+            "recommended_resource_counts": recommended,
+            "selected_resource_costs": selected_costs,
+            "resource_incremental_cost": resource_incremental_cost,
+            "soft_milestone_penalty": soft_milestone_penalty,
+            "total_cost": total_cost,
+            "business_explanation": explanation,
+            "weighted_objective": total_cost,
+        }
+    )
+    return result
+
+
+def _normalized_resource_linear_costs(
+    groups: list[dict[str, Any]],
+    resource_linear_costs_by_pool: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    costs: dict[str, dict[str, Any]] = {}
+    for group in groups:
+        raw = resource_linear_costs_by_pool.get(group["key"], {})
+        try:
+            current_quantity = int(raw.get("current_quantity", group["max_quantity"]))
+            max_quantity = int(raw.get("max_quantity", group["max_quantity"]))
+            unit_cost = int(raw.get("incremental_unit_cost", 0))
+            billing_period_days = int(raw.get("billing_period_days", 30))
+        except (TypeError, ValueError):
+            current_quantity = group["max_quantity"]
+            max_quantity = group["max_quantity"]
+            unit_cost = 0
+            billing_period_days = 30
+        current_quantity = max(0, min(current_quantity, group["max_quantity"]))
+        max_quantity = max(current_quantity, min(max_quantity, group["max_quantity"]))
+        unit_cost = max(0, unit_cost)
+        billing_period_days = max(1, billing_period_days)
+        cost_type = str(raw.get("cost_type", "none"))
+        if cost_type not in {"none", "monthly_rental", "one_time_purchase"}:
+            cost_type = "none"
+        costs[group["key"]] = {
+            "resource_pool_id": group["key"],
+            "label": raw.get("label") or group["label"],
+            "resource_type": group["resource_type"],
+            "current_quantity": current_quantity,
+            "max_quantity": max_quantity,
+            "cost_type": cost_type,
+            "incremental_unit_cost": unit_cost,
+            "billing_period_days": billing_period_days,
+        }
+    return costs
+
+
+def _resource_cost_business_explanation(
+    *,
+    selected_resources: list[dict[str, Any]],
+    resource_incremental_cost: int,
+    soft_milestone_penalty: int,
+    total_cost: int,
+    milestone_results: list[MilestoneResult],
+) -> str:
+    selected_increases = [
+        resource
+        for resource in selected_resources
+        if int(resource.get("added_quantity", 0)) > 0
+    ]
+    kept_resources = [
+        resource
+        for resource in selected_resources
+        if int(resource.get("added_quantity", 0)) <= 0
+    ]
+    if selected_increases:
+        resource_text = "、".join(
+            f"{resource['label']} {resource['selected_quantity']} 个"
+            for resource in selected_resources
+        )
+        increase_text = "、".join(
+            f"{resource['label']}新增 {resource['added_quantity']} 个，线性成本 {_yuan(resource['incremental_cost'])}"
+            for resource in selected_increases
+        )
+        first_sentence = f"系统选择配置 {resource_text}。{increase_text}。"
+    else:
+        kept_text = "、".join(f"{resource['label']}保持 {resource['selected_quantity']} 个" for resource in kept_resources)
+        first_sentence = f"系统选择保持现有资源配置{f'：{kept_text}' if kept_text else ''}。"
+
+    late_milestones = [milestone for milestone in milestone_results if milestone.mode == "soft" and milestone.lateness_days > 0]
+    if late_milestones:
+        milestone_text = "；".join(
+            f"{milestone.name}预计迟延 {milestone.lateness_days} 天，延误成本 {_yuan(milestone.penalty)}"
+            for milestone in late_milestones
+        )
+    else:
+        milestone_text = "已评估的软节点未发生延误成本。"
+
+    return (
+        f"{first_sentence}"
+        f"线性资源成本 {_yuan(resource_incremental_cost)}，参考节点延误成本 {_yuan(soft_milestone_penalty)}。"
+        f"{milestone_text}"
+        f"在固定工期约束下，展示综合成本为 {_yuan(total_cost)}。"
+    )
+
+
+def _yuan(value: Any) -> str:
+    try:
+        amount = int(value)
+    except (TypeError, ValueError):
+        amount = 0
+    return f"{amount:,} 元"
+
+
 def _solve_resource_model(
     schedule_input: ScheduleInput,
     *,
@@ -632,6 +889,8 @@ def _solve_capacity_model(
     fallback_target_days: int | None,
     enforce_fixed_duration: bool = True,
     minimize_resource_count: bool = False,
+    minimize_total_cost: bool = False,
+    resource_linear_costs_by_group: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     validation: list[ValidationMessage] = []
     model = cp_model.CpModel()
@@ -647,6 +906,9 @@ def _solve_capacity_model(
     milestone_target_offsets: dict[str, int] = {}
     soft_lateness_vars: dict[str, Any] = {}
     count_vars: dict[str, Any] = {}
+    resource_cost_terms: list[Any] = []
+    resource_cost_option_details_by_group: dict[str, list[dict[str, Any]]] = {}
+    assignments_by_group: dict[str, list[tuple[str, Any]]] = defaultdict(list)
 
     for task in schedule_input.tasks:
         starts[task.id] = model.NewIntVar(0, horizon, f"start_{_safe(task.id)}")
@@ -667,6 +929,7 @@ def _solve_capacity_model(
             )
             choices.append(assigned)
             assignment_vars[(task.id, group["key"])] = assigned
+            assignments_by_group[group["key"]].append((task.id, assigned))
             intervals_by_group[group["key"]].append(interval)
             demands_by_group[group["key"]].append(1)
         if choices:
@@ -683,8 +946,76 @@ def _solve_capacity_model(
     for group in groups:
         intervals = intervals_by_group.get(group["key"], [])
         if counts is None:
-            lower_bound = 1 if intervals else 0
-            capacity = model.NewIntVar(lower_bound, group["max_quantity"], f"resource_count_{_safe(group['key'])}")
+            cost_config = (resource_linear_costs_by_group or {}).get(group["key"]) if minimize_total_cost else None
+            if cost_config:
+                current_quantity = int(cost_config.get("current_quantity", 0))
+                max_quantity = int(cost_config.get("max_quantity", group["max_quantity"]))
+                if not intervals:
+                    current_quantity = 0
+                    max_quantity = 0
+                capacity = model.NewIntVar(current_quantity, max_quantity, f"resource_count_{_safe(group['key'])}")
+                selected_quantity_vars = []
+                resource_cost_option_details_by_group[group["key"]] = []
+                active_days = None
+                if cost_config.get("cost_type") == "monthly_rental" and intervals:
+                    active_start = model.NewIntVar(0, horizon, f"active_start_{_safe(group['key'])}")
+                    active_end = model.NewIntVar(0, horizon, f"active_end_{_safe(group['key'])}")
+                    active_days = model.NewIntVar(0, horizon, f"active_days_{_safe(group['key'])}")
+                    group_used = model.NewBoolVar(f"group_used_{_safe(group['key'])}")
+                    assignment_sum = sum(assigned for _, assigned in assignments_by_group.get(group["key"], []))
+                    model.Add(assignment_sum >= 1).OnlyEnforceIf(group_used)
+                    model.Add(assignment_sum == 0).OnlyEnforceIf(group_used.Not())
+                    for task_id, assigned in assignments_by_group.get(group["key"], []):
+                        model.Add(active_start <= starts[task_id]).OnlyEnforceIf(assigned)
+                        model.Add(active_end >= ends[task_id]).OnlyEnforceIf(assigned)
+                    model.Add(active_end >= active_start).OnlyEnforceIf(group_used)
+                    model.Add(active_days == active_end - active_start).OnlyEnforceIf(group_used)
+                    model.Add(active_start == 0).OnlyEnforceIf(group_used.Not())
+                    model.Add(active_end == 0).OnlyEnforceIf(group_used.Not())
+                    model.Add(active_days == 0).OnlyEnforceIf(group_used.Not())
+
+                for quantity in range(current_quantity, max_quantity + 1):
+                    selected = model.NewBoolVar(f"resource_quantity_{_safe(group['key'])}_{quantity}")
+                    selected_quantity_vars.append(selected)
+                    added_quantity = quantity - current_quantity
+                    fixed_cost = 0
+                    cost_var = None
+                    daily_unit_cost = 0
+                    if cost_config.get("cost_type") == "one_time_purchase":
+                        fixed_cost = added_quantity * int(cost_config.get("incremental_unit_cost", 0))
+                        if fixed_cost:
+                            resource_cost_terms.append(selected * fixed_cost)
+                    elif cost_config.get("cost_type") == "monthly_rental" and active_days is not None:
+                        daily_unit_cost = math.ceil(
+                            int(cost_config.get("incremental_unit_cost", 0)) / int(cost_config.get("billing_period_days", 30))
+                        )
+                        max_cost = added_quantity * daily_unit_cost * horizon
+                        cost_var = model.NewIntVar(0, max_cost, f"resource_cost_{_safe(group['key'])}_{quantity}")
+                        if added_quantity and daily_unit_cost:
+                            model.Add(cost_var == active_days * added_quantity * daily_unit_cost).OnlyEnforceIf(selected)
+                            model.Add(cost_var == 0).OnlyEnforceIf(selected.Not())
+                        else:
+                            model.Add(cost_var == 0)
+                        resource_cost_terms.append(cost_var)
+                    resource_cost_option_details_by_group[group["key"]].append(
+                        {
+                            **cost_config,
+                            "current_quantity": current_quantity,
+                            "max_quantity": max_quantity,
+                            "selected": selected,
+                            "selected_quantity": quantity,
+                            "added_quantity": added_quantity,
+                            "incremental_cost": fixed_cost,
+                            "daily_unit_cost": daily_unit_cost,
+                            "active_days_var": active_days,
+                            "cost_var": cost_var,
+                        }
+                    )
+                model.AddExactlyOne(selected_quantity_vars)
+                model.Add(capacity == sum(quantity * selected for quantity, selected in zip(range(current_quantity, max_quantity + 1), selected_quantity_vars)))
+            else:
+                lower_bound = 1 if intervals else 0
+                capacity = model.NewIntVar(lower_bound, group["max_quantity"], f"resource_count_{_safe(group['key'])}")
             count_vars[group["key"]] = capacity
         else:
             capacity = counts.get(group["key"], group["max_quantity"])
@@ -734,13 +1065,52 @@ def _solve_capacity_model(
     if enforce_fixed_duration and hard_match_count == 0 and fallback_target_days is not None:
         model.Add(makespan <= fallback_target_days)
 
+    soft_penalty_terms = [
+        late_var * _milestone_by_id(schedule_input.milestones, milestone_id).penalty_per_day
+        for milestone_id, late_var in soft_lateness_vars.items()
+    ]
+    total_resource_cost = sum(resource_cost_terms)
+    total_soft_penalty = sum(soft_penalty_terms)
     if minimize_resource_count:
         model.Minimize(sum(count_vars.values()) * (horizon + 1) + makespan)
+    elif minimize_total_cost:
+        model.Minimize(total_resource_cost)
 
     solver = cp_model.CpSolver()
     _configure_solver(solver, schedule_input.time_limit_seconds)
     status_code = solver.Solve(model)
     status = _status_name(status_code, cp_model)
+    if minimize_total_cost and status in {"OPTIMAL", "FEASIBLE"}:
+        best_resource_cost = solver.Value(total_resource_cost)
+        model.Add(total_resource_cost == best_resource_cost)
+        model.Minimize(total_soft_penalty)
+        status_code = solver.Solve(model)
+        status = _status_name(status_code, cp_model)
+    if minimize_total_cost and status in {"OPTIMAL", "FEASIBLE"}:
+        best_soft_penalty = solver.Value(total_soft_penalty)
+        model.Add(total_soft_penalty == best_soft_penalty)
+        model.Minimize(makespan)
+        status_code = solver.Solve(model)
+        status = _status_name(status_code, cp_model)
+
+    selected_resource_costs: list[dict[str, Any]] = []
+    if status in {"OPTIMAL", "FEASIBLE"}:
+        for group in groups:
+            for option in resource_cost_option_details_by_group.get(group["key"], []):
+                if solver.BooleanValue(option["selected"]):
+                    cost_var = option.get("cost_var")
+                    active_days_var = option.get("active_days_var")
+                    selected_resource_costs.append(
+                        {
+                            key: value
+                            for key, value in option.items()
+                            if key not in {"selected", "cost_var", "active_days_var"}
+                        }
+                        | {
+                            "incremental_cost": solver.Value(cost_var) if cost_var is not None else int(option.get("incremental_cost", 0)),
+                            "active_days": solver.Value(active_days_var) if active_days_var is not None else 0,
+                        }
+                    )
     return {
         "status": status,
         "solver": solver,
@@ -752,6 +1122,8 @@ def _solve_capacity_model(
         "soft_lateness_vars": soft_lateness_vars,
         "makespan": makespan,
         "validation": validation,
+        "selected_resource_costs": selected_resource_costs,
+        "resource_incremental_cost": sum(int(resource["incremental_cost"]) for resource in selected_resource_costs),
         "stats": {
             "horizon_days": horizon,
             "wall_time_seconds": solver.WallTime(),

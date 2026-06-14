@@ -16,6 +16,7 @@ from .models import (
     ProductivityOption,
     ProductivityRule,
     Resource,
+    ResourceCostSolveRequest,
     ResourcePool,
     ScheduleInput,
     ScheduleResult,
@@ -31,7 +32,7 @@ from .models import (
     ValidationMessage,
     WorkSection,
 )
-from .solver import solve_min_resources_schedule, solve_schedule
+from .solver import solve_min_resources_schedule, solve_resource_cost_schedule, solve_schedule
 from .wbs import build_precedence_links, calculate_duration
 
 
@@ -196,6 +197,36 @@ def solve_min_resources_scenario(request: MinResourcesSolveRequest) -> ScenarioS
     )
 
 
+def solve_resource_cost_scenario(request: ResourceCostSolveRequest) -> ScenarioSolveResult:
+    scenario = request.scenario
+    generated = generate_schedule_input_from_scenario(scenario, use_max_resources=True)
+    if any(message.level == "error" for message in generated.validation):
+        result = ScheduleResult(
+            status="MODEL_INVALID",
+            plan_start_date=scenario.project.start_date,
+            validation=generated.validation,
+            stats={"reason": "scenario_generation_error", "solve_mode": "resource_cost_optimization"},
+            milestone_results=[],
+        )
+    else:
+        result = solve_resource_cost_schedule(
+            generated.schedule_input,
+            _resource_linear_costs_by_pool(scenario.resource_pools),
+            fallback_target_days=request.fallback_target_days,
+        )
+
+    diagnostics = _build_diagnostics(generated.validation, result)
+    return ScenarioSolveResult(
+        scenario_id=scenario.scenario_id,
+        scenario_name=scenario.scenario_name,
+        generated=generated,
+        result=result,
+        milestone_results=result.milestone_results,
+        diagnostics=diagnostics,
+        metrics=_scenario_metrics(generated, result),
+    )
+
+
 def compare_scenarios(request: ScenarioCompareRequest) -> ScenarioCompareResponse:
     summaries: list[dict[str, Any]] = []
     best_scenario_id: str | None = None
@@ -205,7 +236,8 @@ def compare_scenarios(request: ScenarioCompareRequest) -> ScenarioCompareRespons
         result = item.result
         penalty = sum(milestone.penalty for milestone in item.milestone_results)
         feasible = result.status in {"OPTIMAL", "FEASIBLE"}
-        score = (result.objective_days or 0) + penalty if feasible else None
+        total_cost = result.objective_breakdown.get("total_cost")
+        score = int(total_cost) if feasible and isinstance(total_cost, (int, float)) else ((result.objective_days or 0) + penalty if feasible else None)
         soft_late = sum(1 for milestone in item.milestone_results if milestone.mode == "soft" and milestone.lateness_days > 0)
         hard_missed = sum(1 for milestone in item.milestone_results if milestone.mode == "hard" and milestone.lateness_days > 0)
         summaries.append(
@@ -218,6 +250,7 @@ def compare_scenarios(request: ScenarioCompareRequest) -> ScenarioCompareRespons
                 "soft_late_count": soft_late,
                 "hard_missed_count": hard_missed,
                 "soft_penalty": penalty,
+                "total_cost": total_cost,
                 "score": score,
                 "resource_count": len(item.generated.schedule_input.resources),
             }
@@ -228,7 +261,7 @@ def compare_scenarios(request: ScenarioCompareRequest) -> ScenarioCompareRespons
 
     notes = []
     if best_scenario_id:
-        notes.append("推荐方案按总工期加软里程碑罚分综合选择。")
+        notes.append("推荐方案按资源成本优化的综合成本优先；其他方案按总工期加软里程碑罚分综合选择。")
     return ScenarioCompareResponse(summaries=summaries, best_scenario_id=best_scenario_id, notes=notes)
 
 
@@ -298,7 +331,10 @@ def _method_id_from_process_id(process_id: str) -> str | None:
 
 
 def _is_limited_pool_available(pool: ResourcePool | None) -> bool:
-    return bool(pool and pool.enabled and pool.resource_mode == "LIMITED" and (pool.quantity or 0) > 0)
+    if not pool or not pool.enabled or pool.resource_mode != "LIMITED":
+        return False
+    usable_limit = pool.max_quantity if pool.max_quantity is not None else pool.quantity
+    return (usable_limit or 0) > 0
 
 
 def _append_unbounded_resource_warning(
@@ -330,8 +366,9 @@ def _resource_unbounded_reason(pool: ResourcePool | None) -> str:
         return "未启用"
     if pool.resource_mode == "UNLIMITED":
         return "设置为默认充足"
-    if (pool.quantity or 0) <= 0:
-        return "限制数量为 0"
+    usable_limit = pool.max_quantity if pool.max_quantity is not None else pool.quantity
+    if (usable_limit or 0) <= 0:
+        return "资源上限为 0"
     return "不可用"
 
 
@@ -361,6 +398,25 @@ def expand_resource_pools(resource_pools: list[ResourcePool], *, use_max_quantit
                 ValidationMessage(level="warning", subject_id=pool.id, message=f"资源池“{pool.label}”的{quantity_label}为 0。")
             )
     return resources, validation
+
+
+def _resource_linear_costs_by_pool(resource_pools: list[ResourcePool]) -> dict[str, dict[str, Any]]:
+    costs_by_pool: dict[str, dict[str, Any]] = {}
+    for pool in resource_pools:
+        if not pool.enabled or pool.resource_mode == "UNLIMITED":
+            continue
+        current_quantity = pool.quantity or 0
+        costs_by_pool[pool.id] = {
+            "resource_pool_id": pool.id,
+            "label": pool.label,
+            "resource_type": pool.type,
+            "current_quantity": current_quantity,
+            "max_quantity": pool.max_quantity if pool.max_quantity is not None else current_quantity,
+            "cost_type": pool.cost_type,
+            "incremental_unit_cost": pool.incremental_unit_cost,
+            "billing_period_days": pool.billing_period_days,
+        }
+    return costs_by_pool
 
 
 def _build_tasks(scenario: ScenarioInput, validation: list[ValidationMessage]) -> tuple[list[Task], list[PrecedenceLink]]:

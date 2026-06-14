@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from email.parser import BytesParser
-from email.policy import default
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -19,6 +17,7 @@ from .models import (
     ProcessNlRequest,
     ProcessNlResponse,
     ProcessTemplate,
+    ResourceCostSolveRequest,
     ScheduleInput,
     ScenarioCompareRequest,
     ScenarioCompareResponse,
@@ -27,18 +26,20 @@ from .models import (
     WbsRequest,
     WbsResponse,
 )
-from .bridge_import import BridgeImportConfigError, BridgeImportError, import_bridge_parameters
+from .api.multipart import parse_multipart_request
+from .bridge_import import BridgeImportConfigError, BridgeImportError
 from .sample_data import (
     default_bridge,
     default_logic_rules,
     default_productivity_rules,
     default_resources,
 )
-from .scenario import compare_scenarios, generate_schedule_input_from_scenario, solve_min_resources_scenario, solve_scenario
-from .scenario_data import apply_resource_max_quantity_defaults, default_scenario
+from .scenario import compare_scenarios, generate_schedule_input_from_scenario, solve_min_resources_scenario, solve_resource_cost_scenario, solve_scenario
 from .solver import solve_schedule
 from .process_nl import apply_process_natural_language
-from .process_repository import ProcessRepositoryError, load_process_library, save_process_library
+from .process_repository import ProcessRepositoryError
+from .services.bridge_import_service import import_local_bridge_params, import_uploaded_bridge_params
+from .services.process_library_service import default_scenario_with_process_library, get_process_library, persist_process_library
 from .wbs import generate_wbs
 
 
@@ -79,16 +80,15 @@ def demo() -> DemoPayload:
 @app.get("/api/demo-scenario", response_model=ScenarioInput)
 def demo_scenario() -> ScenarioInput:
     try:
-        return _default_scenario_with_process_library()
+        return default_scenario_with_process_library()
     except ProcessRepositoryError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.get("/api/process-library", response_model=list[ProcessTemplate])
 def get_process_library_endpoint() -> list[ProcessTemplate]:
-    scenario = default_scenario()
     try:
-        return load_process_library(scenario.process_library)
+        return get_process_library()
     except ProcessRepositoryError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -96,7 +96,7 @@ def get_process_library_endpoint() -> list[ProcessTemplate]:
 @app.put("/api/process-library", response_model=list[ProcessTemplate])
 def save_process_library_endpoint(request: ProcessLibrarySaveRequest) -> list[ProcessTemplate]:
     try:
-        return save_process_library(request.process_library)
+        return persist_process_library(request.process_library)
     except ProcessRepositoryError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -126,6 +126,11 @@ def solve_min_resources_endpoint(request: MinResourcesSolveRequest) -> ScenarioS
     return solve_min_resources_scenario(request)
 
 
+@app.post("/api/solve-resource-cost", response_model=ScenarioSolveResult)
+def solve_resource_cost_endpoint(request: ResourceCostSolveRequest) -> ScenarioSolveResult:
+    return solve_resource_cost_scenario(request)
+
+
 @app.post("/api/compare-scenarios", response_model=ScenarioCompareResponse)
 def compare_scenarios_endpoint(request: ScenarioCompareRequest) -> ScenarioCompareResponse:
     return compare_scenarios(request)
@@ -138,26 +143,9 @@ def apply_process_natural_language_endpoint(request: ProcessNlRequest) -> Proces
 
 @app.post("/api/import-bridge-params", response_model=ImportBridgeParamsResponse)
 async def import_bridge_params_endpoint(request: Request) -> ImportBridgeParamsResponse:
-    fields, files = await _parse_multipart_request(request)
-    scenario_text = fields.get("scenario")
-    uploaded = files.get("file")
-    if not scenario_text:
-        raise HTTPException(status_code=400, detail="multipart 字段 scenario 不能为空。")
-    if uploaded is None:
-        raise HTTPException(status_code=400, detail="multipart 字段 file 不能为空。")
-
     try:
-        scenario = ScenarioInput.model_validate_json(scenario_text)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"scenario JSON 无法解析: {exc}") from exc
-
-    try:
-        return import_bridge_parameters(
-            file_name=uploaded["filename"],
-            content=uploaded["content"],
-            scenario=scenario,
-            target_bridge=fields.get("target_bridge") or fields.get("targetBridge") or None,
-        )
+        fields, files = await parse_multipart_request(request)
+        return import_uploaded_bridge_params(fields, files)
     except BridgeImportConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except BridgeImportError as exc:
@@ -166,64 +154,12 @@ async def import_bridge_params_endpoint(request: Request) -> ImportBridgeParamsR
 
 @app.post("/api/import-local-bridge-params", response_model=ImportBridgeParamsResponse)
 def import_local_bridge_params_endpoint(scenario: ScenarioInput) -> ImportBridgeParamsResponse:
-    workbook_path = _local_workbook_path()
     try:
-        return import_bridge_parameters(
-            file_name=workbook_path.name,
-            content=workbook_path.read_bytes(),
-            scenario=scenario,
-            target_bridge=None,
-        )
+        return import_local_bridge_params(scenario)
     except BridgeImportConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except BridgeImportError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-def _local_workbook_path() -> Path:
-    project_root = Path(__file__).resolve().parents[2]
-    workbooks = sorted(
-        path for path in project_root.glob("*.xlsx")
-        if not path.name.startswith("~$")
-    )
-    if not workbooks:
-        raise HTTPException(status_code=404, detail="项目目录下未找到可导入的 Excel 工作簿。")
-    return workbooks[0]
-
-
-def _default_scenario_with_process_library() -> ScenarioInput:
-    scenario = default_scenario()
-    scenario.process_library = load_process_library(scenario.process_library)
-    apply_resource_max_quantity_defaults(scenario)
-    return scenario
-
-
-async def _parse_multipart_request(request: Request) -> tuple[dict[str, str], dict[str, dict[str, bytes | str]]]:
-    content_type = request.headers.get("content-type", "")
-    if "multipart/form-data" not in content_type:
-        raise HTTPException(status_code=415, detail="请使用 multipart/form-data 上传 Excel 和 scenario。")
-
-    body = await request.body()
-    mime_body = f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8") + body
-    message = BytesParser(policy=default).parsebytes(mime_body)
-    if not message.is_multipart():
-        raise HTTPException(status_code=400, detail="multipart 请求体格式不正确。")
-
-    fields: dict[str, str] = {}
-    files: dict[str, dict[str, bytes | str]] = {}
-    for part in message.iter_parts():
-        params = dict(part.get_params(header="content-disposition", unquote=True) or [])
-        name = params.get("name")
-        if not name:
-            continue
-        payload = part.get_payload(decode=True) or b""
-        filename = params.get("filename")
-        if filename:
-            files[name] = {"filename": filename, "content": payload}
-        else:
-            charset = part.get_content_charset() or "utf-8"
-            fields[name] = payload.decode(charset)
-    return fields, files
 
 
 DIST_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"

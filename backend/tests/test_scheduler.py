@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.models import ComponentModel, MilestoneConstraint, PrecedenceLink, ProcessTemplate, ProductivityOption, Resource, ResourcePool, ScheduleInput, ScenarioCompareRequest, ScheduledTask, StructureModel, Task, TaskOverride, UpperStructureComponent, UpperStructureLogicRule  # noqa: E402
+from app.models import ComponentModel, MilestoneConstraint, PrecedenceLink, ProcessTemplate, ProductivityOption, Resource, ResourceCostSolveRequest, ResourcePool, ScheduleInput, ScenarioCompareRequest, ScheduledTask, StructureModel, Task, TaskOverride, UpperStructureComponent, UpperStructureLogicRule  # noqa: E402
 from app.process_library_defaults import upgrade_process_library  # noqa: E402
 from app.sample_data import (  # noqa: E402
     default_bridge,
@@ -18,9 +18,9 @@ from app.sample_data import (  # noqa: E402
     default_productivity_rules,
     default_resources,
 )
-from app.scenario import compare_scenarios, generate_schedule_input_from_scenario, solve_scenario  # noqa: E402
+from app.scenario import compare_scenarios, generate_schedule_input_from_scenario, solve_resource_cost_scenario, solve_scenario  # noqa: E402
 from app.scenario_data import apply_resource_max_quantity_defaults, default_scenario  # noqa: E402
-from app.solver import _resource_path_metrics, _task_ids_for_milestone, solve_min_resources_schedule, solve_schedule  # noqa: E402
+from app.solver import _resource_path_metrics, _task_ids_for_milestone, solve_min_resources_schedule, solve_resource_cost_schedule, solve_schedule  # noqa: E402
 from app.wbs import calculate_duration, generate_wbs  # noqa: E402
 
 
@@ -522,6 +522,7 @@ def test_upper_structure_logic_relationship_and_lag_are_configurable() -> None:
 
 def test_default_scenario_sets_resource_max_quantity_from_business_defaults() -> None:
     scenario = default_scenario()
+    quantity_by_type = {pool.type: pool.quantity for pool in scenario.resource_pools}
     max_by_type = {pool.type: pool.max_quantity for pool in scenario.resource_pools}
 
     assert set(max_by_type) == {
@@ -542,6 +543,9 @@ def test_default_scenario_sets_resource_max_quantity_from_business_defaults() ->
     assert max_by_type["pier_body_team"] == 5
     assert max_by_type["cap_beam_team"] == 5
     assert max_by_type["cast_in_place_continuous_beam_team"] == 1
+    assert quantity_by_type["circulation_drill"] == 0
+    assert quantity_by_type["impact_drill"] == 0
+    assert quantity_by_type["manual_pile_team"] == 0
 
 
 def test_resource_pool_max_quantity_defaults_to_quantity() -> None:
@@ -1357,6 +1361,189 @@ def test_min_resource_solver_enforces_hard_milestone_target() -> None:
     assert result.stats["fixed_duration_precheck_failed"] is True
 
 
+def test_resource_cost_solver_keeps_current_when_current_meets_fixed_duration() -> None:
+    pytest.importorskip("ortools")
+    result = solve_resource_cost_schedule(
+        _resource_cost_parallel_input(task_count=2, max_resources=2),
+        {"pool-team": _linear_cost("pool-team", "钻机", current=1, max_quantity=2, unit_cost=1000)},
+        fallback_target_days=10,
+    )
+
+    selected = _selected_resource_cost(result, "pool-team")
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert selected["selected_quantity"] == 1
+    assert selected["added_quantity"] == 0
+    assert result.objective_breakdown["resource_incremental_cost"] == 0
+    assert result.objective_days == 10
+
+
+def test_resource_cost_solver_recommends_zero_for_unused_resource_pool() -> None:
+    pytest.importorskip("ortools")
+    schedule_input = _resource_cost_parallel_input(task_count=1, max_resources=1)
+    schedule_input.resources.extend(_resource_instances("pool-unused", "unused_team", "闲置资源", 3))
+
+    result = solve_resource_cost_schedule(
+        schedule_input,
+        {
+            "pool-team": _linear_cost("pool-team", "钻机", current=1, max_quantity=1, unit_cost=1000),
+            "pool-unused": _linear_cost("pool-unused", "闲置资源", current=1, max_quantity=3, unit_cost=1000),
+        },
+        fallback_target_days=5,
+    )
+
+    selected = _selected_resource_cost(result, "pool-unused")
+    recommended = {
+        item["resource_pool_id"]: item
+        for item in result.objective_breakdown["recommended_resource_counts"]
+    }
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert selected["current_quantity"] == 0
+    assert selected["selected_quantity"] == 0
+    assert selected["added_quantity"] == 0
+    assert selected["incremental_cost"] == 0
+    assert recommended["pool-unused"]["recommended_quantity"] == 0
+
+
+def test_resource_cost_solver_adds_cheapest_resource_to_meet_fixed_duration() -> None:
+    pytest.importorskip("ortools")
+    result = solve_resource_cost_schedule(
+        _resource_cost_parallel_input(task_count=2, max_resources=2),
+        {"pool-team": _linear_cost("pool-team", "钻机", current=1, max_quantity=2, unit_cost=1000)},
+        fallback_target_days=5,
+    )
+
+    selected = _selected_resource_cost(result, "pool-team")
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert selected["selected_quantity"] == 2
+    assert selected["added_quantity"] == 1
+    assert result.objective_breakdown["resource_incremental_cost"] == 1000
+    assert result.objective_days == 5
+
+
+def test_resource_cost_solver_reports_infeasible_when_max_resources_cannot_meet_fixed_duration() -> None:
+    pytest.importorskip("ortools")
+    result = solve_resource_cost_schedule(
+        _resource_cost_parallel_input(task_count=2, max_resources=1),
+        {"pool-team": _linear_cost("pool-team", "钻机", current=1, max_quantity=1, unit_cost=1000)},
+        fallback_target_days=5,
+    )
+
+    assert result.status == "INFEASIBLE"
+    assert result.stats["reason"] == "resource_cost_upper_bound_or_deadline_infeasible"
+    assert result.stats["fixed_duration_precheck_failed"] is True
+
+
+def test_resource_cost_solver_uses_monthly_rental_active_window() -> None:
+    pytest.importorskip("ortools")
+    result = solve_resource_cost_schedule(
+        _resource_cost_parallel_input(task_count=2, max_resources=2),
+        {
+            "pool-team": _linear_cost(
+                "pool-team",
+                "钻机",
+                current=1,
+                max_quantity=2,
+                cost_type="monthly_rental",
+                unit_cost=3000,
+                billing_period_days=30,
+            )
+        },
+        fallback_target_days=5,
+    )
+
+    selected = _selected_resource_cost(result, "pool-team")
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert selected["selected_quantity"] == 2
+    assert selected["active_days"] == 5
+    assert selected["daily_unit_cost"] == 100
+    assert result.objective_breakdown["resource_incremental_cost"] == 500
+
+
+def test_resource_cost_solver_uses_one_time_linear_template_cost() -> None:
+    pytest.importorskip("ortools")
+    result = solve_resource_cost_schedule(
+        _resource_cost_parallel_input(task_count=3, max_resources=3, resource_type="template", label="模板"),
+        {"pool-team": _linear_cost("pool-team", "模板", current=1, max_quantity=3, unit_cost=80000)},
+        fallback_target_days=5,
+    )
+
+    selected = _selected_resource_cost(result, "pool-team")
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert selected["selected_quantity"] == 3
+    assert selected["added_quantity"] == 2
+    assert result.objective_breakdown["resource_incremental_cost"] == 160000
+
+
+def test_resource_cost_solver_does_not_add_non_bottleneck_resource() -> None:
+    pytest.importorskip("ortools")
+    start = date(2026, 1, 1)
+    tasks = [_cost_task("T1", "任务1", 5, "team"), _cost_task("T2", "任务2", 5, "team")]
+    result = solve_resource_cost_schedule(
+        ScheduleInput(
+            project_name="非瓶颈资源测试",
+            start_date=start,
+            tasks=tasks,
+            precedence_links=[
+                PrecedenceLink(
+                    id="L1",
+                    predecessor_id="T1",
+                    successor_id="T2",
+                    relationship="FS",
+                    lag_days=0,
+                    source_rule_id="manual",
+                )
+            ],
+            resources=_resource_instances("pool-team", "team", "钻机", 2),
+            time_limit_seconds=5,
+        ),
+        {"pool-team": _linear_cost("pool-team", "钻机", current=1, max_quantity=2, unit_cost=1000)},
+        fallback_target_days=10,
+    )
+
+    selected = _selected_resource_cost(result, "pool-team")
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert selected["selected_quantity"] == 1
+    assert result.objective_breakdown["resource_incremental_cost"] == 0
+
+
+def test_resource_cost_solver_can_choose_combined_resources() -> None:
+    pytest.importorskip("ortools")
+    start = date(2026, 1, 1)
+    tasks = [
+        _cost_task("P1", "1#桩基", 5, "drill"),
+        _cost_task("P2", "2#桩基", 5, "drill"),
+        _cost_task("C1", "1#盖梁", 5, "cap_beam_team", component_type="cap_beam"),
+        _cost_task("C2", "2#盖梁", 5, "cap_beam_team", component_type="cap_beam"),
+    ]
+    result = solve_resource_cost_schedule(
+        ScheduleInput(
+            project_name="组合资源测试",
+            start_date=start,
+            tasks=tasks,
+            precedence_links=[
+                PrecedenceLink(id="P1-C1", predecessor_id="P1", successor_id="C1", lag_days=0, source_rule_id="manual"),
+                PrecedenceLink(id="P2-C2", predecessor_id="P2", successor_id="C2", lag_days=0, source_rule_id="manual"),
+            ],
+            resources=[
+                *_resource_instances("pool-drill", "drill", "钻机", 2),
+                *_resource_instances("pool-cap-beam", "cap_beam_team", "盖梁模板", 2),
+            ],
+            time_limit_seconds=5,
+        ),
+        {
+            "pool-drill": _linear_cost("pool-drill", "钻机", current=1, max_quantity=2, unit_cost=100),
+            "pool-cap-beam": _linear_cost("pool-cap-beam", "盖梁模板", current=1, max_quantity=2, unit_cost=100),
+        },
+        fallback_target_days=10,
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert _selected_resource_cost(result, "pool-drill")["selected_quantity"] == 2
+    assert _selected_resource_cost(result, "pool-cap-beam")["selected_quantity"] == 2
+    assert result.objective_breakdown["resource_incremental_cost"] == 200
+    assert result.objective_days == 10
+
+
 def test_compare_scenarios_returns_best_result() -> None:
     pytest.importorskip("ortools")
     solved = solve_scenario(default_scenario())
@@ -1658,3 +1845,100 @@ def _min_resource_test_input(max_resources: int) -> ScheduleInput:
         ],
         time_limit_seconds=5,
     )
+
+
+def _resource_cost_parallel_input(
+    *,
+    task_count: int,
+    max_resources: int,
+    resource_type: str = "team",
+    label: str = "钻机",
+) -> ScheduleInput:
+    start = date(2026, 1, 1)
+    return ScheduleInput(
+        project_name="资源成本测试",
+        start_date=start,
+        tasks=[
+            _cost_task(f"T{index}", f"任务{index}", 5, resource_type)
+            for index in range(1, task_count + 1)
+        ],
+        precedence_links=[],
+        resources=_resource_instances("pool-team", resource_type, label, max_resources),
+        time_limit_seconds=5,
+    )
+
+
+def _cost_task(
+    task_id: str,
+    name: str,
+    duration_days: int,
+    resource_type: str,
+    *,
+    component_type: str = "pile",
+) -> Task:
+    return Task(
+        id=task_id,
+        name=name,
+        structure_id=f"S-{task_id}",
+        structure_name=name,
+        structure_type="pier",
+        component_type=component_type,
+        process_name="施工",
+        productivity_rule_id="rule",
+        quantity=1,
+        quantity_label="1个",
+        duration_days=duration_days,
+        compatible_resource_types=[resource_type],
+    )
+
+
+def _resource_instances(pool_id: str, resource_type: str, label: str, count: int) -> list[Resource]:
+    return [
+        Resource(
+            id=f"{resource_type}_{index}",
+            name=f"{label}{index}",
+            type=resource_type,
+            pool_id=pool_id,
+            pool_label=label,
+        )
+        for index in range(1, count + 1)
+    ]
+
+
+def _soft_finish_milestone(start: date, *, target_offset: int, penalty_per_day: int) -> MilestoneConstraint:
+    return MilestoneConstraint(
+        id="M-soft",
+        name="关键节点",
+        mode="soft",
+        scope_type="project",
+        target_event="finish",
+        target_date=start + timedelta(days=target_offset - 1),
+        penalty_per_day=penalty_per_day,
+    )
+
+
+def _linear_cost(
+    pool_id: str,
+    label: str,
+    *,
+    current: int,
+    max_quantity: int,
+    unit_cost: int,
+    cost_type: str = "one_time_purchase",
+    billing_period_days: int = 30,
+) -> dict[str, object]:
+    return {
+        "resource_pool_id": pool_id,
+        "label": label,
+        "resource_type": "team",
+        "current_quantity": current,
+        "max_quantity": max_quantity,
+        "cost_type": cost_type,
+        "incremental_unit_cost": unit_cost,
+        "billing_period_days": billing_period_days,
+    }
+
+
+def _selected_resource_cost(result, pool_id: str) -> dict[str, object]:
+    resources = result.objective_breakdown["selected_resource_costs"]
+    return next(resource for resource in resources if resource["resource_pool_id"] == pool_id)

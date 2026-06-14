@@ -111,6 +111,9 @@ type ResourcePool = {
   calendar_id: string;
   enabled: boolean;
   compatible_process_ids: string[];
+  cost_type?: "none" | "monthly_rental" | "one_time_purchase";
+  incremental_unit_cost?: number;
+  billing_period_days?: number;
 };
 
 type MilestoneConstraint = {
@@ -339,6 +342,10 @@ export default async function handler(req: Request, context: Context) {
       const body = await req.json();
       return json(solveScenario(body.scenario, true));
     }
+    if (endpoint === "solve-resource-cost" && req.method === "POST") {
+      const body = await req.json();
+      return json(solveResourceCostScenario(body.scenario ?? body));
+    }
     if (endpoint === "compare-scenarios" && req.method === "POST") {
       return json(compareScenarios(await req.json()));
     }
@@ -406,13 +413,13 @@ function createDefaultScenario(): ScenarioInput {
     upper_structure_logic_rules: defaultUpperStructureLogicRules(),
     resource_calendars: [{ id: "continuous", name: "连续自然日", working_weekdays: [0, 1, 2, 3, 4, 5, 6], blackout_dates: [] }],
     resource_pools: [
-      pool("pool-rotary-drill", "rotary_drill", "旋挖钻", 3, 5),
-      pool("pool-circulation-drill", "circulation_drill", "回旋钻", 1, 5),
-      pool("pool-impact-drill", "impact_drill", "冲击钻", 1, 5),
-      pool("pool-manual-pile", "manual_pile_team", "人工挖孔班组", 1, 10),
+      pool("pool-rotary-drill", "rotary_drill", "旋挖钻", 3, 5, "monthly_rental", 180000, 30),
+      pool("pool-circulation-drill", "circulation_drill", "回旋钻", 0, 5),
+      pool("pool-impact-drill", "impact_drill", "冲击钻", 0, 5),
+      pool("pool-manual-pile", "manual_pile_team", "人工挖孔班组", 0, 10),
       pool("pool-cap", "cap_team", "承台模板", 1, 5),
-      pool("pool-pier-body", "pier_body_team", "墩柱模板", 1, 5),
-      pool("pool-cap-beam", "cap_beam_team", "盖梁模板", 1, 5),
+      pool("pool-pier-body", "pier_body_team", "墩柱模板", 1, 5, "one_time_purchase", 90000),
+      pool("pool-cap-beam", "cap_beam_team", "盖梁模板", 1, 5, "one_time_purchase", 80000),
       pool("pool-cast-in-place-continuous-beam", "cast_in_place_continuous_beam_team", "连续梁班组", 1, 1),
     ],
     milestones: [
@@ -659,7 +666,16 @@ function upperStructureLogicRule(
   };
 }
 
-function pool(id: string, type: string, label: string, quantity: number, maxQuantity: number): ResourcePool {
+function pool(
+  id: string,
+  type: string,
+  label: string,
+  quantity: number,
+  maxQuantity: number,
+  costType: ResourcePool["cost_type"] = "none",
+  incrementalUnitCost = 0,
+  billingPeriodDays = 30,
+): ResourcePool {
   return {
     id,
     type,
@@ -670,6 +686,9 @@ function pool(id: string, type: string, label: string, quantity: number, maxQuan
     calendar_id: "continuous",
     enabled: true,
     compatible_process_ids: [],
+    cost_type: costType,
+    incremental_unit_cost: incrementalUnitCost,
+    billing_period_days: billingPeriodDays,
   };
 }
 
@@ -1039,8 +1058,12 @@ function isLimitedPoolAvailable(poolModel: ResourcePool | undefined): boolean {
     poolModel
       && poolModel.enabled
       && (poolModel.resource_mode ?? "LIMITED") === "LIMITED"
-      && (poolModel.quantity ?? 0) > 0,
+      && resourcePoolUsableLimit(poolModel) > 0,
   );
+}
+
+function resourcePoolUsableLimit(poolModel: ResourcePool): number {
+  return poolModel.max_quantity ?? poolModel.quantity ?? 0;
 }
 
 function appendUnboundedResourceWarning(
@@ -1064,7 +1087,7 @@ function resourceUnboundedReason(poolModel: ResourcePool | undefined): string {
   if (!poolModel) return "未配置";
   if (!poolModel.enabled) return "未启用";
   if ((poolModel.resource_mode ?? "LIMITED") === "UNLIMITED") return "设置为默认充足";
-  if ((poolModel.quantity ?? 0) <= 0) return "限制数量为 0";
+  if (resourcePoolUsableLimit(poolModel) <= 0) return "资源上限为 0";
   return "不可用";
 }
 
@@ -2082,6 +2105,60 @@ function solveScenario(scenario: ScenarioInput, useMaxResources: boolean) {
       hard_milestone_count: result.milestone_results.filter((item) => item.mode === "hard").length,
     },
   };
+}
+
+function solveResourceCostScenario(scenario: ScenarioInput) {
+  const solved = solveScenario(scenario, false);
+  const usedResourceTypes = new Set(
+    solved.generated.schedule_input.tasks.flatMap((task) => task.compatible_resource_types ?? []),
+  );
+  const selectedResources = scenario.resource_pools
+    .filter((poolModel) => poolModel.enabled && (poolModel.resource_mode ?? "LIMITED") === "LIMITED")
+    .map((poolModel) => {
+      const configuredQuantity = poolModel.quantity ?? 0;
+      const quantity = usedResourceTypes.has(poolModel.type) ? configuredQuantity : 0;
+      return {
+        resource_pool_id: poolModel.id,
+        label: poolModel.label,
+        resource_type: poolModel.type,
+        cost_type: poolModel.cost_type ?? "none",
+        selected_quantity: quantity,
+        current_quantity: quantity,
+        added_quantity: 0,
+        incremental_unit_cost: poolModel.incremental_unit_cost ?? 0,
+        billing_period_days: poolModel.billing_period_days ?? 30,
+        daily_unit_cost: poolModel.cost_type === "monthly_rental"
+          ? Math.ceil((poolModel.incremental_unit_cost ?? 0) / (poolModel.billing_period_days ?? 30))
+          : 0,
+        active_days: 0,
+        incremental_cost: 0,
+        max_quantity: poolModel.max_quantity ?? configuredQuantity,
+      };
+    });
+  const resourceIncrementalCost = selectedResources.reduce((sum, resource) => sum + resource.incremental_cost, 0);
+  const softMilestonePenalty = solved.result.milestone_results.reduce((sum, item) => sum + (item.mode === "soft" ? item.penalty : 0), 0);
+  const totalCost = resourceIncrementalCost + softMilestonePenalty;
+  const businessExplanation = `Netlify 演示环境按当前资源配置生成线性成本结果。资源成本 ${resourceIncrementalCost} 元，参考节点延误成本 ${softMilestonePenalty} 元，展示综合成本 ${totalCost} 元。`;
+  solved.result.stats = {
+    ...solved.result.stats,
+    solve_mode: "resource_cost_optimization",
+    selected_resource_costs: selectedResources,
+    resource_incremental_cost: resourceIncrementalCost,
+    soft_milestone_penalty: softMilestonePenalty,
+    total_cost: totalCost,
+    business_explanation: businessExplanation,
+  };
+  solved.result.objective_breakdown = {
+    ...solved.result.objective_breakdown,
+    solve_mode: "resource_cost_optimization",
+    selected_resource_costs: selectedResources,
+    resource_incremental_cost: resourceIncrementalCost,
+    soft_milestone_penalty: softMilestonePenalty,
+    total_cost: totalCost,
+    business_explanation: businessExplanation,
+    weighted_objective: totalCost,
+  };
+  return solved;
 }
 
 function earliestStartFromPrecedenceLink(link: PrecedenceLink, predecessor: ScheduledTask, successor: Task) {

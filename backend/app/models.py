@@ -32,6 +32,7 @@ LogicScope = Literal["same_structure", "structure_sequence"]
 LogicSeverity = Literal["error", "warning"]
 PileMethod = Literal["rotary_drill", "impact_drill", "manual_pile"]
 ResourceMode = Literal["LIMITED", "UNLIMITED"]
+ResourceCostType = Literal["none", "monthly_rental", "one_time_purchase"]
 MilestoneLevel = Literal["contract", "control", "internal"]
 MilestoneMode = Literal["hard", "soft"]
 MilestoneScopeType = Literal["project", "bridge", "work_section", "structure", "component"]
@@ -315,6 +316,9 @@ class ResourcePool(BaseModel):
     calendar_id: str = "continuous"
     enabled: bool = True
     compatible_process_ids: list[str] = []
+    cost_type: ResourceCostType = "none"
+    incremental_unit_cost: int = Field(default=0, ge=0)
+    billing_period_days: int = Field(default=30, ge=1)
 
     @model_validator(mode="after")
     def ensure_max_quantity(self) -> "ResourcePool":
@@ -476,6 +480,11 @@ class ScenarioCompareRequest(BaseModel):
 
 
 class MinResourcesSolveRequest(BaseModel):
+    scenario: ScenarioInput
+    fallback_target_days: int | None = Field(default=None, ge=1)
+
+
+class ResourceCostSolveRequest(BaseModel):
     scenario: ScenarioInput
     fallback_target_days: int | None = Field(default=None, ge=1)
 

@@ -337,13 +337,38 @@ def default_resource_calendars() -> list[ResourceCalendar]:
 
 def default_resource_pools() -> list[ResourcePool]:
     return [
-        ResourcePool(id="pool-rotary-drill", type="rotary_drill", label="旋挖钻", quantity=3, max_quantity=5),
-        ResourcePool(id="pool-circulation-drill", type="circulation_drill", label="回旋钻", quantity=1, max_quantity=5),
-        ResourcePool(id="pool-impact-drill", type="impact_drill", label="冲击钻", quantity=1, max_quantity=5),
-        ResourcePool(id="pool-manual-pile", type="manual_pile_team", label="人工挖孔班组", quantity=1, max_quantity=10),
+        ResourcePool(
+            id="pool-rotary-drill",
+            type="rotary_drill",
+            label="旋挖钻",
+            quantity=3,
+            max_quantity=5,
+            cost_type="monthly_rental",
+            incremental_unit_cost=180000,
+            billing_period_days=30,
+        ),
+        ResourcePool(id="pool-circulation-drill", type="circulation_drill", label="回旋钻", quantity=0, max_quantity=5),
+        ResourcePool(id="pool-impact-drill", type="impact_drill", label="冲击钻", quantity=0, max_quantity=5),
+        ResourcePool(id="pool-manual-pile", type="manual_pile_team", label="人工挖孔班组", quantity=0, max_quantity=10),
         ResourcePool(id="pool-cap", type="cap_team", label="承台模板", quantity=1, max_quantity=5),
-        ResourcePool(id="pool-pier-body", type="pier_body_team", label="墩柱模板", quantity=1, max_quantity=5),
-        ResourcePool(id="pool-cap-beam", type="cap_beam_team", label="盖梁模板", quantity=1, max_quantity=5),
+        ResourcePool(
+            id="pool-pier-body",
+            type="pier_body_team",
+            label="墩柱模板",
+            quantity=1,
+            max_quantity=5,
+            cost_type="one_time_purchase",
+            incremental_unit_cost=90000,
+        ),
+        ResourcePool(
+            id="pool-cap-beam",
+            type="cap_beam_team",
+            label="盖梁模板",
+            quantity=1,
+            max_quantity=5,
+            cost_type="one_time_purchase",
+            incremental_unit_cost=80000,
+        ),
         ResourcePool(id="pool-cast-in-place-continuous-beam", type="cast_in_place_continuous_beam_team", label="连续梁班组", quantity=1),
     ]
 

@@ -681,6 +681,10 @@ code {
   color: #475569;
 }
 
+.icon-button.danger {
+  color: #b91c1c;
+}
+
 .nl-process-panel textarea {
   min-height: 86px;
   resize: vertical;
@@ -1455,7 +1459,8 @@ tbody tr:hover {
   grid-template-areas:
     "title title title enabled"
     "mode quantity maximum calendar"
-    "note note note note";
+    "note note note note"
+    "cost cost cost cost";
   gap: 10px 12px;
   align-items: start;
   overflow: hidden;
@@ -1490,19 +1495,19 @@ tbody tr:hover {
   min-width: 0;
 }
 
-.resource-card label:nth-of-type(1) {
+.resource-card > label:nth-of-type(1) {
   grid-area: mode;
 }
 
-.resource-card label:nth-of-type(2) {
+.resource-card > label:nth-of-type(2) {
   grid-area: quantity;
 }
 
-.resource-card label:nth-of-type(3) {
+.resource-card > label:nth-of-type(3) {
   grid-area: maximum;
 }
 
-.resource-card label:nth-of-type(4) {
+.resource-card > label:nth-of-type(4) {
   grid-area: calendar;
 }
 
@@ -1522,6 +1527,39 @@ tbody tr:hover {
   margin: 0;
   color: #64748b;
   font-size: 12px;
+}
+
+.linear-cost-editor {
+  grid-area: cost;
+  min-width: 0;
+  padding-top: 4px;
+  border-top: 1px solid #edf2f7;
+  display: grid;
+  grid-template-columns: 120px repeat(3, minmax(120px, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
+.linear-cost-editor > strong {
+  align-self: center;
+  color: #0f2742;
+  font-size: 13px;
+}
+
+.cost-result-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.8fr);
+  gap: 12px;
+  padding: 14px;
+}
+
+.business-explanation {
+  margin: 0 14px 14px;
+  padding: 10px 12px;
+  border-left: 3px solid #0ea5a4;
+  background: #f0fdfa;
+  color: #134e4a;
+  line-height: 1.65;
 }
 
 .check-row {
@@ -1894,7 +1932,8 @@ tbody tr:hover {
 
   .summary-band,
   .two-column,
-  .two-column.lower {
+  .two-column.lower,
+  .cost-result-layout {
     grid-template-columns: 1fr;
   }
 
@@ -1935,7 +1974,13 @@ tbody tr:hover {
       "maximum"
       "calendar"
       "enabled"
-      "note";
+      "note"
+      "cost";
+  }
+
+  .linear-cost-editor {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 
   .check-row {
