@@ -6,6 +6,9 @@ __pycache__/
 .git-tmp-projectScheduling/
 *.pyc
 *.log
+logs/
+docs/
+skills/
 .local.env
 .env
 *.local.env
