@@ -3,7 +3,7 @@ import type { ProcessTemplate, ProductivityOption } from "../types/scheduler";
 export const pileProductivityUnitOptions = [
   { unit: "m/天", duration_method: "units_per_day", quantity_source: "pile_length_m" },
   { unit: "根/天", duration_method: "units_per_day", quantity_source: "count" },
-  { unit: "天/根", duration_method: "days_per_unit", quantity_source: "count" },
+  { unit: "天/根", duration_method: "fixed_days", quantity_source: "count" },
   { unit: "天/m", duration_method: "days_per_unit", quantity_source: "pile_length_m" },
 ];
 

@@ -27,19 +27,20 @@ from app.solver import _resource_path_metrics, _task_ids_for_milestone, solve_mi
 from app.wbs import calculate_duration, generate_wbs  # noqa: E402
 
 
-def test_duration_calculation_uses_historical_days_per_pile() -> None:
+def test_duration_calculation_uses_fixed_days_per_pile() -> None:
     rotary = next(rule for rule in default_productivity_rules() if rule.id == "pile_rotary_regular")
-    assert rotary.duration_method == "days_per_unit"
+    assert rotary.duration_method == "fixed_days"
     assert rotary.quantity_source == "count"
     assert rotary.productivity_unit == "天/根"
     assert calculate_duration(1, rotary) == 3
-    assert calculate_duration(2, rotary) == 6
+    assert calculate_duration(2, rotary) == 3
 
 
 def test_default_process_library_uses_historical_productivity_defaults() -> None:
     process_by_id = {process.id: process for process in default_scenario().process_library}
 
     assert process_by_id["pile_rotary_regular"].productivity_value == 3
+    assert process_by_id["pile_rotary_regular"].duration_method == "fixed_days"
     assert process_by_id["pile_rotary_regular"].productivity_unit == "天/根"
     assert process_by_id["pile_circulation"].productivity_value == 2
     assert process_by_id["pile_impact"].productivity_value == 2
@@ -54,6 +55,26 @@ def test_default_process_library_uses_historical_productivity_defaults() -> None
     assert process_by_id["bridge_deck_system_standard"].quantity_source == "deck_length_m"
     for process in process_by_id.values():
         assert sum(1 for option in process.productivity_options if option.is_default) == 1
+
+
+def test_pile_days_per_pile_unit_normalizes_to_fixed_days() -> None:
+    process = ProcessTemplate(
+        id="pile-custom",
+        component_type="pile",
+        process_name="自定义桩基",
+        method_id="rotary_drill",
+        duration_method="days_per_unit",
+        quantity_source="count",
+        productivity_value=3,
+        productivity_unit="天/根",
+        resource_type="rotary_drill",
+        is_default=True,
+    )
+
+    assert process.duration_method == "fixed_days"
+    assert process.quantity_source == "count"
+    assert process.productivity_options[0].duration_method == "fixed_days"
+    assert process.productivity_options[0].quantity_source == "count"
 
 
 def test_process_library_upgrade_replaces_previous_builtin_defaults_and_adds_missing_history() -> None:
@@ -99,6 +120,7 @@ def test_process_library_upgrade_replaces_previous_builtin_defaults_and_adds_mis
     process_by_id = {process.id: process for process in upgraded}
 
     assert process_by_id["pile_rotary_regular"].productivity_value == 3
+    assert process_by_id["pile_rotary_regular"].duration_method == "fixed_days"
     assert process_by_id["pile_rotary_regular"].quantity_source == "count"
     assert process_by_id["cap_standard"].productivity_value == 30
     assert process_by_id["precast_beam_standard"].productivity_unit == "天/片"
@@ -772,7 +794,7 @@ def test_component_productivity_group_overrides_process_default() -> None:
         ProductivityOption(
             id="rotary-by-pile",
             name="按根计",
-            duration_method="days_per_unit",
+            duration_method="fixed_days",
             quantity_source="count",
             productivity_value=2,
             productivity_unit="天/根",

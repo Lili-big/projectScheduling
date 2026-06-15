@@ -7,9 +7,9 @@ from .models import ProcessTemplate, ProductivityOption
 
 def historical_default_process_library() -> list[ProcessTemplate]:
     return [
-        _process("pile_rotary_regular", "pile", "旋挖钻", "rotary_drill", "days_per_unit", "count", 3, "天/根", "rotary_drill", True),
-        _process("pile_circulation", "pile", "回旋钻", "circulation_drill", "days_per_unit", "count", 2, "天/根", "circulation_drill", False),
-        _process("pile_impact", "pile", "冲击钻", "impact_drill", "days_per_unit", "count", 2, "天/根", "impact_drill", False),
+        _process("pile_rotary_regular", "pile", "旋挖钻", "rotary_drill", "fixed_days", "count", 3, "天/根", "rotary_drill", True),
+        _process("pile_circulation", "pile", "回旋钻", "circulation_drill", "fixed_days", "count", 2, "天/根", "circulation_drill", False),
+        _process("pile_impact", "pile", "冲击钻", "impact_drill", "fixed_days", "count", 2, "天/根", "impact_drill", False),
         _process("pile_manual", "pile", "人工挖孔", "manual_pile", "days_per_unit", "pile_length_m", 1, "天/m", "manual_pile_team", False),
         _process("ground_tie_beam_standard", "ground_tie_beam", "桩系梁施工", None, "fixed_days", "count", 3, "天/个", "tie_beam_team", True),
         _process("cap_standard", "cap", "承台施工", None, "fixed_days", "count", 30, "天/个", "cap_team", True),
@@ -109,21 +109,28 @@ _COMPONENT_TYPE_ORDER = {
 }
 
 
-_PREVIOUS_BUILTIN_DEFAULTS: dict[str, tuple[str, str, float, str]] = {
-    "pile_rotary_regular": ("units_per_day", "pile_length_m", 18, "m/天"),
-    "pile_impact": ("units_per_day", "pile_length_m", 10, "m/天"),
-    "pile_manual": ("days_per_unit", "pile_length_m", 1, "天/m"),
-    "cap_standard": ("fixed_days", "count", 8, "天/个"),
-    "spread_foundation_standard": ("fixed_days", "count", 8, "天/个"),
-    "ground_tie_beam_standard": ("fixed_days", "count", 4, "天/个"),
-    "pier_body_standard": ("units_per_day", "pier_height_m", 1.2, "m/天"),
-    "pier_body_climbing_form": ("fixed_days", "count", 7, "天/节"),
-    "pier_body_sliding_form": ("fixed_days", "count", 6, "天/节"),
-    "pier_body_turnover_form": ("fixed_days", "count", 12, "天/节"),
-    "middle_tie_beam_standard": ("fixed_days", "count", 4, "天/个"),
-    "cap_beam_standard": ("fixed_days", "count", 7, "天/个"),
-    "abutment_body_standard": ("fixed_days", "count", 10, "天/个"),
-    "cast_in_place_continuous_standard_segment": ("fixed_days", "count", 10, "天/块"),
+_PREVIOUS_BUILTIN_DEFAULTS: dict[str, tuple[tuple[str, str, float, str], ...]] = {
+    "pile_rotary_regular": (
+        ("units_per_day", "pile_length_m", 18, "m/天"),
+        ("days_per_unit", "count", 3, "天/根"),
+    ),
+    "pile_circulation": (("days_per_unit", "count", 2, "天/根"),),
+    "pile_impact": (
+        ("units_per_day", "pile_length_m", 10, "m/天"),
+        ("days_per_unit", "count", 2, "天/根"),
+    ),
+    "pile_manual": (("days_per_unit", "pile_length_m", 1, "天/m"),),
+    "cap_standard": (("fixed_days", "count", 8, "天/个"),),
+    "spread_foundation_standard": (("fixed_days", "count", 8, "天/个"),),
+    "ground_tie_beam_standard": (("fixed_days", "count", 4, "天/个"),),
+    "pier_body_standard": (("units_per_day", "pier_height_m", 1.2, "m/天"),),
+    "pier_body_climbing_form": (("fixed_days", "count", 7, "天/节"),),
+    "pier_body_sliding_form": (("fixed_days", "count", 6, "天/节"),),
+    "pier_body_turnover_form": (("fixed_days", "count", 12, "天/节"),),
+    "middle_tie_beam_standard": (("fixed_days", "count", 4, "天/个"),),
+    "cap_beam_standard": (("fixed_days", "count", 7, "天/个"),),
+    "abutment_body_standard": (("fixed_days", "count", 10, "天/个"),),
+    "cast_in_place_continuous_standard_segment": (("fixed_days", "count", 10, "天/块"),),
 }
 
 
@@ -203,8 +210,8 @@ def _sort_process_library(process_library: list[ProcessTemplate]) -> list[Proces
 
 
 def _matches_previous_builtin_default(process: ProcessTemplate) -> bool:
-    previous = _PREVIOUS_BUILTIN_DEFAULTS.get(process.id)
-    if previous is None:
+    previous_options = _PREVIOUS_BUILTIN_DEFAULTS.get(process.id)
+    if previous_options is None:
         return False
     if len(process.productivity_options) != 1:
         return False
@@ -215,11 +222,12 @@ def _matches_previous_builtin_default(process: ProcessTemplate) -> bool:
         option.productivity_value,
         option.productivity_unit,
     )
-    return (
+    return any(
         current[0] == previous[0]
         and current[1] == previous[1]
         and math.isclose(current[2], previous[2], rel_tol=0, abs_tol=1e-9)
         and current[3] == previous[3]
+        for previous in previous_options
     )
 
 

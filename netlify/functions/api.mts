@@ -58,6 +58,13 @@ type ProductivityOption = {
   is_default: boolean;
 };
 
+const pileProductivityUnitRules: Record<string, Pick<ProductivityOption, "duration_method" | "quantity_source">> = {
+  "m/天": { duration_method: "units_per_day", quantity_source: "pile_length_m" },
+  "根/天": { duration_method: "units_per_day", quantity_source: "count" },
+  "天/根": { duration_method: "fixed_days", quantity_source: "count" },
+  "天/m": { duration_method: "days_per_unit", quantity_source: "pile_length_m" },
+};
+
 type TaskOverride = {
   method_id?: string | null;
   productivity_option_id?: string | null;
@@ -488,9 +495,9 @@ function component(
 
 function createProcessLibrary(): ProcessTemplate[] {
   return [
-    process("pile_rotary_regular", "pile", "旋挖钻", "rotary_drill", "days_per_unit", "count", 3, "天/根", "rotary_drill", true),
-    process("pile_circulation", "pile", "回旋钻", "circulation_drill", "days_per_unit", "count", 2, "天/根", "circulation_drill", false),
-    process("pile_impact", "pile", "冲击钻", "impact_drill", "days_per_unit", "count", 2, "天/根", "impact_drill", false),
+    process("pile_rotary_regular", "pile", "旋挖钻", "rotary_drill", "fixed_days", "count", 3, "天/根", "rotary_drill", true),
+    process("pile_circulation", "pile", "回旋钻", "circulation_drill", "fixed_days", "count", 2, "天/根", "circulation_drill", false),
+    process("pile_impact", "pile", "冲击钻", "impact_drill", "fixed_days", "count", 2, "天/根", "impact_drill", false),
     process("pile_manual", "pile", "人工挖孔", "manual_pile", "days_per_unit", "pile_length_m", 1, "天/m", "manual_pile_team", false),
     process("ground_tie_beam_standard", "ground_tie_beam", "桩系梁施工", null, "fixed_days", "count", 3, "天/个", "tie_beam_team", true),
     process("cap_standard", "cap", "承台施工", null, "fixed_days", "count", 30, "天/个", "cap_team", true),
@@ -537,7 +544,7 @@ function process(
     standard_section_height_m: standardSectionHeight,
     is_default: true,
   };
-  return {
+  return normalizeProcessTemplate({
     id,
     component_type: componentType,
     process_name: processName,
@@ -551,6 +558,34 @@ function process(
     productivity_options: [option],
     applicability: {},
     is_default: isDefault,
+  });
+}
+
+function normalizeProcessTemplate(processTemplate: ProcessTemplate): ProcessTemplate {
+  if (processTemplate.component_type !== "pile") return processTemplate;
+  const options = (processTemplate.productivity_options ?? []).map((option) => normalizeProductivityOptionForProcess(processTemplate, option));
+  const defaultOption = options.find((option) => option.is_default) ?? options[0];
+  if (!defaultOption) return processTemplate;
+  return {
+    ...processTemplate,
+    duration_method: defaultOption.duration_method,
+    quantity_source: defaultOption.quantity_source,
+    productivity_value: defaultOption.productivity_value,
+    productivity_unit: defaultOption.productivity_unit,
+    standard_section_height_m: defaultOption.standard_section_height_m,
+    productivity_options: options,
+  };
+}
+
+function normalizeProductivityOptionForProcess(processTemplate: ProcessTemplate, option: ProductivityOption): ProductivityOption {
+  if (processTemplate.component_type !== "pile") return option;
+  const unitRule = pileProductivityUnitRules[option.productivity_unit];
+  if (!unitRule) return option;
+  return {
+    ...option,
+    duration_method: unitRule.duration_method,
+    quantity_source: unitRule.quantity_source,
+    standard_section_height_m: null,
   };
 }
 
@@ -1948,18 +1983,19 @@ function selectProcess(componentModel: ComponentModel, processLibrary: ProcessTe
 }
 
 function effectiveProcessForComponent(processTemplate: ProcessTemplate, componentModel: ComponentModel): ProcessTemplate {
-  const selectedOption = selectedProductivityOption(componentModel, processTemplate);
+  const normalizedTemplate = normalizeProcessTemplate(processTemplate);
+  const selectedOption = selectedProductivityOption(componentModel, normalizedTemplate);
   const processWithOption = selectedOption
     ? {
-      ...processTemplate,
-      id: `${processTemplate.id}:${selectedOption.id}`,
+      ...normalizedTemplate,
+      id: `${normalizedTemplate.id}:${selectedOption.id}`,
       duration_method: selectedOption.duration_method,
       quantity_source: selectedOption.quantity_source,
       productivity_value: selectedOption.productivity_value,
       productivity_unit: selectedOption.productivity_unit,
-      standard_section_height_m: selectedOption.standard_section_height_m ?? processTemplate.standard_section_height_m,
+      standard_section_height_m: selectedOption.standard_section_height_m ?? normalizedTemplate.standard_section_height_m,
     }
-    : processTemplate;
+    : normalizedTemplate;
   if (componentModel.component_type === "cast_in_place_continuous_beam" && componentModel.method_id === "standard_segment") {
     return {
       ...processWithOption,

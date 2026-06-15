@@ -155,14 +155,14 @@ def test_pile_productivity_group_can_use_count_quantity_source() -> None:
         ProductivityOption(
             id="rotary-per-pile",
             name="按根计",
-            duration_method="days_per_unit",
+            duration_method="fixed_days",
             quantity_source="count",
             productivity_value=2,
             productivity_unit="天/根",
             is_default=True,
         )
     ]
-    rotary_process.duration_method = "days_per_unit"
+    rotary_process.duration_method = "fixed_days"
     rotary_process.quantity_source = "count"
     rotary_process.productivity_value = 2
     rotary_process.productivity_unit = "天/根"

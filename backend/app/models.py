@@ -26,6 +26,12 @@ ComponentType = Literal[
 WorkPointType = Literal["road", "bridge", "tunnel"]
 WorkSectionSide = Literal["left", "right", "none"]
 DurationMethod = Literal["units_per_day", "days_per_unit", "fixed_days"]
+_PILE_PRODUCTIVITY_UNIT_RULES: dict[str, tuple[DurationMethod, str]] = {
+    "m/天": ("units_per_day", "pile_length_m"),
+    "根/天": ("units_per_day", "count"),
+    "天/根": ("fixed_days", "count"),
+    "天/m": ("days_per_unit", "pile_length_m"),
+}
 PredecessorStrategy = Literal["all", "first_available"]
 RelationshipType = Literal["FS", "SS", "FF", "SF"]
 LogicScope = Literal["same_structure", "structure_sequence"]
@@ -295,6 +301,10 @@ class ProcessTemplate(BaseModel):
                 )
             ]
 
+        if self.component_type == "pile":
+            for option in self.productivity_options:
+                self._sync_pile_productivity_unit(option)
+
         if self._is_segmented_pier_formwork_process():
             for option in self.productivity_options:
                 if option.productivity_unit == "天/节":
@@ -322,6 +332,14 @@ class ProcessTemplate(BaseModel):
         if self.method_id in {"climbing_form", "sliding_form", "turnover_form"}:
             return True
         return any(keyword in self.process_name for keyword in ("爬模", "滑模", "翻模"))
+
+    def _sync_pile_productivity_unit(self, option: ProductivityOption) -> None:
+        unit_rule = _PILE_PRODUCTIVITY_UNIT_RULES.get(option.productivity_unit)
+        if unit_rule is None:
+            return
+        option.duration_method = unit_rule[0]
+        option.quantity_source = unit_rule[1]
+        option.standard_section_height_m = None
 
 
 class ResourceCalendar(BaseModel):
