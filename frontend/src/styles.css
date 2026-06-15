@@ -766,14 +766,14 @@ code {
 }
 
 .productivity-groups {
-  min-width: 700px;
+  min-width: 820px;
   display: grid;
   gap: 5px;
 }
 
 .productivity-group {
   display: grid;
-  grid-template-columns: 108px 64px 82px 104px 86px 78px 52px 58px;
+  grid-template-columns: 108px 64px 82px 104px 118px 86px 78px 52px 58px;
   gap: 6px;
   align-items: center;
   width: max-content;
@@ -796,6 +796,11 @@ code {
 .productivity-unit-control {
   width: 82px;
   min-width: 82px;
+}
+
+.productivity-method-pill {
+  width: 118px;
+  min-width: 118px;
 }
 
 .productivity-source-pill {
@@ -1659,6 +1664,10 @@ tbody tr:hover {
 .segmented button.active {
   color: #fff;
   background: #0ea5a4;
+}
+
+.result-switcher {
+  margin-bottom: 12px;
 }
 
 .tag {

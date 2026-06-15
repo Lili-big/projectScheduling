@@ -72,14 +72,22 @@ export function resourcePoolBillingPeriodDays(pool: ResourcePool): number {
 
 export function taskResourceTypesLabel(task: Task, resourcePools: ResourcePool[]): string {
   if (!task.compatible_resource_types.length) return "-";
-  const labelByType = new Map(resourcePools.map((pool) => [pool.type, pool.label]));
-  return task.compatible_resource_types.map((type) => labelByType.get(type) ?? type).join(" / ");
+  return resourceTypesLabel(task.compatible_resource_types, resourcePools, " / ");
 }
 
 export function processResourceLabel(process: ProcessTemplate, resourcePools: ResourcePool[]): string {
   const resourceType = defaultResourceTypeForProcess(process);
   if (!resourceType) return "";
-  return new Map(resourcePools.map((pool) => [pool.type, pool.label])).get(resourceType) ?? "";
+  return resourceTypeLabel(resourceType, resourcePools);
+}
+
+export function resourceTypeLabel(resourceType: string, resourcePools: ResourcePool[]): string {
+  return resourcePools.find((pool) => pool.type === resourceType)?.label ?? resourceType;
+}
+
+export function resourceTypesLabel(resourceTypes: string[], resourcePools: ResourcePool[], separator = "、"): string {
+  if (!resourceTypes.length) return "-";
+  return resourceTypes.map((type) => resourceTypeLabel(type, resourcePools)).join(separator);
 }
 
 export function defaultResourceTypeForProcess(process: ProcessTemplate): string | null {

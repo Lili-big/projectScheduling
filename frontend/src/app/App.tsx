@@ -41,6 +41,11 @@ import type {
   WorkSectionSide,
   ResourceMode,
   ResourceCostType,
+  ControlLevel,
+  ScheduleStrategy,
+  ScheduleStrategyConfig,
+  ResourceGuaranteeMode,
+  BalanceBucket,
   TabKey,
   GanttMode,
   TaskViewMode,
@@ -71,6 +76,7 @@ import type {
   GeneratedScheduleInput,
   ScheduleResult,
   ScenarioSolveResult,
+  ScenarioAlternativeResult,
   CompareResponse,
   ImportBridgeParamsResponse,
   ProcessNlChange,
@@ -166,6 +172,44 @@ import {
 } from "../components/common/PredecessorPopover";
 import type { PredecessorDetail } from "../components/common/PredecessorPopover";
 
+const defaultScheduleStrategyConfig: ScheduleStrategyConfig = {
+  strategy: "comprehensive",
+  resource_guarantee: "priority",
+  normal_balance_bucket: "month",
+  normal_earliest_start_offset: 0,
+  normal_latest_finish_offset: null,
+  normal_max_early_finish_days: 60,
+  max_parallel_normal_per_work_section: 5,
+  enable_balance_objective: true,
+};
+
+const scheduleStrategyLabels: Record<ScheduleStrategy, string> = {
+  shortest_duration: "总工期最短",
+  min_resource: "资源投入最少",
+  resource_cost: "资源成本最低",
+  control_priority: "控制性工程优先",
+  balanced_normal: "普通工程均衡推进",
+  comprehensive: "控制优先 + 均衡推进",
+};
+
+const resourceGuaranteeLabels: Record<ResourceGuaranteeMode, string> = {
+  strict: "严格保障",
+  priority: "优先保障",
+  off: "不启用",
+};
+
+const balanceBucketLabels: Record<BalanceBucket, string> = {
+  week: "按周",
+  month: "按月",
+};
+
+const controlLevelLabels: Record<ControlLevel, string> = {
+  control: "控制性工程",
+  key: "重点工程",
+  normal: "普通工程",
+  rough: "粗控工程",
+};
+
 export default function App() {
   const [scenario, setScenario] = useState<ScenarioInput | null>(null);
   const [generated, setGenerated] = useState<GeneratedScheduleInput | null>(null);
@@ -260,9 +304,9 @@ export default function App() {
     const requestFingerprint = scenarioFingerprintForSolve(requestScenario);
     setBusy("solving");
     setError(null);
+    openModule("results");
     try {
       await solveWith(requestScenario, requestFingerprint);
-      openModule("results");
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -407,12 +451,12 @@ export default function App() {
     }
   }
 
-  function saveCurrentResult() {
-    if (!currentSolveResult) return;
+  function saveCurrentResult(resultToSave: ScenarioSolveResult | null = currentSolveResult) {
+    if (!resultToSave) return;
     const nextResult = {
-      ...currentSolveResult,
-      scenario_id: `${currentSolveResult.scenario_id}-${savedResults.length + 1}`,
-      scenario_name: `${currentSolveResult.scenario_name} #${savedResults.length + 1}`,
+      ...resultToSave,
+      scenario_id: `${resultToSave.scenario_id}-${savedResults.length + 1}`,
+      scenario_name: `${resultToSave.scenario_name} #${savedResults.length + 1}`,
     };
     const nextResults = [...savedResults, nextResult];
     setSavedResults(nextResults);
@@ -550,6 +594,28 @@ export default function App() {
     setComparison(null);
   }
 
+  function updateStructureControlLevel(task: Task, controlLevel: ControlLevel) {
+    if (!scenario) return;
+    setScenario((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        project: {
+          ...current.project,
+          bridges: current.project.bridges.map((bridge) => ({
+            ...bridge,
+            work_sections: bridge.work_sections.map((section) => ({
+              ...section,
+              structures: section.structures.map((structure) =>
+                structure.id === task.structure_id ? { ...structure, control_level: controlLevel } : structure,
+              ),
+            })),
+          })),
+        },
+      };
+    });
+  }
+
   function renderModule(tabKey: TabKey) {
     if (!scenario && tabKey !== "results") {
       return <div className="empty">正在加载场景...</div>;
@@ -587,6 +653,7 @@ export default function App() {
             onGenerateTaskView={generateOnly}
             onImportBridgeParams={importBridgeParams}
             onUpdateTaskProcess={updateTaskProcessAndGenerate}
+            onUpdateStructureControlLevel={updateStructureControlLevel}
             busy={busy}
           />
         ) : null;
@@ -664,6 +731,7 @@ export default function App() {
             onGenerateTaskView={generateOnly}
             onImportBridgeParams={importBridgeParams}
             onUpdateTaskProcess={updateTaskProcessAndGenerate}
+            onUpdateStructureControlLevel={updateStructureControlLevel}
             busy={busy}
           />
         )}
@@ -707,6 +775,7 @@ function TaskViewTab({
   onGenerateTaskView,
   onImportBridgeParams,
   onUpdateTaskProcess,
+  onUpdateStructureControlLevel,
   busy,
 }: {
   scenario: ScenarioInput;
@@ -715,6 +784,7 @@ function TaskViewTab({
   onGenerateTaskView: () => void;
   onImportBridgeParams: (file: File, targetBridge: string) => void;
   onUpdateTaskProcess: (task: Task, patch: TaskOverride) => void;
+  onUpdateStructureControlLevel: (task: Task, controlLevel: ControlLevel) => void;
   busy: BusyState;
 }) {
   const [groupMode, setGroupMode] = useState<TaskViewMode>("by_structure");
@@ -826,9 +896,26 @@ function TaskViewTab({
       const selectedProductivity = selectedProcess ? selectedProductivityOption(editableComponent, selectedProcess) : null;
       const showProcessSelect = processOptions.length > 1 || (processOptions.length > 0 && !selectedProcess);
       const showProductivitySelect = Boolean(selectedProcess && selectedProductivity && productivityOptions.length > 1);
+      const editableStructure = findStructure(scenario.project, row.task.structure_id)?.structure ?? null;
+      const controlLevel = editableStructure?.control_level ?? row.task.control_level ?? "normal";
 
       return (
         <tr key={`${group.id}-${row.task.id}`}>
+          <td>
+            {editableStructure ? (
+              <select
+                value={controlLevel}
+                disabled={refreshingTaskGraph}
+                onChange={(event) => onUpdateStructureControlLevel(row.task, event.target.value as ControlLevel)}
+              >
+                {Object.entries(controlLevelLabels).map(([value, label]) => (
+                  <option value={value} key={value}>{label}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="text-pill">{controlLevelLabels[controlLevel]}</span>
+            )}
+          </td>
           <td>{row.bridgeName} / {row.sectionName}</td>
           <td><span className="side-tag">{row.sideLabel}</span></td>
           <td>{row.structureLabel}</td>
@@ -926,6 +1013,7 @@ function TaskViewTab({
             <table className="task-view-table">
               <thead>
                 <tr>
+                  <th>管控级别</th>
                   <th>桥梁 / 工区</th>
                   <th>幅别</th>
                   <th>墩号 / 结构物</th>
@@ -1090,7 +1178,7 @@ function ResultsTab({
   busy: BusyState;
   ganttMode: GanttMode;
   onGanttModeChange: (mode: GanttMode) => void;
-  onSaveCurrent: () => void;
+  onSaveCurrent: (result?: ScenarioSolveResult | null) => void;
   savedResults: ScenarioSolveResult[];
   comparison: CompareResponse | null;
   onCompare: () => void;
@@ -1098,25 +1186,35 @@ function ResultsTab({
 }) {
   const [openPredecessorTaskId, setOpenPredecessorTaskId] = useState<string | null>(null);
   const [predecessorAnchorRect, setPredecessorAnchorRect] = useState<DOMRect | null>(null);
+  const [selectedResultIndex, setSelectedResultIndex] = useState(0);
   const predecessorHoverOpenTimerRef = useRef<number | null>(null);
   const predecessorHoverCloseTimerRef = useRef<number | null>(null);
-  const result = solveResult?.result ?? null;
+  const resultOptions = useMemo(() => scenarioResultOptions(solveResult), [solveResult]);
+  const activeSolveResult = resultOptions[Math.min(selectedResultIndex, Math.max(0, resultOptions.length - 1))] ?? null;
+  const result = activeSolveResult?.result ?? null;
   const planStatus = useMemo(() => derivePlanStatus(result), [result]);
-  const summary = useMemo(() => buildSummary(scenario, generated, solveResult), [scenario, generated, solveResult]);
-  const generatedForDetails = solveResult?.generated ?? generated;
+  const summary = useMemo(() => buildSummary(scenario, generated, activeSolveResult), [scenario, generated, activeSolveResult]);
+  const generatedForDetails = activeSolveResult?.generated ?? generated;
   const recommendedResourceCounts = recommendedResourceCountsFromResult(result);
+  const resourceRecommendationStatus = resourceRecommendationStatusFromResult(result);
+  const resourceRecommendationMessage = resourceRecommendationMessageFromResult(result);
+  const resourceUpperBoundCounts = resourceUpperBoundCountsFromResult(result);
+  const resourceCapacityLowerBounds = resourceCapacityLowerBoundsFromResult(result);
+  const showResourceRecommendation = shouldShowResourceRecommendation(result, recommendedResourceCounts);
+  const showResourceRecommendationDiagnostic = shouldShowResourceRecommendationDiagnostic(resourceRecommendationStatus, resourceRecommendationMessage);
   const resourceCostSummary = resourceCostSummaryFromResult(result);
   const continuityMetrics = continuityMetricsFromResult(result);
+  const strategyConfig = withDefaultScheduleStrategy(scenario?.schedule_strategy);
   const workSectionDisplayById = useMemo(
     () => buildWorkSectionDisplayById(scenario?.project ?? null),
     [scenario?.project],
   );
   const diagnostics = useMemo(() => {
-    const messages = solveResult?.diagnostics ?? generated?.validation ?? [];
+    const messages = activeSolveResult?.diagnostics ?? generated?.validation ?? [];
     if (!planStatus.diagnostic) return messages;
     const alreadyIncluded = messages.some((message) => message.subject_id === planStatus.diagnostic?.subject_id);
     return alreadyIncluded ? messages : [planStatus.diagnostic, ...messages];
-  }, [generated, planStatus.diagnostic, solveResult]);
+  }, [activeSolveResult, generated, planStatus.diagnostic]);
   const scheduledTaskById = useMemo(
     () => new Map((result?.tasks ?? []).map((task) => [task.id, task])),
     [result],
@@ -1134,6 +1232,10 @@ function ResultsTab({
     () => new Map((scenario?.logic_rules ?? []).map((rule) => [rule.id, rule])),
     [scenario],
   );
+
+  useEffect(() => {
+    setSelectedResultIndex(0);
+  }, [solveResult]);
 
   useEffect(() => () => {
     clearPredecessorHoverTimers(predecessorHoverOpenTimerRef, predecessorHoverCloseTimerRef);
@@ -1160,6 +1262,11 @@ function ResultsTab({
 
   function keepPredecessorPopoverOpen() {
     clearPredecessorHoverTimer(predecessorHoverCloseTimerRef);
+  }
+
+  function updateStrategyConfig(patch: Partial<ScheduleStrategyConfig>) {
+    if (!scenario) return;
+    onPatchScenario({ schedule_strategy: { ...strategyConfig, ...patch } });
   }
 
   function predecessorDetails(task: ScheduledTask): PredecessorDetail[] {
@@ -1224,6 +1331,79 @@ function ResultsTab({
                 onChange={(event) => onPatchScenario({ time_limit_seconds: Number(event.target.value) })}
               />
             </label>
+            <label>
+              排程策略
+              <select
+                value={strategyConfig.strategy}
+                onChange={(event) => updateStrategyConfig({ strategy: event.target.value as ScheduleStrategy })}
+              >
+                {Object.entries(scheduleStrategyLabels).map(([value, label]) => (
+                  <option value={value} key={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              资源保障
+              <select
+                value={strategyConfig.resource_guarantee}
+                onChange={(event) => updateStrategyConfig({ resource_guarantee: event.target.value as ResourceGuaranteeMode })}
+              >
+                {Object.entries(resourceGuaranteeLabels).map(([value, label]) => (
+                  <option value={value} key={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              均衡周期
+              <select
+                value={strategyConfig.normal_balance_bucket}
+                onChange={(event) => updateStrategyConfig({ normal_balance_bucket: event.target.value as BalanceBucket })}
+              >
+                {Object.entries(balanceBucketLabels).map(([value, label]) => (
+                  <option value={value} key={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              普通工程最早开始(天)
+              <input
+                type="number"
+                min={0}
+                value={strategyConfig.normal_earliest_start_offset}
+                onChange={(event) => updateStrategyConfig({ normal_earliest_start_offset: Math.max(0, Number(event.target.value)) })}
+              />
+            </label>
+            <label>
+              普通工程最晚完成(天)
+              <input
+                type="number"
+                min={1}
+                value={strategyConfig.normal_latest_finish_offset ?? ""}
+                placeholder="不限制"
+                onChange={(event) => updateStrategyConfig({
+                  normal_latest_finish_offset: event.target.value ? Math.max(1, Number(event.target.value)) : null,
+                })}
+              />
+            </label>
+            <label>
+              工区普通工程最大并行
+              <input
+                type="number"
+                min={1}
+                value={strategyConfig.max_parallel_normal_per_work_section}
+                onChange={(event) => updateStrategyConfig({
+                  max_parallel_normal_per_work_section: Math.max(1, Number(event.target.value)),
+                })}
+              />
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={strategyConfig.enable_balance_objective}
+                onChange={(event) => updateStrategyConfig({ enable_balance_objective: event.target.checked })}
+              />
+              启用普通工程均衡目标
+            </label>
           </div>
         </section>
       )}
@@ -1235,6 +1415,53 @@ function ResultsTab({
         <Metric label="资源 / 里程碑" value={summary.resourcesAndMilestones} tone="neutral" icon={<Flag size={18} />} />
       </section>
 
+      {resultOptions.length > 1 && (
+        <section className="panel full">
+          <PanelTitle title="方案输出" subtitle="固定资源方案与可行最少资源方案" />
+          <div className="segmented result-switcher">
+            {resultOptions.map((option, index) => (
+              <button
+                className={selectedResultIndex === index ? "active" : ""}
+                key={`${option.scenario_id}-${index}`}
+                onClick={() => setSelectedResultIndex(index)}
+                type="button"
+              >
+                {index === 0 ? "方案1 当前资源" : `方案${index + 1} 最少资源`}
+              </button>
+            ))}
+          </div>
+          <div className="table-wrap short">
+            <table>
+              <thead>
+                <tr>
+                  <th>方案</th>
+                  <th>状态</th>
+                  <th>总工期</th>
+                  <th>完工日期</th>
+                  <th>资源数量</th>
+                  <th>新增资源</th>
+                </tr>
+              </thead>
+              <tbody>
+                {resultOptions.map((option, index) => {
+                  const item = resultOptionSummary(option);
+                  return (
+                    <tr key={`${option.scenario_id}-${index}`}>
+                      <td>{index === 0 ? "方案1 当前资源" : `方案${index + 1} 最少资源`}</td>
+                      <td>{formatScheduleStatus(option.result.status)}</td>
+                      <td>{option.result.objective_days ?? "-"}</td>
+                      <td>{option.result.plan_finish_date ?? "-"}</td>
+                      <td>{item.resourceCount}</td>
+                      <td>{item.addedResourceCount}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       <section className="panel full">
         <div className="panel-title">
           <div>
@@ -1242,7 +1469,7 @@ function ResultsTab({
             <span>生成层、求解层和里程碑检查的摘要</span>
           </div>
           <div className="actions inline">
-            <button className="secondary" onClick={onSaveCurrent} disabled={!solveResult}>
+            <button className="secondary" onClick={() => onSaveCurrent(activeSolveResult)} disabled={!activeSolveResult}>
               <Save size={15} />
               保存方案
             </button>
@@ -1259,19 +1486,69 @@ function ResultsTab({
               <span>{message.message}</span>
             </div>
           ))}
-          {!solveResult && !generated && <div className="empty">等待生成或求解</div>}
+          {busy === "solving" && !solveResult && (
+            <div className="diagnostic info">
+              <strong>求解中</strong>
+              <span>正在按固定资源推算最短工期，请稍候...</span>
+            </div>
+          )}
+          {!solveResult && !generated && busy !== "solving" && <div className="empty">等待生成或求解</div>}
         </div>
       </section>
 
-      {recommendedResourceCounts.length > 0 && (
+      {showResourceRecommendationDiagnostic && (
         <section className="panel full">
-          <PanelTitle title="推荐资源数量" subtitle="固定工期条件下推算的最少并行资源" />
+          <PanelTitle title="资源增量诊断" subtitle="当前资源上限探测、最少资源求解和关键路径检查结果" />
+          <div className="diagnostics">
+            <div className={`diagnostic ${resourceRecommendationStatus === "resource_upper_bound_infeasible" || resourceRecommendationStatus === "critical_path_infeasible" ? "error" : "warning"}`}>
+              <strong>{resourceRecommendationStatus === "resource_upper_bound_infeasible" ? "上限不可行" : "未输出推荐"}</strong>
+              <span>{resourceRecommendationMessage}</span>
+            </div>
+            {resourceCapacityLowerBounds.filter((item) => item.exceeds_upper_bound).map((item) => (
+              <div className="diagnostic error" key={item.resource_pool_id}>
+                <strong>瓶颈资源</strong>
+                <span>{item.label} 按目标窗口约需 {item.required_minimum} 个，当前上限 {item.max_quantity} 个。</span>
+              </div>
+            ))}
+          </div>
+          {resourceUpperBoundCounts.length > 0 && (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>资源</th>
+                    <th>当前数量</th>
+                    <th>上限数量</th>
+                    <th>可增容量</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {resourceUpperBoundCounts.map((item) => (
+                    <tr key={item.resource_pool_id}>
+                      <td>{item.label}</td>
+                      <td>{item.current_quantity}</td>
+                      <td>{item.upper_bound_quantity}</td>
+                      <td>{item.additional_capacity}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
+      {showResourceRecommendation && (
+        <section className="panel full">
+          <PanelTitle title="资源增量建议" subtitle="为满足强制里程碑目标建议配置的资源数量" />
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>资源</th>
+                  <th>当前数量</th>
                   <th>推荐数量</th>
+                  <th>新增数量</th>
                   <th>最大数量</th>
                 </tr>
               </thead>
@@ -1279,7 +1556,9 @@ function ResultsTab({
                 {recommendedResourceCounts.map((item) => (
                   <tr key={item.resource_pool_id}>
                     <td>{item.label}</td>
+                    <td>{item.current_quantity}</td>
                     <td>{item.recommended_quantity}</td>
+                    <td>{item.added_quantity}</td>
                     <td>{item.max_quantity}</td>
                   </tr>
                 ))}
@@ -2331,7 +2610,9 @@ function buildSummary(
   solveResult: ScenarioSolveResult | null,
 ) {
   const recommendedCounts = recommendedResourceCountsFromResult(solveResult?.result ?? null);
-  const resourceCount = recommendedCounts.length
+  const solveMode = solveResult?.result.objective_breakdown?.solve_mode ?? solveResult?.result.stats?.solve_mode;
+  const useRecommendedResourceCount = solveMode === "min_resources_fixed_duration" || solveMode === "resource_cost_optimization";
+  const resourceCount = useRecommendedResourceCount && recommendedCounts.length
     ? recommendedCounts.reduce((sum, item) => sum + item.recommended_quantity, 0)
     : generated?.schedule_input.resources.length
     ?? scenario?.resource_pools.reduce((sum, pool) => sum + (pool.enabled && resourcePoolMode(pool) === "LIMITED" ? resourcePoolQuantity(pool) : 0), 0)
@@ -2344,6 +2625,40 @@ function buildSummary(
   };
 }
 
+function scenarioResultOptions(solveResult: ScenarioSolveResult | null): ScenarioSolveResult[] {
+  if (!solveResult) return [];
+  const alternatives = (solveResult.alternative_results ?? []).map((item) => scenarioSolveResultFromAlternative(item));
+  return [solveResult, ...alternatives];
+}
+
+function scenarioSolveResultFromAlternative(item: ScenarioAlternativeResult): ScenarioSolveResult {
+  return {
+    scenario_id: item.scenario_id,
+    scenario_name: item.scenario_name,
+    generated: item.generated,
+    result: item.result,
+    milestone_results: item.milestone_results,
+    diagnostics: item.diagnostics,
+    metrics: item.metrics,
+    alternative_results: [],
+  };
+}
+
+function resultOptionSummary(option: ScenarioSolveResult): { resourceCount: number; addedResourceCount: number } {
+  const recommendedCounts = recommendedResourceCountsFromResult(option.result);
+  if (recommendedCounts.length) {
+    return {
+      resourceCount: recommendedCounts.reduce((sum, item) => sum + item.recommended_quantity, 0),
+      addedResourceCount: recommendedCounts.reduce((sum, item) => sum + item.added_quantity, 0),
+    };
+  }
+  const allocatedResourceIds = new Set(option.result.resource_allocations.map((item) => item.resource_id));
+  return {
+    resourceCount: allocatedResourceIds.size || option.generated.schedule_input.resources.length,
+    addedResourceCount: 0,
+  };
+}
+
 function importComponentCountSummary(summary: Record<string, unknown>): string {
   const lower = summary.lowerComponentCount;
   const upper = summary.upperComponentCount;
@@ -2353,12 +2668,33 @@ function importComponentCountSummary(summary: Record<string, unknown>): string {
   return `${displayValue(summary.componentCount)} 构件`;
 }
 
-function recommendedResourceCountsFromResult(result: ScheduleResult | null): Array<{
+type RecommendedResourceCount = {
   resource_pool_id: string;
   label: string;
+  current_quantity: number;
   recommended_quantity: number;
+  added_quantity: number;
   max_quantity: number;
-}> {
+};
+
+type ResourceUpperBoundCount = {
+  resource_pool_id: string;
+  label: string;
+  current_quantity: number;
+  upper_bound_quantity: number;
+  additional_capacity: number;
+  max_quantity: number;
+};
+
+type ResourceCapacityLowerBound = {
+  resource_pool_id: string;
+  label: string;
+  required_minimum: number;
+  max_quantity: number;
+  exceeds_upper_bound: boolean;
+};
+
+function recommendedResourceCountsFromResult(result: ScheduleResult | null): RecommendedResourceCount[] {
   const raw = result?.stats?.recommended_resource_counts ?? result?.objective_breakdown?.recommended_resource_counts;
   if (!Array.isArray(raw)) return [];
   return raw
@@ -2366,10 +2702,76 @@ function recommendedResourceCountsFromResult(result: ScheduleResult | null): Arr
     .map((item) => ({
       resource_pool_id: String(item.resource_pool_id ?? item.resource_type ?? item.label ?? ""),
       label: String(item.label ?? item.resource_type ?? "-"),
+      current_quantity: Number(item.current_quantity ?? 0),
       recommended_quantity: Number(item.recommended_quantity ?? 0),
+      added_quantity: Number(item.added_quantity ?? 0),
       max_quantity: Number(item.max_quantity ?? 0),
     }))
     .filter((item) => item.resource_pool_id);
+}
+
+function resourceRecommendationStatusFromResult(result: ScheduleResult | null): string {
+  const raw = result?.stats?.resource_recommendation_status ?? result?.objective_breakdown?.resource_recommendation_status;
+  return typeof raw === "string" ? raw : "";
+}
+
+function resourceRecommendationMessageFromResult(result: ScheduleResult | null): string {
+  const raw = result?.stats?.resource_recommendation_message ?? result?.objective_breakdown?.resource_recommendation_message;
+  return typeof raw === "string" ? raw : "";
+}
+
+function shouldShowResourceRecommendation(result: ScheduleResult | null, counts: RecommendedResourceCount[]): boolean {
+  if (!counts.length) return false;
+  const status = resourceRecommendationStatusFromResult(result);
+  if (status) return status === "recommended_resources_verified";
+  const solveMode = result?.objective_breakdown?.solve_mode ?? result?.stats?.solve_mode;
+  return solveMode === "min_resources_fixed_duration";
+}
+
+function shouldShowResourceRecommendationDiagnostic(status: string, message: string): boolean {
+  return Boolean(
+    message
+    && status
+    && !["recommended_resources_verified", "not_needed", "not_evaluated"].includes(status),
+  );
+}
+
+function resourceUpperBoundCountsFromResult(result: ScheduleResult | null): ResourceUpperBoundCount[] {
+  const raw = result?.stats?.resource_upper_bound_counts ?? result?.objective_breakdown?.resource_upper_bound_counts;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(isRecord)
+    .map((item) => {
+      const maxQuantity = Number(item.max_quantity ?? item.upper_bound_quantity ?? 0);
+      return {
+        resource_pool_id: String(item.resource_pool_id ?? item.resource_type ?? item.label ?? ""),
+        label: String(item.label ?? item.resource_type ?? "-"),
+        current_quantity: Number(item.current_quantity ?? 0),
+        upper_bound_quantity: Number(item.upper_bound_quantity ?? maxQuantity),
+        additional_capacity: Number(item.additional_capacity ?? Math.max(0, maxQuantity - Number(item.current_quantity ?? 0))),
+        max_quantity: maxQuantity,
+      };
+    })
+    .filter((item) => item.resource_pool_id);
+}
+
+function resourceCapacityLowerBoundsFromResult(result: ScheduleResult | null): ResourceCapacityLowerBound[] {
+  const raw = result?.stats?.resource_capacity_lower_bounds ?? result?.objective_breakdown?.resource_capacity_lower_bounds;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(isRecord)
+    .map((item) => ({
+      resource_pool_id: String(item.resource_pool_id ?? item.resource_type ?? item.label ?? ""),
+      label: String(item.label ?? item.resource_type ?? "-"),
+      required_minimum: Number(item.required_minimum ?? 0),
+      max_quantity: Number(item.max_quantity ?? 0),
+      exceeds_upper_bound: Boolean(item.exceeds_upper_bound),
+    }))
+    .filter((item) => item.resource_pool_id);
+}
+
+function withDefaultScheduleStrategy(config?: ScheduleStrategyConfig | null): ScheduleStrategyConfig {
+  return { ...defaultScheduleStrategyConfig, ...(config ?? {}) };
 }
 
 type SelectedResourceCost = {

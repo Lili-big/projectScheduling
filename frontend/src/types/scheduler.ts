@@ -18,6 +18,16 @@ export type WorkPointType = "road" | "bridge" | "tunnel";
 export type WorkSectionSide = "left" | "right" | "none";
 export type ResourceMode = "LIMITED" | "UNLIMITED";
 export type ResourceCostType = "none" | "monthly_rental" | "one_time_purchase";
+export type ScheduleStrategy =
+  | "shortest_duration"
+  | "min_resource"
+  | "resource_cost"
+  | "control_priority"
+  | "balanced_normal"
+  | "comprehensive";
+export type ControlLevel = "control" | "key" | "normal" | "rough";
+export type ResourceGuaranteeMode = "strict" | "priority" | "off";
+export type BalanceBucket = "week" | "month";
 export type TabKey = "process" | "logic" | "resources" | "milestones" | "tasks" | "results";
 export type GanttMode = "by_structure" | "by_process";
 export type TaskViewMode = "by_structure" | "by_process";
@@ -35,6 +45,17 @@ export type ComponentModel = {
   properties: Record<string, unknown>;
 };
 
+export type ScheduleStrategyConfig = {
+  strategy: ScheduleStrategy;
+  resource_guarantee: ResourceGuaranteeMode;
+  normal_balance_bucket: BalanceBucket;
+  normal_earliest_start_offset: number;
+  normal_latest_finish_offset?: number | null;
+  normal_max_early_finish_days: number;
+  max_parallel_normal_per_work_section: number;
+  enable_balance_objective: boolean;
+};
+
 export type UpperStructureModel = {
   id: string;
   name: string;
@@ -45,6 +66,7 @@ export type UpperStructureModel = {
   span_length_m: number;
   beam_count_per_span?: number | null;
   span_group_expression: string;
+  control_level?: ControlLevel | null;
   properties: Record<string, unknown>;
 };
 
@@ -55,6 +77,7 @@ export type StructureModel = {
   order: number;
   support_no?: string | null;
   support_index?: number | null;
+  control_level?: ControlLevel | null;
   components: ComponentModel[];
 };
 
@@ -167,6 +190,7 @@ export type MilestoneConstraint = {
   target_event: "start" | "finish";
   target_date: string;
   penalty_per_day: number;
+  related_structure_ids?: string[];
 };
 
 export type ScenarioInput = {
@@ -180,6 +204,7 @@ export type ScenarioInput = {
   resource_calendars: ResourceCalendar[];
   resource_pools: ResourcePool[];
   milestones: MilestoneConstraint[];
+  schedule_strategy?: ScheduleStrategyConfig;
   time_limit_seconds: number;
 };
 
@@ -193,6 +218,7 @@ export type Task = {
   structure_id: string;
   structure_name: string;
   structure_type: string;
+  control_level?: ControlLevel;
   component_type: ComponentType;
   process_name: string;
   productivity_rule_id: string;
@@ -264,6 +290,7 @@ export type ScheduleInput = {
   precedence_links: PrecedenceLink[];
   resources: Resource[];
   milestones: MilestoneConstraint[];
+  schedule_strategy?: ScheduleStrategyConfig;
   time_limit_seconds: number;
 };
 
@@ -289,6 +316,18 @@ export type ScheduleResult = {
 export type ScenarioSolveResult = {
   scenario_id: string;
   scenario_name: string;
+  generated: GeneratedScheduleInput;
+  result: ScheduleResult;
+  milestone_results: MilestoneResult[];
+  diagnostics: ValidationMessage[];
+  metrics: Record<string, unknown>;
+  alternative_results?: ScenarioAlternativeResult[];
+};
+
+export type ScenarioAlternativeResult = {
+  scenario_id: string;
+  scenario_name: string;
+  role: string;
   generated: GeneratedScheduleInput;
   result: ScheduleResult;
   milestone_results: MilestoneResult[];

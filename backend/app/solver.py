@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
+import os
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from typing import Any, get_args
 
@@ -22,8 +24,19 @@ from .models import (
 CONTINUITY_PRIMARY_WEIGHT = 1_000_000
 SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT = 1_000
 SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT = 1
+CONTROL_NODE_LATE_WEIGHT = 1_000_000_000
+CONTROL_RESOURCE_WAIT_WEIGHT = 1_000_000
+CONTROL_TASK_FINISH_WEIGHT = 10_000
+CONTROL_MAKESPAN_WEIGHT = 100
+NORMAL_BALANCE_WEIGHT = 10
 SCHEDULER_RANDOM_SEED = 0
-SCHEDULER_SEARCH_WORKERS = 1
+
+
+def _default_scheduler_search_workers() -> int:
+    return max(1, min(8, os.cpu_count() or 1))
+
+
+SCHEDULER_SEARCH_WORKERS = _default_scheduler_search_workers()
 
 COMPONENT_TYPE_LABELS: dict[str, str] = {
     "pile": "桩基",
@@ -83,12 +96,43 @@ def _precedence_violated(predecessor: ScheduledTask, successor: ScheduledTask, l
 
 def _configure_solver(solver: Any, time_limit_seconds: float) -> None:
     solver.parameters.max_time_in_seconds = time_limit_seconds
-    solver.parameters.num_search_workers = SCHEDULER_SEARCH_WORKERS
+    solver.parameters.num_search_workers = _scheduler_search_workers()
     solver.parameters.random_seed = SCHEDULER_RANDOM_SEED
     solver.parameters.randomize_search = False
 
 
-def solve_schedule(schedule_input: ScheduleInput) -> ScheduleResult:
+def _scheduler_search_workers() -> int:
+    raw = os.getenv("SCHEDULER_SEARCH_WORKERS")
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    return max(1, int(SCHEDULER_SEARCH_WORKERS))
+
+
+def _solve_task_parallelism(candidate_count: int) -> int:
+    if candidate_count <= 1:
+        return 1
+    raw = os.getenv("SCHEDULER_PARALLEL_SOLVES")
+    if raw:
+        try:
+            return max(1, min(candidate_count, int(raw)))
+        except ValueError:
+            pass
+    cpu_budget = max(1, os.cpu_count() or 1)
+    workers_per_solver = max(1, _scheduler_search_workers())
+    return max(1, min(candidate_count, cpu_budget // workers_per_solver))
+
+
+def _uses_control_priority_strategy(schedule_input: ScheduleInput) -> bool:
+    return schedule_input.schedule_strategy.strategy in {"control_priority", "balanced_normal", "comprehensive"}
+
+
+def solve_schedule(schedule_input: ScheduleInput, *, enforce_hard_milestones: bool = False) -> ScheduleResult:
+    if _uses_control_priority_strategy(schedule_input):
+        return solve_control_priority_schedule(schedule_input, enforce_hard_milestones=enforce_hard_milestones)
+
     enabled_resources = [resource for resource in schedule_input.resources if resource.enabled]
     resource_candidates = _resource_candidates_by_task(schedule_input.tasks, enabled_resources)
     validation = _validate_resource_coverage(schedule_input.tasks, resource_candidates)
@@ -189,7 +233,9 @@ def solve_schedule(schedule_input: ScheduleInput) -> ScheduleResult:
         target_offset = _target_offset(schedule_input.start_date, milestone)
         milestone_vars[milestone.id] = event_var
         milestone_target_offsets[milestone.id] = target_offset
-        if milestone.mode == "soft":
+        if milestone.mode == "hard" and enforce_hard_milestones:
+            model.Add(event_var <= target_offset)
+        elif milestone.mode == "soft":
             lateness_upper = max(horizon - target_offset, horizon) + 365
             lateness_var = model.NewIntVar(0, lateness_upper, f"late_{_safe(milestone.id)}")
             model.Add(lateness_var >= event_var - target_offset)
@@ -217,7 +263,7 @@ def solve_schedule(schedule_input: ScheduleInput) -> ScheduleResult:
         "conflicts": solver.NumConflicts(),
         "branches": solver.NumBranches(),
         "random_seed": SCHEDULER_RANDOM_SEED,
-        "search_workers": SCHEDULER_SEARCH_WORKERS,
+        "search_workers": _scheduler_search_workers(),
     }
 
     if status not in {"OPTIMAL", "FEASIBLE"}:
@@ -330,6 +376,711 @@ def solve_schedule(schedule_input: ScheduleInput) -> ScheduleResult:
     )
 
 
+def solve_control_priority_schedule(
+    schedule_input: ScheduleInput,
+    *,
+    enforce_hard_milestones: bool = False,
+    baseline_result: ScheduleResult | None = None,
+    max_makespan_days: int | None = None,
+) -> ScheduleResult:
+    if baseline_result is None:
+        baseline_input = schedule_input.model_copy(
+            update={
+                "schedule_strategy": schedule_input.schedule_strategy.model_copy(
+                    update={"strategy": "shortest_duration"}
+                )
+            }
+        )
+        baseline_result = solve_schedule(baseline_input)
+    if baseline_result.status not in {"OPTIMAL", "FEASIBLE"}:
+        baseline_result.objective_breakdown.setdefault("solve_mode", "control_priority_baseline_failed")
+        baseline_result.validation.append(
+            ValidationMessage(
+                level="warning",
+                message="控制性工程优先策略未能进入二次优化：基础排程未得到可行解。",
+            )
+        )
+        return baseline_result
+
+    enabled_resources = [resource for resource in schedule_input.resources if resource.enabled]
+    resource_candidates = _resource_candidates_by_task(schedule_input.tasks, enabled_resources)
+    validation = _validate_resource_coverage(schedule_input.tasks, resource_candidates)
+    if any(message.level == "error" for message in validation):
+        return ScheduleResult(
+            status="INFEASIBLE",
+            plan_start_date=schedule_input.start_date,
+            validation=validation,
+            stats={"reason": "missing_compatible_resource", "solve_mode": "control_priority"},
+        )
+
+    try:
+        from ortools.sat.python import cp_model
+    except ImportError:
+        return ScheduleResult(
+            status="MODEL_INVALID",
+            plan_start_date=schedule_input.start_date,
+            validation=[
+                ValidationMessage(
+                    level="error",
+                    message="未安装 OR-Tools，请先安装后端依赖后再执行求解。",
+                )
+            ],
+            stats={"reason": "ortools_missing", "solve_mode": "control_priority"},
+        )
+
+    model = cp_model.CpModel()
+    horizon = _build_horizon(schedule_input)
+    starts: dict[str, Any] = {}
+    ends: dict[str, Any] = {}
+    task_by_id = {task.id: task for task in schedule_input.tasks}
+    assignment_vars: dict[tuple[str, str], Any] = {}
+    resource_intervals: dict[str, list[Any]] = defaultdict(list)
+    milestone_vars: dict[str, Any] = {}
+    milestone_target_offsets: dict[str, int] = {}
+    soft_lateness_vars: dict[str, Any] = {}
+    config = schedule_input.schedule_strategy
+    control_chain_task_ids = _control_chain_task_ids(schedule_input)
+    normal_tasks = _normal_balance_tasks(schedule_input.tasks, control_chain_task_ids)
+
+    for task in schedule_input.tasks:
+        starts[task.id] = model.NewIntVar(0, horizon, f"start_{_safe(task.id)}")
+        ends[task.id] = model.NewIntVar(0, horizon, f"end_{_safe(task.id)}")
+        model.Add(ends[task.id] == starts[task.id] + task.duration_days)
+
+        choices = []
+        for resource in resource_candidates[task.id]:
+            assigned = model.NewBoolVar(f"assign_{_safe(task.id)}_{_safe(resource.id)}")
+            interval = model.NewOptionalIntervalVar(
+                starts[task.id],
+                task.duration_days,
+                ends[task.id],
+                assigned,
+                f"interval_{_safe(task.id)}_{_safe(resource.id)}",
+            )
+            choices.append(assigned)
+            assignment_vars[(task.id, resource.id)] = assigned
+            resource_intervals[resource.id].append(interval)
+        if choices:
+            model.AddExactlyOne(choices)
+
+    for link in schedule_input.precedence_links:
+        predecessor = task_by_id.get(link.predecessor_id)
+        successor = task_by_id.get(link.successor_id)
+        if not predecessor or not successor:
+            validation.append(
+                ValidationMessage(
+                    level="warning",
+                    subject_id=link.id,
+                    message=f"已跳过逻辑关系 {link.id}：前置或后续工作项不存在。",
+                )
+            )
+            continue
+        _add_precedence_constraint(model, starts, ends, link)
+
+    for intervals in resource_intervals.values():
+        model.AddNoOverlap(intervals)
+
+    _add_normal_time_window_constraints(model, starts, ends, normal_tasks, config, horizon)
+    _add_normal_workface_constraints(model, starts, ends, normal_tasks, config)
+    if config.resource_guarantee == "strict":
+        _add_strict_control_resource_constraints(model, starts, ends, schedule_input.tasks, control_chain_task_ids)
+
+    makespan = model.NewIntVar(0, horizon, "makespan")
+    model.AddMaxEquality(makespan, [ends[task.id] for task in schedule_input.tasks])
+    if max_makespan_days is not None:
+        model.Add(makespan <= max_makespan_days)
+
+    for milestone in schedule_input.milestones:
+        scoped_task_ids = _task_ids_for_milestone(milestone, schedule_input.tasks)
+        if milestone.related_structure_ids:
+            related_ids = {
+                task.id
+                for task in schedule_input.tasks
+                if task.structure_id in set(milestone.related_structure_ids)
+            }
+            scoped_task_ids = sorted(set(scoped_task_ids) | related_ids)
+        if not scoped_task_ids:
+            validation.append(
+                ValidationMessage(
+                    level="warning",
+                    subject_id=milestone.id,
+                    message=f"里程碑“{milestone.name}”没有匹配的工作项，已跳过。",
+                )
+            )
+            continue
+
+        event_var = model.NewIntVar(0, horizon, f"milestone_{_safe(milestone.id)}")
+        event_vars = [ends[task_id] if milestone.target_event == "finish" else starts[task_id] for task_id in scoped_task_ids]
+        if milestone.target_event == "finish":
+            model.AddMaxEquality(event_var, event_vars)
+        else:
+            model.AddMinEquality(event_var, event_vars)
+
+        target_offset = _target_offset(schedule_input.start_date, milestone)
+        milestone_vars[milestone.id] = event_var
+        milestone_target_offsets[milestone.id] = target_offset
+        if milestone.mode == "hard" and enforce_hard_milestones:
+            model.Add(event_var <= target_offset)
+        else:
+            lateness_upper = max(horizon - target_offset, horizon) + 365
+            lateness_var = model.NewIntVar(0, lateness_upper, f"late_{_safe(milestone.id)}")
+            model.Add(lateness_var >= event_var - target_offset)
+            soft_lateness_vars[milestone.id] = lateness_var
+
+    control_lateness_terms = [
+        late_var
+        for milestone_id, late_var in soft_lateness_vars.items()
+        if _is_control_milestone(_milestone_by_id(schedule_input.milestones, milestone_id))
+    ]
+    soft_penalty_terms = [
+        late_var * _milestone_by_id(schedule_input.milestones, milestone_id).penalty_per_day
+        for milestone_id, late_var in soft_lateness_vars.items()
+    ]
+    control_wait_terms = _build_control_wait_terms(
+        model,
+        starts,
+        ends,
+        schedule_input.precedence_links,
+        task_by_id,
+        control_chain_task_ids,
+        horizon,
+    )
+    normal_balance_terms = (
+        _build_normal_balance_terms(model, starts, schedule_input.tasks, baseline_result, config, horizon)
+        if config.enable_balance_objective
+        else []
+    )
+    continuity_terms = _build_continuity_soft_terms(model, schedule_input.tasks, resource_candidates, assignment_vars)
+    continuity_objective = sum(continuity_terms["split_terms"]) * SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT + sum(
+        continuity_terms["spatial_terms"]
+    ) * SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT
+    control_finish_terms = [ends[task_id] for task_id in control_chain_task_ids if task_id in ends]
+
+    model.Minimize(
+        sum(control_lateness_terms) * CONTROL_NODE_LATE_WEIGHT
+        + sum(control_wait_terms) * CONTROL_RESOURCE_WAIT_WEIGHT
+        + sum(control_finish_terms) * CONTROL_TASK_FINISH_WEIGHT
+        + (makespan + sum(soft_penalty_terms)) * CONTROL_MAKESPAN_WEIGHT
+        + sum(normal_balance_terms) * NORMAL_BALANCE_WEIGHT
+        + continuity_objective
+    )
+
+    solver = cp_model.CpSolver()
+    _configure_solver(solver, schedule_input.time_limit_seconds)
+    status_code = solver.Solve(model)
+    status = _status_name(status_code, cp_model)
+
+    stats = {
+        "horizon_days": horizon,
+        "wall_time_seconds": solver.WallTime(),
+        "conflicts": solver.NumConflicts(),
+        "branches": solver.NumBranches(),
+        "random_seed": SCHEDULER_RANDOM_SEED,
+        "search_workers": _scheduler_search_workers(),
+        "solve_mode": "control_priority",
+        "baseline_objective_days": baseline_result.objective_days,
+    }
+    if max_makespan_days is not None:
+        stats["max_makespan_days"] = max_makespan_days
+
+    if status not in {"OPTIMAL", "FEASIBLE"}:
+        return ScheduleResult(
+            status=status,
+            plan_start_date=schedule_input.start_date,
+            milestone_results=_not_evaluated_milestones(schedule_input.milestones),
+            validation=validation
+            + [
+                ValidationMessage(
+                    level="error",
+                    message="控制性工程优先策略在当前工艺、资源、窗口和工作面约束下未找到可行排程。",
+                )
+            ],
+            stats=stats,
+        )
+
+    resource_by_id = {resource.id: resource for resource in enabled_resources}
+    predecessors_by_successor: dict[str, list[str]] = defaultdict(list)
+    for link in schedule_input.precedence_links:
+        predecessors_by_successor[link.successor_id].append(link.predecessor_id)
+
+    scheduled_tasks: list[ScheduledTask] = []
+    allocations: list[ResourceAllocation] = []
+    for task in sorted(schedule_input.tasks, key=lambda item: (solver.Value(starts[item.id]), item.id)):
+        assigned_resource = _assigned_resource_for_task(task, resource_candidates, assignment_vars, solver)
+        start_offset = solver.Value(starts[task.id])
+        end_offset = solver.Value(ends[task.id])
+        start_day = _offset_date(schedule_input.start_date, start_offset)
+        finish_day = _finish_date(schedule_input.start_date, end_offset)
+        scheduled_task = ScheduledTask(
+            **task.model_dump(),
+            start_offset=start_offset,
+            end_offset=end_offset,
+            start_date=start_day,
+            finish_date=finish_day,
+            assigned_resource_id=assigned_resource.id if assigned_resource else None,
+            assigned_resource_name=assigned_resource.name if assigned_resource else None,
+            assigned_resource_type=assigned_resource.type if assigned_resource else None,
+            predecessor_ids=predecessors_by_successor.get(task.id, []),
+        )
+        scheduled_tasks.append(scheduled_task)
+        if assigned_resource:
+            allocations.append(
+                ResourceAllocation(
+                    resource_id=assigned_resource.id,
+                    resource_name=assigned_resource.name,
+                    resource_type=assigned_resource.type,
+                    task_id=task.id,
+                    task_name=task.name,
+                    start_offset=start_offset,
+                    end_offset=end_offset,
+                    start_date=start_day,
+                    finish_date=finish_day,
+                )
+            )
+
+    objective_days = solver.Value(makespan)
+    milestone_results = _build_milestone_results(
+        schedule_input=schedule_input,
+        milestone_vars=milestone_vars,
+        milestone_target_offsets=milestone_target_offsets,
+        soft_lateness_vars=soft_lateness_vars,
+        solver=solver,
+    )
+    validation.extend(_validate_solution(schedule_input, scheduled_tasks, allocations))
+    validation.extend(_validate_milestone_results(milestone_results))
+    continuity_metrics = _build_continuity_metrics(scheduled_tasks)
+    validation.extend(_continuity_validation_messages(continuity_metrics))
+    soft_milestone_penalty = sum(result.penalty for result in milestone_results if result.mode == "soft")
+    control_lateness_days = sum(
+        result.lateness_days for result in milestone_results if _is_control_milestone_result(result)
+    )
+    continuity_split_penalty = sum(solver.Value(term) for term in continuity_terms["split_terms"])
+    spatial_assignment_penalty = sum(
+        int(term["penalty"]) * solver.Value(term["assignment"]) for term in continuity_terms["spatial_term_details"]
+    )
+    normal_balance_metrics = _build_normal_balance_metrics(scheduled_tasks, config)
+    control_priority_analysis = _build_control_priority_analysis(
+        schedule_input=schedule_input,
+        baseline_result=baseline_result,
+        scheduled_tasks=scheduled_tasks,
+        allocations=allocations,
+        milestone_results=milestone_results,
+        control_chain_task_ids=control_chain_task_ids,
+    )
+    stats["continuity_metrics"] = continuity_metrics
+    stats["continuity_objective"] = {
+        "same_structure_craft_split_penalty": continuity_split_penalty,
+        "spatial_assignment_penalty": spatial_assignment_penalty,
+        "primary_weight": CONTINUITY_PRIMARY_WEIGHT,
+        "same_structure_craft_split_weight": SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT,
+        "spatial_resource_assignment_weight": SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT,
+    }
+    stats["normal_balance_metrics"] = normal_balance_metrics
+    stats["control_priority_analysis"] = control_priority_analysis
+    validation.append(
+        ValidationMessage(
+            level="info",
+            message=(
+                f"控制性工程优先策略已完成：控制链工作项 {len(control_chain_task_ids)} 个，"
+                f"普通工程均衡评分 {normal_balance_metrics['balance_score']}。"
+            ),
+        )
+    )
+
+    return ScheduleResult(
+        status=status,
+        objective_days=objective_days,
+        plan_start_date=schedule_input.start_date,
+        plan_finish_date=_finish_date(schedule_input.start_date, objective_days),
+        tasks=scheduled_tasks,
+        resource_allocations=sorted(
+            allocations,
+            key=lambda item: (item.resource_name, item.start_offset, item.task_name),
+        ),
+        milestone_results=milestone_results,
+        validation=validation,
+        stats=stats,
+        objective_breakdown={
+            "solve_mode": "control_priority",
+            "strategy": config.strategy,
+            "resource_guarantee": config.resource_guarantee,
+            "makespan_days": objective_days,
+            "baseline_makespan_days": baseline_result.objective_days,
+            "control_lateness_days": control_lateness_days,
+            "control_resource_wait_penalty": sum(solver.Value(term) for term in control_wait_terms),
+            "normal_balance_penalty": sum(solver.Value(term) for term in normal_balance_terms),
+            "soft_milestone_penalty": soft_milestone_penalty,
+            "same_structure_craft_split_penalty": continuity_split_penalty,
+            "spatial_assignment_penalty": spatial_assignment_penalty,
+            "continuity_score": continuity_metrics["continuity_score"],
+            "normal_balance_score": normal_balance_metrics["balance_score"],
+            "weighted_objective": objective_days + soft_milestone_penalty,
+            "control_priority_analysis": control_priority_analysis,
+            "normal_balance_metrics": normal_balance_metrics,
+        },
+    )
+
+
+def _control_chain_task_ids(schedule_input: ScheduleInput) -> set[str]:
+    task_by_id = {task.id: task for task in schedule_input.tasks}
+    target_ids = _control_target_task_ids(schedule_input)
+    predecessors_by_successor: dict[str, list[str]] = defaultdict(list)
+    for link in schedule_input.precedence_links:
+        if link.predecessor_id in task_by_id and link.successor_id in task_by_id:
+            predecessors_by_successor[link.successor_id].append(link.predecessor_id)
+
+    chain = set(target_ids)
+    stack = list(target_ids)
+    while stack:
+        task_id = stack.pop()
+        for predecessor_id in predecessors_by_successor.get(task_id, []):
+            if predecessor_id in chain:
+                continue
+            chain.add(predecessor_id)
+            stack.append(predecessor_id)
+    return chain
+
+
+def _control_target_task_ids(schedule_input: ScheduleInput) -> set[str]:
+    task_by_id = {task.id: task for task in schedule_input.tasks}
+    broad_scope_types = {"project", "bridge", "work_section"}
+    target_ids = {
+        task.id
+        for task in schedule_input.tasks
+        if task.control_level in {"control", "key"}
+    }
+    for milestone in schedule_input.milestones:
+        if milestone.related_structure_ids:
+            related_structure_ids = set(milestone.related_structure_ids)
+            target_ids.update(
+                task.id for task in schedule_input.tasks if task.structure_id in related_structure_ids
+            )
+            continue
+        if not _is_control_milestone(milestone):
+            continue
+        scoped_ids = set(_task_ids_for_milestone(milestone, schedule_input.tasks))
+        if milestone.scope_type in broad_scope_types:
+            scoped_ids = {
+                task_id
+                for task_id in scoped_ids
+                if task_by_id[task_id].control_level in {"control", "key"}
+            }
+        target_ids.update(scoped_ids)
+    return target_ids
+
+
+def _normal_balance_tasks(tasks: list[Task], control_chain_task_ids: set[str]) -> list[Task]:
+    return [
+        task
+        for task in tasks
+        if task.id not in control_chain_task_ids and task.control_level == "normal"
+    ]
+
+
+def _add_normal_time_window_constraints(
+    model: Any,
+    starts: dict[str, Any],
+    ends: dict[str, Any],
+    normal_tasks: list[Task],
+    config: Any,
+    horizon: int,
+) -> None:
+    earliest = config.normal_earliest_start_offset
+    latest = config.normal_latest_finish_offset
+    for task in normal_tasks:
+        if earliest > 0:
+            model.Add(starts[task.id] >= earliest)
+        if latest is not None:
+            bounded_latest = min(horizon, latest)
+            model.Add(ends[task.id] <= bounded_latest)
+            if config.normal_max_early_finish_days > 0:
+                model.Add(ends[task.id] >= max(0, bounded_latest - config.normal_max_early_finish_days))
+
+
+def _add_normal_workface_constraints(
+    model: Any,
+    starts: dict[str, Any],
+    ends: dict[str, Any],
+    normal_tasks: list[Task],
+    config: Any,
+) -> None:
+    if config.max_parallel_normal_per_work_section <= 0:
+        return
+    by_work_section: dict[tuple[str | None, str | None], list[Task]] = defaultdict(list)
+    for task in normal_tasks:
+        by_work_section[(task.bridge_id, task.work_section_id)].append(task)
+    for group_index, group_tasks in enumerate(by_work_section.values()):
+        if len(group_tasks) <= config.max_parallel_normal_per_work_section:
+            continue
+        intervals = [
+            model.NewIntervalVar(
+                starts[task.id],
+                task.duration_days,
+                ends[task.id],
+                f"normal_workface_{group_index}_{_safe(task.id)}",
+            )
+            for task in group_tasks
+        ]
+        model.AddCumulative(intervals, [1] * len(intervals), config.max_parallel_normal_per_work_section)
+
+
+def _add_strict_control_resource_constraints(
+    model: Any,
+    starts: dict[str, Any],
+    ends: dict[str, Any],
+    tasks: list[Task],
+    control_chain_task_ids: set[str],
+) -> None:
+    control_tasks = [task for task in tasks if task.id in control_chain_task_ids]
+    normal_tasks = [task for task in tasks if task.id not in control_chain_task_ids and task.control_level == "normal"]
+    for control_task in control_tasks:
+        control_types = set(control_task.compatible_resource_types)
+        if not control_types:
+            continue
+        for normal_task in normal_tasks:
+            if not control_types.intersection(normal_task.compatible_resource_types):
+                continue
+            model.Add(starts[normal_task.id] >= ends[control_task.id])
+
+
+def _build_control_wait_terms(
+    model: Any,
+    starts: dict[str, Any],
+    ends: dict[str, Any],
+    links: list[PrecedenceLink],
+    task_by_id: dict[str, Task],
+    control_chain_task_ids: set[str],
+    horizon: int,
+) -> list[Any]:
+    terms = []
+    for index, link in enumerate(links):
+        predecessor = task_by_id.get(link.predecessor_id)
+        successor = task_by_id.get(link.successor_id)
+        if predecessor is None or successor is None or successor.id not in control_chain_task_ids:
+            continue
+        wait = model.NewIntVar(0, horizon, f"control_wait_{index}")
+        if link.relationship == "SS":
+            model.Add(wait >= starts[successor.id] - starts[predecessor.id] - link.lag_days)
+        elif link.relationship == "FF":
+            model.Add(wait >= ends[successor.id] - ends[predecessor.id] - link.lag_days)
+        elif link.relationship == "SF":
+            model.Add(wait >= ends[successor.id] - starts[predecessor.id] - link.lag_days)
+        else:
+            model.Add(wait >= starts[successor.id] - ends[predecessor.id] - link.lag_days)
+        terms.append(wait)
+    return terms
+
+
+def _build_normal_balance_terms(
+    model: Any,
+    starts: dict[str, Any],
+    tasks: list[Task],
+    baseline_result: ScheduleResult,
+    config: Any,
+    horizon: int,
+) -> list[Any]:
+    normal_tasks = sorted(
+        [task for task in tasks if task.control_level == "normal"],
+        key=_task_spatial_sort_key,
+    )
+    if len(normal_tasks) <= 1:
+        return []
+    baseline_by_id = {task.id: task for task in baseline_result.tasks}
+    earliest = config.normal_earliest_start_offset
+    baseline_latest = max((baseline_by_id[task.id].end_offset for task in normal_tasks if task.id in baseline_by_id), default=0)
+    latest = config.normal_latest_finish_offset or max(
+        baseline_latest,
+        earliest + max(1, len(normal_tasks) - 1) * max(1, math.ceil(sum(task.duration_days for task in normal_tasks) / len(normal_tasks))),
+    )
+    latest = min(horizon, max(latest, earliest + 1))
+    span = max(1, latest - earliest)
+    terms = []
+    for rank, task in enumerate(normal_tasks):
+        target = earliest + round(rank * span / max(1, len(normal_tasks) - 1))
+        deviation = model.NewIntVar(0, horizon, f"normal_balance_dev_{rank}_{_safe(task.id)}")
+        model.AddAbsEquality(deviation, starts[task.id] - target)
+        terms.append(deviation)
+    return terms
+
+
+def _is_control_milestone(milestone: MilestoneConstraint) -> bool:
+    return milestone.level == "control" or milestone.mode == "hard" or bool(milestone.related_structure_ids)
+
+
+def _is_control_milestone_result(milestone: MilestoneResult) -> bool:
+    return milestone.level == "control" or milestone.mode == "hard"
+
+
+def _build_normal_balance_metrics(scheduled_tasks: list[ScheduledTask], config: Any) -> dict[str, Any]:
+    normal_tasks = [task for task in scheduled_tasks if task.control_level == "normal"]
+    bucket_size = 7 if config.normal_balance_bucket == "week" else 30
+    if not normal_tasks:
+        return {
+            "bucket": config.normal_balance_bucket,
+            "bucket_size_days": bucket_size,
+            "normal_task_count": 0,
+            "bucket_loads": [],
+            "peak_task_count": 0,
+            "min_task_count": 0,
+            "balance_score": 100,
+        }
+    min_bucket = min(task.start_offset // bucket_size for task in normal_tasks)
+    max_bucket = max(task.start_offset // bucket_size for task in normal_tasks)
+    bucket_loads = []
+    task_counts = []
+    for bucket in range(min_bucket, max_bucket + 1):
+        bucket_tasks = [task for task in normal_tasks if task.start_offset // bucket_size == bucket]
+        count = len(bucket_tasks)
+        task_counts.append(count)
+        bucket_loads.append(
+            {
+                "bucket_index": bucket,
+                "start_offset": bucket * bucket_size,
+                "finish_offset": (bucket + 1) * bucket_size,
+                "task_count": count,
+                "duration_days": sum(task.duration_days for task in bucket_tasks),
+                "resource_types": sorted({task.assigned_resource_type or "" for task in bucket_tasks if task.assigned_resource_type}),
+            }
+        )
+    peak = max(task_counts, default=0)
+    low = min(task_counts, default=0)
+    score = max(0, 100 - (peak - low) * 10)
+    return {
+        "bucket": config.normal_balance_bucket,
+        "bucket_size_days": bucket_size,
+        "normal_task_count": len(normal_tasks),
+        "bucket_loads": bucket_loads,
+        "peak_task_count": peak,
+        "min_task_count": low,
+        "balance_score": score,
+    }
+
+
+def _build_control_priority_analysis(
+    *,
+    schedule_input: ScheduleInput,
+    baseline_result: ScheduleResult,
+    scheduled_tasks: list[ScheduledTask],
+    allocations: list[ResourceAllocation],
+    milestone_results: list[MilestoneResult],
+    control_chain_task_ids: set[str],
+) -> dict[str, Any]:
+    baseline_by_id = {task.id: task for task in baseline_result.tasks}
+    scheduled_by_id = {task.id: task for task in scheduled_tasks}
+    level_counts: dict[str, int] = defaultdict(int)
+    for task in scheduled_tasks:
+        level_counts[task.control_level] += 1
+    control_allocations = [
+        allocation
+        for allocation in allocations
+        if allocation.task_id in control_chain_task_ids
+    ]
+    resource_stats: dict[str, dict[str, Any]] = {}
+    for allocation in control_allocations:
+        item = resource_stats.setdefault(
+            allocation.resource_type,
+            {"resource_type": allocation.resource_type, "task_count": 0, "duration_days": 0, "resource_names": set()},
+        )
+        item["task_count"] += 1
+        item["duration_days"] += allocation.end_offset - allocation.start_offset
+        item["resource_names"].add(allocation.resource_name)
+    bottlenecks = [
+        {
+            **item,
+            "resource_names": sorted(item["resource_names"]),
+        }
+        for item in resource_stats.values()
+    ]
+    bottlenecks.sort(key=lambda item: (-item["duration_days"], item["resource_type"]))
+
+    explanations = []
+    for task in scheduled_tasks:
+        baseline_task = baseline_by_id.get(task.id)
+        if not baseline_task:
+            continue
+        delta = task.start_offset - baseline_task.start_offset
+        if delta >= 1 and task.control_level == "normal":
+            explanations.append(
+                {
+                    "task_id": task.id,
+                    "task_name": task.name,
+                    "change_days": delta,
+                    "direction": "delayed",
+                    "reason": "普通工程让位于控制性工程资源保障，并按均衡节奏推进。",
+                }
+            )
+        elif delta <= -1 and task.id in control_chain_task_ids:
+            explanations.append(
+                {
+                    "task_id": task.id,
+                    "task_name": task.name,
+                    "change_days": abs(delta),
+                    "direction": "advanced",
+                    "reason": "该工作项属于控制性工程链，策略优先压缩其资源等待和节点风险。",
+                }
+            )
+        if len(explanations) >= 30:
+            break
+
+    milestone_summaries = []
+    for result in milestone_results:
+        slack_days = None
+        if result.actual_offset is not None:
+            slack_days = _target_offset(schedule_input.start_date, result) - result.actual_offset
+        milestone_summaries.append(
+            {
+                "id": result.id,
+                "name": result.name,
+                "target_date": result.target_date,
+                "actual_date": result.actual_date,
+                "slack_days": slack_days,
+                "lateness_days": result.lateness_days,
+                "status": result.status,
+                "is_control": _is_control_milestone_result(result),
+            }
+        )
+
+    late_control = [item for item in milestone_summaries if item["is_control"] and item["lateness_days"] > 0]
+    resource_increment_suggestions = [
+        {
+            "resource_type": item["resource_type"],
+            "suggested_added_quantity": 1,
+            "reason": "控制性节点仍有延期风险，建议优先测算该瓶颈资源增量。",
+        }
+        for item in bottlenecks[:3]
+    ] if late_control else []
+
+    return {
+        "control_task_count": len(control_chain_task_ids),
+        "control_level_counts": dict(level_counts),
+        "milestones": milestone_summaries,
+        "bottleneck_resources": bottlenecks[:10],
+        "resource_increment_suggestions": resource_increment_suggestions,
+        "adjustment_explanations": explanations,
+        "baseline_objective_days": baseline_result.objective_days,
+        "baseline_finish_date": baseline_result.plan_finish_date,
+        "strategy_task_finish_delta_days": (
+            max((task.end_offset for task in scheduled_tasks), default=0)
+            - (baseline_result.objective_days or 0)
+        ),
+        "control_task_ids": sorted(control_chain_task_ids),
+        "scheduled_control_tasks": [
+            {
+                "task_id": task.id,
+                "task_name": task.name,
+                "control_level": task.control_level,
+                "start_date": task.start_date,
+                "finish_date": task.finish_date,
+                "resource_name": task.assigned_resource_name,
+            }
+            for task in sorted(
+                (scheduled_by_id[task_id] for task_id in control_chain_task_ids if task_id in scheduled_by_id),
+                key=lambda item: (item.start_offset, item.id),
+            )[:50]
+        ],
+    }
+
+
 def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_days: int | None = None) -> ScheduleResult:
     enabled_resources = [resource for resource in schedule_input.resources if resource.enabled]
     resource_candidates = _resource_candidates_by_task(schedule_input.tasks, enabled_resources)
@@ -398,7 +1149,7 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
             )
         )
 
-    capacity_optimization = _solve_capacity_model(
+    global_capacity_optimization = _solve_capacity_model(
         schedule_input,
         cp_model=cp_model,
         groups=groups,
@@ -407,6 +1158,21 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
         enforce_fixed_duration=True,
         minimize_resource_count=True,
     )
+    capacity_optimization = global_capacity_optimization
+    if global_capacity_optimization["status"] == "UNKNOWN":
+        validation.append(
+            ValidationMessage(
+                level="warning",
+                message="全局最少资源优化在限定时间内未完成，已改用逐资源池二分搜索继续推算。",
+            )
+        )
+        capacity_optimization = _solve_min_resource_counts_by_group_fallback(
+            schedule_input,
+            cp_model=cp_model,
+            groups=groups,
+            fixed_duration_check=fixed_duration_check,
+            fallback_target_days=target_days if hard_match_count == 0 else None,
+        )
     if capacity_optimization["status"] not in {"OPTIMAL", "FEASIBLE"}:
         return ScheduleResult(
             status=capacity_optimization["status"],
@@ -424,6 +1190,9 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
                 "reason": "resource_count_optimization_failed",
                 "solve_mode": "min_resources_fixed_duration",
                 "target_days": target_days,
+                "global_capacity_model_status": global_capacity_optimization["status"],
+                "global_capacity_model_stats": global_capacity_optimization["stats"],
+                "workface_parallelism_diagnostics": _workface_parallelism_diagnostics(schedule_input),
             },
         )
 
@@ -433,26 +1202,344 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
         for group in groups
     ]
 
-    result = _capacity_model_result(schedule_input, capacity_optimization, fixed_counts)
-    result.validation = validation + result.validation
     recommended = _recommended_resource_counts(groups, fixed_counts)
-    result.stats.update(
-        {
-            "solve_mode": "min_resources_fixed_duration",
-            "target_days": target_days,
-            "recommended_resource_counts": recommended,
-            "resource_optimization_phases": phase_stats,
-            "schedule_source": "capacity_model",
-        }
+    capacity_result = _capacity_model_result(schedule_input, capacity_optimization, fixed_counts)
+    capacity_verified = _schedule_result_verified(
+        capacity_result,
+        target_days=target_days,
+        hard_match_count=hard_match_count,
     )
-    result.objective_breakdown.update(
-        {
-            "solve_mode": "min_resources_fixed_duration",
-            "target_days": target_days,
-            "recommended_resource_counts": recommended,
-        }
+    reoptimization_attempts = _run_min_resource_reoptimizations(
+        schedule_input,
+        fixed_counts,
+        target_days=target_days,
+        hard_match_count=hard_match_count,
     )
+    selected_attempt = _select_verified_reoptimization(
+        reoptimization_attempts,
+        target_days=target_days,
+        hard_match_count=hard_match_count,
+    )
+
+    if selected_attempt is not None:
+        result = selected_attempt["result"].model_copy(deep=True)
+        selected_source = selected_attempt["source"]
+        result.validation = validation + capacity_optimization["validation"] + result.validation
+    elif capacity_verified:
+        result = capacity_result.model_copy(deep=True)
+        selected_source = "capacity_model_verified_schedule"
+        result.validation = validation + result.validation
+        result.validation.append(
+            ValidationMessage(
+                level="warning",
+                message=(
+                    "Minimum resource counts were verified by the capacity model. "
+                    "Control-priority balanced reoptimization did not return a verified schedule within the solve limit, "
+                    "so the verified capacity schedule is kept."
+                ),
+            )
+        )
+    else:
+        result = capacity_result.model_copy(deep=True, update={"status": "INFEASIBLE"})
+        selected_source = "capacity_model_unverified"
+        result.validation = validation + result.validation
+        result.validation.append(
+            ValidationMessage(
+                level="error",
+                message=(
+                    "Minimum resource counts were found, but neither the capacity-model schedule "
+                    "nor control-priority reoptimization produced a verified executable schedule."
+                ),
+            )
+        )
+
+    metadata = {
+        "solve_mode": "min_resources_fixed_duration",
+        "target_days": target_days,
+        "recommended_resource_counts": recommended,
+        "resource_optimization_phases": phase_stats,
+        "schedule_source": selected_source,
+        "recommended_schedule_source": selected_source,
+        "capacity_model_status": capacity_optimization["status"],
+        "global_capacity_model_status": global_capacity_optimization["status"],
+        "capacity_model_group_counts": fixed_counts,
+        "capacity_model_stats": capacity_optimization["stats"],
+        "capacity_verification_status": "verified" if capacity_verified else "failed",
+        "balanced_reoptimization_status": _reoptimization_status(
+            reoptimization_attempts,
+            "control_priority_balanced_reoptimization",
+        ),
+        "unbalanced_reoptimization_status": _reoptimization_status(
+            reoptimization_attempts,
+            "control_priority_reoptimization_no_balance",
+        ),
+        "reoptimization_attempts": _reoptimization_attempt_summaries(
+            reoptimization_attempts,
+            target_days=target_days,
+            hard_match_count=hard_match_count,
+        ),
+        "parallel_reoptimization_used": _reoptimization_parallelism(reoptimization_attempts) > 1,
+        "resource_count_optimality": "optimal" if capacity_optimization["status"] == "OPTIMAL" else "feasible",
+    }
+
+    result.stats.update(metadata)
+    result.objective_breakdown.update(metadata)
     return result
+
+
+def _run_min_resource_reoptimizations(
+    schedule_input: ScheduleInput,
+    fixed_counts: dict[str, int],
+    *,
+    target_days: int | None,
+    hard_match_count: int,
+) -> list[dict[str, Any]]:
+    candidates = _min_resource_reoptimization_candidates(schedule_input, fixed_counts)
+    parallelism = _solve_task_parallelism(len(candidates))
+
+    def run(candidate: dict[str, Any]) -> dict[str, Any]:
+        result = solve_control_priority_schedule(
+            candidate["schedule_input"],
+            enforce_hard_milestones=True,
+            max_makespan_days=target_days if hard_match_count == 0 else None,
+        )
+        return {
+            "source": candidate["source"],
+            "result": result,
+            "parallelism": parallelism,
+        }
+
+    if parallelism <= 1:
+        return [run(candidate) for candidate in candidates]
+
+    with ThreadPoolExecutor(max_workers=parallelism) as executor:
+        futures = [executor.submit(run, candidate) for candidate in candidates]
+        results = [future.result() for future in futures]
+    return sorted(results, key=lambda item: _reoptimization_priority(item["source"]))
+
+
+def _min_resource_reoptimization_candidates(
+    schedule_input: ScheduleInput,
+    fixed_counts: dict[str, int],
+) -> list[dict[str, Any]]:
+    resource_guarantee = schedule_input.schedule_strategy.resource_guarantee
+    if resource_guarantee == "off":
+        resource_guarantee = "priority"
+    limited_resources = _apply_resource_limits(schedule_input.resources, fixed_counts)
+    base_strategy = schedule_input.schedule_strategy.model_copy(
+        update={
+            "strategy": "comprehensive",
+            "resource_guarantee": resource_guarantee,
+        }
+    )
+    candidates = [
+        {
+            "source": "control_priority_balanced_reoptimization",
+            "schedule_input": schedule_input.model_copy(
+                update={
+                    "resources": limited_resources,
+                    "schedule_strategy": base_strategy,
+                }
+            ),
+        }
+    ]
+    if base_strategy.enable_balance_objective:
+        candidates.append(
+            {
+                "source": "control_priority_reoptimization_no_balance",
+                "schedule_input": schedule_input.model_copy(
+                    update={
+                        "resources": limited_resources,
+                        "schedule_strategy": base_strategy.model_copy(update={"enable_balance_objective": False}),
+                    }
+                ),
+            }
+        )
+    return candidates
+
+
+def _select_verified_reoptimization(
+    attempts: list[dict[str, Any]],
+    *,
+    target_days: int | None,
+    hard_match_count: int,
+) -> dict[str, Any] | None:
+    for attempt in sorted(attempts, key=lambda item: _reoptimization_priority(item["source"])):
+        if _schedule_result_verified(attempt["result"], target_days=target_days, hard_match_count=hard_match_count):
+            return attempt
+    return None
+
+
+def _schedule_result_verified(
+    result: ScheduleResult,
+    *,
+    target_days: int | None,
+    hard_match_count: int,
+) -> bool:
+    if result.status not in {"OPTIMAL", "FEASIBLE"}:
+        return False
+    if any(milestone.mode == "hard" and milestone.lateness_days > 0 for milestone in result.milestone_results):
+        return False
+    if hard_match_count == 0 and target_days is not None and (result.objective_days is None or result.objective_days > target_days):
+        return False
+    return not any(message.level == "error" for message in result.validation)
+
+
+def _reoptimization_priority(source: str) -> int:
+    priorities = {
+        "control_priority_balanced_reoptimization": 0,
+        "control_priority_reoptimization_no_balance": 1,
+    }
+    return priorities.get(source, 99)
+
+
+def _reoptimization_status(attempts: list[dict[str, Any]], source: str) -> str:
+    for attempt in attempts:
+        if attempt["source"] == source:
+            return attempt["result"].status
+    return "not_attempted"
+
+
+def _reoptimization_parallelism(attempts: list[dict[str, Any]]) -> int:
+    return max((int(attempt.get("parallelism") or 1) for attempt in attempts), default=1)
+
+
+def _reoptimization_attempt_summaries(
+    attempts: list[dict[str, Any]],
+    *,
+    target_days: int | None,
+    hard_match_count: int,
+) -> list[dict[str, Any]]:
+    summaries = []
+    for attempt in attempts:
+        result = attempt["result"]
+        summaries.append(
+            {
+                "source": attempt["source"],
+                "status": result.status,
+                "verified": _schedule_result_verified(result, target_days=target_days, hard_match_count=hard_match_count),
+                "objective_days": result.objective_days,
+                "wall_time_seconds": result.stats.get("wall_time_seconds"),
+                "conflicts": result.stats.get("conflicts"),
+                "branches": result.stats.get("branches"),
+                "search_workers": result.stats.get("search_workers"),
+            }
+        )
+    return summaries
+
+
+def _solve_min_resource_counts_by_group_fallback(
+    schedule_input: ScheduleInput,
+    *,
+    cp_model: Any,
+    groups: list[dict[str, Any]],
+    fixed_duration_check: dict[str, Any],
+    fallback_target_days: int | None,
+) -> dict[str, Any]:
+    max_counts = {group["key"]: int(group["max_quantity"]) for group in groups}
+    attempts: list[dict[str, Any]] = []
+    total_wall_time = 0.0
+    total_conflicts = 0
+    total_branches = 0
+
+    def remember(label: str, solved: dict[str, Any], counts: dict[str, int]) -> None:
+        nonlocal total_wall_time, total_conflicts, total_branches
+        stats = solved.get("stats", {})
+        total_wall_time += float(stats.get("wall_time_seconds", 0.0) or 0.0)
+        total_conflicts += int(stats.get("conflicts", 0) or 0)
+        total_branches += int(stats.get("branches", 0) or 0)
+        attempts.append(
+            {
+                "phase": label,
+                "status": solved.get("status"),
+                "counts": dict(counts),
+                "wall_time_seconds": stats.get("wall_time_seconds"),
+                "conflicts": stats.get("conflicts"),
+                "branches": stats.get("branches"),
+            }
+        )
+
+    if fixed_duration_check["status"] in {"OPTIMAL", "FEASIBLE"}:
+        best_counts = max_counts.copy()
+        best_solution = fixed_duration_check
+        remember("max_resources_precheck", fixed_duration_check, best_counts)
+    else:
+        max_check = _solve_capacity_model(
+            schedule_input,
+            cp_model=cp_model,
+            groups=groups,
+            counts=max_counts,
+            fallback_target_days=fallback_target_days,
+            enforce_fixed_duration=True,
+        )
+        remember("max_resources_retry", max_check, max_counts)
+        if max_check["status"] not in {"OPTIMAL", "FEASIBLE"}:
+            return {
+                **max_check,
+                "validation": max_check["validation"]
+                + [
+                    ValidationMessage(
+                        level="error",
+                        message="最大资源组合在回退搜索中仍未得到可验证排程，无法继续压缩资源数量。",
+                    )
+                ],
+                "stats": {
+                    **max_check["stats"],
+                    "fallback_search_used": True,
+                    "fallback_search_status": "max_resources_not_verified",
+                    "fallback_search_attempts": attempts,
+                    "wall_time_seconds": total_wall_time,
+                    "conflicts": total_conflicts,
+                    "branches": total_branches,
+                },
+            }
+        best_counts = max_counts.copy()
+        best_solution = max_check
+
+    for group in groups:
+        key = group["key"]
+        low = 0
+        high = int(best_counts.get(key, group["max_quantity"]))
+        while low < high:
+            mid = (low + high) // 2
+            trial_counts = {**best_counts, key: mid}
+            trial = _solve_capacity_model(
+                schedule_input,
+                cp_model=cp_model,
+                groups=groups,
+                counts=trial_counts,
+                fallback_target_days=fallback_target_days,
+                enforce_fixed_duration=True,
+            )
+            remember(f"binary_{key}_{mid}", trial, trial_counts)
+            if trial["status"] in {"OPTIMAL", "FEASIBLE"}:
+                best_counts = trial_counts
+                best_solution = trial
+                high = mid
+            else:
+                low = mid + 1
+
+    return {
+        **best_solution,
+        "status": best_solution["status"],
+        "group_counts": best_counts,
+        "validation": best_solution["validation"]
+        + [
+            ValidationMessage(
+                level="warning",
+                message="已通过逐资源池二分搜索得到可验证的最少资源候选组合。",
+            )
+        ],
+        "stats": {
+            **best_solution["stats"],
+            "fallback_search_used": True,
+            "fallback_search_status": "verified",
+            "fallback_search_attempts": attempts,
+            "wall_time_seconds": total_wall_time,
+            "conflicts": total_conflicts,
+            "branches": total_branches,
+        },
+    }
 
 
 def solve_resource_cost_schedule(
@@ -801,6 +1888,13 @@ def _solve_resource_model(
     hard_match_count = 0
     for milestone in schedule_input.milestones:
         scoped_task_ids = _task_ids_for_milestone(milestone, schedule_input.tasks)
+        if milestone.related_structure_ids:
+            related_ids = {
+                task.id
+                for task in schedule_input.tasks
+                if task.structure_id in set(milestone.related_structure_ids)
+            }
+            scoped_task_ids = sorted(set(scoped_task_ids) | related_ids)
         if not scoped_task_ids:
             validation.append(
                 ValidationMessage(level="warning", subject_id=milestone.id, message=f"里程碑“{milestone.name}”没有匹配的工作项，已跳过。")
@@ -875,7 +1969,7 @@ def _solve_resource_model(
             "conflicts": solver.NumConflicts(),
             "branches": solver.NumBranches(),
             "random_seed": SCHEDULER_RANDOM_SEED,
-            "search_workers": SCHEDULER_SEARCH_WORKERS,
+            "search_workers": _scheduler_search_workers(),
         },
     }
 
@@ -898,7 +1992,9 @@ def _solve_capacity_model(
     starts: dict[str, Any] = {}
     ends: dict[str, Any] = {}
     task_by_id = {task.id: task for task in schedule_input.tasks}
-    group_by_type = {group["resource_type"]: group for group in groups}
+    groups_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for group in groups:
+        groups_by_type[group["resource_type"]].append(group)
     intervals_by_group: dict[str, list[Any]] = defaultdict(list)
     demands_by_group: dict[str, list[int]] = defaultdict(list)
     assignment_vars: dict[tuple[str, str], Any] = {}
@@ -915,23 +2011,25 @@ def _solve_capacity_model(
         ends[task.id] = model.NewIntVar(0, horizon, f"end_{_safe(task.id)}")
         model.Add(ends[task.id] == starts[task.id] + task.duration_days)
         choices = []
+        seen_group_keys: set[str] = set()
         for resource_type in task.compatible_resource_types:
-            group = group_by_type.get(resource_type)
-            if not group:
-                continue
-            assigned = model.NewBoolVar(f"capacity_assign_{_safe(task.id)}_{_safe(group['key'])}")
-            interval = model.NewOptionalIntervalVar(
-                starts[task.id],
-                task.duration_days,
-                ends[task.id],
-                assigned,
-                f"capacity_interval_{_safe(task.id)}_{_safe(group['key'])}",
-            )
-            choices.append(assigned)
-            assignment_vars[(task.id, group["key"])] = assigned
-            assignments_by_group[group["key"]].append((task.id, assigned))
-            intervals_by_group[group["key"]].append(interval)
-            demands_by_group[group["key"]].append(1)
+            for group in groups_by_type.get(resource_type, []):
+                if group["key"] in seen_group_keys:
+                    continue
+                seen_group_keys.add(group["key"])
+                assigned = model.NewBoolVar(f"capacity_assign_{_safe(task.id)}_{_safe(group['key'])}")
+                interval = model.NewOptionalIntervalVar(
+                    starts[task.id],
+                    task.duration_days,
+                    ends[task.id],
+                    assigned,
+                    f"capacity_interval_{_safe(task.id)}_{_safe(group['key'])}",
+                )
+                choices.append(assigned)
+                assignment_vars[(task.id, group["key"])] = assigned
+                assignments_by_group[group["key"]].append((task.id, assigned))
+                intervals_by_group[group["key"]].append(interval)
+                demands_by_group[group["key"]].append(1)
         if choices:
             model.AddExactlyOne(choices)
         elif task.compatible_resource_types:
@@ -1032,6 +2130,14 @@ def _solve_capacity_model(
             continue
         _add_precedence_constraint(model, starts, ends, link)
 
+    config = schedule_input.schedule_strategy
+    control_chain_task_ids = _control_chain_task_ids(schedule_input)
+    normal_tasks = _normal_balance_tasks(schedule_input.tasks, control_chain_task_ids)
+    _add_normal_time_window_constraints(model, starts, ends, normal_tasks, config, horizon)
+    _add_normal_workface_constraints(model, starts, ends, normal_tasks, config)
+    if config.resource_guarantee == "strict":
+        _add_strict_control_resource_constraints(model, starts, ends, schedule_input.tasks, control_chain_task_ids)
+
     makespan = model.NewIntVar(0, horizon, "makespan")
     model.AddMaxEquality(makespan, [ends[task.id] for task in schedule_input.tasks])
 
@@ -1043,6 +2149,13 @@ def _solve_capacity_model(
                 ValidationMessage(level="warning", subject_id=milestone.id, message=f"里程碑“{milestone.name}”没有匹配的工作项，已跳过。")
             )
             continue
+        if milestone.related_structure_ids:
+            related_ids = {
+                task.id
+                for task in schedule_input.tasks
+                if task.structure_id in set(milestone.related_structure_ids)
+            }
+            scoped_task_ids = sorted(set(scoped_task_ids) | related_ids)
         event_var = model.NewIntVar(0, horizon, f"capacity_milestone_{_safe(milestone.id)}")
         event_vars = [ends[task_id] if milestone.target_event == "finish" else starts[task_id] for task_id in scoped_task_ids]
         if milestone.target_event == "finish":
@@ -1130,7 +2243,7 @@ def _solve_capacity_model(
             "conflicts": solver.NumConflicts(),
             "branches": solver.NumBranches(),
             "random_seed": SCHEDULER_RANDOM_SEED,
-            "search_workers": SCHEDULER_SEARCH_WORKERS,
+            "search_workers": _scheduler_search_workers(),
         },
         "group_counts": (
             {key: solver.Value(count_var) for key, count_var in count_vars.items()}
@@ -1286,6 +2399,21 @@ def _fixed_duration_infeasible_result(
     capacity_window_days: int | None,
 ) -> ScheduleResult:
     messages = list(validation)
+    resource_upper_bound_counts = [
+        {
+            "resource_pool_id": group["key"],
+            "label": group["label"],
+            "resource_type": group["resource_type"],
+            "upper_bound_quantity": group["max_quantity"],
+            "max_quantity": group["max_quantity"],
+        }
+        for group in groups
+    ]
+    resource_capacity_lower_bounds = _resource_capacity_lower_bound_diagnostics(
+        schedule_input,
+        groups,
+        capacity_window_days,
+    )
 
     stats = {
         **checked["stats"],
@@ -1293,6 +2421,7 @@ def _fixed_duration_infeasible_result(
         "solve_mode": "min_resources_fixed_duration",
         "target_days": target_days,
         "capacity_window_days": capacity_window_days,
+        "resource_upper_bound_counts": resource_upper_bound_counts,
         "max_resource_counts": [
             {
                 "resource_pool_id": group["key"],
@@ -1302,11 +2431,15 @@ def _fixed_duration_infeasible_result(
             }
             for group in groups
         ],
+        "resource_capacity_lower_bounds": resource_capacity_lower_bounds,
+        "workface_parallelism_diagnostics": _workface_parallelism_diagnostics(schedule_input),
         "fixed_duration_precheck_failed": True,
     }
     objective_breakdown: dict[str, Any] = {
         "solve_mode": "min_resources_fixed_duration",
         "target_days": target_days,
+        "resource_upper_bound_counts": resource_upper_bound_counts,
+        "resource_capacity_lower_bounds": resource_capacity_lower_bounds,
     }
 
     if critical_path.get("status") == "OK":
@@ -1370,7 +2503,7 @@ def _fixed_duration_infeasible_result(
                     )
                 )
         if not critical_path_late_hard and not fallback_target_missed:
-            messages.extend(_resource_capacity_lower_bound_messages(schedule_input, groups, capacity_window_days))
+            messages.extend(_resource_capacity_lower_bound_messages(resource_capacity_lower_bounds))
     else:
         objective_days = None
         plan_finish_date = None
@@ -2117,44 +3250,111 @@ def _capacity_window_days(schedule_input: ScheduleInput, fallback_target_days: i
     return fallback_target_days
 
 
-def _resource_capacity_lower_bound_messages(
+def _capacity_window_scope_task_ids(schedule_input: ScheduleInput) -> set[str]:
+    hard_scopes: list[tuple[int, set[str]]] = []
+    for milestone in schedule_input.milestones:
+        if milestone.mode != "hard":
+            continue
+        task_ids = set(_task_ids_for_milestone(milestone, schedule_input.tasks))
+        if task_ids:
+            hard_scopes.append((_target_offset(schedule_input.start_date, milestone), task_ids))
+    if hard_scopes:
+        earliest_target = min(target for target, _ in hard_scopes)
+        return set().union(*(task_ids for target, task_ids in hard_scopes if target == earliest_target))
+    return {task.id for task in schedule_input.tasks}
+
+
+def _resource_capacity_lower_bound_diagnostics(
     schedule_input: ScheduleInput,
     groups: list[dict[str, Any]],
     capacity_window_days: int | None,
-) -> list[ValidationMessage]:
+) -> list[dict[str, Any]]:
     if not capacity_window_days or capacity_window_days <= 0:
         return []
 
-    messages: list[ValidationMessage] = []
+    scoped_task_ids = _capacity_window_scope_task_ids(schedule_input)
+    diagnostics: list[dict[str, Any]] = []
     for group in groups:
         resource_type = group["resource_type"]
-        total_duration = sum(
-            task.duration_days
+        scoped_tasks = [
+            task
             for task in schedule_input.tasks
-            if resource_type in task.compatible_resource_types
-        )
+            if task.id in scoped_task_ids and resource_type in task.compatible_resource_types
+        ]
+        total_duration = sum(task.duration_days for task in scoped_tasks)
         if total_duration <= 0:
             continue
         required_minimum = math.ceil(total_duration / capacity_window_days)
-        if required_minimum > group["max_quantity"]:
-            messages.append(
-                ValidationMessage(
-                    level="error",
-                    subject_id=group["key"],
-                    message=(
-                        f"按目标窗口 {capacity_window_days} 天粗算，资源池“{group['label']}”"
-                        f"至少需要约 {required_minimum} 个并行资源，当前最大数量为 {group['max_quantity']}。"
-                    ),
-                )
-            )
-    if not messages:
+        diagnostics.append(
+            {
+                "resource_pool_id": group["key"],
+                "label": group["label"],
+                "resource_type": resource_type,
+                "window_days": capacity_window_days,
+                "scoped_task_count": len(scoped_tasks),
+                "workload_days": total_duration,
+                "required_minimum": required_minimum,
+                "max_quantity": group["max_quantity"],
+                "upper_bound_gap": max(0, required_minimum - group["max_quantity"]),
+                "exceeds_upper_bound": required_minimum > group["max_quantity"],
+            }
+        )
+    return diagnostics
+
+
+def _resource_capacity_lower_bound_messages(
+    diagnostics: list[dict[str, Any]],
+) -> list[ValidationMessage]:
+    messages: list[ValidationMessage] = []
+    for item in diagnostics:
+        if not item["exceeds_upper_bound"]:
+            continue
         messages.append(
             ValidationMessage(
-                level="warning",
-                message="未发现单一资源池总工作量明显超过目标窗口，可能是多资源组合、里程碑范围或工艺逻辑局部约束导致不可行。",
+                level="error",
+                subject_id=item["resource_pool_id"],
+                message=(
+                    f"按目标窗口 {item['window_days']} 天和关联任务范围粗算，资源池“{item['label']}”"
+                    f"至少需要约 {item['required_minimum']} 个并行资源，当前最大数量为 {item['max_quantity']}。"
+                ),
             )
         )
     return messages
+
+
+def _workface_parallelism_diagnostics(schedule_input: ScheduleInput) -> list[dict[str, Any]]:
+    limit = int(schedule_input.schedule_strategy.max_parallel_normal_per_work_section or 0)
+    if limit <= 0:
+        return []
+    control_chain_task_ids = _control_chain_task_ids(schedule_input)
+    normal_tasks = _normal_balance_tasks(schedule_input.tasks, control_chain_task_ids)
+    by_workface: dict[tuple[str | None, str | None], list[Task]] = defaultdict(list)
+    for task in normal_tasks:
+        by_workface[(task.bridge_id, task.work_section_id)].append(task)
+
+    diagnostics: list[dict[str, Any]] = []
+    for (bridge_id, work_section_id), tasks in by_workface.items():
+        if len(tasks) <= limit:
+            continue
+        total_duration = sum(task.duration_days for task in tasks)
+        diagnostics.append(
+            {
+                "bridge_id": bridge_id,
+                "work_section_id": work_section_id,
+                "normal_task_count": len(tasks),
+                "total_duration_days": total_duration,
+                "max_parallel_normal_per_work_section": limit,
+                "minimum_workface_days": math.ceil(total_duration / limit),
+            }
+        )
+    return sorted(
+        diagnostics,
+        key=lambda item: (
+            -int(item["minimum_workface_days"]),
+            str(item["bridge_id"] or ""),
+            str(item["work_section_id"] or ""),
+        ),
+    )
 
 
 def _resource_groups(resources: list[Resource]) -> list[dict[str, Any]]:
@@ -2315,31 +3515,36 @@ def _is_lower_or_cast_in_place_beam_task(task: Task) -> bool:
 
 
 def _task_ids_for_milestone(milestone: MilestoneConstraint, tasks: list[Task]) -> list[str]:
+    related_ids = {
+        task.id
+        for task in tasks
+        if task.structure_id in set(milestone.related_structure_ids)
+    }
     if milestone.scope_type == "project":
-        return [task.id for task in tasks if _is_lower_or_cast_in_place_beam_task(task)]
+        return sorted(related_ids | {task.id for task in tasks if _is_lower_or_cast_in_place_beam_task(task)})
     if milestone.scope_type == "bridge":
-        return [
+        return sorted(related_ids | {
             task.id
             for task in tasks
             if task.bridge_id == milestone.scope_id and _is_lower_or_cast_in_place_beam_task(task)
-        ]
+        })
     if milestone.scope_type == "work_section":
-        return [
+        return sorted(related_ids | {
             task.id
             for task in tasks
             if task.work_section_id == milestone.scope_id and _is_lower_or_cast_in_place_beam_task(task)
-        ]
+        })
     if milestone.scope_type == "structure":
-        return [task.id for task in tasks if task.structure_id == milestone.scope_id]
+        return sorted(related_ids | {task.id for task in tasks if task.structure_id == milestone.scope_id})
     if milestone.scope_type == "component":
         if milestone.scope_id in get_args(ComponentType):
-            return [task.id for task in tasks if task.component_type == milestone.scope_id]
-        return [
+            return sorted(related_ids | {task.id for task in tasks if task.component_type == milestone.scope_id})
+        return sorted(related_ids | {
             task.id
             for task in tasks
             if task.component_id == milestone.scope_id or task.id == milestone.scope_id
-        ]
-    return []
+        })
+    return sorted(related_ids)
 
 
 def _matched_hard_milestone_count(schedule_input: ScheduleInput) -> int:

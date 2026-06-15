@@ -7,6 +7,7 @@ from typing import Any
 from .models import (
     ComponentModel,
     ComponentType,
+    ControlLevel,
     GeneratedScheduleInput,
     LogicRule,
     MinResourcesSolveRequest,
@@ -20,6 +21,7 @@ from .models import (
     ResourcePool,
     ScheduleInput,
     ScheduleResult,
+    ScenarioAlternativeResult,
     ScenarioCompareRequest,
     ScenarioCompareResponse,
     ScenarioInput,
@@ -32,7 +34,15 @@ from .models import (
     ValidationMessage,
     WorkSection,
 )
-from .solver import solve_min_resources_schedule, solve_resource_cost_schedule, solve_schedule
+from .solver import (
+    _apply_resource_limits,
+    _critical_path_schedule,
+    _resource_groups,
+    solve_control_priority_schedule,
+    solve_min_resources_schedule,
+    solve_resource_cost_schedule,
+    solve_schedule,
+)
 from .wbs import build_precedence_links, calculate_duration
 
 
@@ -41,6 +51,7 @@ CONTINUOUS_BEAM_COMPONENT_TYPE = "cast_in_place_continuous_beam"
 CONTINUOUS_BEAM_DEFAULT_STANDARD_SEGMENT_CYCLES = 18
 CAST_IN_PLACE_BOX_BEAM_STRUCTURE_CODE = "castInPlaceBoxGirder"
 SIMPLE_BEAM_STRUCTURE_CODE = "precastTGirder"
+FIXED_RESOURCE_SOLVE_MODE = "fixed_resources_shortest_control_balanced"
 UPPER_STRUCTURE_LOGIC_RULE_IDS = (
     "cast_in_place_box_beam_after_lower_structure",
     "continuous_beam_zero_block_after_main_pier_lower_structure",
@@ -89,6 +100,14 @@ def _upper_structure_logic_rule(
     return UpperStructureLogicRule(id=rule_id)
 
 
+class _FixedResourceSolveBudget:
+    def __init__(self, time_limit_seconds: float) -> None:
+        self.time_limit_seconds = time_limit_seconds
+
+    def with_time_limit(self, schedule_input: ScheduleInput, **_: Any) -> ScheduleInput:
+        return schedule_input.model_copy(update={"time_limit_seconds": self.time_limit_seconds})
+
+
 def generate_schedule_input_from_scenario(scenario: ScenarioInput, *, use_max_resources: bool = False) -> GeneratedScheduleInput:
     validation: list[ValidationMessage] = []
     tasks, generated_links = _build_tasks(scenario, validation)
@@ -121,6 +140,7 @@ def generate_schedule_input_from_scenario(scenario: ScenarioInput, *, use_max_re
         precedence_links=precedence_links,
         resources=resources,
         milestones=scenario.milestones,
+        schedule_strategy=scenario.schedule_strategy,
         time_limit_seconds=scenario.time_limit_seconds,
     )
     validation.append(
@@ -147,6 +167,7 @@ def generate_schedule_input_from_scenario(scenario: ScenarioInput, *, use_max_re
 
 def solve_scenario(scenario: ScenarioInput) -> ScenarioSolveResult:
     generated = generate_schedule_input_from_scenario(scenario)
+    alternative_results: list[ScenarioAlternativeResult] = []
     if any(message.level == "error" for message in generated.validation):
         result = ScheduleResult(
             status="MODEL_INVALID",
@@ -156,8 +177,7 @@ def solve_scenario(scenario: ScenarioInput) -> ScenarioSolveResult:
             milestone_results=[],
         )
     else:
-        result = solve_schedule(generated.schedule_input)
-        result.objective_breakdown.setdefault("solve_mode", "shortest_duration_fixed_resources")
+        result, alternative_results = _solve_fixed_resources_shortest_scenario(scenario, generated)
 
     diagnostics = _build_diagnostics(generated.validation, result)
     return ScenarioSolveResult(
@@ -168,7 +188,438 @@ def solve_scenario(scenario: ScenarioInput) -> ScenarioSolveResult:
         milestone_results=result.milestone_results,
         diagnostics=diagnostics,
         metrics=_scenario_metrics(generated, result),
+        alternative_results=alternative_results,
     )
+
+
+def _solve_fixed_resources_shortest_scenario(
+    scenario: ScenarioInput,
+    generated: GeneratedScheduleInput,
+) -> tuple[ScheduleResult, list[ScenarioAlternativeResult]]:
+    baseline_input = _schedule_input_with_strategy(generated.schedule_input, "shortest_duration")
+    baseline_result = solve_schedule(baseline_input)
+    if baseline_result.status not in {"OPTIMAL", "FEASIBLE"}:
+        _apply_fixed_resource_metadata(
+            baseline_result,
+            baseline_makespan_days=baseline_result.objective_days,
+            hard_milestone_feasible=False,
+            resource_recommendation_status="not_evaluated",
+            resource_recommendation_message="当前资源最短工期排程未得到可行求解结果，无法继续评估硬里程碑和资源增量建议。",
+        )
+        return baseline_result, []
+
+    late_hard = _late_hard_milestones(baseline_result)
+    final_input = _schedule_input_with_strategy(generated.schedule_input, "comprehensive")
+    final_result = solve_control_priority_schedule(
+        final_input,
+        enforce_hard_milestones=not bool(late_hard),
+        baseline_result=baseline_result,
+    )
+    if late_hard:
+        if final_result.status in {"OPTIMAL", "FEASIBLE"}:
+            result = final_result.model_copy(deep=True, update={"status": "INFEASIBLE"})
+            result.validation = list(final_result.validation)
+        else:
+            result = baseline_result.model_copy(deep=True, update={"status": "INFEASIBLE"})
+            result.validation = list(baseline_result.validation) + list(final_result.validation)
+            result.validation.append(
+                ValidationMessage(
+                    level="warning",
+                    message="控制优先+均衡推进未得到可行二次优化结果，已保留当前资源最短工期排程供查看。",
+                )
+            )
+        result.validation.append(
+            ValidationMessage(
+                level="error",
+                message="当前固定资源最短工期排程未满足强制里程碑；已保留当前资源排程供查看，并尝试测算资源增量建议。",
+            )
+        )
+        for milestone in late_hard:
+            result.validation.append(
+                ValidationMessage(
+                    level="error",
+                    subject_id=milestone.id,
+                    message=(
+                        f"强制里程碑“{milestone.name}”目标 {milestone.target_date}，"
+                        f"当前固定资源最短排程预计 {milestone.actual_date}，迟延 {milestone.lateness_days} 天。"
+                    ),
+                )
+            )
+        recommendation = _fixed_resource_recommendation(scenario, generated.schedule_input)
+        recommendation_metadata = {
+            key: value
+            for key, value in recommendation["metadata"].items()
+            if key != "alternative_result"
+        }
+        _apply_fixed_resource_metadata(
+            result,
+            baseline_makespan_days=baseline_result.objective_days,
+            hard_milestone_feasible=False,
+            schedule_source="current_resources_control_priority_balanced",
+            **recommendation_metadata,
+        )
+        result.validation.extend(recommendation["validation"])
+        alternative = recommendation.get("alternative_result")
+        alternatives = [alternative] if alternative is not None else []
+        return result, alternatives
+
+    if final_result.status in {"OPTIMAL", "FEASIBLE"}:
+        _apply_fixed_resource_metadata(
+            final_result,
+            baseline_makespan_days=baseline_result.objective_days,
+            hard_milestone_feasible=True,
+            schedule_source="current_resources_control_priority_balanced",
+            resource_recommendation_status="not_needed",
+            resource_recommendation_message="当前固定资源最短工期已满足强制里程碑，无需增加资源。",
+        )
+        return final_result, []
+
+    fallback = baseline_result.model_copy(deep=True)
+    fallback.validation = list(baseline_result.validation) + list(final_result.validation)
+    fallback.validation.append(
+        ValidationMessage(
+            level="warning",
+            message="控制优先+均衡推进在硬里程碑约束下未得到可行二次优化结果，已回退展示当前资源最短工期排程。",
+        )
+    )
+    _apply_fixed_resource_metadata(
+        fallback,
+        baseline_makespan_days=baseline_result.objective_days,
+        hard_milestone_feasible=True,
+        schedule_source="current_resources_shortest_fallback",
+        resource_recommendation_status="not_needed",
+        resource_recommendation_message="当前固定资源最短工期已满足强制里程碑，无需增加资源。",
+    )
+    return fallback, []
+
+
+def _schedule_input_with_strategy(schedule_input: ScheduleInput, strategy: str) -> ScheduleInput:
+    return schedule_input.model_copy(
+        update={
+            "schedule_strategy": schedule_input.schedule_strategy.model_copy(update={"strategy": strategy})
+        }
+    )
+
+
+def _late_hard_milestones(result: ScheduleResult) -> list[Any]:
+    return [
+        milestone
+        for milestone in result.milestone_results
+        if milestone.mode == "hard" and milestone.lateness_days > 0
+    ]
+
+
+def _fixed_resource_recommendation(
+    scenario: ScenarioInput,
+    current_schedule_input: ScheduleInput,
+) -> dict[str, Any]:
+    critical_path = _critical_path_schedule(current_schedule_input)
+    critical_metadata = _critical_path_metadata(critical_path)
+    if critical_path.get("status") != "OK":
+        return {
+            "metadata": {
+                **critical_metadata,
+                "resource_recommendation_status": "critical_path_unknown",
+                "resource_recommendation_message": "无法计算工艺逻辑关键路径，请先检查工艺逻辑是否存在闭环或不可满足约束。",
+                "recommended_resource_counts": [],
+            },
+            "validation": [
+                ValidationMessage(
+                    level="error",
+                    message="无法计算工艺逻辑关键路径，请检查工艺逻辑是否存在闭环或不可满足约束。",
+                )
+            ],
+        }
+
+    critical_late_hard = _late_hard_milestones_from_results(critical_path["milestone_results"])
+    if critical_late_hard:
+        messages = [
+            ValidationMessage(
+                level="error",
+                message="不考虑资源排队时，工艺逻辑关键路径仍无法满足强制里程碑；增加资源也无法满足当前工期目标。",
+            )
+        ]
+        for milestone in critical_late_hard:
+            messages.append(
+                ValidationMessage(
+                    level="error",
+                    subject_id=milestone.id,
+                    message=(
+                        f"强制里程碑“{milestone.name}”目标 {milestone.target_date}，"
+                        f"工艺逻辑理论最早 {milestone.actual_date}，迟延 {milestone.lateness_days} 天。"
+                    ),
+                )
+            )
+        return {
+            "metadata": {
+                **critical_metadata,
+                "resource_recommendation_status": "critical_path_infeasible",
+                "resource_recommendation_message": "关键控制链理论最短工期已经突破强制里程碑，增加资源也无法满足当前工期目标。",
+                "recommended_resource_counts": [],
+            },
+            "validation": messages,
+        }
+
+    max_generated = generate_schedule_input_from_scenario(scenario, use_max_resources=True)
+    if any(message.level == "error" for message in max_generated.validation):
+        return {
+            "metadata": {
+                **critical_metadata,
+                "resource_recommendation_status": "max_resource_generation_error",
+                "resource_recommendation_message": "资源增量建议生成失败：最大资源场景存在生成错误。",
+                "recommended_resource_counts": [],
+            },
+            "validation": max_generated.validation,
+        }
+
+    max_schedule_input = max_generated.schedule_input
+    resource_upper_bounds = _resource_upper_bound_counts(current_schedule_input, max_schedule_input)
+    min_resource_result = solve_min_resources_schedule(max_schedule_input)
+    if _min_resource_result_has_verified_recommendation(min_resource_result):
+        fixed_counts = _resource_count_map(min_resource_result)
+        recommendation = _enriched_resource_counts(
+            current_schedule_input=current_schedule_input,
+            max_schedule_input=max_schedule_input,
+            fixed_counts=fixed_counts,
+        )
+        min_resource_result = min_resource_result.model_copy(deep=True)
+        recommendation_metadata = {
+            "resource_recommendation_status": "recommended_resources_verified",
+            "resource_recommendation_message": "已输出固定工期条件下的可行最少资源方案。",
+            "recommended_resource_counts": recommendation,
+            "resource_upper_bound_counts": resource_upper_bounds,
+            "resource_solver_status": min_resource_result.status,
+            **_min_resource_recommendation_metadata(min_resource_result),
+        }
+        min_resource_result.stats.update(recommendation_metadata)
+        min_resource_result.objective_breakdown.update(recommendation_metadata)
+        limited_schedule_input = max_generated.schedule_input.model_copy(
+            update={"resources": _apply_resource_limits(max_generated.schedule_input.resources, fixed_counts)}
+        )
+        alternative_generated = max_generated.model_copy(update={"schedule_input": limited_schedule_input})
+        alternative = ScenarioAlternativeResult(
+            scenario_id=f"{scenario.scenario_id}-minimum-resources",
+            scenario_name=f"{scenario.scenario_name} - 最少资源方案",
+            role="minimum_resources",
+            generated=alternative_generated,
+            result=min_resource_result,
+            milestone_results=min_resource_result.milestone_results,
+            diagnostics=_build_diagnostics(alternative_generated.validation, min_resource_result),
+            metrics=_scenario_metrics(alternative_generated, min_resource_result),
+        )
+        return {
+            "metadata": {
+                **critical_metadata,
+                **recommendation_metadata,
+                "alternative_result": alternative,
+            },
+            "alternative_result": alternative,
+            "validation": [
+                ValidationMessage(
+                    level="warning",
+                    message="已按固定工期最少资源模型生成方案2；推荐数量已通过固定数量排程验证。",
+                )
+            ],
+        }
+
+    if _min_resource_result_is_upper_bound_infeasible(min_resource_result):
+        return {
+            "metadata": {
+                **critical_metadata,
+                "resource_recommendation_status": "resource_upper_bound_infeasible",
+                "resource_recommendation_message": "工艺逻辑关键路径可满足目标，但当前资源池最大数量或资源类型结构仍无法满足硬里程碑。",
+                "recommended_resource_counts": [],
+                "resource_upper_bound_counts": resource_upper_bounds,
+                "resource_capacity_lower_bounds": min_resource_result.stats.get("resource_capacity_lower_bounds", []),
+                "resource_solver_status": min_resource_result.status,
+                **_min_resource_recommendation_metadata(min_resource_result),
+            },
+            "validation": [
+                ValidationMessage(
+                    level="error",
+                    message="当前资源池最大数量仍无法满足强制里程碑；请提高资源上限或检查资源类型配置。",
+                )
+            ],
+        }
+
+    return {
+        "metadata": {
+            **critical_metadata,
+            "resource_recommendation_status": "resource_recommendation_unresolved",
+            "resource_recommendation_message": "最少资源模型未得到可验证结果；当前求解限时内无法确认推荐资源组合。",
+            "recommended_resource_counts": [],
+            "resource_upper_bound_counts": resource_upper_bounds,
+            "resource_capacity_lower_bounds": min_resource_result.stats.get("resource_capacity_lower_bounds", []),
+            "resource_solver_status": min_resource_result.status,
+            **_min_resource_recommendation_metadata(min_resource_result),
+        },
+        "validation": [
+            ValidationMessage(
+                level="warning",
+                message="最少资源模型未得到可验证结果；请提高求解限时或检查工作面并行约束、资源上限配置。",
+            )
+        ],
+    }
+
+
+def _critical_path_metadata(critical_path: dict[str, Any]) -> dict[str, Any]:
+    if critical_path.get("status") != "OK":
+        return {"critical_path_status": critical_path.get("status")}
+    return {
+        "critical_path_status": "OK",
+        "critical_path_minimum_days": critical_path["objective_days"],
+        "critical_path_plan_finish_date": critical_path["plan_finish_date"],
+    }
+
+
+def _late_hard_milestones_from_results(milestone_results: list[Any]) -> list[Any]:
+    return [
+        milestone
+        for milestone in milestone_results
+        if milestone.mode == "hard" and milestone.lateness_days > 0
+    ]
+
+
+def _resource_count_map(result: ScheduleResult) -> dict[str, int]:
+    raw = result.stats.get("recommended_resource_counts") or result.objective_breakdown.get("recommended_resource_counts") or []
+    fixed_counts: dict[str, int] = {}
+    for item in raw:
+        if isinstance(item, dict):
+            fixed_counts[str(item.get("resource_pool_id"))] = int(item.get("recommended_quantity") or 0)
+    return fixed_counts
+
+
+def _min_resource_result_has_verified_recommendation(result: ScheduleResult) -> bool:
+    recommended = result.stats.get("recommended_resource_counts") or result.objective_breakdown.get("recommended_resource_counts") or []
+    capacity_status = result.stats.get("capacity_verification_status") or result.objective_breakdown.get("capacity_verification_status")
+    return result.status in {"OPTIMAL", "FEASIBLE"} and bool(recommended) and capacity_status == "verified"
+
+
+def _min_resource_result_is_upper_bound_infeasible(result: ScheduleResult) -> bool:
+    reason = result.stats.get("reason")
+    capacity_status = result.stats.get("capacity_model_status")
+    global_status = result.stats.get("global_capacity_model_status")
+    return result.status in {"INFEASIBLE", "MODEL_INVALID"} and (
+        bool(result.stats.get("fixed_duration_precheck_failed"))
+        or reason == "resource_upper_bound_or_deadline_infeasible"
+        or capacity_status in {"INFEASIBLE", "MODEL_INVALID"}
+        or global_status in {"INFEASIBLE", "MODEL_INVALID"}
+    )
+
+
+def _min_resource_recommendation_metadata(result: ScheduleResult) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    for key in (
+        "capacity_verification_status",
+        "balanced_reoptimization_status",
+        "unbalanced_reoptimization_status",
+        "recommended_schedule_source",
+        "resource_count_optimality",
+        "capacity_model_status",
+        "global_capacity_model_status",
+        "capacity_model_group_counts",
+        "reoptimization_attempts",
+        "parallel_reoptimization_used",
+    ):
+        if key in result.stats:
+            metadata[key] = result.stats[key]
+    return metadata
+
+
+def _enriched_resource_counts(
+    *,
+    current_schedule_input: ScheduleInput,
+    max_schedule_input: ScheduleInput,
+    fixed_counts: dict[str, int],
+) -> list[dict[str, Any]]:
+    current_counts = {
+        group["key"]: group["max_quantity"]
+        for group in _resource_groups([resource for resource in current_schedule_input.resources if resource.enabled])
+    }
+    max_groups = _resource_groups([resource for resource in max_schedule_input.resources if resource.enabled])
+    enriched = []
+    for group in max_groups:
+        current_quantity = current_counts.get(group["key"], 0)
+        recommended_quantity = max(0, min(int(fixed_counts.get(group["key"], 0)), group["max_quantity"]))
+        enriched.append(
+            {
+                "resource_pool_id": group["key"],
+                "label": group["label"],
+                "resource_type": group["resource_type"],
+                "current_quantity": current_quantity,
+                "recommended_quantity": recommended_quantity,
+                "added_quantity": max(0, recommended_quantity - current_quantity),
+                "max_quantity": group["max_quantity"],
+            }
+        )
+    return enriched
+
+
+def _resource_upper_bound_counts(
+    current_schedule_input: ScheduleInput,
+    max_schedule_input: ScheduleInput,
+) -> list[dict[str, Any]]:
+    current_counts = {
+        group["key"]: group["max_quantity"]
+        for group in _resource_groups([resource for resource in current_schedule_input.resources if resource.enabled])
+    }
+    upper_bounds = []
+    for group in _resource_groups([resource for resource in max_schedule_input.resources if resource.enabled]):
+        current_quantity = current_counts.get(group["key"], 0)
+        upper_bound_quantity = group["max_quantity"]
+        upper_bounds.append(
+            {
+                "resource_pool_id": group["key"],
+                "label": group["label"],
+                "resource_type": group["resource_type"],
+                "current_quantity": current_quantity,
+                "upper_bound_quantity": upper_bound_quantity,
+                "additional_capacity": max(0, upper_bound_quantity - current_quantity),
+                "max_quantity": upper_bound_quantity,
+            }
+        )
+    return upper_bounds
+
+
+def _verify_recommended_resources(
+    max_schedule_input: ScheduleInput,
+    fixed_counts: dict[str, int],
+    budget: _FixedResourceSolveBudget,
+) -> ScheduleResult:
+    verification_input = budget.with_time_limit(
+        _schedule_input_with_strategy(max_schedule_input, "comprehensive").model_copy(
+            update={"resources": _apply_resource_limits(max_schedule_input.resources, fixed_counts)}
+        )
+    )
+    return solve_control_priority_schedule(verification_input, enforce_hard_milestones=True)
+
+
+def _result_meets_hard_milestones(result: ScheduleResult) -> bool:
+    return result.status in {"OPTIMAL", "FEASIBLE"} and not _late_hard_milestones(result)
+
+
+def _apply_fixed_resource_metadata(
+    result: ScheduleResult,
+    *,
+    baseline_makespan_days: int | None,
+    hard_milestone_feasible: bool,
+    resource_recommendation_status: str,
+    resource_recommendation_message: str,
+    recommended_resource_counts: list[dict[str, Any]] | None = None,
+    **extra_metadata: Any,
+) -> None:
+    metadata = {
+        "solve_mode": FIXED_RESOURCE_SOLVE_MODE,
+        "baseline_makespan_days": baseline_makespan_days,
+        "hard_milestone_feasible": hard_milestone_feasible,
+        "resource_recommendation_status": resource_recommendation_status,
+        "resource_recommendation_message": resource_recommendation_message,
+        **extra_metadata,
+    }
+    if recommended_resource_counts is not None:
+        metadata["recommended_resource_counts"] = recommended_resource_counts
+    result.stats.update(metadata)
+    result.objective_breakdown.update(metadata)
 
 
 def solve_min_resources_scenario(request: MinResourcesSolveRequest) -> ScenarioSolveResult:
@@ -419,15 +870,101 @@ def _resource_linear_costs_by_pool(resource_pools: list[ResourcePool]) -> dict[s
     return costs_by_pool
 
 
+def _inferred_control_levels(scenario: ScenarioInput) -> dict[str, ControlLevel]:
+    levels: dict[str, ControlLevel] = {}
+    highest_pier_id: str | None = None
+    highest_pier_height = -1.0
+
+    for bridge in scenario.project.bridges:
+        for section in bridge.work_sections:
+            main_supports: set[int] = set()
+            for uppers in _continuous_beam_groups(section.upper_structures):
+                group_level = _upper_group_control_level(uppers, levels, default="control")
+                for upper in uppers:
+                    levels[upper.id] = upper.control_level or group_level
+                span_indices = sorted({upper.span_index for upper in uppers})
+                main_supports.update(_continuous_main_supports(uppers, span_indices))
+
+            for structure in section.structures:
+                configured = structure.control_level
+                if configured is not None:
+                    levels[structure.id] = configured
+                    continue
+                if structure.structure_type == "pier" and _structure_support_index(structure) in main_supports:
+                    levels[structure.id] = "control"
+                else:
+                    levels.setdefault(structure.id, "normal")
+
+                if structure.structure_type != "pier":
+                    continue
+                height = _structure_pier_height(structure)
+                if height is not None and height > highest_pier_height:
+                    highest_pier_height = height
+                    highest_pier_id = structure.id
+
+    if highest_pier_id and levels.get(highest_pier_id) == "normal":
+        levels[highest_pier_id] = "key"
+    return levels
+
+
+def _structure_control_level(structure: StructureModel, inferred_levels: dict[str, ControlLevel]) -> ControlLevel:
+    return structure.control_level or inferred_levels.get(structure.id, "normal")
+
+
+def _upper_group_control_level(
+    uppers: list[UpperStructureComponent],
+    inferred_levels: dict[str, ControlLevel],
+    *,
+    default: ControlLevel,
+) -> ControlLevel:
+    rank = {"control": 0, "key": 1, "normal": 2, "rough": 3}
+    candidates = [
+        upper.control_level or inferred_levels.get(upper.id)
+        for upper in uppers
+        if upper.control_level or inferred_levels.get(upper.id)
+    ]
+    return min(candidates, key=lambda item: rank[item]) if candidates else default
+
+
+def _structure_support_index(structure: StructureModel) -> int | None:
+    if structure.support_index is not None:
+        return structure.support_index
+    if structure.structure_type == "pier":
+        return structure.order
+    return None
+
+
+def _structure_pier_height(structure: StructureModel) -> float | None:
+    heights: list[float] = []
+    for component in structure.components:
+        if component.component_type != "pier_body":
+            continue
+        for key in ("height_m", "heightM", "pier_height_m", "pierHeightM"):
+            raw_value = component.properties.get(key)
+            if isinstance(raw_value, (int, float)):
+                heights.append(float(raw_value))
+        dimensions = component.properties.get("dimensions_m")
+        if isinstance(dimensions, dict):
+            for key in ("heightM", "height_m"):
+                raw_value = dimensions.get(key)
+                if isinstance(raw_value, (int, float)):
+                    heights.append(float(raw_value))
+        if component.quantity > 0:
+            heights.append(float(component.quantity))
+    return max(heights) if heights else None
+
+
 def _build_tasks(scenario: ScenarioInput, validation: list[ValidationMessage]) -> tuple[list[Task], list[PrecedenceLink]]:
     tasks: list[Task] = []
     generated_links: list[PrecedenceLink] = []
     upper_logic_rules = _upper_structure_logic_rule_by_id(scenario.upper_structure_logic_rules)
     task_overrides = scenario.task_overrides
+    inferred_levels = _inferred_control_levels(scenario)
     for bridge in sorted(scenario.project.bridges, key=lambda item: item.order):
         for section in sorted(bridge.work_sections, key=lambda item: item.order):
             section_lower_start = len(tasks)
             for structure in sorted(section.structures, key=lambda item: item.order):
+                control_level = _structure_control_level(structure, inferred_levels)
                 for component_index, component in enumerate(structure.components):
                     if not component.enabled:
                         continue
@@ -441,6 +978,7 @@ def _build_tasks(scenario: ScenarioInput, validation: list[ValidationMessage]) -
                         structure_id=structure.id,
                         structure_name=structure.name,
                         structure_type=structure.structure_type,
+                        control_level=control_level,
                     )
                     if task is not None:
                         tasks.append(task)
@@ -454,6 +992,7 @@ def _build_tasks(scenario: ScenarioInput, validation: list[ValidationMessage]) -
                 lower_tasks=section_lower_tasks,
                 upper_logic_rules=upper_logic_rules,
                 task_overrides=task_overrides,
+                inferred_levels=inferred_levels,
             )
             tasks.extend(upper_tasks)
             generated_links.extend(upper_links)
@@ -471,6 +1010,7 @@ def _task_from_component(
     structure_id: str,
     structure_name: str,
     structure_type: str,
+    control_level: ControlLevel,
 ) -> Task | None:
     process = _select_process(component, process_library)
     if process is None:
@@ -504,6 +1044,7 @@ def _task_from_component(
         structure_id=structure_id,
         structure_name=structure_name,
         structure_type=structure_type,
+        control_level=control_level,
         component_type=component.component_type,
         process_name=process.process_name,
         productivity_rule_id=rule.id,
@@ -535,6 +1076,7 @@ def _build_upper_structure_tasks(
     lower_tasks: list[Task],
     upper_logic_rules: dict[str, UpperStructureLogicRule],
     task_overrides: dict[str, TaskOverride] | None = None,
+    inferred_levels: dict[str, ControlLevel] | None = None,
 ) -> tuple[list[Task], list[PrecedenceLink]]:
     support_completions = _lower_completion_tasks_by_support(section, lower_tasks)
     tasks: list[Task] = []
@@ -552,6 +1094,7 @@ def _build_upper_structure_tasks(
         link_start=len(links) + 1,
         upper_logic_rules=upper_logic_rules,
         task_overrides=overrides,
+        inferred_levels=inferred_levels or {},
     )
     tasks.extend(box_tasks)
     links.extend(box_links)
@@ -565,6 +1108,7 @@ def _build_upper_structure_tasks(
         link_start=len(links) + 1,
         upper_logic_rules=upper_logic_rules,
         task_overrides=overrides,
+        inferred_levels=inferred_levels or {},
     )
     tasks.extend(continuous_tasks)
     links.extend(continuous_links)
@@ -629,6 +1173,7 @@ def _build_cast_in_place_box_beam_tasks(
     link_start: int,
     upper_logic_rules: dict[str, UpperStructureLogicRule],
     task_overrides: dict[str, TaskOverride],
+    inferred_levels: dict[str, ControlLevel],
 ) -> tuple[list[Task], list[PrecedenceLink]]:
     tasks: list[Task] = []
     links: list[PrecedenceLink] = []
@@ -640,6 +1185,7 @@ def _build_cast_in_place_box_beam_tasks(
         span_indices = [upper.span_index for upper in uppers]
         first_span = min(span_indices)
         last_span = max(span_indices)
+        control_level = _upper_group_control_level(uppers, inferred_levels, default="normal")
         task = _append_upper_task(
             tasks=tasks,
             component_id=f"{bridge.id}-{side_code}-BOX-G{group_index:02d}-CAST",
@@ -655,6 +1201,7 @@ def _build_cast_in_place_box_beam_tasks(
             process_library=process_library,
             validation=validation,
             task_overrides=task_overrides,
+            control_level=control_level,
             properties={
                 "upper_structure_ids": [upper.id for upper in uppers],
                 "span_start_index": first_span,
@@ -692,7 +1239,8 @@ def _append_upper_task(
     process_library: list[ProcessTemplate],
     validation: list[ValidationMessage],
     properties: dict[str, Any],
-    task_overrides: dict[str, TaskOverride],
+    task_overrides: dict[str, TaskOverride] | None = None,
+    control_level: ControlLevel = "normal",
     method_id: str | None = None,
 ) -> Task | None:
     component = _apply_task_override(ComponentModel(
@@ -714,6 +1262,7 @@ def _append_upper_task(
         structure_id=structure_id,
         structure_name=structure_name,
         structure_type="upper_structure",
+        control_level=control_level,
     )
     if task is not None:
         tasks.append(task)
@@ -916,6 +1465,7 @@ def _build_continuous_beam_tasks(
     link_start: int,
     upper_logic_rules: dict[str, UpperStructureLogicRule],
     task_overrides: dict[str, TaskOverride],
+    inferred_levels: dict[str, ControlLevel],
 ) -> tuple[list[Task], list[PrecedenceLink]]:
     tasks: list[Task] = []
     links: list[PrecedenceLink] = []
@@ -923,6 +1473,7 @@ def _build_continuous_beam_tasks(
         group_index = _continuous_group_index(uppers)
         span_indices = sorted({upper.span_index for upper in uppers})
         main_supports = _continuous_main_supports(uppers, span_indices)
+        control_level = _upper_group_control_level(uppers, inferred_levels, default="control")
         if not main_supports:
             validation.append(
                 ValidationMessage(
@@ -964,6 +1515,7 @@ def _build_continuous_beam_tasks(
             link_start=link_start + len(links),
             upper_logic_rules=upper_logic_rules,
             task_overrides=task_overrides,
+            control_level=control_level,
         )
         tasks.extend(group_tasks)
         links.extend(group_links)
@@ -984,6 +1536,7 @@ def _build_continuous_beam_group_tasks(
     link_start: int,
     upper_logic_rules: dict[str, UpperStructureLogicRule],
     task_overrides: dict[str, TaskOverride],
+    control_level: ControlLevel,
 ) -> tuple[list[Task], list[PrecedenceLink]]:
     side_code = _side_code(section.side)
     side_label = _side_label(section.side)
@@ -1030,6 +1583,7 @@ def _build_continuous_beam_group_tasks(
             process_library=process_library,
             validation=validation,
             task_overrides=task_overrides,
+            control_level=control_level,
             properties={
                 "continuous_task_type": "zero_block",
                 "group_index": group_index,
@@ -1065,6 +1619,7 @@ def _build_continuous_beam_group_tasks(
                 process_library=process_library,
                 validation=validation,
                 task_overrides=task_overrides,
+                control_level=control_level,
                 properties={
                     "continuous_task_type": "standard_segment_batch",
                     "group_index": group_index,
@@ -1096,6 +1651,7 @@ def _build_continuous_beam_group_tasks(
         process_library=process_library,
         validation=validation,
         task_overrides=task_overrides,
+        control_level=control_level,
         properties={"continuous_task_type": "side_straight_segment", "group_index": group_index, "side": "left"},
     )
     left_closure = _append_continuous_task(
@@ -1112,6 +1668,7 @@ def _build_continuous_beam_group_tasks(
         process_library=process_library,
         validation=validation,
         task_overrides=task_overrides,
+        control_level=control_level,
         properties={"continuous_task_type": "side_closure_segment", "group_index": group_index, "side": "left"},
     )
     right_straight = _append_continuous_task(
@@ -1128,6 +1685,7 @@ def _build_continuous_beam_group_tasks(
         process_library=process_library,
         validation=validation,
         task_overrides=task_overrides,
+        control_level=control_level,
         properties={"continuous_task_type": "side_straight_segment", "group_index": group_index, "side": "right"},
     )
     right_closure = _append_continuous_task(
@@ -1144,6 +1702,7 @@ def _build_continuous_beam_group_tasks(
         process_library=process_library,
         validation=validation,
         task_overrides=task_overrides,
+        control_level=control_level,
         properties={"continuous_task_type": "side_closure_segment", "group_index": group_index, "side": "right"},
     )
     add_link(left_straight, left_closure, "continuous_beam_side_closure")
@@ -1193,6 +1752,7 @@ def _build_continuous_beam_group_tasks(
             process_library=process_library,
             validation=validation,
             task_overrides=task_overrides,
+            control_level=control_level,
             properties={
                 "continuous_task_type": "middle_closure_segment",
                 "group_index": group_index,
@@ -1236,6 +1796,7 @@ def _append_continuous_task(
     process_library: list[ProcessTemplate],
     validation: list[ValidationMessage],
     properties: dict[str, Any],
+    control_level: ControlLevel,
     task_overrides: dict[str, TaskOverride] | None = None,
 ) -> Task | None:
     component = _apply_task_override(ComponentModel(
@@ -1257,6 +1818,7 @@ def _append_continuous_task(
         structure_id=structure_id,
         structure_name=structure_name,
         structure_type="continuous_beam",
+        control_level=control_level,
     )
     if task is not None:
         tasks.append(task)

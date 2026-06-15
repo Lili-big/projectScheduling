@@ -34,6 +34,17 @@ export function sectionHeightForOption(option: ProductivityOption): number | und
 }
 
 export function normalizeProductivityOptionForProcess(process: ProcessTemplate, option: ProductivityOption): ProductivityOption {
+  if (process.component_type === "pile") {
+    const unitRule = pileProductivityUnitOptions.find((item) => item.unit === option.productivity_unit);
+    if (unitRule) {
+      return {
+        ...option,
+        duration_method: unitRule.duration_method,
+        quantity_source: unitRule.quantity_source,
+      };
+    }
+  }
+
   if (!supportsSegmentedPierUnits(process)) {
     return option;
   }

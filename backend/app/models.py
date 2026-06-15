@@ -37,6 +37,28 @@ MilestoneLevel = Literal["contract", "control", "internal"]
 MilestoneMode = Literal["hard", "soft"]
 MilestoneScopeType = Literal["project", "bridge", "work_section", "structure", "component"]
 MilestoneTargetEvent = Literal["start", "finish"]
+ScheduleStrategy = Literal[
+    "shortest_duration",
+    "min_resource",
+    "resource_cost",
+    "control_priority",
+    "balanced_normal",
+    "comprehensive",
+]
+ControlLevel = Literal["control", "key", "normal", "rough"]
+ResourceGuaranteeMode = Literal["strict", "priority", "off"]
+BalanceBucket = Literal["week", "month"]
+
+
+class ScheduleStrategyConfig(BaseModel):
+    strategy: ScheduleStrategy = "comprehensive"
+    resource_guarantee: ResourceGuaranteeMode = "priority"
+    normal_balance_bucket: BalanceBucket = "month"
+    normal_earliest_start_offset: int = Field(default=0, ge=0)
+    normal_latest_finish_offset: int | None = Field(default=None, ge=1)
+    normal_max_early_finish_days: int = Field(default=60, ge=0)
+    max_parallel_normal_per_work_section: int = Field(default=5, ge=1)
+    enable_balance_objective: bool = True
 
 
 class PierConfig(BaseModel):
@@ -155,6 +177,7 @@ class Task(BaseModel):
     structure_id: str
     structure_name: str
     structure_type: StructureType
+    control_level: ControlLevel = "normal"
     component_type: ComponentType
     process_name: str
     productivity_rule_id: str
@@ -199,6 +222,7 @@ class StructureModel(BaseModel):
     order: int = 0
     support_no: str | None = None
     support_index: int | None = None
+    control_level: ControlLevel | None = None
     components: list[ComponentModel] = []
 
 
@@ -212,6 +236,7 @@ class UpperStructureComponent(BaseModel):
     span_length_m: float
     beam_count_per_span: int | None = None
     span_group_expression: str
+    control_level: ControlLevel | None = None
     properties: dict[str, Any] = {}
 
 
@@ -340,6 +365,7 @@ class MilestoneConstraint(BaseModel):
     target_event: MilestoneTargetEvent = "finish"
     target_date: date
     penalty_per_day: int = Field(default=10, ge=0)
+    related_structure_ids: list[str] = Field(default_factory=list)
 
 
 class MilestoneResult(BaseModel):
@@ -374,6 +400,7 @@ class ScenarioInput(BaseModel):
     resource_calendars: list[ResourceCalendar] = []
     resource_pools: list[ResourcePool]
     milestones: list[MilestoneConstraint] = []
+    schedule_strategy: ScheduleStrategyConfig = Field(default_factory=ScheduleStrategyConfig)
     time_limit_seconds: float = Field(default=10.0, gt=0)
 
 
@@ -420,6 +447,7 @@ class ScheduleInput(BaseModel):
     precedence_links: list[PrecedenceLink]
     resources: list[Resource]
     milestones: list[MilestoneConstraint] = []
+    schedule_strategy: ScheduleStrategyConfig = Field(default_factory=ScheduleStrategyConfig)
     time_limit_seconds: float = Field(default=10.0, gt=0)
 
 
@@ -465,6 +493,17 @@ class GeneratedScheduleInput(BaseModel):
     source_summary: dict[str, Any] = {}
 
 
+class ScenarioAlternativeResult(BaseModel):
+    scenario_id: str
+    scenario_name: str
+    role: str
+    generated: GeneratedScheduleInput
+    result: ScheduleResult
+    milestone_results: list[MilestoneResult] = []
+    diagnostics: list[ValidationMessage] = []
+    metrics: dict[str, Any] = {}
+
+
 class ScenarioSolveResult(BaseModel):
     scenario_id: str
     scenario_name: str
@@ -473,6 +512,7 @@ class ScenarioSolveResult(BaseModel):
     milestone_results: list[MilestoneResult] = []
     diagnostics: list[ValidationMessage] = []
     metrics: dict[str, Any] = {}
+    alternative_results: list[ScenarioAlternativeResult] = []
 
 
 class ScenarioCompareRequest(BaseModel):

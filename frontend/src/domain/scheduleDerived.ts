@@ -16,10 +16,22 @@ export function derivePlanStatus(result: ScheduleResult | null): PlanStatusDispl
   }
 
   const isSolved = result.status === "OPTIMAL" || result.status === "FEASIBLE";
+  const lateMilestones = result.milestone_results.filter((milestone) => milestone.lateness_days > 0);
+  const hardLateCount = lateMilestones.filter((milestone) => milestone.mode === "hard").length;
+  const softLateCount = lateMilestones.filter((milestone) => milestone.mode === "soft").length;
+
   if (!isSolved) {
     return {
       label: scheduleStatusLabels[result.status],
       tone: result.status === "UNKNOWN" ? "warn" : "danger",
+      hint: hardLateCount > 0 ? "硬里程碑未满足" : undefined,
+      diagnostic: hardLateCount > 0
+        ? {
+            level: "error",
+            message: `工期不满足硬里程碑要求：${hardLateCount} 个强制里程碑节点未满足。`,
+            subject_id: "plan-status-hard-milestone",
+          }
+        : undefined,
     };
   }
 
@@ -31,10 +43,6 @@ export function derivePlanStatus(result: ScheduleResult | null): PlanStatusDispl
   if (!isShortestDurationMode) {
     return { label: scheduleStatusLabels[result.status], tone: "ok" };
   }
-
-  const lateMilestones = result.milestone_results.filter((milestone) => milestone.lateness_days > 0);
-  const hardLateCount = lateMilestones.filter((milestone) => milestone.mode === "hard").length;
-  const softLateCount = lateMilestones.filter((milestone) => milestone.mode === "soft").length;
 
   if (hardLateCount > 0) {
     return {

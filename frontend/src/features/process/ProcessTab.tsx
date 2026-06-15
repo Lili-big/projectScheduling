@@ -47,25 +47,7 @@ export function ProcessTab({
     const process = scenario.process_library[processIndex];
     const nextOptions = productivityOptions(process).map((option) => {
       if (option.id !== optionId) return option;
-      const nextOption = { ...option, ...patch };
-      if (patch.productivity_unit && process.component_type === "pile") {
-        const unitRule = pileProductivityUnitOptions.find((item) => item.unit === patch.productivity_unit);
-        if (unitRule) {
-          nextOption.duration_method = unitRule.duration_method;
-          nextOption.quantity_source = unitRule.quantity_source;
-        }
-      }
-      if (patch.productivity_unit && supportsSegmentedPierUnits(process)) {
-        const unitRule = segmentedPierProductivityUnitOptions.find((item) => item.unit === patch.productivity_unit);
-        if (unitRule) {
-          nextOption.duration_method = unitRule.duration_method;
-          nextOption.quantity_source = unitRule.quantity_source;
-          nextOption.standard_section_height_m = unitRule.unit === "天/节"
-            ? sectionHeightForOption(nextOption)
-            : undefined;
-        }
-      }
-      return nextOption;
+      return { ...option, ...patch };
     });
     updateProcessWithOptions(processIndex, nextOptions);
   }
@@ -149,8 +131,6 @@ export function ProcessTab({
             <tr>
               <th>构件</th>
               <th>工艺名称</th>
-              <th>工期算法</th>
-              <th>工程量来源</th>
               <th>工效分组</th>
               <th>默认资源</th>
             </tr>
@@ -164,8 +144,6 @@ export function ProcessTab({
                   <td>
                     <span className="process-name-text">{process.process_name}</span>
                   </td>
-                  <td><span className="text-pill">{durationMethodLabels[process.duration_method] ?? process.duration_method}</span></td>
-                  <td><span className="text-pill">{quantitySourceLabels[process.quantity_source] ?? process.quantity_source}</span></td>
                   <td>
                     <div className="productivity-groups">
                       {options.map((option, optionIndex) => {
@@ -227,6 +205,7 @@ export function ProcessTab({
                                 <span className="section-height-placeholder">-</span>
                               )}
                             </span>
+                            <span className="text-pill productivity-method-pill">{durationMethodLabels[option.duration_method] ?? option.duration_method}</span>
                             <span className="text-pill productivity-source-pill">{quantitySourceLabels[option.quantity_source] ?? option.quantity_source}</span>
                             {option.is_default ? (
                               <span className="default-badge">默认分组</span>
