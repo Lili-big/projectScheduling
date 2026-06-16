@@ -52,13 +52,7 @@ export function MilestonesTab({
                     </td>
                   </tr>
                   <tr>
-                    <td>
-                      <input
-                        className="milestone-name-input"
-                        value={milestone.name}
-                        onChange={(event) => onUpdateMilestone(milestoneIndex, { name: event.target.value })}
-                      />
-                    </td>
+                    <td className="milestone-name-cell">{milestone.name}</td>
                     <td className="milestone-scope-cell">{scopeLabelForMilestone(milestone, scenario)}</td>
                     <td>
                       <span className="text-pill">{milestone.target_event === "start" ? "开始" : "完成"}</span>

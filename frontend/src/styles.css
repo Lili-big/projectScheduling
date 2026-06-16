@@ -765,9 +765,12 @@ code {
 .milestone-table th:nth-child(3) { width: 120px; }
 .milestone-table th:nth-child(4) { width: 140px; }
 
-.milestone-name-input {
-  width: 100%;
-  min-width: 0;
+.milestone-name-cell {
+  color: #0f2742;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .milestone-scope-cell {
