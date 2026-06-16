@@ -486,7 +486,7 @@ def test_continuous_beam_resource_max_quantity_counts_t_structures() -> None:
     apply_resource_max_quantity_defaults(scenario)
 
     max_by_type = {pool.type: pool.max_quantity for pool in scenario.resource_pools}
-    assert max_by_type["cast_in_place_continuous_beam_team"] == 4
+    assert max_by_type["cast_in_place_continuous_beam_team"] == 10
 
 
 def test_simple_beam_erection_is_not_generated_in_current_phase() -> None:
@@ -622,17 +622,8 @@ def test_default_scenario_sets_resource_max_quantity_from_business_defaults() ->
         "cap_beam_team",
         "cast_in_place_continuous_beam_team",
     }
-    assert max_by_type["rotary_drill"] == 5
-    assert max_by_type["circulation_drill"] == 5
-    assert max_by_type["impact_drill"] == 5
-    assert max_by_type["manual_pile_team"] == 10
-    assert max_by_type["cap_team"] == 5
-    assert max_by_type["pier_body_team"] == 5
-    assert max_by_type["cap_beam_team"] == 5
-    assert max_by_type["cast_in_place_continuous_beam_team"] == 1
-    assert quantity_by_type["circulation_drill"] == 0
-    assert quantity_by_type["impact_drill"] == 0
-    assert quantity_by_type["manual_pile_team"] == 0
+    assert all(quantity == 1 for quantity in quantity_by_type.values())
+    assert all(max_quantity == 10 for max_quantity in max_by_type.values())
 
 
 def test_resource_pool_max_quantity_defaults_to_quantity() -> None:

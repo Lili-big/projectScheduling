@@ -27,13 +27,13 @@ SCHEDULE_LOGIC_ONTOLOGY_PATH = Path(__file__).resolve().parent / "ontology" / "b
 CONTINUOUS_BEAM_STRUCTURE_CODE = "castInPlaceContinuousBoxGirder"
 CONTINUOUS_BEAM_DEFAULT_STANDARD_SEGMENT_CYCLES = 18
 DEFAULT_RESOURCE_MAX_QUANTITIES: dict[str, int] = {
-    "rotary_drill": 5,
-    "circulation_drill": 5,
-    "impact_drill": 5,
+    "rotary_drill": 10,
+    "circulation_drill": 10,
+    "impact_drill": 10,
     "manual_pile_team": 10,
-    "cap_team": 5,
-    "pier_body_team": 5,
-    "cap_beam_team": 5,
+    "cap_team": 10,
+    "pier_body_team": 10,
+    "cap_beam_team": 10,
 }
 BRIDGE_COMPLETION_MILESTONE_NAME = "下部及现浇结构施工完成"
 
@@ -222,7 +222,7 @@ def apply_resource_max_quantity_defaults(scenario: ScenarioInput) -> ScenarioInp
         if pool.resource_mode == "UNLIMITED":
             continue
         if pool.type == "cast_in_place_continuous_beam_team":
-            pool.max_quantity = max(quantity, continuous_t_count)
+            pool.max_quantity = max(quantity, continuous_t_count, 10)
         elif pool.type in DEFAULT_RESOURCE_MAX_QUANTITIES:
             pool.max_quantity = max(quantity, DEFAULT_RESOURCE_MAX_QUANTITIES[pool.type])
         elif pool.max_quantity is None:
@@ -386,22 +386,22 @@ def default_resource_pools() -> list[ResourcePool]:
             id="pool-rotary-drill",
             type="rotary_drill",
             label="旋挖钻",
-            quantity=3,
-            max_quantity=5,
+            quantity=1,
+            max_quantity=10,
             cost_type="monthly_rental",
             incremental_unit_cost=180000,
             billing_period_days=30,
         ),
-        ResourcePool(id="pool-circulation-drill", type="circulation_drill", label="回旋钻", quantity=0, max_quantity=5),
-        ResourcePool(id="pool-impact-drill", type="impact_drill", label="冲击钻", quantity=0, max_quantity=5),
-        ResourcePool(id="pool-manual-pile", type="manual_pile_team", label="人工挖孔班组", quantity=0, max_quantity=10),
-        ResourcePool(id="pool-cap", type="cap_team", label="承台模板", quantity=1, max_quantity=5),
+        ResourcePool(id="pool-circulation-drill", type="circulation_drill", label="回旋钻", quantity=1, max_quantity=10),
+        ResourcePool(id="pool-impact-drill", type="impact_drill", label="冲击钻", quantity=1, max_quantity=10),
+        ResourcePool(id="pool-manual-pile", type="manual_pile_team", label="人工挖孔班组", quantity=1, max_quantity=10),
+        ResourcePool(id="pool-cap", type="cap_team", label="承台模板", quantity=1, max_quantity=10),
         ResourcePool(
             id="pool-pier-body",
             type="pier_body_team",
             label="墩柱模板",
             quantity=1,
-            max_quantity=5,
+            max_quantity=10,
             cost_type="one_time_purchase",
             incremental_unit_cost=90000,
         ),
@@ -410,11 +410,11 @@ def default_resource_pools() -> list[ResourcePool]:
             type="cap_beam_team",
             label="盖梁模板",
             quantity=1,
-            max_quantity=5,
+            max_quantity=10,
             cost_type="one_time_purchase",
             incremental_unit_cost=80000,
         ),
-        ResourcePool(id="pool-cast-in-place-continuous-beam", type="cast_in_place_continuous_beam_team", label="连续梁班组", quantity=1),
+        ResourcePool(id="pool-cast-in-place-continuous-beam", type="cast_in_place_continuous_beam_team", label="连续梁班组", quantity=1, max_quantity=10),
     ]
 
 
