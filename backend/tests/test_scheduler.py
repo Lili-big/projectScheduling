@@ -24,7 +24,7 @@ from app.sample_data import (  # noqa: E402
 from app.scenario import compare_scenarios, generate_schedule_input_from_scenario, solve_resource_cost_scenario, solve_scenario  # noqa: E402
 from app.scenario_data import apply_resource_max_quantity_defaults, default_scenario  # noqa: E402
 from app.services.bridge_import_service import import_local_bridge_params  # noqa: E402
-from app.solver import _resource_path_metrics, _task_ids_for_milestone, solve_min_resources_schedule, solve_resource_cost_schedule, solve_schedule  # noqa: E402
+from app.solver import _resource_path_metrics, _task_ids_for_milestone, solve_capacity_shortest_schedule, solve_min_resources_schedule, solve_resource_cost_schedule, solve_schedule  # noqa: E402
 from app.wbs import calculate_duration, generate_wbs  # noqa: E402
 
 
@@ -268,6 +268,22 @@ def test_solver_uses_configured_search_workers_in_stats(monkeypatch: pytest.Monk
 
     assert result.status in {"OPTIMAL", "FEASIBLE"}
     assert result.stats["search_workers"] == 2
+
+
+def test_capacity_shortest_matches_named_resource_shortest_on_simple_parallel_case() -> None:
+    pytest.importorskip("ortools")
+    schedule_input = _min_resource_test_input(max_resources=2).model_copy(
+        update={"schedule_strategy": ScheduleStrategyConfig(strategy="shortest_duration")}
+    )
+
+    named = solve_schedule(schedule_input)
+    capacity = solve_capacity_shortest_schedule(schedule_input)
+
+    assert named.status in {"OPTIMAL", "FEASIBLE"}
+    assert capacity.status in {"OPTIMAL", "FEASIBLE"}
+    assert capacity.objective_days == named.objective_days
+    assert capacity.milestone_results == named.milestone_results
+    assert capacity.stats["performance_path"] == "capacity_fast_path"
 
 
 def test_solver_supports_finish_based_relationships() -> None:
@@ -961,8 +977,10 @@ def test_fixed_resource_shortest_returns_resource_increment_recommendation_when_
     assert recommended["recommended_quantity"] == 2
     assert recommended["added_quantity"] == 1
     assert recommended["max_quantity"] == 3
-    assert solved.result.objective_breakdown["schedule_source"] == "current_resources_control_priority_balanced"
-    assert "control_priority_analysis" in solved.result.stats
+    assert solved.result.objective_breakdown["schedule_source"] == "current_resources_capacity_shortest"
+    assert solved.result.objective_breakdown["performance_path"] == "capacity_fast_path_resource_recommendation"
+    assert solved.result.objective_breakdown["skipped_named_refinement_reason"] == "current_resources_late_hard_milestone"
+    assert "control_priority_analysis" not in solved.result.stats
     assert len(solved.alternative_results) == 1
     alternative = solved.alternative_results[0]
     assert alternative.role == "minimum_resources"
@@ -996,7 +1014,9 @@ def test_fixed_resource_recommendation_matches_direct_min_resource_solver() -> N
     assert len(solved.alternative_results[0].generated.schedule_input.resources) == sum(direct_recommended.values())
 
 
-def test_fixed_resource_followup_solves_keep_full_time_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fixed_resource_late_current_skips_control_refinement_but_keeps_recommendation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     scenario = _parallel_fixed_resource_scenario(target_days=5, current_resources=1, max_resources=3)
     scenario.time_limit_seconds = 5
     call_limits: list[tuple[str, float]] = []
@@ -1019,8 +1039,8 @@ def test_fixed_resource_followup_solves_keep_full_time_limit(monkeypatch: pytest
             ],
         )
 
-    def fake_solve_schedule(schedule_input: ScheduleInput, **_: object) -> ScheduleResult:
-        call_limits.append(("shortest", schedule_input.time_limit_seconds))
+    def fake_capacity_shortest(schedule_input: ScheduleInput) -> ScheduleResult:
+        call_limits.append(("capacity", schedule_input.time_limit_seconds))
         return late_result(schedule_input)
 
     def fake_control_priority(schedule_input: ScheduleInput, **_: object) -> ScheduleResult:
@@ -1039,7 +1059,7 @@ def test_fixed_resource_followup_solves_keep_full_time_limit(monkeypatch: pytest
             },
         )
 
-    monkeypatch.setattr(scenario_module, "solve_schedule", fake_solve_schedule)
+    monkeypatch.setattr(scenario_module, "solve_capacity_shortest_schedule", fake_capacity_shortest)
     monkeypatch.setattr(scenario_module, "solve_control_priority_schedule", fake_control_priority)
     monkeypatch.setattr(scenario_module, "solve_min_resources_schedule", fake_min_resources)
     monkeypatch.setattr(
@@ -1055,9 +1075,9 @@ def test_fixed_resource_followup_solves_keep_full_time_limit(monkeypatch: pytest
 
     solve_scenario(scenario)
 
-    assert ("shortest", 5) in call_limits
-    assert ("control", 5) in call_limits
+    assert ("capacity", 5) in call_limits
     assert ("min_resources", 5) in call_limits
+    assert not any(label == "control" for label, _ in call_limits)
     assert all(limit == 5 for _, limit in call_limits)
 
 
@@ -1077,14 +1097,25 @@ def test_fixed_resource_shortest_does_not_recommend_max_when_upper_bound_is_infe
     assert solved.alternative_results == []
 
 
-def test_fixed_resource_shortest_reports_critical_path_infeasible_without_resource_increment() -> None:
+def test_fixed_resource_shortest_reports_critical_path_infeasible_without_resource_increment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     pytest.importorskip("ortools")
+    min_resource_calls = 0
+
+    def fake_min_resources(schedule_input: ScheduleInput, fallback_target_days: int | None = None) -> ScheduleResult:
+        nonlocal min_resource_calls
+        min_resource_calls += 1
+        return ScheduleResult(status="UNKNOWN", plan_start_date=schedule_input.start_date)
+
+    monkeypatch.setattr(scenario_module, "solve_min_resources_schedule", fake_min_resources)
     solved = solve_scenario(_parallel_fixed_resource_scenario(target_days=4, current_resources=1, max_resources=2))
 
     assert solved.result.status == "INFEASIBLE"
     assert solved.result.objective_breakdown["resource_recommendation_status"] == "critical_path_infeasible"
     assert solved.result.objective_breakdown["recommended_resource_counts"] == []
     assert solved.alternative_results == []
+    assert min_resource_calls == 0
     assert any("增加资源也无法满足" in message.message for message in solved.result.validation)
 
 
@@ -1096,6 +1127,9 @@ def test_fixed_resource_shortest_outputs_control_balanced_result_when_hard_miles
     assert solved.result.objective_breakdown["solve_mode"] == "fixed_resources_shortest_control_balanced"
     assert solved.result.objective_breakdown["hard_milestone_feasible"] is True
     assert solved.result.objective_breakdown["schedule_source"] == "current_resources_control_priority_balanced"
+    assert solved.result.objective_breakdown["performance_path"] == "capacity_fast_path_named_refinement"
+    assert solved.result.objective_breakdown["warm_start_used"] is True
+    assert solved.result.stats["warm_start_used"] is True
     assert "control_priority_analysis" in solved.result.stats
     assert "normal_balance_metrics" in solved.result.stats
     assert solved.alternative_results == []
@@ -1863,13 +1897,26 @@ def test_min_resource_solver_requires_target_duration() -> None:
     assert any(message.level == "error" and "固定工期" in message.message for message in result.validation)
 
 
-def test_min_resource_solver_reports_infeasible_when_max_resources_cannot_meet_target() -> None:
+def test_min_resource_solver_reports_infeasible_when_max_resources_cannot_meet_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     pytest.importorskip("ortools")
+    capacity_model_calls = 0
+
+    def fake_solve_capacity_model(*args: object, **kwargs: object) -> dict[str, object]:
+        nonlocal capacity_model_calls
+        capacity_model_calls += 1
+        return {"status": "UNKNOWN", "validation": [], "stats": {}, "group_counts": {}}
+
+    monkeypatch.setattr(solver_module, "_solve_capacity_model", fake_solve_capacity_model)
     result = solve_min_resources_schedule(_min_resource_test_input(max_resources=1), fallback_target_days=5)
 
     assert result.status == "INFEASIBLE"
     assert result.stats["reason"] == "resource_upper_bound_or_deadline_infeasible"
     assert result.stats["fixed_duration_precheck_failed"] is True
+    assert result.stats["capacity_precheck_status"] == "exclusive_lower_bound_infeasible"
+    assert result.stats["lower_bound_prune_used"] is True
+    assert capacity_model_calls == 0
     assert result.stats["resource_upper_bound_counts"][0]["upper_bound_quantity"] == 1
     lower_bound = result.stats["resource_capacity_lower_bounds"][0]
     assert lower_bound["required_minimum"] == 2

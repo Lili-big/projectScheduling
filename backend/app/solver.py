@@ -101,6 +101,37 @@ def _configure_solver(solver: Any, time_limit_seconds: float) -> None:
     solver.parameters.randomize_search = False
 
 
+def _add_schedule_hints(
+    model: Any,
+    *,
+    starts: dict[str, Any],
+    ends: dict[str, Any],
+    assignment_vars: dict[tuple[str, str], Any],
+    warm_start_result: ScheduleResult | None,
+) -> bool:
+    if warm_start_result is None or warm_start_result.status not in {"OPTIMAL", "FEASIBLE"}:
+        return False
+
+    hinted = False
+    assigned_resource_by_task_id: dict[str, str | None] = {}
+    for task in warm_start_result.tasks:
+        if task.id in starts:
+            model.AddHint(starts[task.id], max(0, int(task.start_offset)))
+            hinted = True
+        if task.id in ends:
+            model.AddHint(ends[task.id], max(0, int(task.end_offset)))
+            hinted = True
+        assigned_resource_by_task_id[task.id] = task.assigned_resource_id
+
+    for (task_id, resource_id), assignment in assignment_vars.items():
+        assigned_resource_id = assigned_resource_by_task_id.get(task_id)
+        if assigned_resource_id is None:
+            continue
+        model.AddHint(assignment, 1 if assigned_resource_id == resource_id else 0)
+        hinted = True
+    return hinted
+
+
 def _scheduler_search_workers() -> int:
     raw = os.getenv("SCHEDULER_SEARCH_WORKERS")
     if raw:
@@ -382,6 +413,7 @@ def solve_control_priority_schedule(
     enforce_hard_milestones: bool = False,
     baseline_result: ScheduleResult | None = None,
     max_makespan_days: int | None = None,
+    warm_start_result: ScheduleResult | None = None,
 ) -> ScheduleResult:
     if baseline_result is None:
         baseline_input = schedule_input.model_copy(
@@ -564,6 +596,13 @@ def solve_control_priority_schedule(
         + sum(normal_balance_terms) * NORMAL_BALANCE_WEIGHT
         + continuity_objective
     )
+    warm_start_used = _add_schedule_hints(
+        model,
+        starts=starts,
+        ends=ends,
+        assignment_vars=assignment_vars,
+        warm_start_result=warm_start_result,
+    )
 
     solver = cp_model.CpSolver()
     _configure_solver(solver, schedule_input.time_limit_seconds)
@@ -579,6 +618,7 @@ def solve_control_priority_schedule(
         "search_workers": _scheduler_search_workers(),
         "solve_mode": "control_priority",
         "baseline_objective_days": baseline_result.objective_days,
+        "warm_start_used": warm_start_used,
     }
     if max_makespan_days is not None:
         stats["max_makespan_days"] = max_makespan_days
@@ -1081,6 +1121,73 @@ def _build_control_priority_analysis(
     }
 
 
+def solve_capacity_shortest_schedule(schedule_input: ScheduleInput) -> ScheduleResult:
+    enabled_resources = [resource for resource in schedule_input.resources if resource.enabled]
+    try:
+        from ortools.sat.python import cp_model
+    except ImportError:
+        return ScheduleResult(
+            status="MODEL_INVALID",
+            plan_start_date=schedule_input.start_date,
+            validation=[
+                ValidationMessage(
+                    level="error",
+                    message="未安装 OR-Tools，请先安装后端依赖后再执行求解。",
+                )
+            ],
+            stats={
+                "reason": "ortools_missing",
+                "solve_mode": "fixed_resource_capacity_shortest",
+                "performance_path": "capacity_fast_path",
+                "solver_call_count": 0,
+                "capacity_precheck_status": "MODEL_INVALID",
+                "warm_start_used": False,
+            },
+        )
+
+    groups = _resource_groups(enabled_resources)
+    fixed_counts = {group["key"]: int(group["max_quantity"]) for group in groups}
+    solved = _solve_capacity_model(
+        schedule_input,
+        cp_model=cp_model,
+        groups=groups,
+        counts=fixed_counts,
+        fallback_target_days=None,
+        enforce_fixed_duration=False,
+        minimize_makespan=True,
+    )
+    metadata = {
+        "solve_mode": "fixed_resource_capacity_shortest",
+        "schedule_source": "current_resources_capacity_shortest",
+        "performance_path": "capacity_fast_path",
+        "solver_call_count": 1,
+        "capacity_precheck_status": solved["status"],
+        "capacity_model_status": solved["status"],
+        "capacity_model_group_counts": fixed_counts,
+        "warm_start_used": False,
+    }
+    if solved["status"] not in {"OPTIMAL", "FEASIBLE"}:
+        return ScheduleResult(
+            status=solved["status"],
+            plan_start_date=schedule_input.start_date,
+            milestone_results=_not_evaluated_milestones(schedule_input.milestones),
+            validation=solved["validation"]
+            + [
+                ValidationMessage(
+                    level="error",
+                    message="池级固定资源最短工期快排未得到可行求解结果。",
+                )
+            ],
+            stats={**solved["stats"], **metadata},
+            objective_breakdown=metadata.copy(),
+        )
+
+    result = _capacity_model_result(schedule_input, solved, fixed_counts)
+    result.stats.update(metadata)
+    result.objective_breakdown.update(metadata)
+    return result
+
+
 def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_days: int | None = None) -> ScheduleResult:
     enabled_resources = [resource for resource in schedule_input.resources if resource.enabled]
     resource_candidates = _resource_candidates_by_task(schedule_input.tasks, enabled_resources)
@@ -1095,6 +1202,46 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
 
     hard_match_count = _matched_hard_milestone_count(schedule_input)
     target_days = _min_resource_target_days(schedule_input, fallback_target_days)
+    groups = _resource_groups(enabled_resources)
+    capacity_window_days = _capacity_window_days(schedule_input, target_days)
+    lower_bound_prune = _resource_capacity_exclusive_lower_bound_diagnostics(
+        schedule_input,
+        groups,
+        capacity_window_days,
+    )
+    if any(item["exceeds_upper_bound"] for item in lower_bound_prune):
+        critical_path = _critical_path_schedule(schedule_input)
+        checked = {
+            "status": "INFEASIBLE",
+            "validation": [],
+            "stats": {
+                "capacity_precheck_status": "exclusive_lower_bound_infeasible",
+                "lower_bound_prune_used": True,
+                "solver_call_count": 0,
+                "wall_time_seconds": 0.0,
+                "conflicts": 0,
+                "branches": 0,
+                "random_seed": SCHEDULER_RANDOM_SEED,
+                "search_workers": _scheduler_search_workers(),
+            },
+        }
+        result = _fixed_duration_infeasible_result(
+            schedule_input=schedule_input,
+            checked=checked,
+            critical_path=critical_path,
+            validation=validation,
+            groups=groups,
+            target_days=target_days,
+            capacity_window_days=capacity_window_days,
+        )
+        metadata = {
+            "capacity_precheck_status": "exclusive_lower_bound_infeasible",
+            "lower_bound_prune_used": True,
+            "solver_call_count": 0,
+        }
+        result.stats.update(metadata)
+        result.objective_breakdown.update(metadata)
+        return result
     if hard_match_count == 0 and target_days is None:
         return ScheduleResult(
             status="MODEL_INVALID",
@@ -1120,7 +1267,6 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
             stats={"reason": "ortools_missing", "solve_mode": "min_resources_fixed_duration"},
         )
 
-    groups = _resource_groups(enabled_resources)
     fixed_duration_check = _solve_capacity_model(
         schedule_input,
         cp_model=cp_model,
@@ -1214,6 +1360,7 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
         fixed_counts,
         target_days=target_days,
         hard_match_count=hard_match_count,
+        capacity_hint_result=capacity_result,
     )
     selected_attempt = _select_verified_reoptimization(
         reoptimization_attempts,
@@ -1293,6 +1440,7 @@ def _run_min_resource_reoptimizations(
     *,
     target_days: int | None,
     hard_match_count: int,
+    capacity_hint_result: ScheduleResult | None = None,
 ) -> list[dict[str, Any]]:
     candidates = _min_resource_reoptimization_candidates(schedule_input, fixed_counts)
     parallelism = _solve_task_parallelism(len(candidates))
@@ -1302,6 +1450,7 @@ def _run_min_resource_reoptimizations(
             candidate["schedule_input"],
             enforce_hard_milestones=True,
             max_makespan_days=target_days if hard_match_count == 0 else None,
+            warm_start_result=capacity_hint_result,
         )
         return {
             "source": candidate["source"],
@@ -1423,6 +1572,7 @@ def _reoptimization_attempt_summaries(
                 "conflicts": result.stats.get("conflicts"),
                 "branches": result.stats.get("branches"),
                 "search_workers": result.stats.get("search_workers"),
+                "warm_start_used": result.stats.get("warm_start_used", False),
             }
         )
     return summaries
@@ -1984,6 +2134,7 @@ def _solve_capacity_model(
     enforce_fixed_duration: bool = True,
     minimize_resource_count: bool = False,
     minimize_total_cost: bool = False,
+    minimize_makespan: bool = False,
     resource_linear_costs_by_group: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     validation: list[ValidationMessage] = []
@@ -2169,7 +2320,7 @@ def _solve_capacity_model(
         if milestone.mode == "hard" and enforce_fixed_duration:
             hard_match_count += 1
             model.Add(event_var <= target_offset)
-        else:
+        elif milestone.mode == "soft":
             lateness_upper = max(horizon - target_offset, horizon) + 365
             lateness_var = model.NewIntVar(0, lateness_upper, f"capacity_late_{_safe(milestone.id)}")
             model.Add(lateness_var >= event_var - target_offset)
@@ -2188,6 +2339,8 @@ def _solve_capacity_model(
         model.Minimize(sum(count_vars.values()) * (horizon + 1) + makespan)
     elif minimize_total_cost:
         model.Minimize(total_resource_cost)
+    elif minimize_makespan:
+        model.Minimize(makespan + total_soft_penalty)
 
     solver = cp_model.CpSolver()
     _configure_solver(solver, schedule_input.time_limit_seconds)
@@ -3297,6 +3450,45 @@ def _resource_capacity_lower_bound_diagnostics(
                 "max_quantity": group["max_quantity"],
                 "upper_bound_gap": max(0, required_minimum - group["max_quantity"]),
                 "exceeds_upper_bound": required_minimum > group["max_quantity"],
+            }
+        )
+    return diagnostics
+
+
+def _resource_capacity_exclusive_lower_bound_diagnostics(
+    schedule_input: ScheduleInput,
+    groups: list[dict[str, Any]],
+    capacity_window_days: int | None,
+) -> list[dict[str, Any]]:
+    if not capacity_window_days or capacity_window_days <= 0:
+        return []
+
+    scoped_task_ids = _capacity_window_scope_task_ids(schedule_input)
+    diagnostics: list[dict[str, Any]] = []
+    for group in groups:
+        resource_type = group["resource_type"]
+        scoped_tasks = [
+            task
+            for task in schedule_input.tasks
+            if task.id in scoped_task_ids and set(task.compatible_resource_types) == {resource_type}
+        ]
+        total_duration = sum(task.duration_days for task in scoped_tasks)
+        if total_duration <= 0:
+            continue
+        required_minimum = math.ceil(total_duration / capacity_window_days)
+        diagnostics.append(
+            {
+                "resource_pool_id": group["key"],
+                "label": group["label"],
+                "resource_type": resource_type,
+                "window_days": capacity_window_days,
+                "scoped_task_count": len(scoped_tasks),
+                "workload_days": total_duration,
+                "required_minimum": required_minimum,
+                "max_quantity": group["max_quantity"],
+                "upper_bound_gap": max(0, required_minimum - group["max_quantity"]),
+                "exceeds_upper_bound": required_minimum > group["max_quantity"],
+                "exclusive_resource_lower_bound": True,
             }
         )
     return diagnostics

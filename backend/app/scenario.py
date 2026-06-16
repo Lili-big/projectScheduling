@@ -38,10 +38,10 @@ from .solver import (
     _apply_resource_limits,
     _critical_path_schedule,
     _resource_groups,
+    solve_capacity_shortest_schedule,
     solve_control_priority_schedule,
     solve_min_resources_schedule,
     solve_resource_cost_schedule,
-    solve_schedule,
 )
 from .wbs import build_precedence_links, calculate_duration
 
@@ -196,8 +196,9 @@ def _solve_fixed_resources_shortest_scenario(
     scenario: ScenarioInput,
     generated: GeneratedScheduleInput,
 ) -> tuple[ScheduleResult, list[ScenarioAlternativeResult]]:
+    critical_path = _critical_path_schedule(generated.schedule_input)
     baseline_input = _schedule_input_with_strategy(generated.schedule_input, "shortest_duration")
-    baseline_result = solve_schedule(baseline_input)
+    baseline_result = solve_capacity_shortest_schedule(baseline_input)
     if baseline_result.status not in {"OPTIMAL", "FEASIBLE"}:
         _apply_fixed_resource_metadata(
             baseline_result,
@@ -205,29 +206,17 @@ def _solve_fixed_resources_shortest_scenario(
             hard_milestone_feasible=False,
             resource_recommendation_status="not_evaluated",
             resource_recommendation_message="当前资源最短工期排程未得到可行求解结果，无法继续评估硬里程碑和资源增量建议。",
+            performance_path="capacity_fast_path_failed",
+            solver_call_count=baseline_result.stats.get("solver_call_count", 1),
+            capacity_precheck_status=baseline_result.status,
+            warm_start_used=False,
         )
         return baseline_result, []
 
     late_hard = _late_hard_milestones(baseline_result)
-    final_input = _schedule_input_with_strategy(generated.schedule_input, "comprehensive")
-    final_result = solve_control_priority_schedule(
-        final_input,
-        enforce_hard_milestones=not bool(late_hard),
-        baseline_result=baseline_result,
-    )
     if late_hard:
-        if final_result.status in {"OPTIMAL", "FEASIBLE"}:
-            result = final_result.model_copy(deep=True, update={"status": "INFEASIBLE"})
-            result.validation = list(final_result.validation)
-        else:
-            result = baseline_result.model_copy(deep=True, update={"status": "INFEASIBLE"})
-            result.validation = list(baseline_result.validation) + list(final_result.validation)
-            result.validation.append(
-                ValidationMessage(
-                    level="warning",
-                    message="控制优先+均衡推进未得到可行二次优化结果，已保留当前资源最短工期排程供查看。",
-                )
-            )
+        result = baseline_result.model_copy(deep=True, update={"status": "INFEASIBLE"})
+        result.validation = list(baseline_result.validation)
         result.validation.append(
             ValidationMessage(
                 level="error",
@@ -245,17 +234,31 @@ def _solve_fixed_resources_shortest_scenario(
                     ),
                 )
             )
-        recommendation = _fixed_resource_recommendation(scenario, generated.schedule_input)
+        recommendation = _fixed_resource_recommendation(
+            scenario,
+            generated.schedule_input,
+            critical_path=critical_path,
+        )
         recommendation_metadata = {
             key: value
             for key, value in recommendation["metadata"].items()
             if key != "alternative_result"
         }
+        skipped_reason = (
+            "critical_path_infeasible"
+            if recommendation_metadata.get("resource_recommendation_status") == "critical_path_infeasible"
+            else "current_resources_late_hard_milestone"
+        )
         _apply_fixed_resource_metadata(
             result,
             baseline_makespan_days=baseline_result.objective_days,
             hard_milestone_feasible=False,
-            schedule_source="current_resources_control_priority_balanced",
+            schedule_source="current_resources_capacity_shortest",
+            performance_path="capacity_fast_path_resource_recommendation",
+            solver_call_count=baseline_result.stats.get("solver_call_count", 1),
+            capacity_precheck_status=baseline_result.status,
+            warm_start_used=False,
+            skipped_named_refinement_reason=skipped_reason,
             **recommendation_metadata,
         )
         result.validation.extend(recommendation["validation"])
@@ -263,12 +266,23 @@ def _solve_fixed_resources_shortest_scenario(
         alternatives = [alternative] if alternative is not None else []
         return result, alternatives
 
+    final_input = _schedule_input_with_strategy(generated.schedule_input, "comprehensive")
+    final_result = solve_control_priority_schedule(
+        final_input,
+        enforce_hard_milestones=True,
+        baseline_result=baseline_result,
+        warm_start_result=baseline_result,
+    )
     if final_result.status in {"OPTIMAL", "FEASIBLE"}:
         _apply_fixed_resource_metadata(
             final_result,
             baseline_makespan_days=baseline_result.objective_days,
             hard_milestone_feasible=True,
             schedule_source="current_resources_control_priority_balanced",
+            performance_path="capacity_fast_path_named_refinement",
+            solver_call_count=int(baseline_result.stats.get("solver_call_count", 1) or 1) + 1,
+            capacity_precheck_status=baseline_result.status,
+            warm_start_used=bool(final_result.stats.get("warm_start_used")),
             resource_recommendation_status="not_needed",
             resource_recommendation_message="当前固定资源最短工期已满足强制里程碑，无需增加资源。",
         )
@@ -286,7 +300,12 @@ def _solve_fixed_resources_shortest_scenario(
         fallback,
         baseline_makespan_days=baseline_result.objective_days,
         hard_milestone_feasible=True,
-        schedule_source="current_resources_shortest_fallback",
+        schedule_source="current_resources_capacity_shortest_fallback",
+        performance_path="capacity_fast_path_named_refinement_fallback",
+        solver_call_count=int(baseline_result.stats.get("solver_call_count", 1) or 1) + 1,
+        capacity_precheck_status=baseline_result.status,
+        warm_start_used=bool(final_result.stats.get("warm_start_used")),
+        skipped_named_refinement_reason=f"control_priority_{final_result.status.lower()}",
         resource_recommendation_status="not_needed",
         resource_recommendation_message="当前固定资源最短工期已满足强制里程碑，无需增加资源。",
     )
@@ -312,8 +331,11 @@ def _late_hard_milestones(result: ScheduleResult) -> list[Any]:
 def _fixed_resource_recommendation(
     scenario: ScenarioInput,
     current_schedule_input: ScheduleInput,
+    *,
+    critical_path: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    critical_path = _critical_path_schedule(current_schedule_input)
+    if critical_path is None:
+        critical_path = _critical_path_schedule(current_schedule_input)
     critical_metadata = _critical_path_metadata(critical_path)
     if critical_path.get("status") != "OK":
         return {
