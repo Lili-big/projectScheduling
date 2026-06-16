@@ -8,7 +8,6 @@ __pycache__/
 *.log
 logs/
 docs/
-skills/
 .local.env
 .env
 *.local.env

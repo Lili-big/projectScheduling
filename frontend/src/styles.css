@@ -755,6 +755,55 @@ code {
   width: 180px;
 }
 
+.milestone-table {
+  min-width: 820px;
+  table-layout: fixed;
+}
+
+.milestone-table th:nth-child(1) { width: 240px; }
+.milestone-table th:nth-child(2) { width: 380px; }
+.milestone-table th:nth-child(3) { width: 120px; }
+.milestone-table th:nth-child(4) { width: 140px; }
+
+.milestone-name-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.milestone-scope-cell {
+  color: #334155;
+  white-space: normal;
+  line-height: 1.4;
+}
+
+.milestone-group-row td {
+  padding: 10px 12px 7px;
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 1px solid #dbeafe;
+  background: #eef8f8;
+}
+
+.milestone-group-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.milestone-group-heading strong {
+  color: #0f2742;
+}
+
+.milestone-group-heading span {
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: #e0f2fe;
+  color: #075985;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .process-name-text {
   display: inline-flex;
   align-items: center;
@@ -1559,8 +1608,7 @@ tbody tr:hover {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   grid-template-areas:
     "title title title enabled"
-    "mode quantity maximum calendar"
-    "note note note note"
+    "quantity quantity maximum maximum"
     "cost cost cost cost";
   gap: 10px 12px;
   align-items: start;
@@ -1597,19 +1645,11 @@ tbody tr:hover {
 }
 
 .resource-card > label:nth-of-type(1) {
-  grid-area: mode;
-}
-
-.resource-card > label:nth-of-type(2) {
   grid-area: quantity;
 }
 
-.resource-card > label:nth-of-type(3) {
+.resource-card > label:nth-of-type(2) {
   grid-area: maximum;
-}
-
-.resource-card > label:nth-of-type(4) {
-  grid-area: calendar;
 }
 
 .resource-card input[type="number"],
@@ -1621,13 +1661,6 @@ tbody tr:hover {
 .resource-card input:disabled {
   color: #64748b;
   background: #f8fafc;
-}
-
-.resource-mode-note {
-  grid-area: note;
-  margin: 0;
-  color: #64748b;
-  font-size: 12px;
 }
 
 .linear-cost-editor {
@@ -2076,12 +2109,9 @@ tbody tr:hover {
     grid-template-columns: 1fr;
     grid-template-areas:
       "title"
-      "mode"
       "quantity"
       "maximum"
-      "calendar"
       "enabled"
-      "note"
       "cost";
   }
 

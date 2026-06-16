@@ -39,7 +39,6 @@ import type {
   RelationshipType,
   WorkPointType,
   WorkSectionSide,
-  ResourceMode,
   ResourceCostType,
   ControlLevel,
   ScheduleStrategy,
@@ -100,7 +99,6 @@ import {
   pileResourceTypeByMethod,
   pileResourceTypeByProcess,
   resourceCostTypeLabels,
-  resourceModeLabels,
   upperStructureCodes,
 } from "../domain/constants";
 import {
@@ -140,6 +138,8 @@ import {
   defaultResourceTypeForProcess,
   defaultResourceTypeForTask,
   isLimitedResourcePoolAvailable,
+  normalizeLimitedResourcePool,
+  normalizeScenarioResourcePools,
   processResourceLabel,
   resourcePoolBillingPeriodDays,
   resourcePoolCostType,
@@ -258,13 +258,14 @@ export default function App() {
     try {
       const demo = await getDemoScenario();
       const imported = await importLocalBridgeParams(demo);
-      setScenario(imported.scenario);
+      const normalizedScenario = normalizeScenarioForWorkspace(imported.scenario);
+      setScenario(normalizedScenario);
       setGenerated(null);
       setGeneratedScenarioFingerprint(null);
       setSolveResult(null);
       setSolveResultScenarioFingerprint(null);
       setComparison(null);
-      setLastImport(imported);
+      setLastImport({ ...imported, scenario: normalizedScenario });
       setOpenTabs((current) => (current.includes("tasks") ? current : [...current, "tasks"]));
       setActiveTab("tasks");
     } catch (err) {
@@ -278,8 +279,9 @@ export default function App() {
     requestScenario: ScenarioInput,
     options: { openTasks?: boolean } = {},
   ) {
-    const requestFingerprint = scenarioFingerprintForSolve(requestScenario);
-    const nextGenerated = await generateScheduleInput(requestScenario);
+    const normalizedScenario = normalizeScenarioForWorkspace(requestScenario);
+    const requestFingerprint = scenarioFingerprintForSolve(normalizedScenario);
+    const nextGenerated = await generateScheduleInput(normalizedScenario);
     setGenerated(nextGenerated);
     setGeneratedScenarioFingerprint(requestFingerprint);
     if (options.openTasks !== false) {
@@ -303,7 +305,7 @@ export default function App() {
 
   async function solveCurrent() {
     if (!scenario) return;
-    const requestScenario = scenario;
+    const requestScenario = normalizeScenarioForWorkspace(scenario);
     const requestFingerprint = scenarioFingerprintForSolve(requestScenario);
     setBusy("solving");
     setError(null);
@@ -319,9 +321,9 @@ export default function App() {
 
   async function solveMinResources() {
     if (!scenario) return;
-    const requestScenario = scenario;
+    const requestScenario = normalizeScenarioForWorkspace(scenario);
     const requestFingerprint = scenarioFingerprintForSolve(requestScenario);
-    const hasHardMilestone = scenario.milestones.some((milestone) => milestone.mode === "hard");
+    const hasHardMilestone = requestScenario.milestones.some((milestone) => milestone.mode === "hard");
     const matchingSolveResult = solveResultScenarioFingerprint === requestFingerprint ? solveResult : null;
     const fallbackTargetDays = matchingSolveResult?.result.objective_days ?? null;
     if (!hasHardMilestone && !fallbackTargetDays) {
@@ -349,9 +351,9 @@ export default function App() {
 
   async function solveResourceCost() {
     if (!scenario) return;
-    const requestScenario = scenario;
+    const requestScenario = normalizeScenarioForWorkspace(scenario);
     const requestFingerprint = scenarioFingerprintForSolve(requestScenario);
-    const hasHardMilestone = scenario.milestones.some((milestone) => milestone.mode === "hard");
+    const hasHardMilestone = requestScenario.milestones.some((milestone) => milestone.mode === "hard");
     const matchingSolveResult = solveResultScenarioFingerprint === requestFingerprint ? solveResult : null;
     const fallbackTargetDays = matchingSolveResult?.result.objective_days ?? null;
     if (!hasHardMilestone && !fallbackTargetDays) {
@@ -378,7 +380,8 @@ export default function App() {
   }
 
   async function solveWith(nextScenario: ScenarioInput, fingerprint = scenarioFingerprintForSolve(nextScenario)) {
-    const solved = await solveScenario(nextScenario);
+    const requestScenario = normalizeScenarioForWorkspace(nextScenario);
+    const solved = await solveScenario(requestScenario);
     setGenerated(solved.generated);
     setGeneratedScenarioFingerprint(fingerprint);
     setSolveResult(solved);
@@ -405,13 +408,14 @@ export default function App() {
     setError(null);
     try {
       const payload = new FormData();
+      const requestScenario = normalizeScenarioForWorkspace(scenario);
       payload.append("file", file);
-      payload.append("scenario", JSON.stringify(scenario));
+      payload.append("scenario", JSON.stringify(requestScenario));
       if (targetBridge.trim()) {
         payload.append("target_bridge", targetBridge.trim());
       }
       const imported = await uploadBridgeParams(payload);
-      const nextScenario: ScenarioInput = { ...imported.scenario, task_overrides: {} };
+      const nextScenario = normalizeScenarioForWorkspace({ ...imported.scenario, task_overrides: {} });
       const nextFingerprint = scenarioFingerprintForSolve(nextScenario);
       previousScenarioFingerprintRef.current = nextFingerprint;
       setScenario(nextScenario);
@@ -434,18 +438,20 @@ export default function App() {
     setBusy("nl");
     setError(null);
     try {
-      const result = await applyProcessNaturalLanguageRequest({ scenario, prompt });
-      const resultFingerprint = scenarioFingerprintForSolve(result.scenario);
+      const requestScenario = normalizeScenarioForWorkspace(scenario);
+      const result = await applyProcessNaturalLanguageRequest({ scenario: requestScenario, prompt });
+      const resultScenario = normalizeScenarioForWorkspace(result.scenario);
+      const resultFingerprint = scenarioFingerprintForSolve(resultScenario);
       previousScenarioFingerprintRef.current = resultFingerprint;
-      setScenario(result.scenario);
-      if (hasProcessLibraryChanged(scenario.process_library, result.scenario.process_library)) {
+      setScenario(resultScenario);
+      if (hasProcessLibraryChanged(scenario.process_library, resultScenario.process_library)) {
         setProcessLibraryDirty(true);
       }
       setSolveResult(null);
       setSolveResultScenarioFingerprint(null);
       setComparison(null);
-      await generateTaskViewForScenario(result.scenario, { openTasks: false });
-      return result;
+      await generateTaskViewForScenario(resultScenario, { openTasks: false });
+      return { ...result, scenario: resultScenario };
     } catch (err) {
       setError(errorText(err));
       return null;
@@ -467,7 +473,7 @@ export default function App() {
   }
 
   function patchScenario(patch: Partial<ScenarioInput>) {
-    setScenario((current) => (current ? { ...current, ...patch } : current));
+    setScenario((current) => (current ? normalizeScenarioForWorkspace({ ...current, ...patch }) : current));
   }
 
   function openModule(tabKey: TabKey) {
@@ -563,7 +569,7 @@ export default function App() {
         ? {
             ...current,
             resource_pools: current.resource_pools.map((pool, poolIndex) =>
-              poolIndex === index ? { ...pool, ...patch } : pool,
+              poolIndex === index ? normalizeLimitedResourcePool({ ...pool, ...patch }) : normalizeLimitedResourcePool(pool),
             ),
           }
         : current,
@@ -2595,6 +2601,57 @@ function isContinuousBeamStandardSegmentTask(task: Task): boolean {
     && task.productivity_rule_id.startsWith("cast_in_place_continuous_standard_segment:");
 }
 
+const bridgeCompletionMilestoneName = "下部及现浇结构施工完成";
+const legacyBridgeMilestoneNames = new Set([
+  "合同下部结构及上部现浇梁完工",
+  "下部结构及上部现浇梁强控节点",
+]);
+
+function normalizeScenarioForWorkspace(scenario: ScenarioInput): ScenarioInput {
+  return normalizeScenarioResourcePools({
+    ...scenario,
+    milestones: bridgeCompletionMilestonesForProject(scenario),
+  });
+}
+
+function bridgeCompletionMilestonesForProject(scenario: ScenarioInput): MilestoneConstraint[] {
+  const bridgeMilestones = scenario.milestones.filter(
+    (milestone) => milestone.scope_type === "bridge" && Boolean(milestone.scope_id),
+  );
+  const template = bridgeMilestones[0];
+  const fallbackTargetDate = template?.target_date ?? defaultBridgeCompletionTargetDate(scenario.project.start_date);
+  const byBridgeId = new Map<string, MilestoneConstraint>();
+  for (const milestone of bridgeMilestones) {
+    if (milestone.scope_id && !byBridgeId.has(milestone.scope_id)) {
+      byBridgeId.set(milestone.scope_id, milestone);
+    }
+  }
+
+  return [...scenario.project.bridges]
+    .sort((left, right) => left.order - right.order || left.name.localeCompare(right.name))
+    .map((bridge): MilestoneConstraint => {
+      const existing = byBridgeId.get(bridge.id);
+      const existingName = existing?.name.trim();
+      return {
+        id: `M-${bridge.id}-lower-cast-in-place-finish`,
+        name: existingName && !legacyBridgeMilestoneNames.has(existingName) ? existingName : bridgeCompletionMilestoneName,
+        level: "control",
+        mode: "hard",
+        scope_type: "bridge",
+        scope_id: bridge.id,
+        target_event: "finish",
+        target_date: existing?.target_date ?? fallbackTargetDate,
+        penalty_per_day: 0,
+        related_structure_ids: [],
+      };
+    });
+}
+
+function defaultBridgeCompletionTargetDate(startDate: string): string {
+  const year = Number(startDate.slice(0, 4));
+  return Number.isFinite(year) ? `${year + 2}-12-31` : startDate;
+}
+
 function buildSummary(
   scenario: ScenarioInput | null,
   generated: GeneratedScheduleInput | null,
@@ -2973,7 +3030,7 @@ function errorText(err: unknown): string {
 }
 
 function scenarioFingerprintForSolve(scenario: ScenarioInput): string {
-  return JSON.stringify(scenario);
+  return JSON.stringify(normalizeScenarioForWorkspace(scenario));
 }
 
 function formatScheduleStatus(value: unknown): string {

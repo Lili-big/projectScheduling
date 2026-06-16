@@ -1,4 +1,4 @@
-import type { ComponentType, ResourceCostType, ResourceMode } from "../types/scheduler";
+import type { ComponentType, ResourceCostType } from "../types/scheduler";
 
 export const PREDECESSOR_HOVER_DELAY_MS = 450;
 export const PREDECESSOR_HOVER_CLOSE_DELAY_MS = 140;
@@ -8,11 +8,6 @@ export const upperStructureCodes = {
   castInPlaceBoxBeam: "castInPlaceBoxGirder",
   continuousBeam: "castInPlaceContinuousBoxGirder",
 } as const;
-
-export const resourceModeLabels: Record<ResourceMode, string> = {
-  LIMITED: "限制数量",
-  UNLIMITED: "默认充足",
-};
 
 export const resourceCostTypeLabels: Record<ResourceCostType, string> = {
   none: "不计成本",

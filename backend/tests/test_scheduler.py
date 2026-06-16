@@ -327,6 +327,18 @@ def test_default_scenario_generates_schedule_input() -> None:
     assert any(task.bridge_id == "B1" and task.work_section_id == "WS-LOWER" for task in generated.schedule_input.tasks)
 
 
+def test_default_scenario_has_one_completion_milestone_per_bridge() -> None:
+    scenario = default_scenario()
+
+    assert len(scenario.milestones) == len(scenario.project.bridges) == 1
+    milestone = scenario.milestones[0]
+    assert milestone.name == "下部及现浇结构施工完成"
+    assert milestone.scope_type == "bridge"
+    assert milestone.scope_id == scenario.project.bridges[0].id
+    assert milestone.target_event == "finish"
+    assert milestone.mode == "hard"
+
+
 def test_continuous_beam_upper_structures_generate_t_groups_and_closure_logic() -> None:
     scenario = _scenario_with_continuous_beam(main_pier_count=4, standard_cycles=2)
     generated = generate_schedule_input_from_scenario(scenario)
@@ -765,7 +777,14 @@ def test_noncritical_component_can_opt_into_limited_resource_pool() -> None:
 def test_component_type_milestone_matches_all_components_of_that_type() -> None:
     scenario = default_scenario()
     generated = generate_schedule_input_from_scenario(scenario)
-    cap_milestone = next(milestone for milestone in scenario.milestones if milestone.scope_id == "cap")
+    cap_milestone = MilestoneConstraint(
+        id="M-cap",
+        name="承台完成目标",
+        mode="soft",
+        scope_type="component",
+        scope_id="cap",
+        target_date=scenario.project.start_date,
+    )
     scoped_task_ids = set(_task_ids_for_milestone(cap_milestone, generated.schedule_input.tasks))
     cap_task_ids = {task.id for task in generated.schedule_input.tasks if task.component_type == "cap"}
 
@@ -1086,8 +1105,14 @@ def test_fixed_resource_shortest_outputs_control_balanced_result_when_hard_miles
 def test_soft_milestone_returns_lateness_and_penalty() -> None:
     pytest.importorskip("ortools")
     scenario = default_scenario()
-    soft_milestone = scenario.milestones[2].model_copy(
-        update={"target_date": scenario.project.start_date, "penalty_per_day": 7}
+    soft_milestone = MilestoneConstraint(
+        id="M-soft",
+        name="提醒目标",
+        mode="soft",
+        scope_type="project",
+        target_event="finish",
+        target_date=scenario.project.start_date,
+        penalty_per_day=7,
     )
     scenario.milestones = [soft_milestone]
 

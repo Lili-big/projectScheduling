@@ -1,0 +1,4 @@
+interface:
+  display_name: "研发需求prd文档"
+  short_description: "生成面向实际工程研发交底的产品需求文档并避免照搬demo实现，输出PRD、生成PRD、写一份PRD、同步需求文档"
+  default_prompt: "使用 $write-dev-prd 基于当前项目生成一份面向实际工程研发交底的 PRD。"

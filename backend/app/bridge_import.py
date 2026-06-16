@@ -23,7 +23,7 @@ from .models import (
     UpperStructureComponent,
     WorkSection,
 )
-from .scenario_data import apply_resource_max_quantity_defaults
+from .scenario_data import apply_resource_max_quantity_defaults, sync_bridge_completion_milestones
 
 
 ONTOLOGY_PATH = Path(__file__).resolve().parent / "ontology" / "bridge_structure_ontology.v1.json"
@@ -117,6 +117,7 @@ def import_bridge_parameters(
 
     next_scenario = scenario.model_copy(deep=True)
     next_scenario.project.bridges = canonical_to_project_bridges(canonical.model_dump(), ontology)
+    sync_bridge_completion_milestones(next_scenario)
     apply_resource_max_quantity_defaults(next_scenario)
     summary = build_import_summary(canonical.model_dump())
     return ImportBridgeParamsResponse(

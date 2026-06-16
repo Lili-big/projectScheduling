@@ -1,5 +1,19 @@
+import { Fragment } from "react";
+
 import { PanelTitle } from "../../components/common/PanelTitle";
-import type { MilestoneConstraint, ScenarioInput } from "../../types/scheduler";
+import type { MilestoneConstraint, ProjectBridge, ScenarioInput, WorkPointType } from "../../types/scheduler";
+
+const workPointTypeLabels: Record<WorkPointType, string> = {
+  bridge: "桥梁工点",
+  road: "路基工点",
+  tunnel: "隧道工点",
+};
+
+type MilestoneRow = {
+  bridge: ProjectBridge;
+  milestone: MilestoneConstraint;
+  milestoneIndex: number;
+};
 
 export function MilestonesTab({
   scenario,
@@ -10,76 +24,73 @@ export function MilestonesTab({
   onUpdateMilestone: (index: number, patch: Partial<MilestoneConstraint>) => void;
   scopeLabelForMilestone: (milestone: MilestoneConstraint, scenario: ScenarioInput) => string;
 }) {
+  const rows = milestoneRowsByBridge(scenario);
+
   return (
     <section className="panel full">
-      <PanelTitle title="关键里程碑节点约束" subtitle="固定资源最短工期允许突破目标并给出偏差；固定工期最少资源会把强制目标作为不可突破工期" />
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>节点</th>
-              <th>等级</th>
-              <th>约束</th>
-              <th>范围</th>
-              <th>事件</th>
-              <th>目标日期</th>
-              <th>罚分/天</th>
-            </tr>
-          </thead>
-          <tbody>
-            {scenario.milestones.map((milestone, index) => (
-              <tr key={milestone.id}>
-                <td>
-                  <input
-                    className="wide-input"
-                    value={milestone.name}
-                    onChange={(event) => onUpdateMilestone(index, { name: event.target.value })}
-                  />
-                </td>
-                <td>
-                  <select value={milestone.level} onChange={(event) => onUpdateMilestone(index, { level: event.target.value as MilestoneConstraint["level"] })}>
-                    <option value="contract">合同</option>
-                    <option value="control">强控</option>
-                    <option value="internal">内部</option>
-                  </select>
-                </td>
-                <td>
-                  <select value={milestone.mode} onChange={(event) => onUpdateMilestone(index, { mode: event.target.value as MilestoneConstraint["mode"] })}>
-                    <option value="hard">强制目标</option>
-                    <option value="soft">提醒目标</option>
-                  </select>
-                </td>
-                <td>{scopeLabelForMilestone(milestone, scenario)}</td>
-                <td>
-                  <select
-                    value={milestone.target_event}
-                    onChange={(event) => onUpdateMilestone(index, { target_event: event.target.value as MilestoneConstraint["target_event"] })}
-                  >
-                    <option value="finish">完成</option>
-                    <option value="start">开始</option>
-                  </select>
-                </td>
-                <td>
-                  <input
-                    type="date"
-                    value={milestone.target_date}
-                    onChange={(event) => onUpdateMilestone(index, { target_date: event.target.value })}
-                  />
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    min={0}
-                    value={milestone.penalty_per_day}
-                    disabled={milestone.mode === "hard"}
-                    onChange={(event) => onUpdateMilestone(index, { penalty_per_day: Number(event.target.value) })}
-                  />
-                </td>
+      <PanelTitle title="关键里程碑节点约束" subtitle="按桥梁/工点维护单一完成节点，用于固定工期和资源建议测算" />
+      {rows.length ? (
+        <div className="table-wrap">
+          <table className="milestone-table">
+            <thead>
+              <tr>
+                <th>节点名称</th>
+                <th>范围</th>
+                <th>事件</th>
+                <th>目标日期</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rows.map(({ bridge, milestone, milestoneIndex }) => (
+                <Fragment key={bridge.id}>
+                  <tr className="milestone-group-row">
+                    <td colSpan={4}>
+                      <span className="milestone-group-heading">
+                        <strong>{bridge.name}</strong>
+                        <span>{workPointTypeLabels[bridge.workpoint_type]}</span>
+                      </span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <input
+                        className="milestone-name-input"
+                        value={milestone.name}
+                        onChange={(event) => onUpdateMilestone(milestoneIndex, { name: event.target.value })}
+                      />
+                    </td>
+                    <td className="milestone-scope-cell">{scopeLabelForMilestone(milestone, scenario)}</td>
+                    <td>
+                      <span className="text-pill">{milestone.target_event === "start" ? "开始" : "完成"}</span>
+                    </td>
+                    <td>
+                      <input
+                        type="date"
+                        value={milestone.target_date}
+                        onChange={(event) => onUpdateMilestone(milestoneIndex, { target_date: event.target.value })}
+                      />
+                    </td>
+                  </tr>
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="empty compact">暂无桥梁/工点里程碑</div>
+      )}
     </section>
   );
+}
+
+function milestoneRowsByBridge(scenario: ScenarioInput): MilestoneRow[] {
+  return [...scenario.project.bridges]
+    .sort((left, right) => left.order - right.order || left.name.localeCompare(right.name))
+    .flatMap((bridge) => {
+      const milestoneIndex = scenario.milestones.findIndex(
+        (milestone) => milestone.scope_type === "bridge" && milestone.scope_id === bridge.id,
+      );
+      if (milestoneIndex < 0) return [];
+      return [{ bridge, milestone: scenario.milestones[milestoneIndex], milestoneIndex }];
+    });
 }

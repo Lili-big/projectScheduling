@@ -35,6 +35,7 @@ DEFAULT_RESOURCE_MAX_QUANTITIES: dict[str, int] = {
     "pier_body_team": 5,
     "cap_beam_team": 5,
 }
+BRIDGE_COMPLETION_MILESTONE_NAME = "下部及现浇结构施工完成"
 
 
 def default_scenario() -> ScenarioInput:
@@ -166,8 +167,52 @@ def default_scenario() -> ScenarioInput:
         milestones=default_milestones(),
         time_limit_seconds=10,
     )
+    sync_bridge_completion_milestones(scenario)
     apply_resource_max_quantity_defaults(scenario)
     return scenario
+
+
+def sync_bridge_completion_milestones(scenario: ScenarioInput) -> ScenarioInput:
+    scenario.milestones = bridge_completion_milestones(scenario.project, scenario.milestones)
+    return scenario
+
+
+def bridge_completion_milestones(
+    project: ProjectModel,
+    existing_milestones: list[MilestoneConstraint] | None = None,
+) -> list[MilestoneConstraint]:
+    existing_bridge_milestones = [
+        milestone
+        for milestone in existing_milestones or []
+        if milestone.scope_type == "bridge" and milestone.scope_id
+    ]
+    existing_by_bridge: dict[str, MilestoneConstraint] = {}
+    for milestone in existing_bridge_milestones:
+        existing_by_bridge.setdefault(milestone.scope_id or "", milestone)
+
+    template = existing_bridge_milestones[0] if existing_bridge_milestones else None
+    fallback_target_date = template.target_date if template else _default_bridge_completion_target_date(project.start_date)
+    milestones: list[MilestoneConstraint] = []
+    for bridge in sorted(project.bridges, key=lambda item: (item.order, item.name)):
+        existing = existing_by_bridge.get(bridge.id)
+        milestones.append(
+            MilestoneConstraint(
+                id=f"M-{bridge.id}-lower-cast-in-place-finish",
+                name=BRIDGE_COMPLETION_MILESTONE_NAME,
+                level="control",
+                mode="hard",
+                scope_type="bridge",
+                scope_id=bridge.id,
+                target_event="finish",
+                target_date=existing.target_date if existing else fallback_target_date,
+                penalty_per_day=0,
+            )
+        )
+    return milestones
+
+
+def _default_bridge_completion_target_date(start_date: date) -> date:
+    return date(start_date.year + 2, 12, 31)
 
 
 def apply_resource_max_quantity_defaults(scenario: ScenarioInput) -> ScenarioInput:
@@ -376,35 +421,15 @@ def default_resource_pools() -> list[ResourcePool]:
 def default_milestones() -> list[MilestoneConstraint]:
     return [
         MilestoneConstraint(
-            id="M-contract-finish",
-            name="合同下部结构及上部现浇梁完工",
-            level="contract",
-            mode="hard",
-            scope_type="bridge",
-            scope_id="B1",
-            target_event="finish",
-            target_date=date(2028, 12, 31),
-        ),
-        MilestoneConstraint(
-            id="M-control-ws-lower",
-            name="下部结构及上部现浇梁强控节点",
+            id="M-B1-lower-cast-in-place-finish",
+            name=BRIDGE_COMPLETION_MILESTONE_NAME,
             level="control",
             mode="hard",
             scope_type="bridge",
             scope_id="B1",
             target_event="finish",
-            target_date=date(2028, 12, 15),
-        ),
-        MilestoneConstraint(
-            id="M-internal-cap",
-            name="承台内部目标",
-            level="internal",
-            mode="soft",
-            scope_type="component",
-            scope_id="cap",
-            target_event="finish",
-            target_date=date(2027, 5, 25),
-            penalty_per_day=20,
+            target_date=date(2028, 12, 31),
+            penalty_per_day=0,
         ),
     ]
 

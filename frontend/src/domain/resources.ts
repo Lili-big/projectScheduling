@@ -1,4 +1,4 @@
-import type { ProcessTemplate, ResourceCostType, ResourceMode, ResourcePool, Task } from "../types/scheduler";
+import type { ProcessTemplate, ResourceCostType, ResourceMode, ResourcePool, ScenarioInput, Task } from "../types/scheduler";
 import {
   defaultResourceTypeByComponent,
   keyResourceComponentTypes,
@@ -68,6 +68,27 @@ export function resourcePoolUnitCost(pool: ResourcePool): number {
 
 export function resourcePoolBillingPeriodDays(pool: ResourcePool): number {
   return Number.isFinite(Number(pool.billing_period_days)) ? Math.max(1, Number(pool.billing_period_days)) : 30;
+}
+
+export function normalizeLimitedResourcePool(pool: ResourcePool): ResourcePool {
+  const quantity = Math.max(0, resourcePoolQuantity(pool));
+  const rawMaxQuantity = typeof pool.max_quantity === "number" && Number.isFinite(pool.max_quantity)
+    ? pool.max_quantity
+    : quantity;
+  return {
+    ...pool,
+    resource_mode: "LIMITED",
+    quantity,
+    max_quantity: Math.max(quantity, rawMaxQuantity),
+    calendar_id: pool.calendar_id || "continuous",
+  };
+}
+
+export function normalizeScenarioResourcePools(scenario: ScenarioInput): ScenarioInput {
+  return {
+    ...scenario,
+    resource_pools: scenario.resource_pools.map(normalizeLimitedResourcePool),
+  };
 }
 
 export function taskResourceTypesLabel(task: Task, resourcePools: ResourcePool[]): string {

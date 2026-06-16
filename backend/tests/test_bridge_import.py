@@ -68,6 +68,9 @@ def test_bridge_excel_import_maps_to_schedulable_scenario() -> None:
     assert imported.process_library[0].id == scenario.process_library[0].id
     assert imported.resource_pools[0].id == scenario.resource_pools[0].id
     assert imported.milestones[0].id == scenario.milestones[0].id
+    assert len(imported.milestones) == len(imported.project.bridges) == 1
+    assert imported.milestones[0].name == "下部及现浇结构施工完成"
+    assert imported.milestones[0].scope_type == "bridge"
 
     bridge = imported.project.bridges[0]
     assert bridge.workpoint_type == "bridge"
