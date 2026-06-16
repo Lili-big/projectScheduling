@@ -1,6 +1,5 @@
 import { PanelTitle } from "../../components/common/PanelTitle";
-import { componentLabels } from "../../domain/labels";
-import { buildUpperLowerLogicConstraints } from "../../domain/logic";
+import { buildLogicRuleRows, deferredScheduleLogicItems } from "../../domain/logic";
 import type { LogicRule, RelationshipType, ScenarioInput, UpperStructureLogicRule } from "../../types/scheduler";
 
 export function LogicTab({
@@ -12,7 +11,7 @@ export function LogicTab({
   onUpdateLogic: (index: number, patch: Partial<LogicRule>) => void;
   onUpdateUpperStructureLogic: (ruleId: string, patch: Partial<UpperStructureLogicRule>) => void;
 }) {
-  const upperLowerConstraints = buildUpperLowerLogicConstraints(scenario);
+  const { rows, summary } = buildLogicRuleRows(scenario);
 
   const relationshipSelect = (
     value: RelationshipType,
@@ -39,96 +38,86 @@ export function LogicTab({
 
   return (
     <section className="panel full logic-panel">
-      <PanelTitle title="工艺逻辑约束" subtitle="下部结构规则与桥梁上部结构派生约束使用同一套关系和间隔配置" />
+      <PanelTitle title="工艺逻辑约束" subtitle="维护任务之间谁先谁后；时间关系和等待时间会进入排程求解" />
       <div className="logic-content unified">
         <div className="logic-section-title">
           <div>
             <h3>规则配置</h3>
-            <span>{scenario.logic_rules.length} 条下部规则 / {upperLowerConstraints.length} 条桥梁上部规则</span>
+            <span>
+              {summary.activeRuleCount} 条规则 / {summary.matchedRuleCount} 条当前适用 / {summary.unmatchedRuleCount} 条暂未适用
+            </span>
           </div>
-          <span className="text-pill">关系与间隔进入排程求解</span>
+          <span className="text-pill">修改后重新生成任务视图</span>
         </div>
         <div className="table-wrap logic-unified">
           <table className="logic-unified-table">
             <thead>
               <tr>
-                <th>规则</th>
-                <th>当前 / 后续</th>
-                <th>前置来源</th>
-                <th>策略 / 生成</th>
-                <th>关系</th>
-                <th>间隔</th>
-                <th>当前匹配</th>
-                <th>说明</th>
+                <th>规则名称</th>
+                <th>适用结构物</th>
+                <th>前置工序</th>
+                <th>匹配规则</th>
+                <th>逻辑关系</th>
+                <th>时间间隔</th>
+                <th>使用范围</th>
+                <th>规则说明</th>
               </tr>
             </thead>
             <tbody>
-              {scenario.logic_rules.map((rule, index) => (
-                <tr key={rule.id}>
+              {rows.map((row) => (
+                <tr key={row.id}>
                   <td>
                     <div className="logic-rule-heading">
-                      <span className="logic-source-badge lower">下部结构</span>
-                      <div className="rule-name">{logicRuleDisplayName(rule)}</div>
+                      <span className={`logic-source-badge ${row.source}`}>{row.sourceLabel}</span>
+                      <div className="rule-name">{row.name}</div>
                     </div>
-                    <code className="muted-code">{rule.id}</code>
                   </td>
-                  <td>{componentLabels[rule.to_component]}</td>
-                  <td>{rule.predecessor_candidates.map((item) => componentLabels[item]).join(" / ")}</td>
+                  <td>{row.successorLabel}</td>
+                  <td>{row.predecessorLabel}</td>
                   <td>
-                    <select
-                      value={rule.predecessor_strategy}
-                      onChange={(event) => onUpdateLogic(index, { predecessor_strategy: event.target.value as LogicRule["predecessor_strategy"] })}
-                    >
-                      <option value="first_available">优先回退</option>
-                      <option value="all">全部满足</option>
-                    </select>
+                    <span className="logic-mode-pill readonly">{row.matchModeLabel}</span>
                   </td>
-                  <td>{relationshipSelect(rule.relationship, (relationship) => onUpdateLogic(index, { relationship }))}</td>
-                  <td>{lagInput(rule.lag_days, (lag_days) => onUpdateLogic(index, { lag_days }))}</td>
-                  <td><span className="logic-match muted">默认规则</span></td>
-                  <td className="note-cell">{rule.note}</td>
-                </tr>
-              ))}
-              {upperLowerConstraints.map((constraint) => (
-                <tr key={constraint.id}>
                   <td>
-                    <div className="logic-rule-heading">
-                      <span className="logic-source-badge upper">桥梁上部</span>
-                      <div className="rule-name">{constraint.name}</div>
-                    </div>
-                    <code className="muted-code">{constraint.id}</code>
-                  </td>
-                  <td>{constraint.upperTarget}</td>
-                  <td>{constraint.lowerPredecessor}</td>
-                  <td className="note-cell">{constraint.generation}</td>
-                  <td>
-                    {relationshipSelect(
-                      constraint.relationship,
-                      (relationship) => onUpdateUpperStructureLogic(constraint.id, { relationship }),
+                    {relationshipSelect(row.relationship, (relationship) =>
+                      row.source === "lower" && row.lowerRuleIndex !== undefined
+                        ? onUpdateLogic(row.lowerRuleIndex, { relationship })
+                        : onUpdateUpperStructureLogic(row.id, { relationship }),
                     )}
                   </td>
                   <td>
-                    {lagInput(
-                      constraint.lagDays,
-                      (lag_days) => onUpdateUpperStructureLogic(constraint.id, { lag_days }),
+                    {lagInput(row.lagDays, (lag_days) =>
+                      row.source === "lower" && row.lowerRuleIndex !== undefined
+                        ? onUpdateLogic(row.lowerRuleIndex, { lag_days })
+                        : onUpdateUpperStructureLogic(row.id, { lag_days }),
                     )}
                   </td>
-                  <td><span className="logic-match">{constraint.matchedText}</span></td>
-                  <td className="note-cell">{constraint.note}</td>
+                  <td>
+                    <span className={`logic-match ${row.matchedCount > 0 ? "active" : "muted"}`}>{row.matchedText}</span>
+                  </td>
+                  <td className="note-cell">
+                    <span>{row.note}</span>
+                    {row.generation && <span className="logic-note-extra">{row.generation}</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        <div className="logic-deferred">
+          <div>
+            <strong>当前暂不生成任务</strong>
+            <span>以下工艺已有模板或结构参数，但当前任务图不会生成对应现场任务。</span>
+          </div>
+          <div className="logic-deferred-list">
+            {deferredScheduleLogicItems.map((item) => (
+              <div className="logic-deferred-item" key={item.name}>
+                <span>{item.name}</span>
+                <p>{item.reason}</p>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </section>
   );
-}
-
-function logicRuleDisplayName(rule: LogicRule): string {
-  if (rule.note) {
-    return rule.note.replace(/。$/, "");
-  }
-  const predecessors = rule.predecessor_candidates.map((item) => componentLabels[item]).join("、");
-  return `${componentLabels[rule.to_component]}在${predecessors}之后施工`;
 }

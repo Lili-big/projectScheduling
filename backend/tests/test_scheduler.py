@@ -23,6 +23,7 @@ from app.sample_data import (  # noqa: E402
 )
 from app.scenario import compare_scenarios, generate_schedule_input_from_scenario, solve_resource_cost_scenario, solve_scenario  # noqa: E402
 from app.scenario_data import apply_resource_max_quantity_defaults, default_scenario  # noqa: E402
+from app.services.bridge_import_service import import_local_bridge_params  # noqa: E402
 from app.solver import _resource_path_metrics, _task_ids_for_milestone, solve_min_resources_schedule, solve_resource_cost_schedule, solve_schedule  # noqa: E402
 from app.wbs import calculate_duration, generate_wbs  # noqa: E402
 
@@ -564,6 +565,18 @@ def test_upper_structure_logic_relationship_and_lag_are_configurable() -> None:
     assert zero_block_link.lag_days == 4
     assert t_chain_link.relationship == "FS"
     assert t_chain_link.lag_days == 2
+
+
+def test_imported_scenario_logic_source_rules_are_visible_active_rules() -> None:
+    scenario = import_local_bridge_params(default_scenario()).scenario
+    generated = generate_schedule_input_from_scenario(scenario)
+
+    visible_rule_ids = {rule.id for rule in scenario.logic_rules}
+    visible_rule_ids.update(scenario_module.UPPER_STRUCTURE_LOGIC_RULE_IDS)
+    generated_rule_ids = {link.source_rule_id for link in generated.schedule_input.precedence_links}
+
+    assert generated_rule_ids <= visible_rule_ids
+    assert "simple_beam_after_lower_structure" not in generated_rule_ids
 
 
 def test_default_scenario_sets_resource_max_quantity_from_business_defaults() -> None:

@@ -129,14 +129,12 @@ import { findComponent, findStructure, findWorkSection, isComponentType } from "
 import { scenarioWithTaskProcessPatch } from "../domain/scenarioMutations";
 import { milestoneStatusClass, scopeLabel } from "../domain/milestones";
 import {
-  buildUpperLowerLogicConstraints,
   groupUpperStructures,
   isCastInPlaceBoxBeamUpper,
   isContinuousBeamUpper,
   isSimpleBeamUpper,
   upperGroupIndex,
 } from "../domain/logic";
-import type { UpperLowerLogicConstraint } from "../domain/logic";
 import {
   applyRequiredResourceTypesToTasks,
   defaultResourceTypeForProcess,
@@ -152,11 +150,7 @@ import {
   taskResourceTypesLabel,
 } from "../domain/resources";
 import type { MetricTone, PlanStatusDisplay } from "../domain/scheduleDerived";
-import {
-  defaultUpperStructureLogicRules,
-  mergeUpperStructureLogicRules,
-  upperStructureLogicDefinitions,
-} from "../domain/upperStructureLogic";
+import { mergeUpperStructureLogicRules } from "../domain/upperStructureLogic";
 import { SideNavigation, WorkspaceTabStrip } from "../features/layout/WorkspaceNavigation";
 import { ProcessTab } from "../features/process/ProcessTab";
 import { LogicTab } from "../features/logic/LogicTab";
@@ -205,10 +199,19 @@ const balanceBucketLabels: Record<BalanceBucket, string> = {
 
 const controlLevelLabels: Record<ControlLevel, string> = {
   control: "控制性工程",
-  key: "重点工程",
+  key: "控制性工程",
   normal: "普通工程",
-  rough: "粗控工程",
+  rough: "普通工程",
 };
+
+const editableControlLevelOptions: Array<{ value: ControlLevel; label: string }> = [
+  { value: "control", label: "控制性工程" },
+  { value: "normal", label: "普通工程" },
+];
+
+function editableControlLevelValue(value: ControlLevel): ControlLevel {
+  return value === "control" || value === "key" ? "control" : "normal";
+}
 
 export default function App() {
   const [scenario, setScenario] = useState<ScenarioInput | null>(null);
@@ -812,10 +815,6 @@ function TaskViewTab({
     () => new Map((generatedForDetails?.schedule_input.tasks ?? []).map((task) => [task.id, task])),
     [generatedForDetails],
   );
-  const logicRuleById = useMemo(
-    () => new Map(scenario.logic_rules.map((rule) => [rule.id, rule])),
-    [scenario.logic_rules],
-  );
   const rows = useMemo(
     () => buildTaskViewRows(generatedForDetails, scenario, linksBySuccessor, workSectionDisplayById),
     [generatedForDetails, linksBySuccessor, scenario, workSectionDisplayById],
@@ -862,7 +861,6 @@ function TaskViewTab({
         predecessor,
         predecessorSideLabel: predecessor ? workSectionLabelForTask(predecessor, workSectionDisplayById) : "-",
         link,
-        rule: logicRuleById.get(link.source_rule_id),
       };
     });
   }
@@ -904,11 +902,11 @@ function TaskViewTab({
           <td>
             {editableStructure ? (
               <select
-                value={controlLevel}
+                value={editableControlLevelValue(controlLevel)}
                 disabled={refreshingTaskGraph}
                 onChange={(event) => onUpdateStructureControlLevel(row.task, event.target.value as ControlLevel)}
               >
-                {Object.entries(controlLevelLabels).map(([value, label]) => (
+                {editableControlLevelOptions.map(({ value, label }) => (
                   <option value={value} key={value}>{label}</option>
                 ))}
               </select>
@@ -1228,11 +1226,6 @@ function ResultsTab({
     }
     return links;
   }, [generatedForDetails]);
-  const logicRuleById = useMemo(
-    () => new Map((scenario?.logic_rules ?? []).map((rule) => [rule.id, rule])),
-    [scenario],
-  );
-
   useEffect(() => {
     setSelectedResultIndex(0);
   }, [solveResult]);
@@ -1274,13 +1267,11 @@ function ResultsTab({
     return task.predecessor_ids.map((predecessorId) => {
       const predecessor = scheduledTaskById.get(predecessorId);
       const link = links.find((item) => item.predecessor_id === predecessorId);
-      const rule = link ? logicRuleById.get(link.source_rule_id) : undefined;
       return {
         predecessorId,
         predecessor,
         predecessorSideLabel: predecessor ? workSectionLabelForTask(predecessor, workSectionDisplayById) : "-",
         link,
-        rule,
       };
     });
   }

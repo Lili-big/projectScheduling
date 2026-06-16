@@ -1,13 +1,12 @@
 import type { CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import type { LogicRule, PrecedenceLink, Task } from "../../types/scheduler";
+import type { PrecedenceLink, Task } from "../../types/scheduler";
 
 export type PredecessorDetail = {
   predecessorId: string;
   predecessor?: Task;
   predecessorSideLabel?: string;
   link?: PrecedenceLink;
-  rule?: LogicRule;
 };
 
 export function PredecessorPopover({
@@ -38,10 +37,13 @@ export function PredecessorPopover({
           {details.map((detail) => (
             <div className="predecessor-item" key={`${task.id}-${detail.predecessorId}-${detail.link?.id ?? "missing"}`}>
               <div className="predecessor-item-title">
-                {detail.predecessorSideLabel && detail.predecessorSideLabel !== "-" && (
-                  <span className="side-tag mini">{detail.predecessorSideLabel}</span>
-                )}
-                <strong>{detail.predecessor?.name ?? detail.predecessorId}</strong>
+                <div className="predecessor-identity">
+                  {detail.predecessorSideLabel && detail.predecessorSideLabel !== "-" && (
+                    <span className="side-tag mini">{detail.predecessorSideLabel}</span>
+                  )}
+                  <span className="predecessor-structure">{predecessorStructureLabel(detail.predecessor, detail.predecessorSideLabel)}</span>
+                  <strong>{predecessorComponentName(detail.predecessor, detail.predecessorSideLabel) ?? detail.predecessorId}</strong>
+                </div>
                 {detail.link && <span className="predecessor-relation-token">{formatPrecedenceToken(detail.link)}</span>}
               </div>
             </div>
@@ -102,5 +104,29 @@ function predecessorPopoverStyle(anchorRect: DOMRect | null): CSSProperties {
 
 function formatPrecedenceToken(link?: PrecedenceLink): string {
   if (!link) return "-";
-  return `${link.relationship}+${link.lag_days}`;
+  return `${link.relationship}+${link.lag_days}天`;
+}
+
+function predecessorStructureLabel(task?: Task, sideLabel?: string): string {
+  if (!task) return "-";
+  const label = task.structure_name || task.structure_id || "-";
+  if (sideLabel && sideLabel !== "-" && label.startsWith(sideLabel)) {
+    return label.slice(sideLabel.length).trim() || label;
+  }
+  return label;
+}
+
+function predecessorComponentName(task?: Task, sideLabel?: string): string | null {
+  if (!task) return null;
+  const structureLabels = [
+    task.structure_name,
+    predecessorStructureLabel(task, sideLabel),
+  ].filter((label): label is string => Boolean(label && label !== "-"));
+
+  for (const structureLabel of structureLabels) {
+    if (task.name.startsWith(`${structureLabel}-`)) {
+      return task.name.slice(structureLabel.length + 1);
+    }
+  }
+  return task.name || null;
 }
