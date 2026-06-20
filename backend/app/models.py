@@ -446,6 +446,20 @@ class ProcessLibrarySaveRequest(BaseModel):
     process_library: list[ProcessTemplate] = Field(min_length=1)
 
 
+class LocalScenarioConfigSaveRequest(BaseModel):
+    process_library: list[ProcessTemplate] = Field(min_length=1)
+    logic_rules: list[LogicRule] = Field(min_length=1)
+    upper_structure_logic_rules: list[UpperStructureLogicRule] = []
+    resource_pools: list[ResourcePool] = Field(min_length=1)
+
+
+class LocalScenarioConfigResponse(BaseModel):
+    process_library: list[ProcessTemplate]
+    logic_rules: list[LogicRule]
+    upper_structure_logic_rules: list[UpperStructureLogicRule]
+    resource_pools: list[ResourcePool]
+
+
 class WbsRequest(BaseModel):
     bridge: BridgeModel
     productivity_rules: list[ProductivityRule]

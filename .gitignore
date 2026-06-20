@@ -1,12 +1,16 @@
 .venv/
 .npm-cache/
+.npm-cache-netlify-deploy/
+.netlify-deploy-staging/
 .pip-cache/
 __pycache__/
 .pytest_cache/
 .git-tmp-projectScheduling/
 *.pyc
 *.log
+deploy-*.zip
 logs/
+.local-data/
 docs/
 .local.env
 .env
@@ -19,3 +23,5 @@ backend/tests/__pycache__/
 
 # Local Netlify folder
 .netlify
+.edge-profile/
+.netlify-cli-runtime/

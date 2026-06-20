@@ -31,7 +31,19 @@ export type BalanceBucket = "week" | "month";
 export type TabKey = "process" | "logic" | "resources" | "milestones" | "tasks" | "results";
 export type GanttMode = "by_structure" | "by_process";
 export type TaskViewMode = "by_structure" | "by_process";
-export type BusyState = "loading" | "generating" | "solving" | "minResources" | "resourceCost" | "comparing" | "importing" | "nl" | "savingProcessLibrary" | null;
+export type BusyState =
+  | "loading"
+  | "generating"
+  | "solving"
+  | "minResources"
+  | "resourceCost"
+  | "comparing"
+  | "importing"
+  | "nl"
+  | "savingProcessLibrary"
+  | "savingLogic"
+  | "savingResources"
+  | null;
 
 export type ComponentModel = {
   id: string;
@@ -206,6 +218,13 @@ export type ScenarioInput = {
   milestones: MilestoneConstraint[];
   schedule_strategy?: ScheduleStrategyConfig;
   time_limit_seconds: number;
+};
+
+export type LocalScenarioConfig = {
+  process_library: ProcessTemplate[];
+  logic_rules: LogicRule[];
+  upper_structure_logic_rules: UpperStructureLogicRule[];
+  resource_pools: ResourcePool[];
 };
 
 export type Task = {

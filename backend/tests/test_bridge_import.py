@@ -127,12 +127,12 @@ def test_import_local_bridge_params_endpoint_uses_project_workbook() -> None:
     assert response.scenario.project.bridges[0].work_sections[0].structures[1].support_no == "1#墩"
     assert response.scenario.process_library[0].id == scenario.process_library[0].id
     max_by_type = {pool.type: pool.max_quantity for pool in response.scenario.resource_pools}
-    assert max_by_type["rotary_drill"] == 5
+    assert max_by_type["rotary_drill"] == 10
     assert "spread_foundation_team" not in max_by_type
-    assert max_by_type["cap_team"] == 5
-    assert max_by_type["pier_body_team"] == 5
-    assert max_by_type["cap_beam_team"] == 5
-    assert max_by_type["cast_in_place_continuous_beam_team"] == 4
+    assert max_by_type["cap_team"] == 10
+    assert max_by_type["pier_body_team"] == 10
+    assert max_by_type["cap_beam_team"] == 10
+    assert max_by_type["cast_in_place_continuous_beam_team"] == 10
 
 
 def test_imported_spread_foundation_can_precede_abutment_body() -> None:

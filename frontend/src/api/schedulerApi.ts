@@ -3,6 +3,7 @@ import type {
   CompareResponse,
   GeneratedScheduleInput,
   ImportBridgeParamsResponse,
+  LocalScenarioConfig,
   ProcessNlResponse,
   ProcessTemplate,
   ScenarioInput,
@@ -31,6 +32,8 @@ type ProcessNlRequest = {
 type ProcessLibrarySaveRequest = {
   process_library: ProcessTemplate[];
 };
+
+type LocalScenarioConfigSaveRequest = LocalScenarioConfig;
 
 export function getDemoScenario(): Promise<ScenarioInput> {
   return apiGet<ScenarioInput>("/api/demo-scenario");
@@ -70,4 +73,8 @@ export function applyProcessNaturalLanguage(request: ProcessNlRequest): Promise<
 
 export function saveProcessLibrary(request: ProcessLibrarySaveRequest): Promise<ProcessTemplate[]> {
   return apiPut<ProcessTemplate[]>("/api/process-library", request);
+}
+
+export function saveLocalScenarioConfig(request: LocalScenarioConfigSaveRequest): Promise<LocalScenarioConfig> {
+  return apiPut<LocalScenarioConfig>("/api/local-scenario-config", request);
 }

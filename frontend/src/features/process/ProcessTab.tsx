@@ -117,7 +117,7 @@ export function ProcessTab({
             type="button"
             onClick={onSaveProcessLibrary}
             disabled={savingProcessLibrary || !processLibraryDirty}
-            title="演示环境使用显式保存；实际工程应改为页面实时保存。"
+            title="保存到后端本地 JSON 配置文件"
             aria-label="保存工艺工效库"
           >
             {savingProcessLibrary ? <Loader2 className="spin" size={16} /> : <Save size={16} />}

@@ -218,18 +218,24 @@ PROCESS_NL_LLM_API_KEY=your-api-key
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/api/health
 ```
-## Supabase 工艺关系表
+## 本地配置模拟
 
-后端启动 `/api/demo-scenario` 时会先构造默认场景，再从 Supabase `public.process_relationships` 读取工艺工效库并覆盖 `scenario.process_library`。前端“工艺工效库”页签点击“保存到 Supabase”时，会调用后端 `PUT /api/process-library`，由后端通过 PostgreSQL session pool 写入，不在浏览器端暴露 Supabase 写入凭据。
+后端启动 `/api/demo-scenario` 时会先构造默认场景，再叠加 `.local-data/scheduler-config.json` 中保存的本地配置。该文件用于临时模拟配置库，不随 git 提交。
 
-需要在 `.local.env` 配置 Supabase Database 的 session pooler 连接串：
+当前保存的配置范围包括：
 
-```env
-SUPABASE_POSTGRES_SESSION_POOL_URL=postgresql://postgres.PROJECT_REF:PASSWORD@aws-0-region.pooler.supabase.com:5432/postgres?sslmode=require
-SUPABASE_POSTGRES_POOL_SIZE=5
-```
+- `process_library`：工艺工效库。
+- `logic_rules`：下部结构工艺逻辑。
+- `upper_structure_logic_rules`：上部结构关联逻辑。
+- `resource_pools`：资源配置。
 
-已创建的表：`public.process_relationships`。一行对应一个工艺模板，`productivity_options` 和 `applicability` 使用 `jsonb` 存储，以保持和前端 `ProcessTemplate` 数据结构一致。
+前端“工艺工效库”“工艺逻辑”“资源配置”页签均使用显式保存按钮。保存会调用后端本地配置接口并写入上述 JSON 文件；刷新浏览器或重启本地服务后仍会读取该配置。
+
+相关接口：
+
+- `GET /api/process-library`：读取本地叠加后的工艺工效库。
+- `PUT /api/process-library`：仅保存工艺工效库。
+- `PUT /api/local-scenario-config`：一次保存工艺工效库、工艺逻辑和资源配置。
 
 ## 本地本体配置
 

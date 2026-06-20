@@ -12,6 +12,8 @@ from .models import (
     DemoPayload,
     GeneratedScheduleInput,
     ImportBridgeParamsResponse,
+    LocalScenarioConfigResponse,
+    LocalScenarioConfigSaveRequest,
     MinResourcesSolveRequest,
     ProcessLibrarySaveRequest,
     ProcessNlRequest,
@@ -37,9 +39,14 @@ from .sample_data import (
 from .scenario import compare_scenarios, generate_schedule_input_from_scenario, solve_min_resources_scenario, solve_resource_cost_scenario, solve_scenario
 from .solver import solve_schedule
 from .process_nl import apply_process_natural_language
-from .process_repository import ProcessRepositoryError
+from .local_scenario_config import LocalScenarioConfigError
 from .services.bridge_import_service import import_local_bridge_params, import_uploaded_bridge_params
-from .services.process_library_service import default_scenario_with_process_library, get_process_library, persist_process_library
+from .services.process_library_service import (
+    default_scenario_with_process_library,
+    get_process_library,
+    persist_local_scenario_config,
+    persist_process_library,
+)
 from .wbs import generate_wbs
 
 
@@ -81,7 +88,7 @@ def demo() -> DemoPayload:
 def demo_scenario() -> ScenarioInput:
     try:
         return default_scenario_with_process_library()
-    except ProcessRepositoryError as exc:
+    except LocalScenarioConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
@@ -89,7 +96,7 @@ def demo_scenario() -> ScenarioInput:
 def get_process_library_endpoint() -> list[ProcessTemplate]:
     try:
         return get_process_library()
-    except ProcessRepositoryError as exc:
+    except LocalScenarioConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
@@ -97,7 +104,20 @@ def get_process_library_endpoint() -> list[ProcessTemplate]:
 def save_process_library_endpoint(request: ProcessLibrarySaveRequest) -> list[ProcessTemplate]:
     try:
         return persist_process_library(request.process_library)
-    except ProcessRepositoryError as exc:
+    except LocalScenarioConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.put("/api/local-scenario-config", response_model=LocalScenarioConfigResponse)
+def save_local_scenario_config_endpoint(request: LocalScenarioConfigSaveRequest) -> dict[str, list[object]]:
+    try:
+        return persist_local_scenario_config(
+            process_library=request.process_library,
+            logic_rules=request.logic_rules,
+            upper_structure_logic_rules=request.upper_structure_logic_rules,
+            resource_pools=request.resource_pools,
+        )
+    except LocalScenarioConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 

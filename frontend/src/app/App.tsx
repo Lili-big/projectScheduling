@@ -28,7 +28,7 @@ import {
   generateScheduleInput,
   getDemoScenario,
   importLocalBridgeParams,
-  saveProcessLibrary,
+  saveLocalScenarioConfig,
   solveMinResources as solveMinResourcesRequest,
   solveResourceCost as solveResourceCostRequest,
   solveScenario,
@@ -78,6 +78,7 @@ import type {
   ScenarioAlternativeResult,
   CompareResponse,
   ImportBridgeParamsResponse,
+  LocalScenarioConfig,
   ProcessNlChange,
   ProcessNlResponse,
   ContinuitySplitDetail,
@@ -228,6 +229,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [lastImport, setLastImport] = useState<ImportBridgeParamsResponse | null>(null);
   const [processLibraryDirty, setProcessLibraryDirty] = useState(false);
+  const [logicDirty, setLogicDirty] = useState(false);
+  const [resourcesDirty, setResourcesDirty] = useState(false);
 
   useEffect(() => {
     void loadScenario();
@@ -237,6 +240,7 @@ export default function App() {
   const currentGenerated = scenarioFingerprint !== null && generatedScenarioFingerprint === scenarioFingerprint ? generated : null;
   const currentSolveResult = scenarioFingerprint !== null && solveResultScenarioFingerprint === scenarioFingerprint ? solveResult : null;
   const previousScenarioFingerprintRef = useRef<string | null>(null);
+  const autoTaskViewFingerprintRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (previousScenarioFingerprintRef.current === null) {
@@ -251,6 +255,31 @@ export default function App() {
     setSolveResultScenarioFingerprint(null);
     setComparison(null);
   }, [scenarioFingerprint]);
+
+  useEffect(() => {
+    if (activeTab !== "tasks" || !scenario || !scenarioFingerprint || currentGenerated || busy) return;
+    if (autoTaskViewFingerprintRef.current === scenarioFingerprint) return;
+
+    let cancelled = false;
+    autoTaskViewFingerprintRef.current = scenarioFingerprint;
+    setBusy("generating");
+    setError(null);
+    void generateTaskViewForScenario(scenario, { openTasks: false })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(errorText(err));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setBusy((current) => (current === "generating" ? null : current));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, busy, currentGenerated, scenario, scenarioFingerprint]);
 
   async function loadScenario() {
     setBusy("loading");
@@ -447,6 +476,9 @@ export default function App() {
       if (hasProcessLibraryChanged(scenario.process_library, resultScenario.process_library)) {
         setProcessLibraryDirty(true);
       }
+      if (hasResourcePoolsChanged(scenario.resource_pools, resultScenario.resource_pools)) {
+        setResourcesDirty(true);
+      }
       setSolveResult(null);
       setSolveResultScenarioFingerprint(null);
       setComparison(null);
@@ -516,20 +548,28 @@ export default function App() {
   }
 
   async function saveCurrentProcessLibrary() {
+    await saveCurrentLocalScenarioConfig("savingProcessLibrary");
+  }
+
+  async function saveCurrentLogicConfig() {
+    await saveCurrentLocalScenarioConfig("savingLogic");
+  }
+
+  async function saveCurrentResourceConfig() {
+    await saveCurrentLocalScenarioConfig("savingResources");
+  }
+
+  async function saveCurrentLocalScenarioConfig(busyState: Exclude<BusyState, null>) {
     if (!scenario) return;
-    setBusy("savingProcessLibrary");
+    setBusy(busyState);
     setError(null);
     try {
-      const processLibrary = await saveProcessLibrary({
-        process_library: scenario.process_library,
-      });
-      setScenario((current) => (current ? { ...current, process_library: processLibrary } : current));
+      const config = await saveLocalScenarioConfig(localScenarioConfigFromScenario(scenario));
+      setScenario((current) => (current ? normalizeScenarioForWorkspace({ ...current, ...config }) : current));
       setProcessLibraryDirty(false);
-      setGenerated(null);
-      setGeneratedScenarioFingerprint(null);
-      setSolveResult(null);
-      setSolveResultScenarioFingerprint(null);
-      setComparison(null);
+      setLogicDirty(false);
+      setResourcesDirty(false);
+      clearGeneratedOutputs();
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -537,7 +577,16 @@ export default function App() {
     }
   }
 
+  function clearGeneratedOutputs() {
+    setGenerated(null);
+    setGeneratedScenarioFingerprint(null);
+    setSolveResult(null);
+    setSolveResultScenarioFingerprint(null);
+    setComparison(null);
+  }
+
   function updateLogic(index: number, patch: Partial<LogicRule>) {
+    setLogicDirty(true);
     setScenario((current) =>
       current
         ? {
@@ -551,6 +600,7 @@ export default function App() {
   }
 
   function updateUpperStructureLogic(ruleId: string, patch: Partial<UpperStructureLogicRule>) {
+    setLogicDirty(true);
     setScenario((current) =>
       current
         ? {
@@ -564,6 +614,7 @@ export default function App() {
   }
 
   function updateResourcePool(index: number, patch: Partial<ResourcePool>) {
+    setResourcesDirty(true);
     setScenario((current) =>
       current
         ? {
@@ -647,10 +698,21 @@ export default function App() {
             scenario={scenario}
             onUpdateLogic={updateLogic}
             onUpdateUpperStructureLogic={updateUpperStructureLogic}
+            onSaveLocalConfig={saveCurrentLogicConfig}
+            savingLocalConfig={busy === "savingLogic"}
+            localConfigDirty={logicDirty}
           />
         ) : null;
       case "resources":
-        return scenario ? <ResourcesTab scenario={scenario} onUpdateResourcePool={updateResourcePool} /> : null;
+        return scenario ? (
+          <ResourcesTab
+            scenario={scenario}
+            onUpdateResourcePool={updateResourcePool}
+            onSaveLocalConfig={saveCurrentResourceConfig}
+            savingLocalConfig={busy === "savingResources"}
+            localConfigDirty={resourcesDirty}
+          />
+        ) : null;
       case "milestones":
         return scenario ? <MilestonesTab scenario={scenario} onUpdateMilestone={updateMilestone} scopeLabelForMilestone={scopeLabel} /> : null;
       case "tasks":
@@ -724,10 +786,19 @@ export default function App() {
             scenario={scenario}
             onUpdateLogic={updateLogic}
             onUpdateUpperStructureLogic={updateUpperStructureLogic}
+            onSaveLocalConfig={saveCurrentLogicConfig}
+            savingLocalConfig={busy === "savingLogic"}
+            localConfigDirty={logicDirty}
           />
         )}
         {scenario && activeTab === "resources" && (
-          <ResourcesTab scenario={scenario} onUpdateResourcePool={updateResourcePool} />
+          <ResourcesTab
+            scenario={scenario}
+            onUpdateResourcePool={updateResourcePool}
+            onSaveLocalConfig={saveCurrentResourceConfig}
+            savingLocalConfig={busy === "savingResources"}
+            localConfigDirty={resourcesDirty}
+          />
         )}
         {scenario && activeTab === "milestones" && (
           <MilestonesTab scenario={scenario} onUpdateMilestone={updateMilestone} scopeLabelForMilestone={scopeLabel} />
@@ -2614,6 +2685,15 @@ function normalizeScenarioForWorkspace(scenario: ScenarioInput): ScenarioInput {
   });
 }
 
+function localScenarioConfigFromScenario(scenario: ScenarioInput): LocalScenarioConfig {
+  return {
+    process_library: scenario.process_library,
+    logic_rules: scenario.logic_rules,
+    upper_structure_logic_rules: scenario.upper_structure_logic_rules ?? [],
+    resource_pools: scenario.resource_pools,
+  };
+}
+
 function bridgeCompletionMilestonesForProject(scenario: ScenarioInput): MilestoneConstraint[] {
   const bridgeMilestones = scenario.milestones.filter(
     (milestone) => milestone.scope_type === "bridge" && Boolean(milestone.scope_id),
@@ -2945,6 +3025,11 @@ function continuityMetricsFromResult(result: ScheduleResult | null): ContinuityM
 function hasProcessLibraryChanged(current: ProcessTemplate[], next: ProcessTemplate[]): boolean {
   if (current.length !== next.length) return true;
   return current.some((process, index) => JSON.stringify(process) !== JSON.stringify(next[index]));
+}
+
+function hasResourcePoolsChanged(current: ResourcePool[], next: ResourcePool[]): boolean {
+  if (current.length !== next.length) return true;
+  return current.some((pool, index) => JSON.stringify(pool) !== JSON.stringify(next[index]));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

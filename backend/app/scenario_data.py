@@ -221,11 +221,14 @@ def apply_resource_max_quantity_defaults(scenario: ScenarioInput) -> ScenarioInp
         quantity = pool.quantity or 0
         if pool.resource_mode == "UNLIMITED":
             continue
+        if pool.max_quantity is not None:
+            pool.max_quantity = max(quantity, pool.max_quantity)
+            continue
         if pool.type == "cast_in_place_continuous_beam_team":
             pool.max_quantity = max(quantity, continuous_t_count, 10)
         elif pool.type in DEFAULT_RESOURCE_MAX_QUANTITIES:
             pool.max_quantity = max(quantity, DEFAULT_RESOURCE_MAX_QUANTITIES[pool.type])
-        elif pool.max_quantity is None:
+        else:
             pool.max_quantity = quantity
     return scenario
 

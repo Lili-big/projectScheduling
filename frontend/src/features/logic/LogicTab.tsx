@@ -1,3 +1,4 @@
+import { Loader2, Save } from "lucide-react";
 import { PanelTitle } from "../../components/common/PanelTitle";
 import { buildLogicRuleRows, deferredScheduleLogicItems } from "../../domain/logic";
 import type { LogicRule, RelationshipType, ScenarioInput, UpperStructureLogicRule } from "../../types/scheduler";
@@ -6,10 +7,16 @@ export function LogicTab({
   scenario,
   onUpdateLogic,
   onUpdateUpperStructureLogic,
+  onSaveLocalConfig,
+  savingLocalConfig,
+  localConfigDirty,
 }: {
   scenario: ScenarioInput;
   onUpdateLogic: (index: number, patch: Partial<LogicRule>) => void;
   onUpdateUpperStructureLogic: (ruleId: string, patch: Partial<UpperStructureLogicRule>) => void;
+  onSaveLocalConfig: () => void;
+  savingLocalConfig: boolean;
+  localConfigDirty: boolean;
 }) {
   const { rows, summary } = buildLogicRuleRows(scenario);
 
@@ -38,7 +45,23 @@ export function LogicTab({
 
   return (
     <section className="panel full logic-panel">
-      <PanelTitle title="工艺逻辑约束" subtitle="维护任务之间谁先谁后；时间关系和等待时间会进入排程求解" />
+      <PanelTitle
+        title="工艺逻辑约束"
+        subtitle="维护任务之间谁先谁后；时间关系和等待时间会进入排程求解"
+        action={
+          <button
+            className="secondary"
+            type="button"
+            onClick={onSaveLocalConfig}
+            disabled={savingLocalConfig || !localConfigDirty}
+            title="保存到后端本地 JSON 配置文件"
+            aria-label="保存工艺逻辑"
+          >
+            {savingLocalConfig ? <Loader2 className="spin" size={16} /> : <Save size={16} />}
+            保存
+          </button>
+        }
+      />
       <div className="logic-content unified">
         <div className="logic-section-title">
           <div>

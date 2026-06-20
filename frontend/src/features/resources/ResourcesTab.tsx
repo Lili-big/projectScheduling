@@ -1,3 +1,4 @@
+import { Loader2, Save } from "lucide-react";
 import { PanelTitle } from "../../components/common/PanelTitle";
 import { resourceCostTypeLabels } from "../../domain/constants";
 import {
@@ -11,13 +12,35 @@ import type { ResourceCostType, ResourcePool, ScenarioInput } from "../../types/
 export function ResourcesTab({
   scenario,
   onUpdateResourcePool,
+  onSaveLocalConfig,
+  savingLocalConfig,
+  localConfigDirty,
 }: {
   scenario: ScenarioInput;
   onUpdateResourcePool: (index: number, patch: Partial<ResourcePool>) => void;
+  onSaveLocalConfig: () => void;
+  savingLocalConfig: boolean;
+  localConfigDirty: boolean;
 }) {
   return (
     <section className="panel full">
-      <PanelTitle title="资源配置约束" subtitle="配置默认 / 最大资源数量，资源均参与容量约束；资源日历暂按默认连续自然日处理" />
+      <PanelTitle
+        title="资源配置约束"
+        subtitle="配置默认 / 最大资源数量，资源均参与容量约束；资源日历暂按默认连续自然日处理"
+        action={
+          <button
+            className="secondary"
+            type="button"
+            onClick={onSaveLocalConfig}
+            disabled={savingLocalConfig || !localConfigDirty}
+            title="保存到后端本地 JSON 配置文件"
+            aria-label="保存资源配置"
+          >
+            {savingLocalConfig ? <Loader2 className="spin" size={16} /> : <Save size={16} />}
+            保存
+          </button>
+        }
+      />
       <div className="resource-grid">
         {scenario.resource_pools.map((pool, index) => {
           const quantity = resourcePoolQuantity(pool);

@@ -181,6 +181,13 @@ type ScenarioInput = {
   time_limit_seconds: number;
 };
 
+type LocalScenarioConfig = {
+  process_library: ProcessTemplate[];
+  logic_rules: LogicRule[];
+  upper_structure_logic_rules: UpperStructureLogicRule[];
+  resource_pools: ResourcePool[];
+};
+
 type BridgeModel = ScenarioInput["project"]["bridges"][number];
 type WorkSectionModel = BridgeModel["work_sections"][number];
 type StructureModel = WorkSectionModel["structures"][number];
@@ -254,13 +261,13 @@ const CAST_IN_PLACE_BOX_BEAM_STRUCTURE_CODE = "castInPlaceBoxGirder";
 const SIMPLE_BEAM_STRUCTURE_CODE = "precastTGirder";
 const CONTINUOUS_BEAM_DEFAULT_STANDARD_SEGMENT_CYCLES = 18;
 const DEFAULT_RESOURCE_MAX_QUANTITIES: Record<string, number> = {
-  rotary_drill: 5,
-  circulation_drill: 5,
-  impact_drill: 5,
+  rotary_drill: 10,
+  circulation_drill: 10,
+  impact_drill: 10,
   manual_pile_team: 10,
-  cap_team: 5,
-  pier_body_team: 5,
-  cap_beam_team: 5,
+  cap_team: 10,
+  pier_body_team: 10,
+  cap_beam_team: 10,
 };
 const KEY_RESOURCE_COMPONENT_TYPES = new Set<ComponentType>(["pile", "cap", "pier_body", "cap_beam", "cast_in_place_continuous_beam"]);
 const DEFAULT_RESOURCE_TYPE_BY_COMPONENT: Partial<Record<ComponentType, string>> = {
@@ -315,6 +322,9 @@ type WorkbookSheet = {
   data: unknown[][];
 };
 
+// Netlify Functions do not provide durable local disk for this demo API; FastAPI stores the real local JSON file.
+let localScenarioConfigCache: Partial<LocalScenarioConfig> | null = null;
+
 export default async function handler(req: Request, context: Context) {
   try {
     const endpoint = context.params.endpoint;
@@ -327,7 +337,25 @@ export default async function handler(req: Request, context: Context) {
     }
     if (endpoint === "process-library" && req.method === "PUT") {
       const body = await req.json();
-      return json(body.process_library ?? []);
+      const fallback = localConfigFromScenario(createDefaultScenario());
+      localScenarioConfigCache = {
+        ...fallback,
+        process_library: Array.isArray(body.process_library) ? body.process_library : fallback.process_library,
+      };
+      return json(localScenarioConfigCache.process_library ?? []);
+    }
+    if (endpoint === "local-scenario-config" && req.method === "PUT") {
+      const body = await req.json();
+      const fallback = localConfigFromScenario(createDefaultScenario());
+      localScenarioConfigCache = {
+        process_library: Array.isArray(body.process_library) ? body.process_library : fallback.process_library,
+        logic_rules: Array.isArray(body.logic_rules) ? body.logic_rules : fallback.logic_rules,
+        upper_structure_logic_rules: Array.isArray(body.upper_structure_logic_rules)
+          ? body.upper_structure_logic_rules
+          : fallback.upper_structure_logic_rules,
+        resource_pools: Array.isArray(body.resource_pools) ? body.resource_pools : fallback.resource_pools,
+      };
+      return json(localScenarioConfigCache);
     }
     if (endpoint === "import-local-bridge-params" && req.method === "POST") {
       const scenario = await req.json();
@@ -387,7 +415,7 @@ function createDefaultScenario(): ScenarioInput {
     ...[8, 9, 10, 11, 12].map((index) => createPier(index, 50, "rotary_drill")),
     createAbutment("A13", "13号台", 999, 2, 30, "rotary_drill"),
   ];
-  return {
+  const scenario: ScenarioInput = {
     scenario_id: "default-lower-structure",
     scenario_name: "默认下部结构模拟方案",
     project: {
@@ -436,6 +464,8 @@ function createDefaultScenario(): ScenarioInput {
     ],
     time_limit_seconds: 10,
   };
+  applyDefaultResourcePoolQuantities(scenario);
+  return applyCachedLocalScenarioConfig(scenario);
 }
 
 function createAbutment(id: string, name: string, order: number, pileCount: number, pileLength: number, methodId: string) {
@@ -575,6 +605,62 @@ function normalizeProcessTemplate(processTemplate: ProcessTemplate): ProcessTemp
     standard_section_height_m: defaultOption.standard_section_height_m,
     productivity_options: options,
   };
+}
+
+function applyDefaultResourcePoolQuantities(scenario: ScenarioInput) {
+  const defaults: Record<string, { quantity: number; maxQuantity: number }> = {
+    rotary_drill: { quantity: 1, maxQuantity: 10 },
+    circulation_drill: { quantity: 1, maxQuantity: 10 },
+    impact_drill: { quantity: 1, maxQuantity: 10 },
+    manual_pile_team: { quantity: 1, maxQuantity: 10 },
+    cap_team: { quantity: 1, maxQuantity: 10 },
+    pier_body_team: { quantity: 1, maxQuantity: 10 },
+    cap_beam_team: { quantity: 1, maxQuantity: 10 },
+    cast_in_place_continuous_beam_team: { quantity: 1, maxQuantity: 10 },
+  };
+  scenario.resource_pools = scenario.resource_pools.map((resourcePool) => {
+    const defaultValue = defaults[resourcePool.type];
+    if (!defaultValue) return resourcePool;
+    return {
+      ...resourcePool,
+      quantity: defaultValue.quantity,
+      max_quantity: defaultValue.maxQuantity,
+    };
+  });
+}
+
+function applyCachedLocalScenarioConfig(scenario: ScenarioInput): ScenarioInput {
+  if (!localScenarioConfigCache) return scenario;
+  return {
+    ...scenario,
+    process_library: mergeById(scenario.process_library, localScenarioConfigCache.process_library),
+    logic_rules: mergeById(scenario.logic_rules, localScenarioConfigCache.logic_rules),
+    upper_structure_logic_rules: mergeById(
+      scenario.upper_structure_logic_rules ?? [],
+      localScenarioConfigCache.upper_structure_logic_rules,
+    ),
+    resource_pools: mergeById(scenario.resource_pools, localScenarioConfigCache.resource_pools),
+  };
+}
+
+function localConfigFromScenario(scenario: ScenarioInput): LocalScenarioConfig {
+  return {
+    process_library: scenario.process_library,
+    logic_rules: scenario.logic_rules,
+    upper_structure_logic_rules: scenario.upper_structure_logic_rules ?? [],
+    resource_pools: scenario.resource_pools,
+  };
+}
+
+function mergeById<T extends { id: string }>(defaults: T[], saved: T[] | undefined): T[] {
+  if (!saved?.length) return defaults;
+  const savedById = new Map(saved.map((item) => [item.id, item]));
+  const used = new Set<string>();
+  const merged = defaults.map((item) => {
+    used.add(item.id);
+    return savedById.get(item.id) ?? item;
+  });
+  return [...merged, ...saved.filter((item) => !used.has(item.id))];
 }
 
 function normalizeProductivityOptionForProcess(processTemplate: ProcessTemplate, option: ProductivityOption): ProductivityOption {
@@ -1019,10 +1105,12 @@ function applyResourceMaxQuantityDefaults(scenario: ScenarioInput) {
     ...item,
     max_quantity: (item.resource_mode ?? "LIMITED") === "UNLIMITED"
       ? item.max_quantity ?? item.quantity ?? null
-      : Math.max(
+      : item.max_quantity !== null && item.max_quantity !== undefined
+        ? Math.max(item.quantity ?? 0, item.max_quantity)
+        : Math.max(
         item.quantity ?? 0,
         item.type === "cast_in_place_continuous_beam_team"
-          ? continuousTCount
+          ? Math.max(continuousTCount, 10)
           : DEFAULT_RESOURCE_MAX_QUANTITIES[item.type] ?? item.max_quantity ?? item.quantity ?? 0,
       ),
   }));
