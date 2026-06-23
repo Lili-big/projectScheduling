@@ -449,8 +449,9 @@ class ProcessLibrarySaveRequest(BaseModel):
 class LocalScenarioConfigSaveRequest(BaseModel):
     process_library: list[ProcessTemplate] = Field(min_length=1)
     logic_rules: list[LogicRule] = Field(min_length=1)
-    upper_structure_logic_rules: list[UpperStructureLogicRule] = []
+    upper_structure_logic_rules: list[UpperStructureLogicRule] = Field(default_factory=list)
     resource_pools: list[ResourcePool] = Field(min_length=1)
+    milestones: list[MilestoneConstraint] = Field(default_factory=list)
 
 
 class LocalScenarioConfigResponse(BaseModel):
@@ -458,6 +459,30 @@ class LocalScenarioConfigResponse(BaseModel):
     logic_rules: list[LogicRule]
     upper_structure_logic_rules: list[UpperStructureLogicRule]
     resource_pools: list[ResourcePool]
+    milestones: list[MilestoneConstraint]
+
+
+ProjectStructureParamsSource = Literal["local_config", "local_workbook", "default_demo", "request"]
+
+
+class ProjectStructureParamsResponse(BaseModel):
+    project: ProjectModel
+    source: ProjectStructureParamsSource
+    warnings: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ProjectStructureParamsSaveRequest(BaseModel):
+    project: ProjectModel
+
+
+class ProjectStructureParamsApplyRequest(BaseModel):
+    scenario: ScenarioInput
+    project: ProjectModel
+
+
+class ProjectStructureParamsApplyResponse(BaseModel):
+    scenario: ScenarioInput
+    source: ProjectStructureParamsSource = "request"
 
 
 class WbsRequest(BaseModel):

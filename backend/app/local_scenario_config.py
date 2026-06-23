@@ -6,7 +6,14 @@ from typing import Any, Iterable, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from .models import LogicRule, ProcessTemplate, ResourcePool, ScenarioInput, UpperStructureLogicRule
+from .models import (
+    LogicRule,
+    MilestoneConstraint,
+    ProcessTemplate,
+    ResourcePool,
+    ScenarioInput,
+    UpperStructureLogicRule,
+)
 from .process_library_defaults import upgrade_process_library
 
 
@@ -56,6 +63,10 @@ def apply_local_scenario_config(
         saved_resource_pools = _validate_list(config["resource_pools"], ResourcePool, "resource_pools")
         next_scenario.resource_pools = _merge_by_id(next_scenario.resource_pools, saved_resource_pools)
 
+    if "milestones" in config:
+        saved_milestones = _validate_list(config["milestones"], MilestoneConstraint, "milestones")
+        next_scenario.milestones = _merge_by_id(next_scenario.milestones, saved_milestones)
+
     return next_scenario
 
 
@@ -92,6 +103,7 @@ def save_local_scenario_config(
     logic_rules: list[LogicRule],
     upper_structure_logic_rules: list[UpperStructureLogicRule],
     resource_pools: list[ResourcePool],
+    milestones: list[MilestoneConstraint] | None = None,
     path: Path = LOCAL_SCENARIO_CONFIG_PATH,
 ) -> dict[str, list[Any]]:
     if not process_library:
@@ -109,6 +121,7 @@ def save_local_scenario_config(
             "logic_rules": _dump_models(logic_rules),
             "upper_structure_logic_rules": _dump_models(upper_structure_logic_rules),
             "resource_pools": _dump_models(resource_pools),
+            "milestones": _dump_models(milestones or []),
         }
     )
     _write_config(config, path)
@@ -117,6 +130,7 @@ def save_local_scenario_config(
         "logic_rules": logic_rules,
         "upper_structure_logic_rules": upper_structure_logic_rules,
         "resource_pools": resource_pools,
+        "milestones": milestones or [],
     }
 
 

@@ -14,6 +14,11 @@ from app import process_nl  # noqa: E402
 from app.bridge_import import BridgeImportConfigError, get_bridge_import_adapter, import_bridge_parameters  # noqa: E402
 from app.main import apply_process_natural_language_endpoint, import_bridge_params_endpoint, import_local_bridge_params_endpoint  # noqa: E402
 from app.models import ProcessNlRequest, ProductivityOption  # noqa: E402
+from app.project_structure_params import (  # noqa: E402
+    apply_project_structure_params,
+    load_project_structure_params,
+    save_project_structure_params,
+)
 from app.scenario import generate_schedule_input_from_scenario  # noqa: E402
 from app.scenario_data import default_scenario  # noqa: E402
 
@@ -133,6 +138,23 @@ def test_import_local_bridge_params_endpoint_uses_project_workbook() -> None:
     assert max_by_type["pier_body_team"] == 10
     assert max_by_type["cap_beam_team"] == 10
     assert max_by_type["cast_in_place_continuous_beam_team"] == 10
+
+
+def test_project_structure_params_save_reload_and_apply(tmp_path: Path) -> None:
+    path = tmp_path / "project-structure-params.json"
+    scenario = default_scenario()
+    project = scenario.project.model_copy(deep=True)
+    project.project_name = "工程化结构参数 API 测试项目"
+
+    saved = save_project_structure_params(project, path=path)
+    loaded = load_project_structure_params(path=path)
+    applied = apply_project_structure_params(default_scenario(), loaded.project)
+
+    assert saved.source == "local_config"
+    assert loaded.project.project_name == "工程化结构参数 API 测试项目"
+    assert applied.project.project_name == "工程化结构参数 API 测试项目"
+    assert len(applied.milestones) == len(project.bridges)
+    assert applied.milestones[0].scope_id == project.bridges[0].id
 
 
 def test_imported_spread_foundation_can_precede_abutment_body() -> None:

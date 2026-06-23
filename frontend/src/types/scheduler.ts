@@ -43,6 +43,7 @@ export type BusyState =
   | "savingProcessLibrary"
   | "savingLogic"
   | "savingResources"
+  | "savingMilestones"
   | null;
 
 export type ComponentModel = {
@@ -225,6 +226,20 @@ export type LocalScenarioConfig = {
   logic_rules: LogicRule[];
   upper_structure_logic_rules: UpperStructureLogicRule[];
   resource_pools: ResourcePool[];
+  milestones: MilestoneConstraint[];
+};
+
+export type ProjectStructureParamsSource = "local_config" | "local_workbook" | "default_demo" | "request";
+
+export type ProjectStructureParamsResponse = {
+  project: ProjectModel;
+  source: ProjectStructureParamsSource;
+  warnings: Array<Record<string, unknown>>;
+};
+
+export type ProjectStructureParamsApplyResponse = {
+  scenario: ScenarioInput;
+  source: ProjectStructureParamsSource;
 };
 
 export type Task = {

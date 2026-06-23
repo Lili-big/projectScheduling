@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 
+import { Loader2, Save } from "lucide-react";
 import { PanelTitle } from "../../components/common/PanelTitle";
 import type { MilestoneConstraint, ProjectBridge, ScenarioInput, WorkPointType } from "../../types/scheduler";
 
@@ -18,17 +19,39 @@ type MilestoneRow = {
 export function MilestonesTab({
   scenario,
   onUpdateMilestone,
+  onSaveLocalConfig,
+  savingLocalConfig,
+  localConfigDirty,
   scopeLabelForMilestone,
 }: {
   scenario: ScenarioInput;
   onUpdateMilestone: (index: number, patch: Partial<MilestoneConstraint>) => void;
+  onSaveLocalConfig: () => void;
+  savingLocalConfig: boolean;
+  localConfigDirty: boolean;
   scopeLabelForMilestone: (milestone: MilestoneConstraint, scenario: ScenarioInput) => string;
 }) {
   const rows = milestoneRowsByBridge(scenario);
 
   return (
     <section className="panel full">
-      <PanelTitle title="关键里程碑节点约束" subtitle="按桥梁/工点维护单一完成节点，用于固定工期和资源建议测算" />
+      <PanelTitle
+        title="关键里程碑节点约束"
+        subtitle="按桥梁/工点维护单一完成节点，用于固定工期和资源建议测算"
+        action={
+          <button
+            className="secondary"
+            type="button"
+            onClick={onSaveLocalConfig}
+            disabled={savingLocalConfig || !localConfigDirty}
+            title="保存到后端本地 JSON 配置文件"
+            aria-label="保存里程碑配置"
+          >
+            {savingLocalConfig ? <Loader2 className="spin" size={16} /> : <Save size={16} />}
+            保存
+          </button>
+        }
+      />
       {rows.length ? (
         <div className="table-wrap">
           <table className="milestone-table">

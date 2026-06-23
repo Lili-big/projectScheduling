@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..local_scenario_config import apply_local_scenario_config, load_process_library, save_local_scenario_config, save_process_library
-from ..models import LogicRule, ProcessTemplate, ResourcePool, ScenarioInput, UpperStructureLogicRule
+from ..models import LogicRule, MilestoneConstraint, ProcessTemplate, ResourcePool, ScenarioInput, UpperStructureLogicRule
 from ..scenario_data import default_scenario
 
 
@@ -25,10 +25,12 @@ def persist_local_scenario_config(
     logic_rules: list[LogicRule],
     upper_structure_logic_rules: list[UpperStructureLogicRule],
     resource_pools: list[ResourcePool],
+    milestones: list[MilestoneConstraint],
 ) -> dict[str, list[object]]:
     return save_local_scenario_config(
         process_library=process_library,
         logic_rules=logic_rules,
         upper_structure_logic_rules=upper_structure_logic_rules,
         resource_pools=resource_pools,
+        milestones=milestones,
     )

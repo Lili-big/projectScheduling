@@ -6,6 +6,9 @@ import type {
   LocalScenarioConfig,
   ProcessNlResponse,
   ProcessTemplate,
+  ProjectModel,
+  ProjectStructureParamsApplyResponse,
+  ProjectStructureParamsResponse,
   ScenarioInput,
   ScenarioSolveResult,
 } from "../types/scheduler";
@@ -35,8 +38,31 @@ type ProcessLibrarySaveRequest = {
 
 type LocalScenarioConfigSaveRequest = LocalScenarioConfig;
 
+type ProjectStructureParamsApplyRequest = {
+  scenario: ScenarioInput;
+  project: ProjectModel;
+};
+
+type ProjectStructureParamsSaveRequest = {
+  project: ProjectModel;
+};
+
 export function getDemoScenario(): Promise<ScenarioInput> {
   return apiGet<ScenarioInput>("/api/demo-scenario");
+}
+
+export function getProjectStructureParams(): Promise<ProjectStructureParamsResponse> {
+  return apiGet<ProjectStructureParamsResponse>("/api/project-structure-params");
+}
+
+export function applyProjectStructureParams(
+  request: ProjectStructureParamsApplyRequest,
+): Promise<ProjectStructureParamsApplyResponse> {
+  return apiPost<ProjectStructureParamsApplyResponse>("/api/apply-project-structure-params", request);
+}
+
+export function saveProjectStructureParams(request: ProjectStructureParamsSaveRequest): Promise<ProjectStructureParamsResponse> {
+  return apiPut<ProjectStructureParamsResponse>("/api/project-structure-params", request);
 }
 
 export function importLocalBridgeParams(scenario: ScenarioInput): Promise<ImportBridgeParamsResponse> {

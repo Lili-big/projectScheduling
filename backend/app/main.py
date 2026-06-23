@@ -19,6 +19,10 @@ from .models import (
     ProcessNlRequest,
     ProcessNlResponse,
     ProcessTemplate,
+    ProjectStructureParamsApplyRequest,
+    ProjectStructureParamsApplyResponse,
+    ProjectStructureParamsResponse,
+    ProjectStructureParamsSaveRequest,
     ResourceCostSolveRequest,
     ScheduleInput,
     ScenarioCompareRequest,
@@ -39,6 +43,12 @@ from .sample_data import (
 from .scenario import compare_scenarios, generate_schedule_input_from_scenario, solve_min_resources_scenario, solve_resource_cost_scenario, solve_scenario
 from .solver import solve_schedule
 from .process_nl import apply_process_natural_language
+from .project_structure_params import (
+    ProjectStructureParamsError,
+    apply_project_structure_params,
+    load_project_structure_params,
+    save_project_structure_params,
+)
 from .local_scenario_config import LocalScenarioConfigError
 from .services.bridge_import_service import import_local_bridge_params, import_uploaded_bridge_params
 from .services.process_library_service import (
@@ -116,9 +126,38 @@ def save_local_scenario_config_endpoint(request: LocalScenarioConfigSaveRequest)
             logic_rules=request.logic_rules,
             upper_structure_logic_rules=request.upper_structure_logic_rules,
             resource_pools=request.resource_pools,
+            milestones=request.milestones,
         )
     except LocalScenarioConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/project-structure-params", response_model=ProjectStructureParamsResponse)
+def get_project_structure_params_endpoint() -> ProjectStructureParamsResponse:
+    try:
+        return load_project_structure_params()
+    except ProjectStructureParamsError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except BridgeImportConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except BridgeImportError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.put("/api/project-structure-params", response_model=ProjectStructureParamsResponse)
+def save_project_structure_params_endpoint(request: ProjectStructureParamsSaveRequest) -> ProjectStructureParamsResponse:
+    try:
+        return save_project_structure_params(request.project)
+    except ProjectStructureParamsError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/apply-project-structure-params", response_model=ProjectStructureParamsApplyResponse)
+def apply_project_structure_params_endpoint(request: ProjectStructureParamsApplyRequest) -> ProjectStructureParamsApplyResponse:
+    return ProjectStructureParamsApplyResponse(
+        scenario=apply_project_structure_params(request.scenario, request.project),
+        source="request",
+    )
 
 
 @app.post("/api/generate-wbs", response_model=WbsResponse)

@@ -1,13 +1,9 @@
-import { Loader2, Save } from "lucide-react";
+import { CheckCircle2, Loader2, Save, XCircle } from "lucide-react";
 import { PanelTitle } from "../../components/common/PanelTitle";
-import { resourceCostTypeLabels } from "../../domain/constants";
 import {
-  resourcePoolBillingPeriodDays,
-  resourcePoolCostType,
   resourcePoolQuantity,
-  resourcePoolUnitCost,
 } from "../../domain/resources";
-import type { ResourceCostType, ResourcePool, ScenarioInput } from "../../types/scheduler";
+import type { ResourcePool, ScenarioInput } from "../../types/scheduler";
 
 export function ResourcesTab({
   scenario,
@@ -25,8 +21,8 @@ export function ResourcesTab({
   return (
     <section className="panel full">
       <PanelTitle
-        title="资源配置约束"
-        subtitle="配置默认 / 最大资源数量，资源均参与容量约束；资源日历暂按默认连续自然日处理"
+        title="资源方案"
+        subtitle="复制方案后调整资源数量，再重新求解并保存对比"
         action={
           <button
             className="secondary"
@@ -41,94 +37,74 @@ export function ResourcesTab({
           </button>
         }
       />
-      <div className="resource-grid">
-        {scenario.resource_pools.map((pool, index) => {
-          const quantity = resourcePoolQuantity(pool);
-          const maxQuantity = Math.max(pool.max_quantity ?? quantity, quantity);
-          const costType = resourcePoolCostType(pool);
-          const unitCost = resourcePoolUnitCost(pool);
-          const billingPeriodDays = resourcePoolBillingPeriodDays(pool);
-          return (
-            <div className="resource-card" key={pool.id}>
-              <div>
-                <strong>{pool.label}</strong>
-                <code>{pool.type}</code>
-              </div>
-              <label>
-                默认投入数量
-                <input
-                  type="number"
-                  min={0}
-                  value={quantity}
-                  onChange={(event) => {
-                    const nextQuantity = Math.max(0, Number(event.target.value));
-                    onUpdateResourcePool(index, {
-                      resource_mode: "LIMITED",
-                      quantity: nextQuantity,
-                      max_quantity: Math.max(maxQuantity, nextQuantity),
-                    });
-                  }}
-                />
-              </label>
-              <label>
-                可增配上限数量
-                <input
-                  type="number"
-                  min={Math.max(0, quantity)}
-                  value={maxQuantity}
-                  onChange={(event) => onUpdateResourcePool(index, {
-                    resource_mode: "LIMITED",
-                    max_quantity: Math.max(Number(event.target.value), Math.max(0, quantity)),
-                  })}
-                />
-              </label>
-              <label className="check-row">
-                <input
-                  type="checkbox"
-                  checked={pool.enabled}
-                  onChange={(event) => onUpdateResourcePool(index, { enabled: event.target.checked })}
-                />
-                启用
-              </label>
-              <div className="linear-cost-editor">
-                <strong>线性成本</strong>
-                <label>
-                  成本类型
-                  <select
-                    value={costType}
-                    onChange={(event) => onUpdateResourcePool(index, { cost_type: event.target.value as ResourceCostType })}
-                  >
-                    {Object.entries(resourceCostTypeLabels).map(([value, label]) => (
-                      <option value={value} key={value}>{label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  {costType === "monthly_rental" ? "月租金" : "新增单价"}
-                  <input
-                    type="number"
-                    min={0}
-                    disabled={costType === "none"}
-                    value={costType === "none" ? "" : unitCost}
-                    placeholder="0"
-                    onChange={(event) => onUpdateResourcePool(index, { incremental_unit_cost: Math.max(0, Number(event.target.value)) })}
-                  />
-                </label>
-                {costType === "monthly_rental" && (
-                  <label>
-                    计费周期
+      <div className="resource-list-wrap">
+        <table className="resource-list-table">
+          <thead>
+            <tr>
+              <th>资源</th>
+              <th>默认投入</th>
+              <th>可增上限</th>
+              <th>状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            {scenario.resource_pools.map((pool, index) => {
+              const quantity = resourcePoolQuantity(pool);
+              const maxQuantity = Math.max(pool.max_quantity ?? quantity, quantity);
+              return (
+                <tr key={pool.id}>
+                  <td>
+                    <div className="resource-list-name">
+                      <strong>{pool.label}</strong>
+                      <code>{pool.type}</code>
+                    </div>
+                  </td>
+                  <td>
                     <input
                       type="number"
-                      min={1}
-                      value={billingPeriodDays}
-                      onChange={(event) => onUpdateResourcePool(index, { billing_period_days: Math.max(1, Number(event.target.value)) })}
+                      min={0}
+                      value={quantity}
+                      aria-label={`${pool.label} 默认投入`}
+                      onChange={(event) => {
+                        const nextQuantity = Math.max(0, Number(event.target.value));
+                        onUpdateResourcePool(index, {
+                          resource_mode: "LIMITED",
+                          quantity: nextQuantity,
+                          max_quantity: Math.max(maxQuantity, nextQuantity),
+                        });
+                      }}
                     />
-                  </label>
-                )}
-              </div>
-            </div>
-          );
-        })}
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      min={Math.max(0, quantity)}
+                      value={maxQuantity}
+                      aria-label={`${pool.label} 可增上限`}
+                      onChange={(event) => onUpdateResourcePool(index, {
+                        resource_mode: "LIMITED",
+                        max_quantity: Math.max(Number(event.target.value), Math.max(0, quantity)),
+                      })}
+                    />
+                  </td>
+                  <td>
+                    <label className="resource-status-toggle">
+                      <input
+                        type="checkbox"
+                        checked={pool.enabled}
+                        onChange={(event) => onUpdateResourcePool(index, { enabled: event.target.checked })}
+                      />
+                      <span className={pool.enabled ? "resource-status enabled" : "resource-status disabled"}>
+                        {pool.enabled ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+                        {pool.enabled ? "可模拟" : "已停用"}
+                      </span>
+                    </label>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </section>
   );

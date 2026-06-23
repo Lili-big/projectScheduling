@@ -1,4 +1,4 @@
-import {
+﻿import {
   AlertCircle,
   Bot,
   CalendarDays,
@@ -44,7 +44,6 @@ import type {
   ScheduleStrategy,
   ScheduleStrategyConfig,
   ResourceGuaranteeMode,
-  BalanceBucket,
   TabKey,
   GanttMode,
   TaskViewMode,
@@ -193,11 +192,6 @@ const resourceGuaranteeLabels: Record<ResourceGuaranteeMode, string> = {
   off: "不启用",
 };
 
-const balanceBucketLabels: Record<BalanceBucket, string> = {
-  week: "按周",
-  month: "按月",
-};
-
 const controlLevelLabels: Record<ControlLevel, string> = {
   control: "控制性工程",
   key: "控制性工程",
@@ -231,6 +225,7 @@ export default function App() {
   const [processLibraryDirty, setProcessLibraryDirty] = useState(false);
   const [logicDirty, setLogicDirty] = useState(false);
   const [resourcesDirty, setResourcesDirty] = useState(false);
+  const [milestonesDirty, setMilestonesDirty] = useState(false);
 
   useEffect(() => {
     void loadScenario();
@@ -260,25 +255,16 @@ export default function App() {
     if (activeTab !== "tasks" || !scenario || !scenarioFingerprint || currentGenerated || busy) return;
     if (autoTaskViewFingerprintRef.current === scenarioFingerprint) return;
 
-    let cancelled = false;
     autoTaskViewFingerprintRef.current = scenarioFingerprint;
     setBusy("generating");
     setError(null);
     void generateTaskViewForScenario(scenario, { openTasks: false })
       .catch((err) => {
-        if (!cancelled) {
-          setError(errorText(err));
-        }
+        setError(errorText(err));
       })
       .finally(() => {
-        if (!cancelled) {
-          setBusy((current) => (current === "generating" ? null : current));
-        }
+        setBusy((current) => (current === "generating" ? null : current));
       });
-
-    return () => {
-      cancelled = true;
-    };
   }, [activeTab, busy, currentGenerated, scenario, scenarioFingerprint]);
 
   async function loadScenario() {
@@ -559,6 +545,10 @@ export default function App() {
     await saveCurrentLocalScenarioConfig("savingResources");
   }
 
+  async function saveCurrentMilestoneConfig() {
+    await saveCurrentLocalScenarioConfig("savingMilestones");
+  }
+
   async function saveCurrentLocalScenarioConfig(busyState: Exclude<BusyState, null>) {
     if (!scenario) return;
     setBusy(busyState);
@@ -569,6 +559,7 @@ export default function App() {
       setProcessLibraryDirty(false);
       setLogicDirty(false);
       setResourcesDirty(false);
+      setMilestonesDirty(false);
       clearGeneratedOutputs();
     } catch (err) {
       setError(errorText(err));
@@ -628,6 +619,7 @@ export default function App() {
   }
 
   function updateMilestone(index: number, patch: Partial<MilestoneConstraint>) {
+    setMilestonesDirty(true);
     setScenario((current) =>
       current
         ? {
@@ -714,7 +706,14 @@ export default function App() {
           />
         ) : null;
       case "milestones":
-        return scenario ? <MilestonesTab scenario={scenario} onUpdateMilestone={updateMilestone} scopeLabelForMilestone={scopeLabel} /> : null;
+        return scenario ? <MilestonesTab
+            scenario={scenario}
+            onUpdateMilestone={updateMilestone}
+            onSaveLocalConfig={saveCurrentMilestoneConfig}
+            savingLocalConfig={busy === "savingMilestones"}
+            localConfigDirty={milestonesDirty}
+            scopeLabelForMilestone={scopeLabel}
+          /> : null;
       case "tasks":
         return scenario ? (
           <TaskViewTab
@@ -801,7 +800,14 @@ export default function App() {
           />
         )}
         {scenario && activeTab === "milestones" && (
-          <MilestonesTab scenario={scenario} onUpdateMilestone={updateMilestone} scopeLabelForMilestone={scopeLabel} />
+          <MilestonesTab
+            scenario={scenario}
+            onUpdateMilestone={updateMilestone}
+            onSaveLocalConfig={saveCurrentMilestoneConfig}
+            savingLocalConfig={busy === "savingMilestones"}
+            localConfigDirty={milestonesDirty}
+            scopeLabelForMilestone={scopeLabel}
+          />
         )}
         {scenario && activeTab === "tasks" && (
           <TaskViewTab
@@ -1262,15 +1268,21 @@ function ResultsTab({
   const [openPredecessorTaskId, setOpenPredecessorTaskId] = useState<string | null>(null);
   const [predecessorAnchorRect, setPredecessorAnchorRect] = useState<DOMRect | null>(null);
   const [selectedResultIndex, setSelectedResultIndex] = useState(0);
+  const [planWindowStart, setPlanWindowStart] = useState("");
+  const [planWindowFinish, setPlanWindowFinish] = useState("");
   const predecessorHoverOpenTimerRef = useRef<number | null>(null);
   const predecessorHoverCloseTimerRef = useRef<number | null>(null);
   const resultOptions = useMemo(() => scenarioResultOptions(solveResult), [solveResult]);
+  const resultOptionSummaries = useMemo(() => summarizeResultOptions(resultOptions), [resultOptions]);
   const activeSolveResult = resultOptions[Math.min(selectedResultIndex, Math.max(0, resultOptions.length - 1))] ?? null;
   const result = activeSolveResult?.result ?? null;
   const planStatus = useMemo(() => derivePlanStatus(result), [result]);
   const summary = useMemo(() => buildSummary(scenario, generated, activeSolveResult), [scenario, generated, activeSolveResult]);
   const generatedForDetails = activeSolveResult?.generated ?? generated;
-  const recommendedResourceCounts = recommendedResourceCountsFromResult(result);
+  const recommendedResourceCounts = filterRecommendedResourceCountsByUsedResources(
+    recommendedResourceCountsFromResult(result),
+    result,
+  );
   const resourceRecommendationStatus = resourceRecommendationStatusFromResult(result);
   const resourceRecommendationMessage = resourceRecommendationMessageFromResult(result);
   const resourceUpperBoundCounts = resourceUpperBoundCountsFromResult(result);
@@ -1293,6 +1305,10 @@ function ResultsTab({
   const scheduledTaskById = useMemo(
     () => new Map((result?.tasks ?? []).map((task) => [task.id, task])),
     [result],
+  );
+  const filteredPlanTasks = useMemo(
+    () => filterScheduledTasksByWindow(result?.tasks ?? [], planWindowStart, planWindowFinish),
+    [result, planWindowStart, planWindowFinish],
   );
   const linksBySuccessor = useMemo(() => {
     const links = new Map<string, PrecedenceLink[]>();
@@ -1421,49 +1437,6 @@ function ResultsTab({
                 ))}
               </select>
             </label>
-            <label>
-              均衡周期
-              <select
-                value={strategyConfig.normal_balance_bucket}
-                onChange={(event) => updateStrategyConfig({ normal_balance_bucket: event.target.value as BalanceBucket })}
-              >
-                {Object.entries(balanceBucketLabels).map(([value, label]) => (
-                  <option value={value} key={value}>{label}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              普通工程最早开始(天)
-              <input
-                type="number"
-                min={0}
-                value={strategyConfig.normal_earliest_start_offset}
-                onChange={(event) => updateStrategyConfig({ normal_earliest_start_offset: Math.max(0, Number(event.target.value)) })}
-              />
-            </label>
-            <label>
-              普通工程最晚完成(天)
-              <input
-                type="number"
-                min={1}
-                value={strategyConfig.normal_latest_finish_offset ?? ""}
-                placeholder="不限制"
-                onChange={(event) => updateStrategyConfig({
-                  normal_latest_finish_offset: event.target.value ? Math.max(1, Number(event.target.value)) : null,
-                })}
-              />
-            </label>
-            <label>
-              工区普通工程最大并行
-              <input
-                type="number"
-                min={1}
-                value={strategyConfig.max_parallel_normal_per_work_section}
-                onChange={(event) => updateStrategyConfig({
-                  max_parallel_normal_per_work_section: Math.max(1, Number(event.target.value)),
-                })}
-              />
-            </label>
             <label className="check-row">
               <input
                 type="checkbox"
@@ -1473,6 +1446,43 @@ function ResultsTab({
               启用普通工程均衡目标
             </label>
           </div>
+          <details className="advanced-schedule-config">
+            <summary>高级排程参数</summary>
+            <div className="form-grid advanced-schedule-grid">
+              <label>
+                普通工程最早开始(天)
+                <input
+                  type="number"
+                  min={0}
+                  value={strategyConfig.normal_earliest_start_offset}
+                  onChange={(event) => updateStrategyConfig({ normal_earliest_start_offset: Math.max(0, Number(event.target.value)) })}
+                />
+              </label>
+              <label>
+                普通工程最晚完成(天)
+                <input
+                  type="number"
+                  min={1}
+                  value={strategyConfig.normal_latest_finish_offset ?? ""}
+                  placeholder="不限制"
+                  onChange={(event) => updateStrategyConfig({
+                    normal_latest_finish_offset: event.target.value ? Math.max(1, Number(event.target.value)) : null,
+                  })}
+                />
+              </label>
+              <label>
+                工区普通工程最大并行
+                <input
+                  type="number"
+                  min={1}
+                  value={strategyConfig.max_parallel_normal_per_work_section}
+                  onChange={(event) => updateStrategyConfig({
+                    max_parallel_normal_per_work_section: Math.max(1, Number(event.target.value)),
+                  })}
+                />
+              </label>
+            </div>
+          </details>
         </section>
       )}
 
@@ -1512,7 +1522,7 @@ function ResultsTab({
               </thead>
               <tbody>
                 {resultOptions.map((option, index) => {
-                  const item = resultOptionSummary(option);
+                  const item = resultOptionSummaries[index] ?? resultOptionSummary(option);
                   return (
                     <tr key={`${option.scenario_id}-${index}`}>
                       <td>{index === 0 ? "方案1 当前资源" : `方案${index + 1} 最少资源`}</td>
@@ -1754,7 +1764,7 @@ function ResultsTab({
               </tr>
             </thead>
             <tbody>
-              {result?.tasks.map((task) => {
+              {filteredPlanTasks.map((task) => {
                 const isOpen = openPredecessorTaskId === task.id;
                 return (
                   <tr key={task.id}>
@@ -2691,6 +2701,7 @@ function localScenarioConfigFromScenario(scenario: ScenarioInput): LocalScenario
     logic_rules: scenario.logic_rules,
     upper_structure_logic_rules: scenario.upper_structure_logic_rules ?? [],
     resource_pools: scenario.resource_pools,
+    milestones: scenario.milestones,
   };
 }
 
@@ -2772,19 +2783,222 @@ function scenarioSolveResultFromAlternative(item: ScenarioAlternativeResult): Sc
   };
 }
 
-function resultOptionSummary(option: ScenarioSolveResult): { resourceCount: number; addedResourceCount: number } {
-  const recommendedCounts = recommendedResourceCountsFromResult(option.result);
-  if (recommendedCounts.length) {
-    return {
-      resourceCount: recommendedCounts.reduce((sum, item) => sum + item.recommended_quantity, 0),
-      addedResourceCount: recommendedCounts.reduce((sum, item) => sum + item.added_quantity, 0),
-    };
-  }
-  const allocatedResourceIds = new Set(option.result.resource_allocations.map((item) => item.resource_id));
+type ResultOptionSummary = { resourceCount: number; addedResourceCount: number };
+
+function summarizeResultOptions(options: ScenarioSolveResult[]): ResultOptionSummary[] {
+  const baselineResourceCount = options[0] ? actualUsedResourceCount(options[0].result) : 0;
+  return options.map((option) => resultOptionSummary(option, baselineResourceCount));
+}
+
+function resultOptionSummary(option: ScenarioSolveResult, baselineResourceCount = actualUsedResourceCount(option.result)): ResultOptionSummary {
+  const resourceCount = actualUsedResourceCount(option.result);
   return {
-    resourceCount: allocatedResourceIds.size || option.generated.schedule_input.resources.length,
-    addedResourceCount: 0,
+    resourceCount,
+    addedResourceCount: Math.max(0, resourceCount - baselineResourceCount),
   };
+}
+
+function actualUsedResourceCount(result: ScheduleResult): number {
+  const allocatedResourceIds = new Set(
+    result.resource_allocations
+      .map((item) => String(item.resource_id ?? ""))
+      .filter((resourceId) => resourceId.trim().length > 0),
+  );
+  return allocatedResourceIds.size;
+}
+
+
+type DateRangePickerProps = {
+  startDate: string;
+  finishDate: string;
+  minDate?: string;
+  maxDate?: string;
+  onChange: (range: { startDate: string; finishDate: string }) => void;
+};
+
+function DateRangePicker({ startDate, finishDate, minDate, maxDate, onChange }: DateRangePickerProps) {
+  const [open, setOpen] = useState(false);
+  const [selectingFinish, setSelectingFinish] = useState(false);
+  const [visibleMonth, setVisibleMonth] = useState(() => monthKey(startDate || minDate || todayDateValue()));
+  const pickerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setVisibleMonth(monthKey(startDate || minDate || todayDateValue()));
+  }, [open, startDate, minDate]);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleDocumentPointerDown(event: MouseEvent) {
+      if (!pickerRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleDocumentPointerDown);
+    return () => document.removeEventListener("mousedown", handleDocumentPointerDown);
+  }, [open]);
+
+  const calendarDays = useMemo(() => calendarDaysForMonth(visibleMonth), [visibleMonth]);
+  const waitingForFinish = selectingFinish && Boolean(startDate) && !finishDate;
+  const rangeLabel = startDate && finishDate ? `${startDate} - ${finishDate}` : startDate ? `${startDate} -` : "选择时间范围";
+  const disablePreviousMonth = Boolean(minDate && compareDateValues(monthLastDate(addMonthsToMonthKey(visibleMonth, -1)), minDate) < 0);
+  const disableNextMonth = Boolean(maxDate && compareDateValues(monthFirstDate(addMonthsToMonthKey(visibleMonth, 1)), maxDate) > 0);
+
+  function handleDateClick(dateValue: string) {
+    if (!startDate || !selectingFinish || finishDate) {
+      onChange({ startDate: dateValue, finishDate: "" });
+      setSelectingFinish(true);
+      return;
+    }
+    if (compareDateValues(dateValue, startDate) <= 0) return;
+    onChange({ startDate, finishDate: dateValue });
+    setSelectingFinish(false);
+    setOpen(false);
+  }
+
+  function clearRange() {
+    onChange({ startDate: "", finishDate: "" });
+    setSelectingFinish(false);
+  }
+
+  return (
+    <div className="date-range-picker" ref={pickerRef}>
+      <button className="date-range-trigger" type="button" onClick={() => setOpen((current) => !current)}>
+        <CalendarDays size={15} />
+        <span>{rangeLabel}</span>
+      </button>
+      {open && (
+        <div className="date-range-popover">
+          <div className="date-range-fields">
+            <span><strong>开始</strong>{startDate || "-"}</span>
+            <span><strong>完成</strong>{finishDate || "-"}</span>
+          </div>
+          <div className="date-range-monthbar">
+            <button type="button" onClick={() => setVisibleMonth(addMonthsToMonthKey(visibleMonth, -1))} disabled={disablePreviousMonth}>‹</button>
+            <strong>{formatMonthLabel(visibleMonth)}</strong>
+            <button type="button" onClick={() => setVisibleMonth(addMonthsToMonthKey(visibleMonth, 1))} disabled={disableNextMonth}>›</button>
+          </div>
+          <div className="date-range-weekdays">
+            {dateRangeWeekdays.map((weekday) => <span key={weekday}>{weekday}</span>)}
+          </div>
+          <div className="date-range-grid">
+            {calendarDays.map((day) => {
+              const beforeStart = waitingForFinish && compareDateValues(day.value, startDate) <= 0;
+              const outsideBounds = Boolean(minDate && compareDateValues(day.value, minDate) < 0)
+                || Boolean(maxDate && compareDateValues(day.value, maxDate) > 0);
+              const disabled = beforeStart || outsideBounds;
+              const selected = day.value === startDate || day.value === finishDate;
+              const inRange = Boolean(startDate && finishDate)
+                && compareDateValues(day.value, startDate) > 0
+                && compareDateValues(day.value, finishDate) < 0;
+              return (
+                <button
+                  className={`${day.inMonth ? "" : "muted"} ${selected ? "selected" : ""} ${inRange ? "in-range" : ""}`}
+                  disabled={disabled}
+                  key={day.value}
+                  onClick={() => handleDateClick(day.value)}
+                  type="button"
+                >
+                  {Number(day.value.slice(-2))}
+                </button>
+              );
+            })}
+          </div>
+          <div className="date-range-footer">
+            <span>{waitingForFinish ? "选择完成日期" : "选择开始日期"}</span>
+            <button type="button" onClick={clearRange}>清空</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const dateRangeWeekdays = ["一", "二", "三", "四", "五", "六", "日"];
+
+type CalendarDay = { value: string; inMonth: boolean };
+
+function todayDateValue(): string {
+  return dateToInputValue(new Date());
+}
+
+function calendarDaysForMonth(month: string): CalendarDay[] {
+  const first = parseDateValue(`${month}-01`) ?? new Date();
+  const firstDayOffset = (first.getDay() + 6) % 7;
+  const gridStart = addDays(first, -firstDayOffset);
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = addDays(gridStart, index);
+    const value = dateToInputValue(date);
+    return { value, inMonth: value.startsWith(month) };
+  });
+}
+
+function monthKey(dateValue: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateValue) ? dateValue.slice(0, 7) : todayDateValue().slice(0, 7);
+}
+
+function formatMonthLabel(month: string): string {
+  const [year, monthValue] = month.split("-");
+  return `${year}年${Number(monthValue)}月`;
+}
+
+function addMonthsToMonthKey(month: string, delta: number): string {
+  const [year, monthValue] = month.split("-").map(Number);
+  return dateToInputValue(new Date(year, monthValue - 1 + delta, 1)).slice(0, 7);
+}
+
+function monthFirstDate(month: string): string {
+  return `${month}-01`;
+}
+
+function monthLastDate(month: string): string {
+  const [year, monthValue] = month.split("-").map(Number);
+  return dateToInputValue(new Date(year, monthValue, 0));
+}
+
+function parseDateValue(dateValue: string): Date | null {
+  const match = dateValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function dateToInputValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function compareDateValues(left: string, right: string): number {
+  return left.localeCompare(right);
+}
+
+function filterScheduledTasksByWindow(tasks: ScheduledTask[], startDate: string, finishDate: string): ScheduledTask[] {
+  return tasks.filter((task) => {
+    if (startDate && task.finish_date < startDate) return false;
+    if (finishDate && task.start_date > finishDate) return false;
+    return true;
+  });
+}
+
+function filterRecommendedResourceCountsByUsedResources(
+  counts: RecommendedResourceCount[],
+  result: ScheduleResult | null,
+): RecommendedResourceCount[] {
+  if (!result) return [];
+  const usedResourceTypes = new Set(
+    result.resource_allocations
+      .map((item) => String(item.resource_type ?? ""))
+      .filter((resourceType) => resourceType.trim().length > 0),
+  );
+  if (!usedResourceTypes.size) return [];
+  return counts.filter((item) => usedResourceTypes.has(item.resource_type));
 }
 
 function importComponentCountSummary(summary: Record<string, unknown>): string {
@@ -2798,6 +3012,7 @@ function importComponentCountSummary(summary: Record<string, unknown>): string {
 
 type RecommendedResourceCount = {
   resource_pool_id: string;
+  resource_type: string;
   label: string;
   current_quantity: number;
   recommended_quantity: number;
@@ -2829,6 +3044,7 @@ function recommendedResourceCountsFromResult(result: ScheduleResult | null): Rec
     .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
     .map((item) => ({
       resource_pool_id: String(item.resource_pool_id ?? item.resource_type ?? item.label ?? ""),
+      resource_type: String(item.resource_type ?? ""),
       label: String(item.label ?? item.resource_type ?? "-"),
       current_quantity: Number(item.current_quantity ?? 0),
       recommended_quantity: Number(item.recommended_quantity ?? 0),
@@ -3124,3 +3340,4 @@ function formatScheduleStatus(value: unknown): string {
   }
   return value == null ? "-" : String(value);
 }
+

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,12 +31,14 @@ def test_local_config_save_and_reload_round_trips_config(tmp_path: Path) -> None
     scenario.upper_structure_logic_rules[0].lag_days = 3
     scenario.resource_pools[0].quantity = 1
     scenario.resource_pools[0].max_quantity = 3
+    scenario.milestones[0].target_date = date(2026, 7, 30)
 
     save_local_scenario_config(
         process_library=scenario.process_library,
         logic_rules=scenario.logic_rules,
         upper_structure_logic_rules=scenario.upper_structure_logic_rules,
         resource_pools=scenario.resource_pools,
+        milestones=scenario.milestones,
         path=path,
     )
     loaded = apply_local_scenario_config(default_scenario(), path=path)
@@ -44,6 +47,7 @@ def test_local_config_save_and_reload_round_trips_config(tmp_path: Path) -> None
     assert loaded.logic_rules[0].lag_days == 2
     assert loaded.upper_structure_logic_rules[0].lag_days == 3
     assert loaded.resource_pools[0].max_quantity == 3
+    assert loaded.milestones[0].target_date == date(2026, 7, 30)
 
 
 def test_local_config_keeps_new_defaults_when_file_has_old_subset(tmp_path: Path) -> None:
@@ -81,3 +85,4 @@ def test_local_config_keeps_new_defaults_when_file_has_old_subset(tmp_path: Path
     assert len(loaded.logic_rules) > 1
     assert resource_by_id[scenario.resource_pools[0].id].max_quantity == 3
     assert "pool-cap" in resource_by_id
+    assert loaded.milestones[0].target_date == scenario.milestones[0].target_date
