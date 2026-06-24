@@ -1459,7 +1459,17 @@ def _run_min_resource_reoptimizations(
         }
 
     if parallelism <= 1:
-        return [run(candidate) for candidate in candidates]
+        results = []
+        for candidate in sorted(candidates, key=lambda item: _reoptimization_priority(item["source"])):
+            attempt = run(candidate)
+            results.append(attempt)
+            if _schedule_result_verified(
+                attempt["result"],
+                target_days=target_days,
+                hard_match_count=hard_match_count,
+            ):
+                break
+        return results
 
     with ThreadPoolExecutor(max_workers=parallelism) as executor:
         futures = [executor.submit(run, candidate) for candidate in candidates]
