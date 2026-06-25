@@ -10,8 +10,10 @@ __pycache__/
 *.log
 deploy-*.zip
 logs/
+local-json-task-review/
 .local-data/
 docs/
+docs/*
 .local.env
 .env
 *.local.env
