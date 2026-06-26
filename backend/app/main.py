@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -64,9 +65,29 @@ load_local_config()
 
 app = FastAPI(title="Bridge Lower-Structure CP-SAT Scheduler", version="0.1.0")
 
+NETLIFY_FRONTEND_ORIGIN = "https://project-scheduling-lili-big.netlify.app"
+
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8888",
+    NETLIFY_FRONTEND_ORIGIN,
+]
+
+
+def _csv_env(name: str, defaults: list[str]) -> list[str]:
+    raw = os.getenv(name, "")
+    values = [value.strip().rstrip("/") for value in raw.split(",") if value.strip()]
+    return values or defaults
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=_csv_env("SCHEDULER_CORS_ORIGINS", DEFAULT_CORS_ORIGINS),
+    allow_origin_regex=os.getenv(
+        "SCHEDULER_CORS_ORIGIN_REGEX",
+        r"https://[a-z0-9-]+--project-scheduling-lili-big\.netlify\.app",
+    ),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -1,4 +1,4 @@
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
+const apiBase = normalizeApiBase(import.meta.env.VITE_API_BASE_URL ?? "");
 const DEFAULT_TIMEOUT_MS = 90_000;
 
 export async function apiGet<T>(path: string): Promise<T> {
@@ -37,6 +37,7 @@ export async function apiPostFormData<T>(path: string, payload: FormData): Promi
 }
 
 async function apiFetch(path: string, init: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
+  ensureApiBaseConfiguredForNetlify();
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -49,6 +50,17 @@ async function apiFetch(path: string, init: RequestInit = {}, timeoutMs = DEFAUL
   } finally {
     window.clearTimeout(timeoutId);
   }
+}
+
+function normalizeApiBase(value: string): string {
+  return value.trim().replace(/\/+$/, "");
+}
+
+function ensureApiBaseConfiguredForNetlify(): void {
+  if (apiBase || !import.meta.env.PROD || !/\.netlify\.app$/i.test(window.location.hostname)) {
+    return;
+  }
+  throw new Error("Netlify 生产环境未配置 VITE_API_BASE_URL，无法连接完整 FastAPI/OR-Tools 后端。");
 }
 
 async function responseErrorText(response: Response): Promise<string> {

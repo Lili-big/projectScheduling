@@ -1,8 +1,13 @@
 {
-  "name": "bridge-cpsat-scheduler-netlify",
+  "name": "bridge-cpsat-scheduler",
   "private": true,
   "type": "module",
-  "dependencies": {
-    "read-excel-file": "^9.1.1"
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "build": "npm --workspace frontend run build",
+    "frontend:dev": "npm --workspace frontend run dev",
+    "frontend:preview": "npm --workspace frontend run preview"
   }
 }

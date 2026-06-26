@@ -102,6 +102,28 @@ npm run dev
 
 开发模式下访问 `http://127.0.0.1:5173/`。前端的 `/api` 请求会通过 `frontend/vite.config.ts` 代理到 `http://127.0.0.1:8000`。
 
+## 云端部署
+
+当前生产部署采用“Netlify 静态前端 + Docker FastAPI 后端”的拆分形态：
+
+- Netlify 绑定本仓库 `main` 分支后，从根目录执行 `npm run build`，发布 `frontend/dist`。
+- Netlify 项目环境变量需要设置 `VITE_API_BASE_URL`，值为 Docker 后端的公开 HTTPS 地址，例如 `https://your-backend.example.com`。
+- 完整排程能力由 Docker 后端提供，包含 FastAPI、OR-Tools CP-SAT、Excel 导入和本地规则解析。
+- `netlify/demo-functions/api.mts` 只保留为早期演示 API 参考，不会作为生产 `/api` 部署。
+
+Docker 后端可在支持 Docker 的云服务中绑定同一个 Git 仓库自动部署。构建入口使用仓库根目录的 `Dockerfile`，运行命令已在镜像中定义为：
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --app-dir backend
+```
+
+后端跨域配置通过环境变量控制：
+
+- `SCHEDULER_CORS_ORIGINS`：逗号分隔的允许来源，建议包含 Netlify 生产域名，例如 `https://project-scheduling-lili-big.netlify.app`。
+- `SCHEDULER_CORS_ORIGIN_REGEX`：可选，默认允许 `https://<deploy-id>--project-scheduling-lili-big.netlify.app` 形式的 Netlify 预览域名。
+
+第一版云端部署不配置持久化存储，工艺库、资源配置、项目参数等保存接口写入的 `.local-data` 内容可能在实例重启或重新部署后丢失。
+
 ## 关闭服务
 
 ### 常规关闭
