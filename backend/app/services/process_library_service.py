@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from ..local_scenario_config import apply_local_scenario_config, load_process_library, save_local_scenario_config, save_process_library
+from ..local_scenario_config import apply_bundled_scenario_config, apply_local_scenario_config, save_local_scenario_config, save_process_library
 from ..models import LogicRule, MilestoneConstraint, ProcessTemplate, ResourcePool, ScenarioInput, UpperStructureLogicRule
 from ..scenario_data import default_scenario
 
 
 def default_scenario_with_process_library() -> ScenarioInput:
     scenario = default_scenario()
+    scenario = apply_bundled_scenario_config(scenario)
     return apply_local_scenario_config(scenario)
 
 
 def get_process_library() -> list[ProcessTemplate]:
-    scenario = default_scenario()
-    return load_process_library(scenario.process_library)
+    return default_scenario_with_process_library().process_library
 
 
 def persist_process_library(process_library: list[ProcessTemplate]) -> list[ProcessTemplate]:

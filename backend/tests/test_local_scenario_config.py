@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.local_scenario_config import apply_local_scenario_config, save_local_scenario_config  # noqa: E402
+from app.local_scenario_config import apply_bundled_scenario_config, apply_local_scenario_config, save_local_scenario_config  # noqa: E402
 from app.scenario_data import default_scenario  # noqa: E402
 
 
@@ -20,6 +20,17 @@ def test_missing_local_config_uses_default_scenario(tmp_path: Path) -> None:
     assert loaded.process_library[0].id == scenario.process_library[0].id
     assert loaded.logic_rules[0].id == scenario.logic_rules[0].id
     assert loaded.resource_pools[0].id == scenario.resource_pools[0].id
+
+
+def test_bundled_config_supplies_deployed_default_resource_quantities() -> None:
+    loaded = apply_bundled_scenario_config(default_scenario())
+    resources_by_type = {pool.type: pool for pool in loaded.resource_pools}
+
+    assert resources_by_type["rotary_drill"].quantity == 8
+    assert resources_by_type["cap_team"].quantity == 4
+    assert resources_by_type["pier_body_team"].quantity == 8
+    assert resources_by_type["cap_beam_team"].quantity == 6
+    assert resources_by_type["cast_in_place_continuous_beam_team"].quantity == 4
 
 
 def test_local_config_save_and_reload_round_trips_config(tmp_path: Path) -> None:

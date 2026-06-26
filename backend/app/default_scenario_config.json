@@ -1,0 +1,903 @@
+{
+  "schema_version": "local-scheduler-config/v1",
+  "process_library": [
+    {
+      "id": "pile_rotary_regular",
+      "component_type": "pile",
+      "process_name": "旋挖钻",
+      "method_id": "rotary_drill",
+      "duration_method": "fixed_days",
+      "quantity_source": "count",
+      "productivity_value": 3.0,
+      "productivity_unit": "天/根",
+      "resource_type": "rotary_drill",
+      "productivity_options": [
+        {
+          "id": "pile_rotary_regular-default",
+          "name": "默认工效",
+          "duration_method": "fixed_days",
+          "quantity_source": "count",
+          "productivity_value": 3.0,
+          "productivity_unit": "天/根",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": true
+    },
+    {
+      "id": "pile_circulation",
+      "component_type": "pile",
+      "process_name": "回旋钻",
+      "method_id": "circulation_drill",
+      "duration_method": "fixed_days",
+      "quantity_source": "count",
+      "productivity_value": 2.0,
+      "productivity_unit": "天/根",
+      "resource_type": "circulation_drill",
+      "productivity_options": [
+        {
+          "id": "pile_circulation-default",
+          "name": "默认工效",
+          "duration_method": "fixed_days",
+          "quantity_source": "count",
+          "productivity_value": 2.0,
+          "productivity_unit": "天/根",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": false
+    },
+    {
+      "id": "pile_impact",
+      "component_type": "pile",
+      "process_name": "冲击钻",
+      "method_id": "impact_drill",
+      "duration_method": "fixed_days",
+      "quantity_source": "count",
+      "productivity_value": 2.0,
+      "productivity_unit": "天/根",
+      "resource_type": "impact_drill",
+      "productivity_options": [
+        {
+          "id": "pile_impact-default",
+          "name": "默认工效",
+          "duration_method": "fixed_days",
+          "quantity_source": "count",
+          "productivity_value": 2.0,
+          "productivity_unit": "天/根",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": false
+    },
+    {
+      "id": "pile_manual",
+      "component_type": "pile",
+      "process_name": "人工挖孔",
+      "method_id": "manual_pile",
+      "duration_method": "days_per_unit",
+      "quantity_source": "pile_length_m",
+      "productivity_value": 1.0,
+      "productivity_unit": "天/m",
+      "resource_type": "manual_pile_team",
+      "productivity_options": [
+        {
+          "id": "pile_manual-default",
+          "name": "默认工效",
+          "duration_method": "days_per_unit",
+          "quantity_source": "pile_length_m",
+          "productivity_value": 1.0,
+          "productivity_unit": "天/m",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": false
+    },
+    {
+      "id": "cap_standard",
+      "component_type": "cap",
+      "process_name": "承台施工",
+      "method_id": null,
+      "duration_method": "fixed_days",
+      "quantity_source": "count",
+      "productivity_value": 30.0,
+      "productivity_unit": "天/个",
+      "resource_type": "cap_team",
+      "productivity_options": [
+        {
+          "id": "cap_standard-default",
+          "name": "默认工效",
+          "duration_method": "fixed_days",
+          "quantity_source": "count",
+          "productivity_value": 30.0,
+          "productivity_unit": "天/个",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": true
+    },
+    {
+      "id": "spread_foundation_standard",
+      "component_type": "spread_foundation",
+      "process_name": "扩大基础施工",
+      "method_id": null,
+      "duration_method": "fixed_days",
+      "quantity_source": "count",
+      "productivity_value": 8.0,
+      "productivity_unit": "天/个",
+      "resource_type": "spread_foundation_team",
+      "productivity_options": [
+        {
+          "id": "spread_foundation_standard-default",
+          "name": "默认工效",
+          "duration_method": "fixed_days",
+          "quantity_source": "count",
+          "productivity_value": 8.0,
+          "productivity_unit": "天/个",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": true
+    },
+    {
+      "id": "ground_tie_beam_standard",
+      "component_type": "ground_tie_beam",
+      "process_name": "桩系梁施工",
+      "method_id": null,
+      "duration_method": "fixed_days",
+      "quantity_source": "count",
+      "productivity_value": 3.0,
+      "productivity_unit": "天/个",
+      "resource_type": "tie_beam_team",
+      "productivity_options": [
+        {
+          "id": "ground_tie_beam_standard-default",
+          "name": "默认工效",
+          "duration_method": "fixed_days",
+          "quantity_source": "count",
+          "productivity_value": 3.0,
+          "productivity_unit": "天/个",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": true
+    },
+    {
+      "id": "pier_body_climbing_form",
+      "component_type": "pier_body",
+      "process_name": "爬模施工",
+      "method_id": "climbing_form",
+      "duration_method": "days_per_unit",
+      "quantity_source": "pier_height_m",
+      "productivity_value": 7.0,
+      "productivity_unit": "天/节",
+      "resource_type": "pier_body_team",
+      "productivity_options": [
+        {
+          "id": "pier_body_climbing_form-default",
+          "name": "默认工效",
+          "duration_method": "days_per_unit",
+          "quantity_source": "pier_height_m",
+          "productivity_value": 7.0,
+          "productivity_unit": "天/节",
+          "standard_section_height_m": 4.5,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": true
+    },
+    {
+      "id": "pier_body_standard",
+      "component_type": "pier_body",
+      "process_name": "整体式浇筑",
+      "method_id": "integral_casting",
+      "duration_method": "fixed_days",
+      "quantity_source": "count",
+      "productivity_value": 20.0,
+      "productivity_unit": "天/个",
+      "resource_type": "pier_body_team",
+      "productivity_options": [
+        {
+          "id": "pier_body_standard-default",
+          "name": "默认工效",
+          "duration_method": "fixed_days",
+          "quantity_source": "count",
+          "productivity_value": 20.0,
+          "productivity_unit": "天/个",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": false
+    },
+    {
+      "id": "pier_body_sliding_form",
+      "component_type": "pier_body",
+      "process_name": "滑模施工",
+      "method_id": "sliding_form",
+      "duration_method": "days_per_unit",
+      "quantity_source": "pier_height_m",
+      "productivity_value": 6.0,
+      "productivity_unit": "天/节",
+      "resource_type": "pier_body_team",
+      "productivity_options": [
+        {
+          "id": "pier_body_sliding_form-default",
+          "name": "默认工效",
+          "duration_method": "days_per_unit",
+          "quantity_source": "pier_height_m",
+          "productivity_value": 6.0,
+          "productivity_unit": "天/节",
+          "standard_section_height_m": 4.5,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": false
+    },
+    {
+      "id": "pier_body_turnover_form",
+      "component_type": "pier_body",
+      "process_name": "翻模施工",
+      "method_id": "turnover_form",
+      "duration_method": "days_per_unit",
+      "quantity_source": "pier_height_m",
+      "productivity_value": 12.0,
+      "productivity_unit": "天/节",
+      "resource_type": "pier_body_team",
+      "productivity_options": [
+        {
+          "id": "pier_body_turnover_form-default",
+          "name": "默认工效",
+          "duration_method": "days_per_unit",
+          "quantity_source": "pier_height_m",
+          "productivity_value": 12.0,
+          "productivity_unit": "天/节",
+          "standard_section_height_m": 4.5,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": false
+    },
+    {
+      "id": "middle_tie_beam_standard",
+      "component_type": "middle_tie_beam",
+      "process_name": "中系梁施工",
+      "method_id": null,
+      "duration_method": "fixed_days",
+      "quantity_source": "count",
+      "productivity_value": 4.0,
+      "productivity_unit": "天/个",
+      "resource_type": "tie_beam_team",
+      "productivity_options": [
+        {
+          "id": "middle_tie_beam_standard-default",
+          "name": "默认工效",
+          "duration_method": "fixed_days",
+          "quantity_source": "count",
+          "productivity_value": 4.0,
+          "productivity_unit": "天/个",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": true
+    },
+    {
+      "id": "cap_beam_standard",
+      "component_type": "cap_beam",
+      "process_name": "盖梁施工",
+      "method_id": null,
+      "duration_method": "fixed_days",
+      "quantity_source": "count",
+      "productivity_value": 10.0,
+      "productivity_unit": "天/个",
+      "resource_type": "cap_beam_team",
+      "productivity_options": [
+        {
+          "id": "cap_beam_standard-default",
+          "name": "默认工效",
+          "duration_method": "fixed_days",
+          "quantity_source": "count",
+          "productivity_value": 10.0,
+          "productivity_unit": "天/个",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": true
+    },
+    {
+      "id": "abutment_body_standard",
+      "component_type": "abutment_body",
+      "process_name": "桥台施工",
+      "method_id": null,
+      "duration_method": "fixed_days",
+      "quantity_source": "count",
+      "productivity_value": 15.0,
+      "productivity_unit": "天/个",
+      "resource_type": "abutment_team",
+      "productivity_options": [
+        {
+          "id": "abutment_body_standard-default",
+          "name": "默认工效",
+          "duration_method": "fixed_days",
+          "quantity_source": "count",
+          "productivity_value": 15.0,
+          "productivity_unit": "天/个",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": true
+    },
+    {
+      "id": "precast_beam_standard",
+      "component_type": "precast_beam",
+      "process_name": "制梁",
+      "method_id": null,
+      "duration_method": "fixed_days",
+      "quantity_source": "count",
+      "productivity_value": 35.0,
+      "productivity_unit": "天/片",
+      "resource_type": "precast_beam_team",
+      "productivity_options": [
+        {
+          "id": "precast_beam_standard-default",
+          "name": "默认工效",
+          "duration_method": "fixed_days",
+          "quantity_source": "count",
+          "productivity_value": 35.0,
+          "productivity_unit": "天/片",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": true
+    },
+    {
+      "id": "beam_erection_standard",
+      "component_type": "beam_erection",
+      "process_name": "架梁",
+      "method_id": null,
+      "duration_method": "fixed_days",
+      "quantity_source": "count",
+      "productivity_value": 2.0,
+      "productivity_unit": "天/片",
+      "resource_type": "beam_erection_team",
+      "productivity_options": [
+        {
+          "id": "beam_erection_standard-default",
+          "name": "默认工效",
+          "duration_method": "fixed_days",
+          "quantity_source": "count",
+          "productivity_value": 2.0,
+          "productivity_unit": "天/片",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": true
+    },
+    {
+      "id": "cast_in_place_continuous_zero_block",
+      "component_type": "cast_in_place_continuous_beam",
+      "process_name": "0号块",
+      "method_id": "zero_block",
+      "duration_method": "fixed_days",
+      "quantity_source": "count",
+      "productivity_value": 120.0,
+      "productivity_unit": "天/块",
+      "resource_type": "cast_in_place_continuous_beam_team",
+      "productivity_options": [
+        {
+          "id": "cast_in_place_continuous_zero_block-default",
+          "name": "默认工效",
+          "duration_method": "fixed_days",
+          "quantity_source": "count",
+          "productivity_value": 120.0,
+          "productivity_unit": "天/块",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": true
+    },
+    {
+      "id": "cast_in_place_continuous_standard_segment",
+      "component_type": "cast_in_place_continuous_beam",
+      "process_name": "标准块",
+      "method_id": "standard_segment",
+      "duration_method": "days_per_unit",
+      "quantity_source": "count",
+      "productivity_value": 10.0,
+      "productivity_unit": "天/块",
+      "resource_type": "cast_in_place_continuous_beam_team",
+      "productivity_options": [
+        {
+          "id": "cast_in_place_continuous_standard_segment-default",
+          "name": "默认工效",
+          "duration_method": "days_per_unit",
+          "quantity_source": "count",
+          "productivity_value": 10.0,
+          "productivity_unit": "天/块",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": false
+    },
+    {
+      "id": "cast_in_place_continuous_closure_segment",
+      "component_type": "cast_in_place_continuous_beam",
+      "process_name": "合拢段",
+      "method_id": "closure_segment",
+      "duration_method": "fixed_days",
+      "quantity_source": "count",
+      "productivity_value": 30.0,
+      "productivity_unit": "天/块",
+      "resource_type": "cast_in_place_continuous_beam_team",
+      "productivity_options": [
+        {
+          "id": "cast_in_place_continuous_closure_segment-default",
+          "name": "默认工效",
+          "duration_method": "fixed_days",
+          "quantity_source": "count",
+          "productivity_value": 30.0,
+          "productivity_unit": "天/块",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": false
+    },
+    {
+      "id": "cast_in_place_continuous_straight_segment",
+      "component_type": "cast_in_place_continuous_beam",
+      "process_name": "直线段",
+      "method_id": "straight_segment",
+      "duration_method": "fixed_days",
+      "quantity_source": "count",
+      "productivity_value": 35.0,
+      "productivity_unit": "天/块",
+      "resource_type": "cast_in_place_continuous_beam_team",
+      "productivity_options": [
+        {
+          "id": "cast_in_place_continuous_straight_segment-default",
+          "name": "默认工效",
+          "duration_method": "fixed_days",
+          "quantity_source": "count",
+          "productivity_value": 35.0,
+          "productivity_unit": "天/块",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": false
+    },
+    {
+      "id": "cast_in_place_box_beam_standard",
+      "component_type": "cast_in_place_box_beam",
+      "process_name": "现浇箱梁",
+      "method_id": null,
+      "duration_method": "fixed_days",
+      "quantity_source": "count",
+      "productivity_value": 45.0,
+      "productivity_unit": "天/联",
+      "resource_type": "cast_in_place_box_beam_team",
+      "productivity_options": [
+        {
+          "id": "cast_in_place_box_beam_standard-default",
+          "name": "默认工效",
+          "duration_method": "fixed_days",
+          "quantity_source": "count",
+          "productivity_value": 45.0,
+          "productivity_unit": "天/联",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": true
+    },
+    {
+      "id": "steel_box_beam_standard",
+      "component_type": "steel_box_beam",
+      "process_name": "钢箱梁",
+      "method_id": null,
+      "duration_method": "fixed_days",
+      "quantity_source": "count",
+      "productivity_value": 30.0,
+      "productivity_unit": "天/片",
+      "resource_type": "steel_box_beam_team",
+      "productivity_options": [
+        {
+          "id": "steel_box_beam_standard-default",
+          "name": "默认工效",
+          "duration_method": "fixed_days",
+          "quantity_source": "count",
+          "productivity_value": 30.0,
+          "productivity_unit": "天/片",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": true
+    },
+    {
+      "id": "bridge_deck_system_standard",
+      "component_type": "bridge_deck_system",
+      "process_name": "桥面系",
+      "method_id": null,
+      "duration_method": "units_per_day",
+      "quantity_source": "deck_length_m",
+      "productivity_value": 30.0,
+      "productivity_unit": "米/天",
+      "resource_type": "bridge_deck_system_team",
+      "productivity_options": [
+        {
+          "id": "bridge_deck_system_standard-default",
+          "name": "默认工效",
+          "duration_method": "units_per_day",
+          "quantity_source": "deck_length_m",
+          "productivity_value": 30.0,
+          "productivity_unit": "米/天",
+          "standard_section_height_m": null,
+          "is_default": true
+        }
+      ],
+      "applicability": {
+        "source": "historical_default"
+      },
+      "is_default": true
+    }
+  ],
+  "logic_rules": [
+    {
+      "id": "cap_after_piles",
+      "scope": "same_structure",
+      "structure_type": null,
+      "to_component": "cap",
+      "predecessor_candidates": [
+        "pile"
+      ],
+      "predecessor_strategy": "all",
+      "relationship": "FS",
+      "lag_days": 3,
+      "severity": "error",
+      "note": "承台在同一墩台全部桩基完成后施工。"
+    },
+    {
+      "id": "ground_tie_after_piles",
+      "scope": "same_structure",
+      "structure_type": "pier",
+      "to_component": "ground_tie_beam",
+      "predecessor_candidates": [
+        "pile"
+      ],
+      "predecessor_strategy": "all",
+      "relationship": "FS",
+      "lag_days": 2,
+      "severity": "error",
+      "note": "地系梁在同一墩台全部桩基完成后施工。"
+    },
+    {
+      "id": "pier_body_after_cap",
+      "scope": "same_structure",
+      "structure_type": "pier",
+      "to_component": "pier_body",
+      "predecessor_candidates": [
+        "ground_tie_beam",
+        "cap",
+        "pile"
+      ],
+      "predecessor_strategy": "first_available",
+      "relationship": "FS",
+      "lag_days": 5,
+      "severity": "error",
+      "note": "墩柱优先以承台前置；无承台时依次回退到地系梁或桩基。"
+    },
+    {
+      "id": "middle_tie_after_pier_body",
+      "scope": "same_structure",
+      "structure_type": "pier",
+      "to_component": "middle_tie_beam",
+      "predecessor_candidates": [
+        "pier_body"
+      ],
+      "predecessor_strategy": "first_available",
+      "relationship": "FS",
+      "lag_days": 0,
+      "severity": "error",
+      "note": "中系梁在墩柱完成后施工。"
+    },
+    {
+      "id": "cap_beam_after_pier_body",
+      "scope": "same_structure",
+      "structure_type": "pier",
+      "to_component": "cap_beam",
+      "predecessor_candidates": [
+        "pier_body",
+        "middle_tie_beam"
+      ],
+      "predecessor_strategy": "all",
+      "relationship": "FS",
+      "lag_days": 3,
+      "severity": "error",
+      "note": "盖梁以墩柱、中系梁为前置。"
+    },
+    {
+      "id": "abutment_body_after_cap",
+      "scope": "same_structure",
+      "structure_type": "abutment",
+      "to_component": "abutment_body",
+      "predecessor_candidates": [
+        "cap",
+        "pile",
+        "spread_foundation"
+      ],
+      "predecessor_strategy": "first_available",
+      "relationship": "FS",
+      "lag_days": 5,
+      "severity": "error",
+      "note": "桥台台身优先以承台为前置；无承台时回退到桩基；无桩基时回退到扩大基础。"
+    }
+  ],
+  "upper_structure_logic_rules": [
+    {
+      "id": "cast_in_place_box_beam_after_lower_structure",
+      "relationship": "FS",
+      "lag_days": 0,
+      "severity": "error",
+      "note": "现浇箱梁在对应跨组墩台下部结构完成后开始。"
+    },
+    {
+      "id": "continuous_beam_zero_block_after_main_pier_lower_structure",
+      "relationship": "FS",
+      "lag_days": 0,
+      "severity": "error",
+      "note": "连续梁0号块在对应主墩下部结构完成后开始。"
+    },
+    {
+      "id": "continuous_beam_side_straight_after_edge_lower_structure",
+      "relationship": "FS",
+      "lag_days": 0,
+      "severity": "error",
+      "note": "连续梁边跨连续段在对应边跨墩台下部结构完成后开始。"
+    },
+    {
+      "id": "continuous_beam_t_chain",
+      "relationship": "FS",
+      "lag_days": 0,
+      "severity": "error",
+      "note": "连续梁T构内0号块和标准段按顺序施工。"
+    },
+    {
+      "id": "continuous_beam_side_closure",
+      "relationship": "FS",
+      "lag_days": 0,
+      "severity": "error",
+      "note": "连续梁边跨合龙段在边跨连续段和相邻T构完成后开始。"
+    },
+    {
+      "id": "continuous_beam_middle_closure",
+      "relationship": "FS",
+      "lag_days": 0,
+      "severity": "error",
+      "note": "连续梁中跨合龙段在相邻两个T构完成后开始。"
+    },
+    {
+      "id": "continuous_beam_edge_before_middle_closure",
+      "relationship": "FS",
+      "lag_days": 0,
+      "severity": "error",
+      "note": "连续梁默认边跨合龙先于中跨合龙。"
+    },
+    {
+      "id": "continuous_beam_middle_closure_sequence",
+      "relationship": "FS",
+      "lag_days": 0,
+      "severity": "error",
+      "note": "连续梁中跨合龙按配置顺序推进。"
+    }
+  ],
+  "resource_pools": [
+    {
+      "id": "pool-rotary-drill",
+      "type": "rotary_drill",
+      "label": "旋挖钻",
+      "resource_mode": "LIMITED",
+      "quantity": 8,
+      "max_quantity": 10,
+      "calendar_id": "continuous",
+      "enabled": true,
+      "compatible_process_ids": [],
+      "cost_type": "monthly_rental",
+      "incremental_unit_cost": 180000,
+      "billing_period_days": 30
+    },
+    {
+      "id": "pool-circulation-drill",
+      "type": "circulation_drill",
+      "label": "回旋钻",
+      "resource_mode": "LIMITED",
+      "quantity": 1,
+      "max_quantity": 10,
+      "calendar_id": "continuous",
+      "enabled": true,
+      "compatible_process_ids": [],
+      "cost_type": "none",
+      "incremental_unit_cost": 0,
+      "billing_period_days": 30
+    },
+    {
+      "id": "pool-impact-drill",
+      "type": "impact_drill",
+      "label": "冲击钻",
+      "resource_mode": "LIMITED",
+      "quantity": 1,
+      "max_quantity": 10,
+      "calendar_id": "continuous",
+      "enabled": true,
+      "compatible_process_ids": [],
+      "cost_type": "none",
+      "incremental_unit_cost": 0,
+      "billing_period_days": 30
+    },
+    {
+      "id": "pool-manual-pile",
+      "type": "manual_pile_team",
+      "label": "人工挖孔班组",
+      "resource_mode": "LIMITED",
+      "quantity": 1,
+      "max_quantity": 10,
+      "calendar_id": "continuous",
+      "enabled": true,
+      "compatible_process_ids": [],
+      "cost_type": "none",
+      "incremental_unit_cost": 0,
+      "billing_period_days": 30
+    },
+    {
+      "id": "pool-cap",
+      "type": "cap_team",
+      "label": "承台模板",
+      "resource_mode": "LIMITED",
+      "quantity": 4,
+      "max_quantity": 10,
+      "calendar_id": "continuous",
+      "enabled": true,
+      "compatible_process_ids": [],
+      "cost_type": "none",
+      "incremental_unit_cost": 0,
+      "billing_period_days": 30
+    },
+    {
+      "id": "pool-pier-body",
+      "type": "pier_body_team",
+      "label": "墩柱模板",
+      "resource_mode": "LIMITED",
+      "quantity": 8,
+      "max_quantity": 10,
+      "calendar_id": "continuous",
+      "enabled": true,
+      "compatible_process_ids": [],
+      "cost_type": "one_time_purchase",
+      "incremental_unit_cost": 90000,
+      "billing_period_days": 30
+    },
+    {
+      "id": "pool-cap-beam",
+      "type": "cap_beam_team",
+      "label": "盖梁模板",
+      "resource_mode": "LIMITED",
+      "quantity": 6,
+      "max_quantity": 10,
+      "calendar_id": "continuous",
+      "enabled": true,
+      "compatible_process_ids": [],
+      "cost_type": "one_time_purchase",
+      "incremental_unit_cost": 80000,
+      "billing_period_days": 30
+    },
+    {
+      "id": "pool-cast-in-place-continuous-beam",
+      "type": "cast_in_place_continuous_beam_team",
+      "label": "连续梁班组",
+      "resource_mode": "LIMITED",
+      "quantity": 4,
+      "max_quantity": 10,
+      "calendar_id": "continuous",
+      "enabled": true,
+      "compatible_process_ids": [],
+      "cost_type": "none",
+      "incremental_unit_cost": 0,
+      "billing_period_days": 30
+    }
+  ],
+  "milestones": [
+    {
+      "id": "M-B1-lower-cast-in-place-finish",
+      "name": "下部及现浇结构施工完成",
+      "level": "control",
+      "mode": "hard",
+      "scope_type": "bridge",
+      "scope_id": "B1",
+      "target_event": "finish",
+      "target_date": "2028-12-31",
+      "penalty_per_day": 0,
+      "related_structure_ids": []
+    }
+  ]
+}

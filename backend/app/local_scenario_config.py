@@ -20,6 +20,7 @@ from .process_library_defaults import upgrade_process_library
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LOCAL_DATA_DIR = PROJECT_ROOT / ".local-data"
 LOCAL_SCENARIO_CONFIG_PATH = LOCAL_DATA_DIR / "scheduler-config.json"
+BUNDLED_SCENARIO_CONFIG_PATH = Path(__file__).resolve().with_name("default_scenario_config.json")
 SCHEMA_VERSION = "local-scheduler-config/v1"
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -33,6 +34,22 @@ def apply_local_scenario_config(
     scenario: ScenarioInput,
     *,
     path: Path = LOCAL_SCENARIO_CONFIG_PATH,
+) -> ScenarioInput:
+    return apply_scenario_config(scenario, path=path)
+
+
+def apply_bundled_scenario_config(
+    scenario: ScenarioInput,
+    *,
+    path: Path = BUNDLED_SCENARIO_CONFIG_PATH,
+) -> ScenarioInput:
+    return apply_scenario_config(scenario, path=path)
+
+
+def apply_scenario_config(
+    scenario: ScenarioInput,
+    *,
+    path: Path,
 ) -> ScenarioInput:
     config = _read_config(path)
     if not config:

@@ -12,11 +12,6 @@
 - 里程碑：硬节点作为 CP-SAT 日期约束，软节点转为迟延变量并进入加权目标。
 - 前端页签：项目参数、工艺工效库、工艺逻辑、资源配置、里程碑、模拟结果。
 
-## 需求文档
-
-- [项目排程系统整体说明](docs/project-scheduling-system-overview.md)：说明系统模块划分、数据输入输出、内部数据流转和后端调用关系。
-- [项目参数页面需求文档](docs/project-parameters-requirements.md)：说明项目参数页在实际工程中的页面定位、主要功能、数据来源、接口规则和验收标准。
-- [工艺工效库页面需求文档](docs/process-productivity-library-requirements.md)：说明工艺工效库页的历史数据升级、工效分组、桩基工效单位和接口保存规则。
 
 ## 后端接口
 
@@ -109,6 +104,7 @@ npm run dev
 - Netlify 绑定本仓库 `main` 分支后，从根目录执行 `npm run build`，发布 `frontend/dist`。
 - Netlify 项目环境变量需要设置 `VITE_API_BASE_URL`，值为 Docker 后端的公开 HTTPS 地址，例如 `https://your-backend.example.com`。
 - 完整排程能力由 Docker 后端提供，包含 FastAPI、OR-Tools CP-SAT、Excel 导入和本地规则解析。
+- 后端镜像内置 `backend/app/default_scenario_config.json` 作为随代码发布的默认配置，云端打开页面时会先读取这份默认资源、工艺和逻辑配置。
 - `netlify/demo-functions/api.mts` 只保留为早期演示 API 参考，不会作为生产 `/api` 部署。
 
 Docker 后端可在支持 Docker 的云服务中绑定同一个 Git 仓库自动部署。构建入口使用仓库根目录的 `Dockerfile`，运行命令已在镜像中定义为：
@@ -122,7 +118,7 @@ uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --app-dir backend
 - `SCHEDULER_CORS_ORIGINS`：逗号分隔的允许来源，建议包含 Netlify 生产域名，例如 `https://project-scheduling-lili-big.netlify.app`。
 - `SCHEDULER_CORS_ORIGIN_REGEX`：可选，默认允许 `https://<deploy-id>--project-scheduling-lili-big.netlify.app` 形式的 Netlify 预览域名。
 
-第一版云端部署不配置持久化存储，工艺库、资源配置、项目参数等保存接口写入的 `.local-data` 内容可能在实例重启或重新部署后丢失。
+第一版云端部署不配置持久化存储，工艺库、资源配置、项目参数等保存接口写入的 `.local-data` 内容可能在实例重启或重新部署后丢失；需要长期固化的默认值应更新到 `backend/app/default_scenario_config.json` 并随 Git 发布。
 
 ## 关闭服务
 
@@ -242,7 +238,7 @@ Invoke-RestMethod http://127.0.0.1:8000/api/health
 ```
 ## 本地配置模拟
 
-后端启动 `/api/demo-scenario` 时会先构造默认场景，再叠加 `.local-data/scheduler-config.json` 中保存的本地配置。该文件用于临时模拟配置库，不随 git 提交。
+后端启动 `/api/demo-scenario` 时会先构造默认场景，再叠加 `backend/app/default_scenario_config.json` 中随代码发布的默认配置，最后叠加 `.local-data/scheduler-config.json` 中保存的本地配置。`.local-data` 文件用于临时模拟配置库，不随 git 提交。
 
 当前保存的配置范围包括：
 
