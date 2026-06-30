@@ -115,6 +115,14 @@ Python 后端仍是本地工程化和测试验证的主要实现；Netlify Funct
 
 当用户要求写、改、沉淀或完善需求文档时，应优先按该技能口径工作。
 
+全局技能中新增 `requirement-review`，用于需求评审、文档评审、方案评审和变更评审。用户提供初始需求文档并明确要“评审”时，应优先使用 `$requirement-review`，把用户文档放到当前项目 Demo、代码和已有文档中对照分析，先共同确认为什么改、改什么、怎么改，再输出可落地的变更说明文档。
+
+需求评审、Demo 实现和 PRD 输出需要区分处理：
+
+- 需求评审：使用 `$requirement-review`，默认不改代码、不直接生成 PRD，先输出评审结论、待确认项和变更说明。
+- Demo 实现：进入代码实现流程，读取真实前后端、算法和测试路径，修改源码并运行合适验证。
+- PRD 输出：使用 `skills/write-dev-prd/SKILL.md`，基于已确认的产品口径输出或更新 `docs/` 下的研发交底 PRD。
+
 ### 2.7 本地运行产物边界
 
 以下目录/文件通常不应纳入项目梳理，也不应提交：
@@ -275,7 +283,8 @@ git diff --check -- <changed-files>
 - 修改工艺工效库：保持每个 `ProcessTemplate` 至少一个 `ProductivityOption`，且只有一个默认工效；同步检查前端 `ProcessTab`、`domain/productivity.ts` 和后端默认库。
 - 修改工艺逻辑：同步检查 `bridge_schedule_logic_ontology.v1.json`、`backend/app/scenario.py`、`frontend/src/domain/logic.ts`、`LogicTab.tsx` 和前置关系追踪展示。
 - 修改资源/成本：同步检查 `ResourcePool` 字段、`frontend/src/domain/resources.ts`、`ResourcesTab.tsx`、`solve_resource_cost_scenario` 和资源成本相关测试。
-- 修改需求文档：先读 `skills/write-dev-prd/SKILL.md`，再读相关 `docs/` 文档和代码，避免把 demo 临时限制写成工程化产品目标。
+- 需求评审：用户明确“评审、审一下、方案评审、变更评审”时，优先使用全局 `$requirement-review`，先读用户初始文档，再扫描当前项目 `agent.md`、`README.md`、`docs/`、相关前后端代码和测试，输出“为什么改、改什么、怎么改、影响范围、验收标准”的变更说明。
+- 修改需求文档或输出 PRD：先读 `skills/write-dev-prd/SKILL.md`，再读相关 `docs/` 文档和代码，避免把 demo 临时限制写成工程化产品目标。
 
 ## 10. 配置与安全
 
