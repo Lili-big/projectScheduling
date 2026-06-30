@@ -98,11 +98,11 @@ Python 后端仍是本地工程化和测试验证的主要实现；Netlify Funct
 
 `docs/` 目录是项目需求和架构知识资产。由于该目录被 `.gitignore` 覆盖，新增或更新文档时需要显式检查目录内容：
 
-- `docs/project-scheduling-system-overview.md`：系统总览、模块划分、数据输入输出、内部流转和调用关系。
+- `docs/项目排程系统整体说明_v1.1.md`：系统总览、模块划分、数据输入输出、内部流转和调用关系。
 - `docs/project-parameters-requirements.md`：项目参数/结构参数页面需求。
-- `docs/process-productivity-library-requirements.md`：施工工艺及工效库需求。
-- `docs/process-logic-requirements.md`：工艺逻辑约束需求，包含工艺逻辑页面口径。
-- `docs/task-view-requirements.md`：任务视图页面需求，包含求解前任务网络核验口径。
+- `docs/施工工艺及工效库需求文档_v1.1.md`：施工工艺及工效库需求。
+- `docs/工艺逻辑约束需求文档_v1.0.md`：工艺逻辑约束需求，包含工艺逻辑页面口径。
+- `docs/任务视图页面需求文档_v1.0.md`：任务视图页面需求，包含求解前任务网络核验口径。
 
 整理需求或写 PRD 时应先读取这些文档，再看代码。
 
