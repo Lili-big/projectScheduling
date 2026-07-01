@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT))
 
 import app.scenario as scenario_module  # noqa: E402
 import app.solver as solver_module  # noqa: E402
-from app.models import ComponentModel, MilestoneConstraint, PrecedenceLink, ProcessTemplate, ProductivityOption, ProjectBridge, ProjectModel, Resource, ResourceCostSolveRequest, ResourcePool, ScheduleInput, ScheduleStrategyConfig, ScenarioCompareRequest, ScenarioInput, ScheduledTask, StructureModel, Task, TaskOverride, UpperStructureComponent, UpperStructureLogicRule, WorkSection  # noqa: E402
+from app.models import ComponentModel, MilestoneConstraint, PrecedenceLink, ProcessTemplate, ProductivityOption, ProjectBridge, ProjectModel, Resource, ResourceCostSolveRequest, ResourcePool, ScheduleInput, ScheduleStrategyConfig, ScenarioCompareRequest, ScenarioInput, ScheduledTask, StructureModel, Task, TaskOverride, UpperStructureComponent, UpperStructureLogicRule, ValidationMessage, WorkSection  # noqa: E402
 from app.models import MilestoneResult, ScheduleResult  # noqa: E402
 from app.process_library_defaults import upgrade_process_library  # noqa: E402
 from app.sample_data import (  # noqa: E402
@@ -1115,7 +1115,8 @@ def test_fixed_resource_shortest_returns_resource_increment_recommendation_when_
     alternative = solved.alternative_results[0]
     assert alternative.role == "minimum_resources"
     assert alternative.result.status in {"OPTIMAL", "FEASIBLE"}
-    assert alternative.result.stats["schedule_source"] == "control_priority_balanced_reoptimization"
+    assert alternative.result.stats["schedule_source"] == "minimum_resources_control_priority_balanced"
+    assert alternative.result.stats["recommended_schedule_source"] == "minimum_resources_control_priority_balanced"
     assert alternative.result.stats["recommended_resource_counts"][0]["added_quantity"] == 1
     assert len(alternative.generated.schedule_input.resources) == 2
     assert {allocation.resource_id for allocation in alternative.result.resource_allocations} <= {"cap_team_1", "cap_team_2"}
@@ -1142,6 +1143,59 @@ def test_fixed_resource_recommendation_matches_direct_min_resource_solver() -> N
     assert fixed_recommended == direct_recommended
     assert len(solved.alternative_results) == 1
     assert len(solved.alternative_results[0].generated.schedule_input.resources) == sum(direct_recommended.values())
+
+
+def test_fixed_resource_minimum_candidate_reruns_refinement_before_display(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("ortools")
+    original_refinement = scenario_module.solve_control_priority_schedule
+    refinement_calls: list[dict[str, object]] = []
+
+    def tracking_refinement(schedule_input: ScheduleInput, **kwargs: object) -> ScheduleResult:
+        refinement_calls.append(kwargs)
+        return original_refinement(schedule_input, **kwargs)
+
+    monkeypatch.setattr(scenario_module, "solve_control_priority_schedule", tracking_refinement)
+
+    solved = solve_scenario(_parallel_fixed_resource_scenario(target_days=5, current_resources=1, max_resources=3))
+
+    assert refinement_calls
+    assert any(call.get("baseline_result") is not None and call.get("warm_start_result") is not None for call in refinement_calls)
+    alternative = solved.alternative_results[0]
+    assert alternative.result.status in {"OPTIMAL", "FEASIBLE"}
+    assert alternative.result.stats["schedule_source"] == "minimum_resources_control_priority_balanced"
+    assert alternative.result.objective_breakdown["minimum_resource_refinement_status"] in {"OPTIMAL", "FEASIBLE"}
+
+
+def test_fixed_resource_minimum_candidate_keeps_verified_schedule_when_refinement_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("ortools")
+
+    def failed_refinement(schedule_input: ScheduleInput, **_: object) -> ScheduleResult:
+        return ScheduleResult(
+            status="UNKNOWN",
+            plan_start_date=schedule_input.start_date,
+            validation=[
+                ValidationMessage(
+                    level="warning",
+                    message="minimum resource refinement timed out",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(scenario_module, "solve_control_priority_schedule", failed_refinement)
+
+    solved = solve_scenario(_parallel_fixed_resource_scenario(target_days=5, current_resources=1, max_resources=3))
+
+    assert solved.result.objective_breakdown["resource_recommendation_status"] == "recommended_resources_verified"
+    assert solved.result.objective_breakdown["recommended_schedule_source"] == "minimum_resources_refinement_fallback"
+    alternative = solved.alternative_results[0]
+    assert alternative.result.status in {"OPTIMAL", "FEASIBLE"}
+    assert alternative.result.stats["schedule_source"] == "minimum_resources_refinement_fallback"
+    assert alternative.result.stats["minimum_resource_refinement_status"] == "UNKNOWN"
+    assert alternative.result.stats["recommended_resource_counts"][0]["added_quantity"] == 1
 
 
 def test_fixed_resource_late_current_skips_control_refinement_but_keeps_recommendation(

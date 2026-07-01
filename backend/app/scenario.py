@@ -52,6 +52,8 @@ CONTINUOUS_BEAM_DEFAULT_STANDARD_SEGMENT_CYCLES = 18
 CAST_IN_PLACE_BOX_BEAM_STRUCTURE_CODE = "castInPlaceBoxGirder"
 SIMPLE_BEAM_STRUCTURE_CODE = "precastTGirder"
 FIXED_RESOURCE_SOLVE_MODE = "fixed_resources_shortest_control_balanced"
+MINIMUM_RESOURCES_REFINED_SOURCE = "minimum_resources_control_priority_balanced"
+MINIMUM_RESOURCES_FALLBACK_SOURCE = "minimum_resources_refinement_fallback"
 UPPER_STRUCTURE_LOGIC_RULE_IDS = (
     "cast_in_place_box_beam_after_lower_structure",
     "continuous_beam_zero_block_after_main_pier_lower_structure",
@@ -418,7 +420,7 @@ def _fixed_resource_recommendation(
             max_schedule_input=max_schedule_input,
             fixed_counts=fixed_counts,
         )
-        min_resource_result = min_resource_result.model_copy(deep=True)
+        candidate_result = min_resource_result.model_copy(deep=True)
         recommendation_metadata = {
             "resource_recommendation_status": "recommended_resources_verified",
             "resource_recommendation_message": "已输出固定工期条件下的可行最少资源方案。",
@@ -427,21 +429,26 @@ def _fixed_resource_recommendation(
             "resource_solver_status": min_resource_result.status,
             **_min_resource_recommendation_metadata(min_resource_result),
         }
-        min_resource_result.stats.update(recommendation_metadata)
-        min_resource_result.objective_breakdown.update(recommendation_metadata)
         limited_schedule_input = max_generated.schedule_input.model_copy(
             update={"resources": _apply_resource_limits(max_generated.schedule_input.resources, fixed_counts)}
         )
         alternative_generated = max_generated.model_copy(update={"schedule_input": limited_schedule_input})
+        candidate_result = _minimum_resource_candidate_result(limited_schedule_input, candidate_result)
+        candidate_result.stats.update(recommendation_metadata)
+        candidate_result.objective_breakdown.update(recommendation_metadata)
+        candidate_source = candidate_result.stats.get("schedule_source") or candidate_result.objective_breakdown.get("schedule_source")
+        recommendation_metadata["recommended_schedule_source"] = candidate_source
+        candidate_result.stats["recommended_schedule_source"] = candidate_source
+        candidate_result.objective_breakdown["recommended_schedule_source"] = candidate_source
         alternative = ScenarioAlternativeResult(
             scenario_id=f"{scenario.scenario_id}-minimum-resources",
             scenario_name=f"{scenario.scenario_name} - 最少资源方案",
             role="minimum_resources",
             generated=alternative_generated,
-            result=min_resource_result,
-            milestone_results=min_resource_result.milestone_results,
-            diagnostics=_build_diagnostics(alternative_generated.validation, min_resource_result),
-            metrics=_scenario_metrics(alternative_generated, min_resource_result),
+            result=candidate_result,
+            milestone_results=candidate_result.milestone_results,
+            diagnostics=_build_diagnostics(alternative_generated.validation, candidate_result),
+            metrics=_scenario_metrics(alternative_generated, candidate_result),
         )
         return {
             "metadata": {
@@ -615,6 +622,69 @@ def _resource_upper_bound_counts(
             }
         )
     return upper_bounds
+
+
+def _minimum_resource_candidate_result(
+    limited_schedule_input: ScheduleInput,
+    min_resource_result: ScheduleResult,
+) -> ScheduleResult:
+    refined_input = _schedule_input_with_strategy(limited_schedule_input, "comprehensive")
+    refined_result = solve_control_priority_schedule(
+        refined_input,
+        enforce_hard_milestones=True,
+        baseline_result=min_resource_result,
+        warm_start_result=min_resource_result,
+    )
+    if _result_meets_hard_milestones(refined_result):
+        result = refined_result.model_copy(deep=True)
+        metadata = {
+            "schedule_source": MINIMUM_RESOURCES_REFINED_SOURCE,
+            "recommended_schedule_source": MINIMUM_RESOURCES_REFINED_SOURCE,
+            "minimum_resource_refinement_status": refined_result.status,
+            "minimum_resource_refinement_source": refined_result.stats.get("schedule_source")
+            or refined_result.objective_breakdown.get("schedule_source")
+            or "control_priority",
+            "warm_start_used": bool(refined_result.stats.get("warm_start_used")),
+        }
+        result.stats.update(metadata)
+        result.objective_breakdown.update(metadata)
+        return result
+
+    result = min_resource_result.model_copy(deep=True)
+    fallback_reason = f"minimum_resource_refinement_{refined_result.status.lower()}"
+    result.validation = list(min_resource_result.validation) + list(refined_result.validation)
+    result.validation.append(
+        ValidationMessage(
+            level="warning",
+            message="最少资源候选方案的二次精排未在当前时限内返回可用结果，已保留已验证的可行候选排程。",
+        )
+    )
+    metadata = {
+        "schedule_source": MINIMUM_RESOURCES_FALLBACK_SOURCE,
+        "recommended_schedule_source": MINIMUM_RESOURCES_FALLBACK_SOURCE,
+        "minimum_resource_refinement_status": refined_result.status,
+        "minimum_resource_refinement_fallback_reason": fallback_reason,
+        "skipped_named_refinement_reason": fallback_reason,
+    }
+    result.stats.update(metadata)
+    result.objective_breakdown.update(metadata)
+    result.stats.setdefault(
+        "control_priority_analysis",
+        {
+            "fallback_reason": fallback_reason,
+            "control_buffer_status": "not_evaluated",
+            "normal_balance_status": "not_evaluated",
+            "resource_path_status": "not_evaluated",
+            "control_objects": [],
+            "control_object_tasks": [],
+            "control_chain_predecessors": [],
+            "control_targets": [],
+            "control_buffer_risks": [],
+            "path_group_diagnostics": [],
+        },
+    )
+    result.objective_breakdown["control_priority_analysis"] = result.stats["control_priority_analysis"]
+    return result
 
 
 def _verify_recommended_resources(

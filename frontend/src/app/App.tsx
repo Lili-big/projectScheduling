@@ -207,6 +207,8 @@ const scheduleSourceLabels: Record<string, string> = {
   current_resources_capacity_shortest: "固定资源快排",
   current_resources_capacity_shortest_fallback: "固定资源回退",
   control_priority_balanced_reoptimization: "命名资源重排",
+  minimum_resources_control_priority_balanced: "最少资源候选精排",
+  minimum_resources_refinement_fallback: "最少资源候选回退",
   capacity_model_verified_schedule: "容量模型校验排程",
 };
 
@@ -1610,14 +1612,14 @@ function ResultsTab({
             </div>
           </div>
           {refinementSummary.fallbackReason && (
-            <p>命名资源精排未作为主结果展示，当前已回退到固定资源参考排程：{refinementSummary.fallbackReason}</p>
+            <p>{refinementSummary.source.startsWith("minimum_resources_") ? "最少资源候选精排未作为主结果展示，当前保留已验证的候选排程：" : "命名资源精排未作为主结果展示，当前已回退到固定资源参考排程："}{refinementSummary.fallbackReason}</p>
           )}
         </section>
       )}
 
       {resultOptions.length > 1 && (
         <section className="panel full">
-          <PanelTitle title="方案输出" subtitle="固定资源方案与可行最少资源方案" />
+          <PanelTitle title="方案输出" subtitle="固定资源方案与可验证最少资源候选方案" />
           <div className="segmented result-switcher">
             {resultOptions.map((option, index) => (
               <button
@@ -1626,7 +1628,7 @@ function ResultsTab({
                 onClick={() => setSelectedResultIndex(index)}
                 type="button"
               >
-                {index === 0 ? "方案1 当前资源" : `方案${index + 1} 最少资源`}
+                {resultOptionLabel(option, index)}
               </button>
             ))}
           </div>
@@ -1647,7 +1649,7 @@ function ResultsTab({
                   const item = resultOptionSummaries[index] ?? resultOptionSummary(option);
                   return (
                     <tr key={`${option.scenario_id}-${index}`}>
-                      <td>{index === 0 ? "方案1 当前资源" : `方案${index + 1} 最少资源`}</td>
+                      <td>{resultOptionLabel(option, index)}</td>
                       <td>{formatScheduleStatus(option.result.status)}</td>
                       <td>{option.result.objective_days ?? "-"}</td>
                       <td>{option.result.plan_finish_date ?? "-"}</td>
@@ -1945,14 +1947,14 @@ function ResultsTab({
 
       {showResourceRecommendation && (
         <section className="panel full">
-          <PanelTitle title="资源增量建议" subtitle="为满足强制里程碑目标建议配置的资源数量" />
+          <PanelTitle title="资源增量候选建议" subtitle="为满足强制里程碑目标，后端已验证可行的资源候选数量" />
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>资源</th>
                   <th>当前数量</th>
-                  <th>推荐数量</th>
+                  <th>候选数量</th>
                   <th>新增数量</th>
                   <th>最大数量</th>
                 </tr>
@@ -3137,6 +3139,14 @@ function resultOptionSummary(option: ScenarioSolveResult, baselineResourceCount 
   };
 }
 
+function resultOptionLabel(option: ScenarioSolveResult, index: number): string {
+  if (index === 0) return "方案1 当前资源";
+  const source = stringFromUnknown(option.result.objective_breakdown?.schedule_source ?? option.result.stats?.schedule_source);
+  if (source === "minimum_resources_control_priority_balanced") return `方案${index + 1} 最少资源候选精排`;
+  if (source === "minimum_resources_refinement_fallback") return `方案${index + 1} 最少资源候选`;
+  return `方案${index + 1} 资源候选`;
+}
+
 function actualUsedResourceCount(result: ScheduleResult): number {
   const allocatedResourceIds = new Set(
     result.resource_allocations
@@ -3377,6 +3387,7 @@ type ResourceCapacityLowerBound = {
 };
 
 type RefinementSummary = {
+  source: string;
   tone: MetricTone;
   title: string;
   recommendedDays: string;
@@ -3652,6 +3663,7 @@ function refinementSummaryFromResult(result: ScheduleResult | null): RefinementS
     isFallback,
   });
   return {
+    source,
     tone,
     title: refinementTitle({ source, hardLateCount, controlBufferStatus, isFallback }),
     recommendedDays: result.objective_days == null ? "-" : `${result.objective_days} 天`,
