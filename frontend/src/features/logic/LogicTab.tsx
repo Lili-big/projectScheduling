@@ -42,6 +42,17 @@ export function LogicTab({
       <span className="unit">自然日</span>
     </div>
   );
+  const finishGapInput = (value: number, onChange: (value: number) => void) => (
+    <div className="logic-lag-control">
+      <input
+        type="number"
+        min={0}
+        value={value}
+        onChange={(event) => onChange(Math.max(0, Number(event.target.value) || 0))}
+      />
+      <span className="unit">天内</span>
+    </div>
+  );
 
   return (
     <section className="panel full logic-panel">
@@ -82,6 +93,7 @@ export function LogicTab({
                 <th>匹配规则</th>
                 <th>逻辑关系</th>
                 <th>时间间隔</th>
+                <th>同步/窗口</th>
                 <th>使用范围</th>
                 <th>规则说明</th>
               </tr>
@@ -101,18 +113,29 @@ export function LogicTab({
                     <span className="logic-mode-pill readonly">{row.matchModeLabel}</span>
                   </td>
                   <td>
-                    {relationshipSelect(row.relationship, (relationship) =>
+                    {row.readOnly ? (
+                      <span className="logic-mode-pill readonly">硬约束</span>
+                    ) : relationshipSelect(row.relationship, (relationship) =>
                       row.source === "lower" && row.lowerRuleIndex !== undefined
                         ? onUpdateLogic(row.lowerRuleIndex, { relationship })
                         : onUpdateUpperStructureLogic(row.id, { relationship }),
                     )}
                   </td>
                   <td>
-                    {lagInput(row.lagDays, (lag_days) =>
+                    {row.readOnly ? (
+                      <span className="logic-mode-pill readonly">不可编辑</span>
+                    ) : lagInput(row.lagDays, (lag_days) =>
                       row.source === "lower" && row.lowerRuleIndex !== undefined
                         ? onUpdateLogic(row.lowerRuleIndex, { lag_days })
                         : onUpdateUpperStructureLogic(row.id, { lag_days }),
                     )}
+                  </td>
+                  <td>
+                    {row.source === "upper" && !row.readOnly && row.maxFinishGapDays !== undefined && row.maxFinishGapDays !== null
+                      ? finishGapInput(row.maxFinishGapDays, (max_finish_gap_days) =>
+                          onUpdateUpperStructureLogic(row.id, { max_finish_gap_days }),
+                        )
+                      : <span className="logic-mode-pill readonly">{row.constraintLabel ?? "无"}</span>}
                   </td>
                   <td>
                     <span className={`logic-match ${row.matchedCount > 0 ? "active" : "muted"}`}>{row.matchedText}</span>

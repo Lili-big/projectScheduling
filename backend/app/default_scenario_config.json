@@ -747,6 +747,7 @@
       "id": "continuous_beam_side_closure",
       "relationship": "FS",
       "lag_days": 0,
+      "max_finish_gap_days": 7,
       "severity": "error",
       "note": "连续梁边跨合龙段在边跨连续段和相邻T构完成后开始。"
     },
@@ -754,6 +755,7 @@
       "id": "continuous_beam_middle_closure",
       "relationship": "FS",
       "lag_days": 0,
+      "max_finish_gap_days": 7,
       "severity": "error",
       "note": "连续梁中跨合龙段在相邻两个T构完成后开始。"
     },
@@ -785,7 +787,10 @@
       "compatible_process_ids": [],
       "cost_type": "monthly_rental",
       "incremental_unit_cost": 180000,
-      "billing_period_days": 30
+      "billing_period_days": 30,
+      "same_structure_resource_binding": true,
+      "same_structure_parallel_limit": 1,
+      "parallel_rule_description": "设备型桩基资源：同一墩同一工艺默认由一台设备顺序或跳孔施工，不默认多机并行。"
     },
     {
       "id": "pool-circulation-drill",
@@ -799,7 +804,10 @@
       "compatible_process_ids": [],
       "cost_type": "none",
       "incremental_unit_cost": 0,
-      "billing_period_days": 30
+      "billing_period_days": 30,
+      "same_structure_resource_binding": true,
+      "same_structure_parallel_limit": 1,
+      "parallel_rule_description": "设备型桩基资源：同一墩同一工艺默认由一台设备顺序或跳孔施工，不默认多机并行。"
     },
     {
       "id": "pool-impact-drill",
@@ -813,7 +821,10 @@
       "compatible_process_ids": [],
       "cost_type": "none",
       "incremental_unit_cost": 0,
-      "billing_period_days": 30
+      "billing_period_days": 30,
+      "same_structure_resource_binding": true,
+      "same_structure_parallel_limit": 1,
+      "parallel_rule_description": "设备型桩基资源：同一墩同一工艺默认由一台设备顺序或跳孔施工，不默认多机并行。"
     },
     {
       "id": "pool-manual-pile",
@@ -827,7 +838,10 @@
       "compatible_process_ids": [],
       "cost_type": "none",
       "incremental_unit_cost": 0,
-      "billing_period_days": 30
+      "billing_period_days": 30,
+      "same_structure_resource_binding": false,
+      "same_structure_parallel_limit": null,
+      "parallel_rule_description": "人工挖孔班组：同一墩内暂不设置额外并行上限，仅受班组数量约束。"
     },
     {
       "id": "pool-cap",

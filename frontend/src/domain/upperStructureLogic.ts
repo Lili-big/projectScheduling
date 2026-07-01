@@ -7,6 +7,9 @@ export type UpperStructureLogicDefinition = {
   lowerPredecessor: string;
   generation: string;
   note: string;
+  defaultMaxFinishGapDays?: number | null;
+  readOnly?: boolean;
+  constraintLabel?: string;
 };
 
 export const upperStructureLogicDefinitions: UpperStructureLogicDefinition[] = [
@@ -37,26 +40,38 @@ export const upperStructureLogicDefinitions: UpperStructureLogicDefinition[] = [
   {
     id: "continuous_beam_t_chain",
     name: "连续梁T构顺序",
-    upperTarget: "同一主墩T构标准段",
+    upperTarget: "同一主墩T构左/右标准段",
     lowerPredecessor: "同一T构0号块或上一段",
-    generation: "每个T构内0号块、标准段按顺序生成前后置关系。",
-    note: "连续梁T构内0号块和标准段按顺序施工。",
+    generation: "每个T构内0号块分别连接左侧标准段、右侧标准段。",
+    note: "连续梁T构内0号块和左/右标准段按顺序施工。",
+  },
+  {
+    id: "continuous_beam_standard_segment_sync",
+    name: "左/右标准段同步",
+    upperTarget: "同一主墩T构左/右标准段",
+    lowerPredecessor: "同一T构0号块",
+    generation: "左侧标准段、右侧标准段作为两个聚合任务生成，求解时同步开始、同步完成。",
+    note: "同一T构左/右标准段必须同步开始、同步完成。",
+    readOnly: true,
+    constraintLabel: "同步开始/同步完成",
   },
   {
     id: "continuous_beam_side_closure",
     name: "连续梁边跨合龙",
     upperTarget: "边跨合龙段",
-    lowerPredecessor: "边跨连续段和相邻T构",
-    generation: "左右边跨合龙段分别以前置边跨连续段和相邻T构完成为前置。",
-    note: "连续梁边跨合龙段在边跨连续段和相邻T构完成后开始。",
+    lowerPredecessor: "边跨连续段和相邻T构边跨侧标准段",
+    generation: "左右边跨合龙段分别以前置边跨连续段和相邻T构边跨侧标准段完成为前置。",
+    note: "连续梁边跨合龙段在两侧前置完成后开始，默认两侧完成时间差不超过7天。",
+    defaultMaxFinishGapDays: 7,
   },
   {
     id: "continuous_beam_middle_closure",
     name: "连续梁中跨合龙",
     upperTarget: "中跨合龙段",
-    lowerPredecessor: "相邻两个T构",
-    generation: "每个中跨合龙段以左右相邻T构完成为前置。",
-    note: "连续梁中跨合龙段在相邻两个T构完成后开始。",
+    lowerPredecessor: "相邻两个T构面向合龙口的标准段",
+    generation: "每个中跨合龙段以左侧T构右侧标准段、右侧T构左侧标准段完成为前置。",
+    note: "连续梁中跨合龙段在两侧标准段完成后开始，默认两侧完成时间差不超过7天。",
+    defaultMaxFinishGapDays: 7,
   },
   {
     id: "continuous_beam_edge_before_middle_closure",
@@ -77,10 +92,11 @@ export const upperStructureLogicDefinitions: UpperStructureLogicDefinition[] = [
 ];
 
 export function defaultUpperStructureLogicRules(): UpperStructureLogicRule[] {
-  return upperStructureLogicDefinitions.map((definition) => ({
+  return upperStructureLogicDefinitions.filter((definition) => !definition.readOnly).map((definition) => ({
     id: definition.id,
     relationship: "FS",
     lag_days: 0,
+    max_finish_gap_days: definition.defaultMaxFinishGapDays ?? null,
     severity: "error",
     note: definition.note,
   }));
@@ -93,13 +109,15 @@ export function mergeUpperStructureLogicRules(rules: UpperStructureLogicRule[] =
       ...rule,
       relationship: rule.relationship ?? "FS",
       lag_days: rule.lag_days ?? 0,
+      max_finish_gap_days: rule.max_finish_gap_days ?? byId.get(rule.id)?.max_finish_gap_days ?? null,
       severity: rule.severity ?? "error",
     });
   }
-  return upperStructureLogicDefinitions.map((definition) => byId.get(definition.id) ?? {
+  return upperStructureLogicDefinitions.filter((definition) => !definition.readOnly).map((definition) => byId.get(definition.id) ?? {
     id: definition.id,
     relationship: "FS",
     lag_days: 0,
+    max_finish_gap_days: definition.defaultMaxFinishGapDays ?? null,
     severity: "error",
     note: definition.note,
   });

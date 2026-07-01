@@ -85,6 +85,8 @@ import type {
   ResourcePathStep,
   ResourcePath,
   ContinuityMetrics,
+  ControlPriorityAnalysis,
+  ResourceOrganizationAnalysis,
   TaskViewFilters,
   TaskViewRow,
   TaskViewGroup,
@@ -147,6 +149,7 @@ import {
   resourcePoolQuantity,
   resourcePoolUnitCost,
   resourcePoolUsableLimit,
+  resourceTypeLabel,
   taskResourceTypesLabel,
 } from "../domain/resources";
 import type { MetricTone, PlanStatusDisplay } from "../domain/scheduleDerived";
@@ -197,6 +200,70 @@ const controlLevelLabels: Record<ControlLevel, string> = {
   key: "控制性工程",
   normal: "普通工程",
   rough: "普通工程",
+};
+
+const scheduleSourceLabels: Record<string, string> = {
+  current_resources_control_priority_balanced: "命名资源精排",
+  current_resources_capacity_shortest: "固定资源快排",
+  current_resources_capacity_shortest_fallback: "固定资源回退",
+  control_priority_balanced_reoptimization: "命名资源重排",
+  capacity_model_verified_schedule: "容量模型校验排程",
+};
+
+const controlBufferStatusLabels: Record<string, string> = {
+  normal: "正常",
+  near_risk: "接近风险",
+  buffer_insufficient: "缓冲不足",
+  affected_node: "已影响节点",
+  not_evaluated: "未评价",
+};
+
+const normalBalanceStatusLabels: Record<string, string> = {
+  balanced: "均衡",
+  concentrated: "偏集中",
+  backloaded: "后期堆积",
+  not_evaluated: "未评价",
+};
+
+const resourcePathStatusLabels: Record<string, string> = {
+  smooth: "顺畅",
+  reasonable_jump: "有合理跨越",
+  abnormal_jump: "有异常跳转",
+  not_evaluated: "未评价",
+};
+
+const resourceBalanceStatusLabels: Record<string, string> = {
+  balanced: "分配均衡",
+  slightly_unbalanced: "轻微不均",
+  under_used: "部分资源低利用",
+  unbalanced: "分配不均",
+  not_evaluated: "未评价",
+};
+
+const resourceIdleStatusLabels: Record<string, string> = {
+  continuous: "施工连续",
+  minor_idle: "存在短空档",
+  idle_risk: "存在窝工风险",
+  not_evaluated: "未评价",
+};
+
+const controlTargetSourceLabels: Record<string, string> = {
+  cast_in_place_continuous_beam_rule: "现浇连续梁规则",
+  continuous_main_pier_inherited: "连续梁主墩继承",
+  task_control_level: "任务控制属性",
+  milestone_scope: "节点范围",
+  control_chain_predecessor: "控制链前置追溯",
+};
+
+const controlObjectTypeLabels: Record<string, string> = {
+  continuous_beam: "现浇连续梁",
+  main_pier_lower_structure: "主墩下部结构",
+  control_structure: "控制结构",
+};
+
+const controlTaskRoleLabels: Record<string, string> = {
+  control_object_task: "控制对象任务",
+  inherited_control_task: "主墩继承任务",
 };
 
 const editableControlLevelOptions: Array<{ value: ControlLevel; label: string }> = [
@@ -1291,7 +1358,11 @@ function ResultsTab({
   const showResourceRecommendationDiagnostic = shouldShowResourceRecommendationDiagnostic(resourceRecommendationStatus, resourceRecommendationMessage);
   const resourceCostSummary = resourceCostSummaryFromResult(result);
   const continuityMetrics = continuityMetricsFromResult(result);
+  const refinementSummary = refinementSummaryFromResult(result);
+  const controlPriorityAnalysis = controlPriorityAnalysisFromResult(result);
+  const resourceOrganization = resourceOrganizationFromResult(result);
   const strategyConfig = withDefaultScheduleStrategy(scenario?.schedule_strategy);
+  const resourcePoolsForDisplay = scenario?.resource_pools ?? [];
   const workSectionDisplayById = useMemo(
     () => buildWorkSectionDisplayById(scenario?.project ?? null),
     [scenario?.project],
@@ -1493,6 +1564,57 @@ function ResultsTab({
         <Metric label="资源 / 里程碑" value={summary.resourcesAndMilestones} tone="neutral" icon={<Flag size={18} />} />
       </section>
 
+      {refinementSummary && (
+        <section className={`business-conclusion ${refinementSummary.tone}`}>
+          <div className="business-conclusion-heading">
+            <div className="business-conclusion-icon">
+              <Workflow size={22} />
+            </div>
+            <div>
+              <span>精排主结果</span>
+              <h2>{refinementSummary.title}</h2>
+            </div>
+          </div>
+          <div className="business-conclusion-grid">
+            <div>
+              <span>推荐排程总工期</span>
+              <strong>{refinementSummary.recommendedDays}</strong>
+            </div>
+            <div>
+              <span>最短工期基准</span>
+              <strong>{refinementSummary.baselineDays}</strong>
+            </div>
+            <div>
+              <span>强制节点状态</span>
+              <strong>{refinementSummary.hardMilestoneStatus}</strong>
+            </div>
+            <div>
+              <span>方案来源</span>
+              <strong>{refinementSummary.scheduleSource}</strong>
+            </div>
+            <div>
+              <span>控制缓冲状态</span>
+              <strong>{refinementSummary.controlBufferStatus}</strong>
+            </div>
+            <div>
+              <span>普通工程均衡</span>
+              <strong>{refinementSummary.normalBalanceStatus}</strong>
+            </div>
+            <div>
+              <span>资源路径状态</span>
+              <strong>{refinementSummary.resourcePathStatus}</strong>
+            </div>
+            <div>
+              <span>最大缓冲风险</span>
+              <strong>{refinementSummary.maxBufferRiskDays}</strong>
+            </div>
+          </div>
+          {refinementSummary.fallbackReason && (
+            <p>命名资源精排未作为主结果展示，当前已回退到固定资源参考排程：{refinementSummary.fallbackReason}</p>
+          )}
+        </section>
+      )}
+
       {resultOptions.length > 1 && (
         <section className="panel full">
           <PanelTitle title="方案输出" subtitle="固定资源方案与可行最少资源方案" />
@@ -1573,6 +1695,211 @@ function ResultsTab({
           {!solveResult && !generated && busy !== "solving" && <div className="empty">等待生成或求解</div>}
         </div>
       </section>
+
+      {controlPriorityAnalysis && (
+        <section className="panel full">
+          <PanelTitle title="精排诊断" subtitle="控制对象、对象任务和前置影响任务" />
+          <div className="control-diagnostic-grid refinement-diagnostics">
+            <div className="table-wrap short">
+              <div className="table-caption">控制对象</div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>控制对象</th>
+                    <th>来源</th>
+                    <th>任务数</th>
+                    <th>最小缓冲</th>
+                    <th>最大风险</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {controlPriorityAnalysis.control_objects.slice(0, 8).map((object) => (
+                    <tr key={object.id}>
+                      <td>
+                        <strong>{object.name}</strong>
+                        <span className="muted-cell">{controlObjectTypeLabels[object.object_type] ?? object.object_type}</span>
+                      </td>
+                      <td>{object.source_label || controlTargetSourceLabels[object.source] || object.source}</td>
+                      <td>{object.task_count}</td>
+                      <td>{formatNullableDays(object.remaining_buffer_days)}</td>
+                      <td>{object.buffer_risk_days} 天</td>
+                    </tr>
+                  ))}
+                  {!controlPriorityAnalysis.control_objects.length && (
+                    <tr>
+                      <td colSpan={5}>暂无控制对象</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="table-wrap short">
+              <div className="table-caption">控制对象任务</div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>任务</th>
+                    <th>所属对象</th>
+                    <th>角色</th>
+                    <th>剩余缓冲</th>
+                    <th>风险</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {controlPriorityAnalysis.control_object_tasks.slice(0, 10).map((task) => (
+                    <tr key={task.task_id}>
+                      <td>{task.task_name}</td>
+                      <td>{task.object_name}</td>
+                      <td>{controlTaskRoleLabels[task.task_role] ?? task.task_role}</td>
+                      <td>{formatNullableDays(task.remaining_buffer_days)}</td>
+                      <td>{task.buffer_risk_days} 天</td>
+                    </tr>
+                  ))}
+                  {!controlPriorityAnalysis.control_object_tasks.length && (
+                    <tr>
+                      <td colSpan={5}>暂无控制对象任务</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="table-wrap short control-predecessor-table">
+              <div className="table-caption">前置影响任务</div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>任务</th>
+                    <th>影响控制对象</th>
+                    <th>风险来源</th>
+                    <th>剩余缓冲</th>
+                    <th>风险</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {controlPriorityAnalysis.control_chain_predecessors.slice(0, 10).map((task) => (
+                    <tr key={task.task_id}>
+                      <td>{task.task_name}</td>
+                      <td>{task.impacted_control_objects.map((object) => object.name).join("、") || "-"}</td>
+                      <td>{task.source_label || controlTargetSourceLabels[task.source] || task.source}</td>
+                      <td>{formatNullableDays(task.remaining_buffer_days)}</td>
+                      <td>{task.buffer_risk_days} 天</td>
+                    </tr>
+                  ))}
+                  {!controlPriorityAnalysis.control_chain_predecessors.length && (
+                    <tr>
+                      <td colSpan={5}>暂无前置影响任务</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          {resourceOrganization && (
+            <div className="control-diagnostic-grid refinement-diagnostics">
+              <div className="table-wrap short">
+                <div className="table-caption">资源组织汇总</div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>资源类型</th>
+                      <th>启用/输入</th>
+                      <th>工作量差</th>
+                      <th>最大空档</th>
+                      <th>均衡</th>
+                      <th>连续</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {resourceOrganization.resource_types.slice(0, 8).map((item) => (
+                      <tr key={item.resource_type}>
+                        <td>{resourceTypeLabel(item.resource_type, resourcePoolsForDisplay)}</td>
+                        <td>{item.used_resource_count} / {item.resource_count}</td>
+                        <td>{item.workload_range_days} 天</td>
+                        <td>{item.max_idle_gap_days} 天</td>
+                        <td>{resourceBalanceStatusLabels[item.balance_status] ?? item.balance_status}</td>
+                        <td>{resourceIdleStatusLabels[item.idle_status] ?? item.idle_status}</td>
+                      </tr>
+                    ))}
+                    {!resourceOrganization.resource_types.length && (
+                      <tr>
+                        <td colSpan={6}>暂无资源组织诊断</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="table-wrap short">
+                <div className="table-caption">资源队伍明细</div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>资源</th>
+                      <th>任务</th>
+                      <th>工作天</th>
+                      <th>空闲天</th>
+                      <th>最大空档</th>
+                      <th>利用率</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...resourceOrganization.resources]
+                      .sort((a, b) => (
+                        b.max_idle_gap_days - a.max_idle_gap_days
+                        || b.idle_days - a.idle_days
+                        || b.active_days - a.active_days
+                        || a.resource_name.localeCompare(b.resource_name)
+                      ))
+                      .slice(0, 10)
+                      .map((item) => (
+                        <tr key={item.resource_id}>
+                          <td>
+                            <strong>{item.resource_name}</strong>
+                            <span className="muted-cell">{resourceTypeLabel(item.resource_type, resourcePoolsForDisplay)}</span>
+                          </td>
+                          <td>{item.task_count}</td>
+                          <td>{item.active_days} 天</td>
+                          <td>{item.idle_days} 天</td>
+                          <td>{item.max_idle_gap_days} 天</td>
+                          <td>{formatPercent(item.utilization_within_span)}</td>
+                        </tr>
+                      ))}
+                    {!resourceOrganization.resources.length && (
+                      <tr>
+                        <td colSpan={6}>暂无资源队伍明细</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {controlPriorityAnalysis.path_group_diagnostics.length > 0 && (
+            <div className="table-wrap short refinement-path-groups">
+              <table>
+                <thead>
+                  <tr>
+                    <th>路径组</th>
+                    <th>资源</th>
+                    <th>实际可施工序列</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {controlPriorityAnalysis.path_group_diagnostics.map((group) => (
+                    <tr key={group.key}>
+                      <td>{group.side_label} / {group.component_label} / {group.process_name}</td>
+                      <td>{resourceTypeLabel(group.resource_type, resourcePoolsForDisplay)}</td>
+                      <td className="path-group-sequence">
+                        {group.actual_sequence.join(" -> ")}
+                        <span className="muted-cell">共 {group.actual_sequence.length} 个位置</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       {showResourceRecommendationDiagnostic && (
         <section className="panel full">
@@ -1832,6 +2159,7 @@ function ResultsTab({
           makespan={Math.max(result?.objective_days ?? 1, 1)}
           mode={ganttMode}
           workSectionDisplayById={workSectionDisplayById}
+          resourcePools={resourcePoolsForDisplay}
         />
       </section>
 
@@ -1840,12 +2168,13 @@ function ResultsTab({
         <ResourceLanes
           allocations={result?.resource_allocations ?? []}
           makespan={Math.max(result?.objective_days ?? 1, 1)}
+          resourcePools={resourcePoolsForDisplay}
         />
       </section>
 
       <section className="panel full">
         <PanelTitle title="资源路径图" subtitle="按施工先后展示资源经过的左/右幅-墩号序列" />
-        <ResourcePathChart resourcePaths={continuityMetrics?.resource_paths ?? []} />
+        <ResourcePathChart resourcePaths={continuityMetrics?.resource_paths ?? []} resourcePools={resourcePoolsForDisplay} />
       </section>
 
       <section className="panel full">
@@ -1886,11 +2215,13 @@ function Gantt({
   makespan,
   mode,
   workSectionDisplayById,
+  resourcePools,
 }: {
   tasks: ScheduledTask[];
   makespan: number;
   mode: GanttMode;
   workSectionDisplayById: Map<string, WorkSectionDisplay>;
+  resourcePools: ResourcePool[];
 }) {
   if (!tasks.length) return <div className="empty">暂无排程结果</div>;
   const groups = buildGanttGroups(tasks, mode, workSectionDisplayById);
@@ -1918,7 +2249,7 @@ function Gantt({
                       width: `${Math.max(((task.end_offset - task.start_offset) / makespan) * 100, 1.2)}%`,
                       backgroundColor: componentColors[task.component_type],
                     }}
-                    title={ganttTaskHoverTitle(task, sideLabel)}
+                    title={ganttTaskHoverTitle(task, sideLabel, resourcePools)}
                   >
                     <span>{task.duration_days}d</span>
                   </div>
@@ -1935,9 +2266,11 @@ function Gantt({
 function ResourceLanes({
   allocations,
   makespan,
+  resourcePools,
 }: {
   allocations: ResourceAllocation[];
   makespan: number;
+  resourcePools: ResourcePool[];
 }) {
   if (!allocations.length) return <div className="empty">暂无资源分配</div>;
   const groups = groupBy(allocations, (item) => item.resource_id);
@@ -1947,7 +2280,7 @@ function ResourceLanes({
         <div className="lane-row" key={items[0].resource_id}>
           <div className="lane-label">
             <strong>{items[0].resource_name}</strong>
-            <code>{items[0].resource_type}</code>
+            <code>{resourceTypeLabel(items[0].resource_type, resourcePools)}</code>
           </div>
           <div className="lane-track">
             {items.map((allocation) => (
@@ -1958,7 +2291,7 @@ function ResourceLanes({
                   left: `${(allocation.start_offset / makespan) * 100}%`,
                   width: `${Math.max(((allocation.end_offset - allocation.start_offset) / makespan) * 100, 1.2)}%`,
                 }}
-                title={allocationHoverTitle(allocation)}
+                title={allocationHoverTitle(allocation, resourcePools)}
               />
             ))}
           </div>
@@ -1968,7 +2301,13 @@ function ResourceLanes({
   );
 }
 
-function ResourcePathChart({ resourcePaths }: { resourcePaths: ResourcePath[] }) {
+function ResourcePathChart({
+  resourcePaths,
+  resourcePools,
+}: {
+  resourcePaths: ResourcePath[];
+  resourcePools: ResourcePool[];
+}) {
   const visiblePaths = resourcePaths.filter((path) => path.path.length > 0);
   if (!visiblePaths.length) return <div className="empty">暂无资源路径</div>;
   return (
@@ -1980,7 +2319,7 @@ function ResourcePathChart({ resourcePaths }: { resourcePaths: ResourcePath[] })
             <div className="resource-path-label">
               <strong>{path.resource_name}</strong>
             </div>
-            <div className="resource-path-sequence" title={resourcePathHoverTitle(path, labels)}>
+            <div className="resource-path-sequence" title={resourcePathHoverTitle(path, labels, resourcePools)}>
               {labels.map((label, index) => (
                 <span className="resource-path-step" key={`${path.resource_id}-${label}-${index}`}>
                   {label}
@@ -1994,7 +2333,7 @@ function ResourcePathChart({ resourcePaths }: { resourcePaths: ResourcePath[] })
   );
 }
 
-function ganttTaskHoverTitle(task: ScheduledTask, sideLabel = "-"): string {
+function ganttTaskHoverTitle(task: ScheduledTask, sideLabel = "-", resourcePools: ResourcePool[] = []): string {
   return [
     `工作项：${task.name}`,
     `幅别：${sideLabel}`,
@@ -2003,24 +2342,24 @@ function ganttTaskHoverTitle(task: ScheduledTask, sideLabel = "-"): string {
     `工期：${task.duration_days} 天`,
     `分配资源：${task.assigned_resource_name ?? "-"}`,
     `资源序列：${task.assigned_resource_id ?? "-"}`,
-    `资源类型：${task.assigned_resource_type ?? "-"}`,
+    `资源类型：${task.assigned_resource_type ? resourceTypeLabel(task.assigned_resource_type, resourcePools) : "-"}`,
   ].join("\n");
 }
 
-function allocationHoverTitle(allocation: ResourceAllocation): string {
+function allocationHoverTitle(allocation: ResourceAllocation, resourcePools: ResourcePool[] = []): string {
   return [
     `工作项：${allocation.task_name}`,
     `计划：${allocation.start_date} 至 ${allocation.finish_date}`,
     `分配资源：${allocation.resource_name}`,
     `资源序列：${allocation.resource_id}`,
-    `资源类型：${allocation.resource_type}`,
+    `资源类型：${resourceTypeLabel(allocation.resource_type, resourcePools)}`,
   ].join("\n");
 }
 
-function resourcePathHoverTitle(path: ResourcePath, labels: string[]): string {
+function resourcePathHoverTitle(path: ResourcePath, labels: string[], resourcePools: ResourcePool[] = []): string {
   return [
     `资源：${path.resource_name}`,
-    `资源类型：${path.resource_type}`,
+    `资源类型：${resourceTypeLabel(path.resource_type, resourcePools)}`,
     `施工路径：${labels.join("-")}`,
     `任务数：${path.task_count}`,
   ].join("\n");
@@ -3037,6 +3376,20 @@ type ResourceCapacityLowerBound = {
   exceeds_upper_bound: boolean;
 };
 
+type RefinementSummary = {
+  tone: MetricTone;
+  title: string;
+  recommendedDays: string;
+  baselineDays: string;
+  hardMilestoneStatus: string;
+  scheduleSource: string;
+  controlBufferStatus: string;
+  normalBalanceStatus: string;
+  resourcePathStatus: string;
+  maxBufferRiskDays: string;
+  fallbackReason: string;
+};
+
 function recommendedResourceCountsFromResult(result: ScheduleResult | null): RecommendedResourceCount[] {
   const raw = result?.stats?.recommended_resource_counts ?? result?.objective_breakdown?.recommended_resource_counts;
   if (!Array.isArray(raw)) return [];
@@ -3112,6 +3465,297 @@ function resourceCapacityLowerBoundsFromResult(result: ScheduleResult | null): R
       exceeds_upper_bound: Boolean(item.exceeds_upper_bound),
     }))
     .filter((item) => item.resource_pool_id);
+}
+
+function resourceOrganizationFromResult(result: ScheduleResult | null): ResourceOrganizationAnalysis | null {
+  const analysisRaw = result?.stats?.control_priority_analysis ?? result?.objective_breakdown?.control_priority_analysis;
+  const nestedRaw = isRecord(analysisRaw) ? analysisRaw.resource_organization_analysis : undefined;
+  const raw = result?.stats?.resource_organization_analysis
+    ?? result?.objective_breakdown?.resource_organization_analysis
+    ?? nestedRaw;
+  if (!isRecord(raw)) return null;
+  const resources = Array.isArray(raw.resources)
+    ? raw.resources.filter(isRecord).map((item) => ({
+        resource_id: String(item.resource_id ?? ""),
+        resource_name: String(item.resource_name ?? "-"),
+        resource_type: String(item.resource_type ?? ""),
+        task_count: Number(item.task_count ?? 0),
+        active_days: Number(item.active_days ?? 0),
+        first_start_offset: nullableNumberFromUnknown(item.first_start_offset),
+        last_end_offset: nullableNumberFromUnknown(item.last_end_offset),
+        active_span_days: Number(item.active_span_days ?? 0),
+        idle_days: Number(item.idle_days ?? 0),
+        max_idle_gap_days: Number(item.max_idle_gap_days ?? 0),
+        idle_gap_count: Number(item.idle_gap_count ?? 0),
+        utilization_within_span: Number(item.utilization_within_span ?? 0),
+        project_utilization: Number(item.project_utilization ?? 0),
+        jump_pier_count: Number(item.jump_pier_count ?? 0),
+        side_switch_count: Number(item.side_switch_count ?? 0),
+        cross_side_jump_count: Number(item.cross_side_jump_count ?? 0),
+        path_group_switch_count: Number(item.path_group_switch_count ?? 0),
+      })).filter((item) => item.resource_id)
+    : [];
+  const resourceTypes = Array.isArray(raw.resource_types)
+    ? raw.resource_types.filter(isRecord).map((item) => ({
+        resource_type: String(item.resource_type ?? ""),
+        resource_count: Number(item.resource_count ?? 0),
+        used_resource_count: Number(item.used_resource_count ?? 0),
+        task_count: Number(item.task_count ?? 0),
+        active_days: Number(item.active_days ?? 0),
+        min_workload_days: Number(item.min_workload_days ?? 0),
+        max_workload_days: Number(item.max_workload_days ?? 0),
+        average_workload_days: Number(item.average_workload_days ?? 0),
+        workload_range_days: Number(item.workload_range_days ?? 0),
+        idle_days: Number(item.idle_days ?? 0),
+        max_idle_gap_days: Number(item.max_idle_gap_days ?? 0),
+        jump_pier_count: Number(item.jump_pier_count ?? 0),
+        side_switch_count: Number(item.side_switch_count ?? 0),
+        path_group_switch_count: Number(item.path_group_switch_count ?? 0),
+        balance_status: String(item.balance_status ?? "not_evaluated"),
+        idle_status: String(item.idle_status ?? "not_evaluated"),
+      })).filter((item) => item.resource_type)
+    : [];
+  return {
+    resource_count: Number(raw.resource_count ?? resources.length),
+    used_resource_count: Number(raw.used_resource_count ?? resources.filter((item) => item.active_days > 0).length),
+    resource_balance_status: String(raw.resource_balance_status ?? "not_evaluated"),
+    resource_idle_status: String(raw.resource_idle_status ?? "not_evaluated"),
+    resources,
+    resource_types: resourceTypes,
+  };
+}
+
+function controlPriorityAnalysisFromResult(result: ScheduleResult | null): ControlPriorityAnalysis | null {
+  const raw = result?.stats?.control_priority_analysis ?? result?.objective_breakdown?.control_priority_analysis;
+  if (!isRecord(raw)) return null;
+  const controlObjects = Array.isArray(raw.control_objects)
+    ? raw.control_objects.filter(isRecord).map((item) => ({
+        id: String(item.id ?? ""),
+        name: String(item.name ?? "-"),
+        object_type: String(item.object_type ?? ""),
+        source: String(item.source ?? ""),
+        source_label: String(item.source_label ?? controlTargetSourceLabels[String(item.source ?? "")] ?? item.source ?? "-"),
+        task_count: Number(item.task_count ?? 0),
+        task_ids: Array.isArray(item.task_ids) ? item.task_ids.map(String) : [],
+        remaining_buffer_days: nullableNumberFromUnknown(item.remaining_buffer_days),
+        buffer_risk_days: Number(item.buffer_risk_days ?? 0),
+        status: String(item.status ?? "not_evaluated"),
+      })).filter((item) => item.id)
+    : [];
+  const controlObjectTasks = Array.isArray(raw.control_object_tasks)
+    ? raw.control_object_tasks.filter(isRecord).map((item) => ({
+        task_id: String(item.task_id ?? ""),
+        task_name: String(item.task_name ?? "-"),
+        object_id: String(item.object_id ?? ""),
+        object_name: String(item.object_name ?? "-"),
+        task_role: String(item.task_role ?? ""),
+        source: String(item.source ?? ""),
+        source_label: String(item.source_label ?? controlTargetSourceLabels[String(item.source ?? "")] ?? item.source ?? "-"),
+        control_level: controlLevelFromUnknown(item.control_level),
+        component_type: componentTypeFromUnknown(item.component_type),
+        finish_date: String(item.finish_date ?? ""),
+        latest_safe_finish_date: item.latest_safe_finish_date ? String(item.latest_safe_finish_date) : null,
+        remaining_buffer_days: nullableNumberFromUnknown(item.remaining_buffer_days),
+        buffer_risk_days: Number(item.buffer_risk_days ?? 0),
+        status: String(item.status ?? "not_evaluated"),
+      })).filter((item) => item.task_id)
+    : [];
+  const controlChainPredecessors = Array.isArray(raw.control_chain_predecessors)
+    ? raw.control_chain_predecessors.filter(isRecord).map((item) => ({
+        task_id: String(item.task_id ?? ""),
+        task_name: String(item.task_name ?? "-"),
+        source: String(item.source ?? ""),
+        source_label: String(item.source_label ?? controlTargetSourceLabels[String(item.source ?? "")] ?? item.source ?? "-"),
+        control_level: controlLevelFromUnknown(item.control_level),
+        component_type: componentTypeFromUnknown(item.component_type),
+        finish_date: String(item.finish_date ?? ""),
+        latest_safe_finish_date: item.latest_safe_finish_date ? String(item.latest_safe_finish_date) : null,
+        remaining_buffer_days: nullableNumberFromUnknown(item.remaining_buffer_days),
+        buffer_risk_days: Number(item.buffer_risk_days ?? 0),
+        status: String(item.status ?? "not_evaluated"),
+        deadline_source: String(item.deadline_source ?? ""),
+        impacted_control_objects: Array.isArray(item.impacted_control_objects)
+          ? item.impacted_control_objects.filter(isRecord).map((object) => ({
+              id: String(object.id ?? ""),
+              name: String(object.name ?? "-"),
+            })).filter((object) => object.id)
+          : [],
+      })).filter((item) => item.task_id)
+    : [];
+  const controlTargets = Array.isArray(raw.control_targets)
+    ? raw.control_targets.filter(isRecord).map((item) => ({
+        task_id: String(item.task_id ?? ""),
+        task_name: String(item.task_name ?? "-"),
+        control_level: controlLevelFromUnknown(item.control_level),
+        component_type: componentTypeFromUnknown(item.component_type),
+        source: String(item.source ?? ""),
+      })).filter((item) => item.task_id)
+    : [];
+  const bufferRisks = Array.isArray(raw.control_buffer_risks)
+    ? raw.control_buffer_risks.filter(isRecord).map((item) => ({
+        task_id: String(item.task_id ?? ""),
+        task_name: String(item.task_name ?? "-"),
+        control_level: controlLevelFromUnknown(item.control_level),
+        is_control_target: Boolean(item.is_control_target),
+        target_source: String(item.target_source ?? ""),
+        deadline_source: String(item.deadline_source ?? ""),
+        latest_safe_finish_date: String(item.latest_safe_finish_date ?? ""),
+        necessary_buffer_days: Number(item.necessary_buffer_days ?? 0),
+        finish_date: String(item.finish_date ?? ""),
+        remaining_buffer_days: Number(item.remaining_buffer_days ?? 0),
+        buffer_risk_days: Number(item.buffer_risk_days ?? 0),
+        status: String(item.status ?? "not_evaluated"),
+      })).filter((item) => item.task_id)
+    : [];
+  const pathGroups = Array.isArray(raw.path_group_diagnostics)
+    ? raw.path_group_diagnostics.filter(isRecord).map(pathGroupDiagnosticFromRecord).filter((item) => item.key)
+    : [];
+  const resourceOrganization = resourceOrganizationFromResult(result);
+  return {
+    control_task_count: Number(raw.control_task_count ?? 0),
+    control_objects: controlObjects,
+    control_object_tasks: controlObjectTasks,
+    control_chain_predecessors: controlChainPredecessors,
+    control_targets: controlTargets,
+    control_buffer_risks: bufferRisks,
+    control_buffer_status: String(raw.control_buffer_status ?? "not_evaluated"),
+    normal_balance_status: String(raw.normal_balance_status ?? "not_evaluated"),
+    resource_path_status: String(raw.resource_path_status ?? "not_evaluated"),
+    resource_balance_status: String(raw.resource_balance_status ?? resourceOrganization?.resource_balance_status ?? "not_evaluated"),
+    resource_idle_status: String(raw.resource_idle_status ?? resourceOrganization?.resource_idle_status ?? "not_evaluated"),
+    resource_organization_analysis: resourceOrganization ?? undefined,
+    path_group_diagnostics: pathGroups,
+    fallback_reason: typeof raw.fallback_reason === "string" ? raw.fallback_reason : undefined,
+  };
+}
+
+function refinementSummaryFromResult(result: ScheduleResult | null): RefinementSummary | null {
+  if (!result) return null;
+  const analysis = controlPriorityAnalysisFromResult(result);
+  const source = stringFromUnknown(result.objective_breakdown?.schedule_source ?? result.stats?.schedule_source);
+  if (!analysis && !source) return null;
+  const hardMilestones = result.milestone_results.filter((milestone) => milestone.mode === "hard");
+  const hardLateCount = hardMilestones.filter((milestone) => milestone.lateness_days > 0).length;
+  const controlBufferStatus = analysis?.control_buffer_status ?? "not_evaluated";
+  const normalBalanceStatus = analysis?.normal_balance_status ?? "not_evaluated";
+  const resourcePathStatus = analysis?.resource_path_status ?? "not_evaluated";
+  const fallbackReason = analysis?.fallback_reason
+    ?? stringFromUnknown(result.objective_breakdown?.skipped_named_refinement_reason ?? result.stats?.skipped_named_refinement_reason);
+  const maxBufferRisk = Math.max(0, ...(analysis?.control_buffer_risks ?? []).map((item) => item.buffer_risk_days));
+  const baselineDays = Number(result.objective_breakdown?.baseline_makespan_days ?? result.stats?.baseline_makespan_days);
+  const isFallback = source === "current_resources_capacity_shortest_fallback" || Boolean(fallbackReason);
+  const tone = refinementTone({
+    hardLateCount,
+    controlBufferStatus,
+    normalBalanceStatus,
+    resourcePathStatus,
+    isFallback,
+  });
+  return {
+    tone,
+    title: refinementTitle({ source, hardLateCount, controlBufferStatus, isFallback }),
+    recommendedDays: result.objective_days == null ? "-" : `${result.objective_days} 天`,
+    baselineDays: Number.isFinite(baselineDays) ? `${baselineDays} 天` : "-",
+    hardMilestoneStatus: hardMilestones.length
+      ? (hardLateCount > 0 ? `不满足 ${hardLateCount} 个` : "全部满足")
+      : "未配置",
+    scheduleSource: scheduleSourceLabels[source] ?? (source || "-"),
+    controlBufferStatus: controlBufferStatusLabels[controlBufferStatus] ?? controlBufferStatus,
+    normalBalanceStatus: normalBalanceStatusLabels[normalBalanceStatus] ?? normalBalanceStatus,
+    resourcePathStatus: resourcePathStatusLabels[resourcePathStatus] ?? resourcePathStatus,
+    maxBufferRiskDays: `${maxBufferRisk} 天`,
+    fallbackReason,
+  };
+}
+
+function pathGroupDiagnosticFromRecord(item: Record<string, unknown>) {
+  return {
+    key: String(item.key ?? ""),
+    bridge_id: item.bridge_id == null ? null : String(item.bridge_id),
+    work_section_id: item.work_section_id == null ? null : String(item.work_section_id),
+    side: String(item.side ?? "N"),
+    side_label: String(item.side_label ?? "-"),
+    resource_type: String(item.resource_type ?? ""),
+    component_type: componentTypeFromUnknown(item.component_type),
+    component_label: String(item.component_label ?? item.component_type ?? "-"),
+    process_name: String(item.process_name ?? "-"),
+    task_count: Number(item.task_count ?? 0),
+    resource_count: Number(item.resource_count ?? 0),
+    resource_names: Array.isArray(item.resource_names) ? item.resource_names.map(String) : [],
+    structure_count: Number(item.structure_count ?? 0),
+    actual_sequence: Array.isArray(item.actual_sequence) ? item.actual_sequence.map(String) : [],
+  };
+}
+
+function refinementTone({
+  hardLateCount,
+  controlBufferStatus,
+  normalBalanceStatus,
+  resourcePathStatus,
+  isFallback,
+}: {
+  hardLateCount: number;
+  controlBufferStatus: string;
+  normalBalanceStatus: string;
+  resourcePathStatus: string;
+  isFallback: boolean;
+}): MetricTone {
+  if (hardLateCount > 0 || controlBufferStatus === "affected_node") return "danger";
+  if (
+    isFallback
+    || controlBufferStatus === "buffer_insufficient"
+    || controlBufferStatus === "near_risk"
+    || normalBalanceStatus === "backloaded"
+    || resourcePathStatus === "abnormal_jump"
+  ) {
+    return "warn";
+  }
+  return "ok";
+}
+
+function refinementTitle({
+  source,
+  hardLateCount,
+  controlBufferStatus,
+  isFallback,
+}: {
+  source: string;
+  hardLateCount: number;
+  controlBufferStatus: string;
+  isFallback: boolean;
+}): string {
+  if (isFallback) return "已回退固定资源参考排程";
+  if (hardLateCount > 0) return "强制节点未满足";
+  if (controlBufferStatus === "buffer_insufficient") return "控制缓冲不足，需复核关键链";
+  if (source === "current_resources_control_priority_balanced") return "命名资源精排可用于复核";
+  return scheduleSourceLabels[source] ?? "排程结果可用于复核";
+}
+
+function controlLevelFromUnknown(value: unknown): ControlLevel {
+  return typeof value === "string" && value in controlLevelLabels ? value as ControlLevel : "normal";
+}
+
+function componentTypeFromUnknown(value: unknown): ComponentType {
+  return typeof value === "string" && isComponentType(value) ? value : "pile";
+}
+
+function stringFromUnknown(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function nullableNumberFromUnknown(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatNullableDays(value: number | null): string {
+  return value === null ? "-" : `${value} 天`;
+}
+
+function formatPercent(value: number): string {
+  if (!Number.isFinite(value)) return "-";
+  return `${Math.round(value * 100)}%`;
 }
 
 function withDefaultScheduleStrategy(config?: ScheduleStrategyConfig | null): ScheduleStrategyConfig {
@@ -3209,8 +3853,12 @@ function continuityMetricsFromResult(result: ScheduleResult | null): ContinuityM
     side_switch_count: Number(raw.side_switch_count ?? 0),
     cross_side_jump_count: Number(raw.cross_side_jump_count ?? 0),
     direction_reversal_count: Number(raw.direction_reversal_count ?? 0),
+    path_group_switch_count: Number(raw.path_group_switch_count ?? 0),
     same_structure_craft_split_details: splitDetails,
     jump_transition_details: jumpDetails,
+    path_group_diagnostics: Array.isArray(raw.path_group_diagnostics)
+      ? raw.path_group_diagnostics.filter(isRecord).map(pathGroupDiagnosticFromRecord).filter((item) => item.key)
+      : [],
     resource_paths: Array.isArray(raw.resource_paths)
       ? raw.resource_paths.filter(isRecord).map((item) => ({
           resource_id: String(item.resource_id ?? ""),
@@ -3222,6 +3870,7 @@ function continuityMetricsFromResult(result: ScheduleResult | null): ContinuityM
           jump_pier_count: Number(item.jump_pier_count ?? 0),
           side_switch_count: Number(item.side_switch_count ?? 0),
           cross_side_jump_count: Number(item.cross_side_jump_count ?? 0),
+          path_group_switch_count: Number(item.path_group_switch_count ?? 0),
           path: Array.isArray(item.path)
             ? item.path.filter(isRecord).map((step) => ({
                 task_id: String(step.task_id ?? ""),

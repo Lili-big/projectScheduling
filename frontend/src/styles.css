@@ -360,6 +360,8 @@ code {
   padding: 16px;
   display: grid;
   gap: 14px;
+  border: 1px solid #dbe4ed;
+  border-radius: 8px;
   border-color: #dbe4ed;
 }
 
@@ -2009,13 +2011,22 @@ tbody tr:hover {
 .resource-list-name {
   min-width: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  column-gap: 8px;
+  row-gap: 4px;
 }
 
 .resource-list-name strong {
   color: #0f2742;
   white-space: nowrap;
+}
+
+.resource-parallel-note {
+  flex-basis: 100%;
+  color: #4b647f;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .resource-status-toggle {
@@ -2142,6 +2153,55 @@ tbody tr:hover {
   grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.8fr);
   gap: 12px;
   padding: 14px;
+}
+
+.control-diagnostic-grid {
+  padding: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+@media (min-width: 1180px) {
+  .control-diagnostic-grid {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.2fr);
+  }
+
+  .control-predecessor-table {
+    grid-column: 1 / -1;
+  }
+}
+
+.refinement-diagnostics {
+  padding-bottom: 8px;
+}
+
+.refinement-path-groups {
+  margin: 0 14px 14px;
+}
+
+.path-group-sequence {
+  min-width: 360px;
+  max-width: 960px;
+  white-space: normal;
+  line-height: 1.6;
+}
+
+.table-caption {
+  padding: 8px 12px;
+  color: #0f2742;
+  background: #fff;
+  border-bottom: 1px solid #edf2f7;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.muted-cell {
+  display: block;
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .business-explanation {

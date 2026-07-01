@@ -167,6 +167,7 @@ export type UpperStructureLogicRule = {
   id: string;
   relationship: RelationshipType;
   lag_days: number;
+  max_finish_gap_days?: number | null;
   severity?: "error" | "warning";
   note?: string;
 };
@@ -191,6 +192,9 @@ export type ResourcePool = {
   cost_type?: ResourceCostType;
   incremental_unit_cost?: number;
   billing_period_days?: number;
+  same_structure_resource_binding?: boolean;
+  same_structure_parallel_limit?: number | null;
+  parallel_rule_description?: string;
 };
 
 export type MilestoneConstraint = {
@@ -260,6 +264,7 @@ export type Task = {
   quantity_label: string;
   duration_days: number;
   compatible_resource_types: string[];
+  properties?: Record<string, unknown>;
 };
 
 export type ScheduledTask = Task & {
@@ -279,6 +284,7 @@ export type PrecedenceLink = {
   successor_id: string;
   relationship: RelationshipType;
   lag_days: number;
+  max_finish_gap_days?: number | null;
   source_rule_id: string;
   severity?: "error" | "warning";
 };
@@ -287,8 +293,13 @@ export type Resource = {
   id: string;
   name: string;
   type: string;
+  pool_id?: string | null;
+  pool_label?: string | null;
   enabled: boolean;
   calendar_id: string;
+  same_structure_resource_binding?: boolean;
+  same_structure_parallel_limit?: number | null;
+  parallel_rule_description?: string;
 };
 
 export type ResourceAllocation = {
@@ -419,6 +430,23 @@ export type ContinuityJumpDetail = {
   is_direction_reversal: boolean;
 };
 
+export type PathGroupDiagnostic = {
+  key: string;
+  bridge_id?: string | null;
+  work_section_id?: string | null;
+  side: string;
+  side_label: string;
+  resource_type: string;
+  component_type: ComponentType;
+  component_label: string;
+  process_name: string;
+  task_count: number;
+  resource_count: number;
+  resource_names: string[];
+  structure_count: number;
+  actual_sequence: string[];
+};
+
 export type ResourcePathStep = {
   task_id: string;
   task_name: string;
@@ -439,6 +467,7 @@ export type ResourcePath = {
   jump_pier_count: number;
   side_switch_count: number;
   cross_side_jump_count: number;
+  path_group_switch_count: number;
   path: ResourcePathStep[];
 };
 
@@ -450,9 +479,156 @@ export type ContinuityMetrics = {
   side_switch_count: number;
   cross_side_jump_count: number;
   direction_reversal_count: number;
+  path_group_switch_count: number;
   same_structure_craft_split_details: ContinuitySplitDetail[];
   jump_transition_details: ContinuityJumpDetail[];
+  path_group_diagnostics: PathGroupDiagnostic[];
   resource_paths: ResourcePath[];
+};
+
+export type ControlBufferRisk = {
+  task_id: string;
+  task_name: string;
+  control_level: ControlLevel;
+  is_control_target: boolean;
+  target_source: string;
+  deadline_source: string;
+  latest_safe_finish_date: string;
+  necessary_buffer_days: number;
+  finish_date: string;
+  remaining_buffer_days: number;
+  buffer_risk_days: number;
+  status: string;
+};
+
+export type ControlPriorityTarget = {
+  task_id: string;
+  task_name: string;
+  control_level: ControlLevel;
+  component_type: ComponentType;
+  source: string;
+};
+
+export type ControlObjectRef = {
+  id: string;
+  name: string;
+};
+
+export type ControlObject = {
+  id: string;
+  name: string;
+  object_type: string;
+  source: string;
+  source_label: string;
+  task_count: number;
+  task_ids: string[];
+  remaining_buffer_days: number | null;
+  buffer_risk_days: number;
+  status: string;
+};
+
+export type ControlObjectTask = {
+  task_id: string;
+  task_name: string;
+  object_id: string;
+  object_name: string;
+  task_role: string;
+  source: string;
+  source_label: string;
+  control_level: ControlLevel;
+  component_type: ComponentType;
+  finish_date: string;
+  latest_safe_finish_date: string | null;
+  remaining_buffer_days: number | null;
+  buffer_risk_days: number;
+  status: string;
+};
+
+export type ControlChainPredecessor = {
+  task_id: string;
+  task_name: string;
+  source: string;
+  source_label: string;
+  control_level: ControlLevel;
+  component_type: ComponentType;
+  finish_date: string;
+  latest_safe_finish_date: string | null;
+  remaining_buffer_days: number | null;
+  buffer_risk_days: number;
+  status: string;
+  deadline_source: string;
+  impacted_control_objects: ControlObjectRef[];
+};
+
+export type ResourceOrganizationResource = {
+  resource_id: string;
+  resource_name: string;
+  resource_type: string;
+  same_structure_resource_binding?: boolean;
+  same_structure_parallel_limit?: number | null;
+  parallel_rule_description?: string;
+  task_count: number;
+  active_days: number;
+  first_start_offset: number | null;
+  last_end_offset: number | null;
+  active_span_days: number;
+  idle_days: number;
+  max_idle_gap_days: number;
+  idle_gap_count: number;
+  utilization_within_span: number;
+  project_utilization: number;
+  jump_pier_count: number;
+  side_switch_count: number;
+  cross_side_jump_count: number;
+  path_group_switch_count: number;
+};
+
+export type ResourceOrganizationType = {
+  resource_type: string;
+  resource_count: number;
+  used_resource_count: number;
+  same_structure_resource_binding?: boolean;
+  same_structure_parallel_limit?: number | null;
+  parallel_rule_description?: string;
+  task_count: number;
+  active_days: number;
+  min_workload_days: number;
+  max_workload_days: number;
+  average_workload_days: number;
+  workload_range_days: number;
+  idle_days: number;
+  max_idle_gap_days: number;
+  jump_pier_count: number;
+  side_switch_count: number;
+  path_group_switch_count: number;
+  balance_status: string;
+  idle_status: string;
+};
+
+export type ResourceOrganizationAnalysis = {
+  resource_count: number;
+  used_resource_count: number;
+  resource_balance_status: string;
+  resource_idle_status: string;
+  resources: ResourceOrganizationResource[];
+  resource_types: ResourceOrganizationType[];
+};
+
+export type ControlPriorityAnalysis = {
+  control_task_count: number;
+  control_objects: ControlObject[];
+  control_object_tasks: ControlObjectTask[];
+  control_chain_predecessors: ControlChainPredecessor[];
+  control_targets: ControlPriorityTarget[];
+  control_buffer_risks: ControlBufferRisk[];
+  control_buffer_status: string;
+  normal_balance_status: string;
+  resource_path_status: string;
+  resource_balance_status?: string;
+  resource_idle_status?: string;
+  resource_organization_analysis?: ResourceOrganizationAnalysis;
+  path_group_diagnostics: PathGroupDiagnostic[];
+  fallback_reason?: string;
 };
 
 export type TaskViewFilters = {

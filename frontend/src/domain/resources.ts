@@ -70,6 +70,13 @@ export function resourcePoolBillingPeriodDays(pool: ResourcePool): number {
   return Number.isFinite(Number(pool.billing_period_days)) ? Math.max(1, Number(pool.billing_period_days)) : 30;
 }
 
+export function resourcePoolSameStructureParallelLimit(pool: ResourcePool): number | null {
+  if (pool.same_structure_parallel_limit === null || pool.same_structure_parallel_limit === undefined) return null;
+  const value = Number(pool.same_structure_parallel_limit);
+  if (!Number.isFinite(value)) return null;
+  return Math.max(1, Math.floor(value));
+}
+
 export function normalizeLimitedResourcePool(pool: ResourcePool): ResourcePool {
   const quantity = Math.max(0, resourcePoolQuantity(pool));
   const rawMaxQuantity = typeof pool.max_quantity === "number" && Number.isFinite(pool.max_quantity)
@@ -81,6 +88,9 @@ export function normalizeLimitedResourcePool(pool: ResourcePool): ResourcePool {
     quantity,
     max_quantity: Math.max(quantity, rawMaxQuantity),
     calendar_id: pool.calendar_id || "continuous",
+    same_structure_resource_binding: Boolean(pool.same_structure_resource_binding),
+    same_structure_parallel_limit: resourcePoolSameStructureParallelLimit(pool),
+    parallel_rule_description: String(pool.parallel_rule_description ?? ""),
   };
 }
 

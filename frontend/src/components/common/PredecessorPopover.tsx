@@ -104,7 +104,10 @@ function predecessorPopoverStyle(anchorRect: DOMRect | null): CSSProperties {
 
 function formatPrecedenceToken(link?: PrecedenceLink): string {
   if (!link) return "-";
-  return `${link.relationship}+${link.lag_days}天`;
+  const gap = link.max_finish_gap_days === null || link.max_finish_gap_days === undefined
+    ? ""
+    : ` · 完成差≤${link.max_finish_gap_days}天`;
+  return `${link.relationship}+${link.lag_days}天${gap}`;
 }
 
 function predecessorStructureLabel(task?: Task, sideLabel?: string): string {

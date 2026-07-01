@@ -355,6 +355,18 @@ def test_default_scenario_has_one_completion_milestone_per_bridge() -> None:
     assert milestone.mode == "hard"
 
 
+def test_bridge_milestone_scope_does_not_promote_all_lower_tasks_to_control_targets() -> None:
+    scenario = _parallel_fixed_resource_scenario(target_days=10, current_resources=1, max_resources=2)
+
+    generated = generate_schedule_input_from_scenario(scenario)
+    scoped_ids = set(_task_ids_for_milestone(scenario.milestones[0], generated.schedule_input.tasks))
+    scoped_tasks = [task for task in generated.schedule_input.tasks if task.id in scoped_ids]
+
+    assert scoped_tasks
+    assert any(task.control_level == "normal" for task in scoped_tasks)
+    assert not all(task.control_level in {"control", "key"} for task in scoped_tasks)
+
+
 def test_continuous_beam_upper_structures_generate_t_groups_and_closure_logic() -> None:
     scenario = _scenario_with_continuous_beam(main_pier_count=4, standard_cycles=2)
     generated = generate_schedule_input_from_scenario(scenario)
@@ -363,11 +375,13 @@ def test_continuous_beam_upper_structures_generate_t_groups_and_closure_logic() 
     links = generated.schedule_input.precedence_links
 
     assert not any(message.level == "error" for message in generated.validation)
-    assert len(continuous_tasks) == 15
+    assert len(continuous_tasks) == 19
     assert not any("第" in task.name for task in continuous_tasks)
     assert sum(1 for task in continuous_tasks if "0号块" in task.name) == 4
     standard_tasks = [task for task in continuous_tasks if "标准段2块" in task.name]
-    assert len(standard_tasks) == 4
+    assert len(standard_tasks) == 8
+    assert sum(1 for task in standard_tasks if "左侧标准段" in task.name) == 4
+    assert sum(1 for task in standard_tasks if "右侧标准段" in task.name) == 4
     assert {task.quantity for task in standard_tasks} == {2}
     assert {task.quantity_label for task in standard_tasks} == {"2块"}
     assert {task.duration_days for task in standard_tasks} == {20}
@@ -377,17 +391,43 @@ def test_continuous_beam_upper_structures_generate_t_groups_and_closure_logic() 
 
     left_straight = _task_named(continuous_tasks, "左幅连续梁1#墩T构-边跨连续段")
     left_closure = _task_named(continuous_tasks, "左幅连续梁1#墩T构-边跨合龙段")
-    first_t_standard = _task_named(continuous_tasks, "左幅连续梁1#墩T构-标准段2块")
+    first_t_left_standard = _task_named(continuous_tasks, "左幅连续梁1#墩T构-左侧标准段2块")
+    first_t_right_standard = _task_named(continuous_tasks, "左幅连续梁1#墩T构-右侧标准段2块")
+    second_t_left_standard = _task_named(continuous_tasks, "左幅连续梁2#墩T构-左侧标准段2块")
     mid_1 = _task_named(continuous_tasks, "中跨合龙1")
     mid_2 = _task_named(continuous_tasks, "中跨合龙2")
     mid_3 = _task_named(continuous_tasks, "中跨合龙3")
 
     assert _has_link(links, left_straight.id, left_closure.id, "continuous_beam_side_closure")
-    assert _has_link(links, first_t_standard.id, left_closure.id, "continuous_beam_side_closure")
+    assert _has_link(links, first_t_left_standard.id, left_closure.id, "continuous_beam_side_closure")
+    assert _has_link(links, first_t_right_standard.id, mid_1.id, "continuous_beam_middle_closure")
+    assert _has_link(links, second_t_left_standard.id, mid_1.id, "continuous_beam_middle_closure")
     assert _has_link(links, left_closure.id, mid_1.id, "continuous_beam_edge_before_middle_closure")
     assert _has_link(links, left_closure.id, mid_2.id, "continuous_beam_edge_before_middle_closure")
     assert _has_link(links, mid_1.id, mid_2.id, "continuous_beam_middle_closure_sequence")
     assert _has_link(links, mid_3.id, mid_2.id, "continuous_beam_middle_closure_sequence")
+    assert all(
+        link.max_finish_gap_days == 7
+        for link in links
+        if link.source_rule_id in {"continuous_beam_side_closure", "continuous_beam_middle_closure"}
+    )
+
+
+def test_continuous_beam_tasks_are_control_when_generated_from_structure_params() -> None:
+    scenario = _scenario_with_continuous_beam(main_pier_count=2, standard_cycles=1)
+    section = scenario.project.bridges[0].work_sections[0]
+    for upper in section.upper_structures:
+        upper.control_level = "normal"
+
+    generated = generate_schedule_input_from_scenario(scenario)
+    continuous_tasks = [
+        task
+        for task in generated.schedule_input.tasks
+        if task.component_type == "cast_in_place_continuous_beam"
+    ]
+
+    assert continuous_tasks
+    assert {task.control_level for task in continuous_tasks} == {"control"}
 
 
 def test_continuous_beam_standard_segment_duration_uses_block_count_when_process_is_legacy_fixed_days() -> None:
@@ -429,20 +469,26 @@ def test_continuous_beam_task_override_selects_productivity_option_for_derived_t
         )
     )
     scenario.task_overrides = {
-        "B1-L-CB-G01-T01-P01-STD": TaskOverride(
+        "B1-L-CB-G01-T01-P01-STD-L": TaskOverride(
+            method_id="standard_segment",
+            productivity_option_id="continuous-standard-fast",
+        ),
+        "B1-L-CB-G01-T01-P01-STD-R": TaskOverride(
             method_id="standard_segment",
             productivity_option_id="continuous-standard-fast",
         )
     }
 
     generated = generate_schedule_input_from_scenario(scenario)
-    target = next(task for task in generated.schedule_input.tasks if task.id == "B1-L-CB-G01-T01-P01-STD")
-    peer = next(task for task in generated.schedule_input.tasks if task.id == "B1-L-CB-G01-T02-P02-STD")
+    target = next(task for task in generated.schedule_input.tasks if task.id == "B1-L-CB-G01-T01-P01-STD-L")
+    target_peer = next(task for task in generated.schedule_input.tasks if task.id == "B1-L-CB-G01-T01-P01-STD-R")
+    other_t = next(task for task in generated.schedule_input.tasks if task.id == "B1-L-CB-G01-T02-P02-STD-L")
 
     assert target.productivity_rule_id == "cast_in_place_continuous_standard_segment:continuous-standard-fast"
     assert target.quantity == 18
     assert target.duration_days == 90
-    assert peer.duration_days == 180
+    assert target_peer.duration_days == 90
+    assert other_t.duration_days == 180
 
 
 def test_continuous_beam_middle_closure_order_is_configurable() -> None:
@@ -553,6 +599,99 @@ def test_continuous_beam_zero_block_and_side_straight_wait_for_lower_structures(
     )
 
 
+def test_continuous_beam_lower_anchor_prefers_pier_body_before_cap_when_no_cap_beam() -> None:
+    scenario = _scenario_with_continuous_beam(main_pier_count=2, standard_cycles=1)
+    section = scenario.project.bridges[0].work_sections[0]
+    section.structures = [
+        _abutment_structure(0),
+        _pier_lower_structure(1),
+        _pier_lower_structure(2),
+        _pier_lower_structure(3),
+    ]
+
+    generated = generate_schedule_input_from_scenario(scenario)
+    continuous_tasks = [task for task in generated.schedule_input.tasks if task.component_type == "cast_in_place_continuous_beam"]
+    zero_block = _task_named(continuous_tasks, "左幅连续梁1#墩T构-0号块")
+    predecessors = {
+        link.predecessor_id
+        for link in generated.schedule_input.precedence_links
+        if link.successor_id == zero_block.id
+        and link.source_rule_id == "continuous_beam_zero_block_after_main_pier_lower_structure"
+    }
+
+    assert "P01-BODY" in predecessors
+    assert "P01-CAP" not in predecessors
+    assert "P01-PILE-01" not in predecessors
+
+
+def test_continuous_beam_left_and_right_standard_segments_solve_synchronously() -> None:
+    pytest.importorskip("ortools")
+    scenario = _scenario_with_continuous_beam(main_pier_count=2, standard_cycles=1)
+    generated = generate_schedule_input_from_scenario(scenario, use_max_resources=True)
+    schedule_input = generated.schedule_input.model_copy(
+        update={"schedule_strategy": ScheduleStrategyConfig(strategy="shortest_duration")}
+    )
+
+    result = solve_schedule(schedule_input)
+    by_name = {task.name: task for task in result.tasks}
+    left_standard = by_name["左幅连续梁1#墩T构-左侧标准段1块"]
+    right_standard = by_name["左幅连续梁1#墩T构-右侧标准段1块"]
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert left_standard.start_offset == right_standard.start_offset
+    assert left_standard.end_offset == right_standard.end_offset
+    assert left_standard.assigned_resource_id is not None
+    assert right_standard.assigned_resource_id is None
+
+
+def test_continuous_beam_closure_predecessor_finish_gap_is_limited() -> None:
+    pytest.importorskip("ortools")
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="closure-gap",
+            start_date=date(2026, 1, 1),
+            tasks=[
+                _solver_task("A", "边跨连续段", 1, "").model_copy(update={"compatible_resource_types": []}),
+                _solver_task("B", "相邻T构边跨侧标准段", 20, "").model_copy(update={"compatible_resource_types": []}),
+                _solver_task("C", "边跨合龙段", 1, "").model_copy(
+                    update={
+                        "component_type": "cast_in_place_continuous_beam",
+                        "structure_type": "continuous_beam",
+                        "compatible_resource_types": [],
+                        "properties": {"continuous_task_type": "side_closure_segment"},
+                    }
+                ),
+            ],
+            precedence_links=[
+                PrecedenceLink(
+                    id="A-C",
+                    predecessor_id="A",
+                    successor_id="C",
+                    lag_days=0,
+                    source_rule_id="continuous_beam_side_closure",
+                    max_finish_gap_days=7,
+                ),
+                PrecedenceLink(
+                    id="B-C",
+                    predecessor_id="B",
+                    successor_id="C",
+                    lag_days=0,
+                    source_rule_id="continuous_beam_side_closure",
+                    max_finish_gap_days=7,
+                ),
+            ],
+            resources=[],
+            milestones=[],
+            schedule_strategy=ScheduleStrategyConfig(strategy="shortest_duration"),
+            time_limit_seconds=5,
+        )
+    )
+    by_id = {task.id: task for task in result.tasks}
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert abs(by_id["A"].end_offset - by_id["B"].end_offset) <= 7
+
+
 def test_upper_structure_logic_relationship_and_lag_are_configurable() -> None:
     scenario = _scenario_with_continuous_beam(main_pier_count=2, standard_cycles=1)
     section = scenario.project.bridges[0].work_sections[0]
@@ -574,7 +713,7 @@ def test_upper_structure_logic_relationship_and_lag_are_configurable() -> None:
 
     continuous_tasks = [task for task in generated.schedule_input.tasks if task.component_type == "cast_in_place_continuous_beam"]
     zero_block = _task_named(continuous_tasks, "左幅连续梁1#墩T构-0号块")
-    standard_segment = _task_named(continuous_tasks, "左幅连续梁1#墩T构-标准段1块")
+    standard_segment = _task_named(continuous_tasks, "左幅连续梁1#墩T构-左侧标准段1块")
     zero_block_link = next(
         link
         for link in generated.schedule_input.precedence_links
@@ -1292,6 +1431,237 @@ def test_solver_prefers_same_resource_for_same_structure_and_craft() -> None:
     assert result.stats["continuity_metrics"]["same_structure_craft_split_count"] == 0
 
 
+def test_same_structure_drill_parallel_rule_comes_from_resource_config() -> None:
+    pytest.importorskip("ortools")
+    tasks = _same_pier_pile_tasks("rotary_drill")
+    start = date(2026, 1, 1)
+
+    unconfigured_result = solve_schedule(
+        ScheduleInput(
+            project_name="unconfigured rotary can parallel",
+            start_date=start,
+            tasks=tasks,
+            precedence_links=[],
+            resources=[
+                Resource(id="rotary_1", name="旋挖钻1", type="rotary_drill"),
+                Resource(id="rotary_2", name="旋挖钻2", type="rotary_drill"),
+            ],
+            time_limit_seconds=5,
+        )
+    )
+
+    configured_result = solve_schedule(
+        ScheduleInput(
+            project_name="configured rotary same pier rule",
+            start_date=start,
+            tasks=tasks,
+            precedence_links=[],
+            resources=[
+                Resource(
+                    id="rotary_1",
+                    name="旋挖钻1",
+                    type="rotary_drill",
+                    same_structure_resource_binding=True,
+                    same_structure_parallel_limit=1,
+                ),
+                Resource(
+                    id="rotary_2",
+                    name="旋挖钻2",
+                    type="rotary_drill",
+                    same_structure_resource_binding=True,
+                    same_structure_parallel_limit=1,
+                ),
+            ],
+            time_limit_seconds=5,
+        )
+    )
+
+    assert unconfigured_result.status in {"OPTIMAL", "FEASIBLE"}
+    assert unconfigured_result.objective_days == 5
+    assert len({task.assigned_resource_id for task in unconfigured_result.tasks}) == 2
+
+    assert configured_result.status in {"OPTIMAL", "FEASIBLE"}
+    assert configured_result.objective_days == 10
+    assert len({task.assigned_resource_id for task in configured_result.tasks}) == 1
+
+
+def test_manual_pile_team_allows_same_structure_parallel_without_extra_limit() -> None:
+    pytest.importorskip("ortools")
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="manual pile parallel",
+            start_date=date(2026, 1, 1),
+            tasks=_same_pier_pile_tasks("manual_pile_team"),
+            precedence_links=[],
+            resources=[
+                Resource(id="manual_1", name="人工挖孔班1", type="manual_pile_team"),
+                Resource(id="manual_2", name="人工挖孔班2", type="manual_pile_team"),
+            ],
+            time_limit_seconds=5,
+        )
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.objective_days == 5
+    assert len({task.assigned_resource_id for task in result.tasks}) == 2
+
+
+def test_capacity_model_enforces_configured_same_structure_parallel_limit() -> None:
+    pytest.importorskip("ortools")
+    result = solve_capacity_shortest_schedule(
+        ScheduleInput(
+            project_name="capacity same pier parallel limit",
+            start_date=date(2026, 1, 1),
+            tasks=_same_pier_pile_tasks("rotary_drill"),
+            precedence_links=[],
+            resources=[
+                Resource(
+                    id="rotary_1",
+                    name="旋挖钻1",
+                    type="rotary_drill",
+                    pool_id="pool-rotary",
+                    pool_label="旋挖钻",
+                    same_structure_parallel_limit=1,
+                ),
+                Resource(
+                    id="rotary_2",
+                    name="旋挖钻2",
+                    type="rotary_drill",
+                    pool_id="pool-rotary",
+                    pool_label="旋挖钻",
+                    same_structure_parallel_limit=1,
+                ),
+            ],
+            time_limit_seconds=5,
+        )
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.objective_days == 10
+
+
+def test_default_pile_resource_parallel_rules_are_configuration_fields() -> None:
+    scenario = default_scenario()
+    pool_by_type = {pool.type: pool for pool in scenario.resource_pools}
+
+    for resource_type in {"rotary_drill", "circulation_drill", "impact_drill"}:
+        assert pool_by_type[resource_type].same_structure_resource_binding is True
+        assert pool_by_type[resource_type].same_structure_parallel_limit == 1
+        assert pool_by_type[resource_type].parallel_rule_description
+    assert pool_by_type["manual_pile_team"].same_structure_resource_binding is False
+    assert pool_by_type["manual_pile_team"].same_structure_parallel_limit is None
+    assert pool_by_type["manual_pile_team"].parallel_rule_description
+
+    resources, validation = scenario_module.expand_resource_pools(scenario.resource_pools)
+    assert validation == []
+    rotary = next(resource for resource in resources if resource.type == "rotary_drill")
+    manual = next(resource for resource in resources if resource.type == "manual_pile_team")
+    assert rotary.same_structure_resource_binding is True
+    assert rotary.same_structure_parallel_limit == 1
+    assert manual.same_structure_resource_binding is False
+    assert manual.same_structure_parallel_limit is None
+
+
+def test_control_priority_balances_workload_across_fixed_rotary_resources() -> None:
+    pytest.importorskip("ortools")
+    tasks = [
+        Task(
+            id=f"B1-L-P{index:02d}-PILE-01",
+            name=f"{index}# pier pile",
+            bridge_id="B1",
+            work_section_id="WS-L",
+            sequence_order=index,
+            structure_id=f"B1-L-P{index:02d}",
+            structure_name=f"{index}# pier",
+            structure_type="pier",
+            component_type="pile",
+            process_name="pile",
+            productivity_rule_id="pile",
+            quantity=1,
+            quantity_label="1",
+            duration_days=3,
+            compatible_resource_types=["rotary_drill"],
+        )
+        for index in range(1, 13)
+    ]
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="fixed-rotary-balance",
+            start_date=date(2026, 1, 1),
+            tasks=tasks,
+            precedence_links=[],
+            resources=[
+                Resource(id=f"rotary_drill_{index}", name=f"Rotary {index}", type="rotary_drill")
+                for index in range(1, 7)
+            ],
+            schedule_strategy=ScheduleStrategyConfig(strategy="comprehensive", enable_balance_objective=False),
+            time_limit_seconds=5,
+        )
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    rotary_resources = [
+        item
+        for item in result.stats["resource_organization_analysis"]["resources"]
+        if item["resource_type"] == "rotary_drill"
+    ]
+    workloads = [item["active_days"] for item in rotary_resources]
+    assert len(rotary_resources) == 6
+    assert all(workload > 0 for workload in workloads)
+    assert max(workloads) - min(workloads) <= 3
+    assert result.objective_breakdown["resource_workload_balance_penalty"] <= 3
+
+
+def test_control_priority_reports_resource_idle_penalty_for_forced_gap() -> None:
+    pytest.importorskip("ortools")
+    rotary_first = _solver_task("A-rotary", "rotary first", 1, "rotary_drill")
+    blocker = _solver_task("B-blocker", "blocking work", 20, "other_team")
+    rotary_last = _solver_task("C-rotary", "rotary last", 1, "rotary_drill")
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="resource-idle-gap",
+            start_date=date(2026, 1, 1),
+            tasks=[rotary_first, blocker, rotary_last],
+            precedence_links=[
+                PrecedenceLink(
+                    id="first-before-blocker",
+                    predecessor_id=rotary_first.id,
+                    successor_id=blocker.id,
+                    relationship="FS",
+                    lag_days=0,
+                    source_rule_id="test",
+                ),
+                PrecedenceLink(
+                    id="blocker-before-last",
+                    predecessor_id=blocker.id,
+                    successor_id=rotary_last.id,
+                    relationship="FS",
+                    lag_days=0,
+                    source_rule_id="test",
+                ),
+            ],
+            resources=[
+                Resource(id="rotary_drill_1", name="Rotary 1", type="rotary_drill"),
+                Resource(id="other_team_1", name="Other 1", type="other_team"),
+            ],
+            schedule_strategy=ScheduleStrategyConfig(strategy="comprehensive", enable_balance_objective=False),
+            time_limit_seconds=5,
+        )
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    rotary = next(
+        item
+        for item in result.stats["resource_organization_analysis"]["resources"]
+        if item["resource_id"] == "rotary_drill_1"
+    )
+    assert rotary["idle_days"] >= 20
+    assert rotary["max_idle_gap_days"] >= 20
+    assert result.objective_breakdown["resource_idle_penalty"] >= 20
+
+
 def test_control_priority_keeps_control_task_ahead_of_competing_normal_task() -> None:
     pytest.importorskip("ortools")
     start = date(2026, 1, 1)
@@ -1332,6 +1702,248 @@ def test_control_priority_keeps_control_task_ahead_of_competing_normal_task() ->
     assert by_task["A-normal"].start_offset >= by_task["Z-control"].end_offset
     assert result.objective_breakdown["solve_mode"] == "control_priority"
     assert result.stats["control_priority_analysis"]["bottleneck_resources"][0]["resource_type"] == "template"
+
+
+def test_control_buffer_risk_is_zero_when_required_buffer_remains() -> None:
+    pytest.importorskip("ortools")
+    start = date(2026, 1, 1)
+    normal = _solver_task("A-normal", "Normal pier", 5, "template").model_copy(
+        update={"structure_id": "S-normal", "control_level": "normal"}
+    )
+    control = _solver_task("Z-control", "Control pier", 5, "template").model_copy(
+        update={"structure_id": "S-control", "control_level": "control"}
+    )
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="control-buffer-sufficient",
+            start_date=start,
+            tasks=[normal, control],
+            precedence_links=[],
+            resources=[
+                Resource(id="template-1", name="Template 1", type="template"),
+                Resource(id="template-2", name="Template 2", type="template"),
+            ],
+            milestones=[
+                MilestoneConstraint(
+                    id="M-control",
+                    name="Control finish",
+                    level="control",
+                    mode="hard",
+                    scope_type="structure",
+                    scope_id="S-control",
+                    target_event="finish",
+                    target_date=date(2026, 1, 20),
+                )
+            ],
+            schedule_strategy=ScheduleStrategyConfig(strategy="comprehensive", resource_guarantee="priority"),
+            time_limit_seconds=5,
+        )
+    )
+
+    risks = result.stats["control_priority_analysis"]["control_buffer_risks"]
+    control_risk = next(item for item in risks if item["task_id"] == "Z-control")
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert control_risk["buffer_risk_days"] == 0
+    assert control_risk["status"] == "normal"
+    assert result.objective_breakdown["control_buffer_risk_penalty"] == 0
+
+
+def test_control_buffer_risk_is_reported_when_required_buffer_is_missing() -> None:
+    pytest.importorskip("ortools")
+    start = date(2026, 1, 1)
+    normal = _solver_task("A-normal", "Normal pier", 5, "template").model_copy(
+        update={"structure_id": "S-normal", "control_level": "normal"}
+    )
+    control = _solver_task("Z-control", "Control pier", 5, "template").model_copy(
+        update={"structure_id": "S-control", "control_level": "control"}
+    )
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="control-buffer-insufficient",
+            start_date=start,
+            tasks=[normal, control],
+            precedence_links=[],
+            resources=[Resource(id="template-1", name="Template 1", type="template")],
+            milestones=[
+                MilestoneConstraint(
+                    id="M-control",
+                    name="Control finish",
+                    level="control",
+                    mode="hard",
+                    scope_type="structure",
+                    scope_id="S-control",
+                    target_event="finish",
+                    target_date=date(2026, 1, 8),
+                )
+            ],
+            schedule_strategy=ScheduleStrategyConfig(strategy="comprehensive", resource_guarantee="priority"),
+            time_limit_seconds=5,
+        )
+    )
+
+    risks = result.stats["control_priority_analysis"]["control_buffer_risks"]
+    control_risk = next(item for item in risks if item["task_id"] == "Z-control")
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert control_risk["remaining_buffer_days"] == 3
+    assert control_risk["buffer_risk_days"] == 4
+    assert control_risk["status"] == "buffer_insufficient"
+    assert result.stats["control_priority_analysis"]["control_buffer_status"] == "buffer_insufficient"
+    assert result.objective_breakdown["control_buffer_risk_penalty"] >= 4
+
+
+def test_control_priority_analysis_separates_objects_tasks_and_predecessors() -> None:
+    pytest.importorskip("ortools")
+    scenario = _scenario_with_continuous_beam(main_pier_count=2, standard_cycles=1)
+    section = scenario.project.bridges[0].work_sections[0]
+    section.structures = [
+        _abutment_structure(0),
+        _pier_lower_structure(1),
+        _pier_lower_structure(2),
+        _pier_body_structure(3),
+    ]
+    for pool in scenario.resource_pools:
+        if pool.type == "cast_in_place_continuous_beam_team":
+            pool.quantity = 4
+    scenario.time_limit_seconds = 5
+
+    solved = solve_scenario(scenario)
+    analysis = solved.result.stats["control_priority_analysis"]
+
+    assert solved.result.status in {"OPTIMAL", "FEASIBLE"}
+    assert any(item["object_type"] == "continuous_beam" for item in analysis["control_objects"])
+    main_pier_objects = [
+        item for item in analysis["control_objects"] if item["object_type"] == "main_pier_lower_structure"
+    ]
+    assert {item["structure_id"] for item in main_pier_objects} >= {"P01", "P02"}
+
+    p01_object_tasks = [
+        item for item in analysis["control_object_tasks"] if item["object_id"] == "lower:P01"
+    ]
+    assert {item["component_type"] for item in p01_object_tasks} >= {"pile", "cap", "pier_body"}
+    assert {item["task_role"] for item in p01_object_tasks} == {"inherited_control_task"}
+
+    predecessor = next(item for item in analysis["control_chain_predecessors"] if item["task_id"] == "P03-BODY")
+    assert predecessor["source"] == "control_chain_predecessor"
+    assert predecessor["impacted_control_objects"]
+    assert all(item["id"].startswith("continuous:") for item in predecessor["impacted_control_objects"])
+    assert "P03-BODY" not in {item["task_id"] for item in analysis["control_object_tasks"]}
+
+
+def test_control_priority_analysis_labels_left_and_right_side_objects() -> None:
+    pytest.importorskip("ortools")
+    tasks = [
+        Task(
+            id="L10-PILE",
+            name="10#墩-1#桩基",
+            bridge_id="B1",
+            work_section_id="WS-L",
+            structure_id="B1-L-P10",
+            structure_name="10#墩",
+            structure_type="pier",
+            control_level="control",
+            component_type="pile",
+            process_name="旋挖钻成孔",
+            productivity_rule_id="pile_rotary_regular",
+            quantity=1,
+            quantity_label="1根",
+            duration_days=1,
+            compatible_resource_types=["rotary_drill"],
+        ),
+        Task(
+            id="R10-PILE",
+            name="10#墩-1#桩基",
+            bridge_id="B1",
+            work_section_id="WS-R",
+            structure_id="B1-R-P10",
+            structure_name="10#墩",
+            structure_type="pier",
+            control_level="control",
+            component_type="pile",
+            process_name="旋挖钻成孔",
+            productivity_rule_id="pile_rotary_regular",
+            quantity=1,
+            quantity_label="1根",
+            duration_days=1,
+            compatible_resource_types=["rotary_drill"],
+        ),
+        Task(
+            id="L-CB",
+            name="左幅连续梁10#墩T构-0号块",
+            bridge_id="B1",
+            work_section_id="WS-L",
+            structure_id="B1-L-CB-G01-T10",
+            structure_name="左幅连续梁10#墩T构",
+            structure_type="continuous_beam",
+            control_level="control",
+            component_type="cast_in_place_continuous_beam",
+            process_name="0号块施工",
+            productivity_rule_id="cast_in_place_continuous_beam",
+            quantity=1,
+            quantity_label="1段",
+            duration_days=1,
+            compatible_resource_types=["beam_team"],
+        ),
+        Task(
+            id="R-CB",
+            name="右幅连续梁10#墩T构-0号块",
+            bridge_id="B1",
+            work_section_id="WS-R",
+            structure_id="B1-R-CB-G01-T10",
+            structure_name="右幅连续梁10#墩T构",
+            structure_type="continuous_beam",
+            control_level="control",
+            component_type="cast_in_place_continuous_beam",
+            process_name="0号块施工",
+            productivity_rule_id="cast_in_place_continuous_beam",
+            quantity=1,
+            quantity_label="1段",
+            duration_days=1,
+            compatible_resource_types=["beam_team"],
+        ),
+    ]
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="side-aware-control-diagnostics",
+            start_date=date(2026, 1, 1),
+            tasks=tasks,
+            precedence_links=[
+                PrecedenceLink(
+                    id="L10-to-CB",
+                    predecessor_id="L10-PILE",
+                    successor_id="L-CB",
+                    lag_days=0,
+                    source_rule_id="continuous_beam_zero_block_after_main_pier_lower_structure",
+                ),
+                PrecedenceLink(
+                    id="R10-to-CB",
+                    predecessor_id="R10-PILE",
+                    successor_id="R-CB",
+                    lag_days=0,
+                    source_rule_id="continuous_beam_zero_block_after_main_pier_lower_structure",
+                ),
+            ],
+            resources=[
+                Resource(id="rotary-1", name="旋挖钻1", type="rotary_drill"),
+                Resource(id="beam-1", name="连续梁班组1", type="beam_team"),
+            ],
+            schedule_strategy=ScheduleStrategyConfig(strategy="comprehensive", resource_guarantee="priority"),
+            time_limit_seconds=5,
+        )
+    )
+
+    analysis = result.stats["control_priority_analysis"]
+    object_names = {
+        item["name"] for item in analysis["control_objects"] if item["object_type"] == "main_pier_lower_structure"
+    }
+    task_names = {item["task_name"] for item in analysis["control_object_tasks"]}
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert {"左幅10#墩下部结构", "右幅10#墩下部结构"} <= object_names
+    assert {"左幅10#墩-1#桩基", "右幅10#墩-1#桩基"} <= task_names
 
 
 def test_control_priority_applies_normal_windows_and_workface_limit() -> None:
@@ -1500,6 +2112,7 @@ def test_continuity_metrics_do_not_count_sparse_ordered_piers_as_jump() -> None:
     assert [step["location"] for step in metrics["resource_paths"][0]["path"]] == ["左幅1#墩", "左幅3#墩", "左幅5#墩"]
     assert metrics["jump_pier_count"] == 0
     assert metrics["max_jump_distance"] == 0
+    assert metrics["path_group_diagnostics"][0]["actual_sequence"] == ["左幅1#墩", "左幅3#墩", "左幅5#墩"]
 
 
 def test_continuity_metrics_count_ranked_scope_skip_as_jump() -> None:
@@ -1545,6 +2158,7 @@ def test_continuity_metrics_count_ranked_scope_skip_as_jump() -> None:
     assert metrics["jump_transition_details"][0]["from_location"] == "左幅1#墩"
     assert metrics["jump_transition_details"][0]["to_location"] == "左幅5#墩"
     assert metrics["jump_transition_details"][0]["jump_distance"] == 2
+    assert metrics["path_group_diagnostics"][0]["actual_sequence"] == ["左幅1#墩", "左幅3#墩", "左幅5#墩"]
 
 
 def test_continuity_metrics_do_not_count_same_pier_side_switch_as_jump() -> None:
@@ -1591,6 +2205,8 @@ def test_continuity_metrics_do_not_count_same_pier_side_switch_as_jump() -> None
     assert metrics["max_jump_distance"] == 0
     assert metrics["jump_transition_details"][0]["is_side_switch"] is True
     assert metrics["jump_transition_details"][0]["is_jump_pier"] is False
+    assert metrics["path_group_switch_count"] == 1
+    assert {item["side"] for item in metrics["path_group_diagnostics"]} == {"L", "R"}
 
 
 def test_continuity_metrics_do_not_count_abutment_span_as_jump_pier() -> None:
@@ -2292,6 +2908,40 @@ def _pier_body_structure(pier_no: int) -> StructureModel:
         ],
     )
 
+def _pier_lower_structure(pier_no: int) -> StructureModel:
+    return StructureModel(
+        id=f"P{pier_no:02d}",
+        name=f"Pier {pier_no}",
+        structure_type="pier",
+        order=pier_no,
+        support_no=f"{pier_no}#pier",
+        support_index=pier_no,
+        components=[
+            ComponentModel(
+                id=f"P{pier_no:02d}-PILE-01",
+                name=f"Pier {pier_no} pile",
+                component_type="pile",
+                quantity=1,
+                quantity_label="1",
+                method_id="rotary_drill",
+            ),
+            ComponentModel(
+                id=f"P{pier_no:02d}-CAP",
+                name=f"Pier {pier_no} cap",
+                component_type="cap",
+                quantity=1,
+                quantity_label="1",
+            ),
+            ComponentModel(
+                id=f"P{pier_no:02d}-BODY",
+                name=f"Pier {pier_no} body",
+                component_type="pier_body",
+                quantity=1,
+                quantity_label="1",
+            ),
+        ],
+    )
+
 
 def _abutment_structure(abutment_no: int) -> StructureModel:
     return StructureModel(
@@ -2328,6 +2978,25 @@ def _solver_task(task_id: str, name: str, duration_days: int, resource_type: str
         duration_days=duration_days,
         compatible_resource_types=[resource_type],
     )
+
+
+def _same_pier_pile_tasks(resource_type: str) -> list[Task]:
+    return [
+        _solver_task(f"P10-PILE-{index}", f"10#墩-{index}#桩基", 5, resource_type).model_copy(
+            update={
+                "bridge_id": "B1",
+                "work_section_id": "WS-L",
+                "sequence_order": index,
+                "structure_id": "B1-L-P10",
+                "structure_name": "10#墩",
+                "structure_type": "pier",
+                "component_type": "pile",
+                "process_name": "桩基",
+                "quantity_label": "1根",
+            }
+        )
+        for index in range(1, 3)
+    ]
 
 
 def _task_named(tasks: list[Task], name_part: str) -> Task:

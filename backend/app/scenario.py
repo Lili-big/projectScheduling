@@ -309,6 +309,20 @@ def _solve_fixed_resources_shortest_scenario(
         resource_recommendation_status="not_needed",
         resource_recommendation_message="当前固定资源最短工期已满足强制里程碑，无需增加资源。",
     )
+    fallback_reason = f"control_priority_{final_result.status.lower()}"
+    fallback.stats["control_priority_analysis"] = {
+        "fallback_reason": fallback_reason,
+        "control_buffer_status": "not_evaluated",
+        "normal_balance_status": "not_evaluated",
+        "resource_path_status": "not_evaluated",
+        "control_objects": [],
+        "control_object_tasks": [],
+        "control_chain_predecessors": [],
+        "control_targets": [],
+        "control_buffer_risks": [],
+        "path_group_diagnostics": [],
+    }
+    fallback.objective_breakdown["control_priority_analysis"] = fallback.stats["control_priority_analysis"]
     return fallback, []
 
 
@@ -766,6 +780,9 @@ def _required_resource_types_for_task(
     validation: list[ValidationMessage],
     warning_keys: set[str],
 ) -> list[str]:
+    if task.properties.get("resource_neutral"):
+        return []
+
     default_resource_type = _default_resource_type_for_task(task)
     if not default_resource_type:
         return []
@@ -863,6 +880,9 @@ def expand_resource_pools(resource_pools: list[ResourcePool], *, use_max_quantit
                     pool_label=pool.label,
                     enabled=True,
                     calendar_id=pool.calendar_id,
+                    same_structure_resource_binding=pool.same_structure_resource_binding,
+                    same_structure_parallel_limit=pool.same_structure_parallel_limit,
+                    parallel_rule_description=pool.parallel_rule_description,
                 )
             )
         if quantity == 0:
@@ -901,9 +921,8 @@ def _inferred_control_levels(scenario: ScenarioInput) -> dict[str, ControlLevel]
         for section in bridge.work_sections:
             main_supports: set[int] = set()
             for uppers in _continuous_beam_groups(section.upper_structures):
-                group_level = _upper_group_control_level(uppers, levels, default="control")
                 for upper in uppers:
-                    levels[upper.id] = upper.control_level or group_level
+                    levels[upper.id] = "control"
                 span_indices = sorted({upper.span_index for upper in uppers})
                 main_supports.update(_continuous_main_supports(uppers, span_indices))
 
@@ -1074,6 +1093,7 @@ def _task_from_component(
         quantity_label=quantity_label,
         duration_days=calculate_duration(quantity, rule),
         compatible_resource_types=[process.resource_type],
+        properties=component.properties,
     )
 
 
@@ -1287,6 +1307,8 @@ def _append_upper_task(
         control_level=control_level,
     )
     if task is not None:
+        if properties.get("resource_neutral"):
+            task.compatible_resource_types = []
         tasks.append(task)
     return task
 
@@ -1331,6 +1353,7 @@ def _build_lower_to_upper_links(
                     successor_id=successor.id,
                     relationship=rule.relationship,
                     lag_days=rule.lag_days,
+                    max_finish_gap_days=rule.max_finish_gap_days,
                     source_rule_id=source_rule_id,
                     severity=rule.severity,
                 )
@@ -1358,7 +1381,7 @@ def _select_lower_completion_tasks(structure: StructureModel, tasks: list[Task])
     if not tasks:
         return []
     priority_by_structure = {
-        "pier": ["cap_beam", "middle_tie_beam", "pier_body", "cap", "ground_tie_beam", "spread_foundation", "pile"],
+        "pier": ["cap_beam", "pier_body", "middle_tie_beam", "cap", "ground_tie_beam", "spread_foundation", "pile"],
         "abutment": ["abutment_body", "cap", "spread_foundation", "pile"],
     }
     for component_type in priority_by_structure.get(structure.structure_type, []):
@@ -1495,7 +1518,7 @@ def _build_continuous_beam_tasks(
         group_index = _continuous_group_index(uppers)
         span_indices = sorted({upper.span_index for upper in uppers})
         main_supports = _continuous_main_supports(uppers, span_indices)
-        control_level = _upper_group_control_level(uppers, inferred_levels, default="control")
+        control_level: ControlLevel = "control"
         if not main_supports:
             validation.append(
                 ValidationMessage(
@@ -1581,17 +1604,19 @@ def _build_continuous_beam_group_tasks(
                 successor_id=successor.id,
                 relationship=rule.relationship,
                 lag_days=rule.lag_days,
+                max_finish_gap_days=rule.max_finish_gap_days,
                 source_rule_id=source_rule_id,
                 severity=rule.severity,
             )
         )
         link_no += 1
 
-    t_completion_tasks: list[Task | None] = []
+    left_standard_end_tasks: list[Task | None] = []
+    right_standard_end_tasks: list[Task | None] = []
     for t_index, support_index in enumerate(main_supports, start=1):
         structure_id = f"{prefix}-T{t_index:02d}-P{support_index:02d}"
         structure_name = f"{group_label}{support_index}#墩T构"
-        previous = _append_continuous_task(
+        zero_block = _append_continuous_task(
             tasks=tasks,
             component_id=f"{structure_id}-ZERO",
             name=f"{structure_name}-0号块",
@@ -1614,7 +1639,7 @@ def _build_continuous_beam_group_tasks(
             },
         )
         zero_block_links = _build_lower_to_upper_links(
-            successor=previous,
+            successor=zero_block,
             support_refs=[f"{support_index}#墩"],
             support_completions=support_completions,
             source_rule_id="continuous_beam_zero_block_after_main_pier_lower_structure",
@@ -1625,11 +1650,14 @@ def _build_continuous_beam_group_tasks(
         )
         links.extend(zero_block_links)
         link_no += len(zero_block_links)
+        left_ready = zero_block
+        right_ready = zero_block
         if standard_cycles > 0:
-            current = _append_continuous_task(
+            sync_group_id = f"{structure_id}-STD-SYNC"
+            left_standard = _append_continuous_task(
                 tasks=tasks,
-                component_id=f"{structure_id}-STD",
-                name=f"{structure_name}-标准段{standard_cycles}块",
+                component_id=f"{structure_id}-STD-L",
+                name=f"{structure_name}-左侧标准段{standard_cycles}块",
                 method_id="standard_segment",
                 quantity=standard_cycles,
                 quantity_label=f"{standard_cycles}块",
@@ -1647,14 +1675,46 @@ def _build_continuous_beam_group_tasks(
                     "group_index": group_index,
                     "support_index": support_index,
                     "t_index": t_index,
+                    "standard_side": "left",
+                    "standard_sync_group_id": sync_group_id,
                     "standard_block_count": standard_cycles,
                     "synchronizes_left_right_cantilevers": True,
                 },
             )
-            add_link(previous, current, "continuous_beam_t_chain")
-            if current is not None:
-                previous = current
-        t_completion_tasks.append(previous)
+            right_standard = _append_continuous_task(
+                tasks=tasks,
+                component_id=f"{structure_id}-STD-R",
+                name=f"{structure_name}-右侧标准段{standard_cycles}块",
+                method_id="standard_segment",
+                quantity=standard_cycles,
+                quantity_label=f"{standard_cycles}块",
+                bridge_id=bridge.id,
+                work_section_id=section.id,
+                sequence_order=base_order + t_index * 1000 + 2,
+                structure_id=structure_id,
+                structure_name=structure_name,
+                process_library=process_library,
+                validation=validation,
+                task_overrides=task_overrides,
+                control_level=control_level,
+                properties={
+                    "continuous_task_type": "standard_segment_batch",
+                    "group_index": group_index,
+                    "support_index": support_index,
+                    "t_index": t_index,
+                    "standard_side": "right",
+                    "standard_sync_group_id": sync_group_id,
+                    "standard_block_count": standard_cycles,
+                    "synchronizes_left_right_cantilevers": True,
+                    "resource_neutral": True,
+                },
+            )
+            add_link(zero_block, left_standard, "continuous_beam_t_chain")
+            add_link(zero_block, right_standard, "continuous_beam_t_chain")
+            left_ready = left_standard or zero_block
+            right_ready = right_standard or zero_block
+        left_standard_end_tasks.append(left_ready)
+        right_standard_end_tasks.append(right_ready)
 
     left_edge_structure_name = f"{group_label}{main_supports[0]}#墩T构"
     right_edge_structure_name = f"{group_label}{main_supports[-1]}#墩T构"
@@ -1741,7 +1801,7 @@ def _build_continuous_beam_group_tasks(
     )
     links.extend(left_straight_links)
     link_no += len(left_straight_links)
-    add_link(t_completion_tasks[0], left_closure, "continuous_beam_side_closure")
+    add_link(left_standard_end_tasks[0], left_closure, "continuous_beam_side_closure")
     add_link(right_straight, right_closure, "continuous_beam_side_closure")
     right_boundary_refs = _edge_support_refs(uppers, edge="right")
     right_straight_links = _build_lower_to_upper_links(
@@ -1756,7 +1816,7 @@ def _build_continuous_beam_group_tasks(
     )
     links.extend(right_straight_links)
     link_no += len(right_straight_links)
-    add_link(t_completion_tasks[-1], right_closure, "continuous_beam_side_closure")
+    add_link(right_standard_end_tasks[-1], right_closure, "continuous_beam_side_closure")
 
     mid_closures: list[Task | None] = []
     for closure_index, (left_support, right_support) in enumerate(zip(main_supports, main_supports[1:]), start=1):
@@ -1783,8 +1843,8 @@ def _build_continuous_beam_group_tasks(
                 "right_support_index": right_support,
             },
         )
-        add_link(t_completion_tasks[closure_index - 1], mid_closure, "continuous_beam_middle_closure")
-        add_link(t_completion_tasks[closure_index], mid_closure, "continuous_beam_middle_closure")
+        add_link(right_standard_end_tasks[closure_index - 1], mid_closure, "continuous_beam_middle_closure")
+        add_link(left_standard_end_tasks[closure_index], mid_closure, "continuous_beam_middle_closure")
         add_link(left_closure, mid_closure, "continuous_beam_edge_before_middle_closure")
         add_link(right_closure, mid_closure, "continuous_beam_edge_before_middle_closure")
         mid_closures.append(mid_closure)
@@ -1840,9 +1900,11 @@ def _append_continuous_task(
         structure_id=structure_id,
         structure_name=structure_name,
         structure_type="continuous_beam",
-        control_level=control_level,
+        control_level="control",
     )
     if task is not None:
+        if task.properties.get("resource_neutral"):
+            task.compatible_resource_types = []
         tasks.append(task)
     return task
 

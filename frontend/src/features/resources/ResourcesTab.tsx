@@ -57,6 +57,9 @@ export function ResourcesTab({
                     <div className="resource-list-name">
                       <strong>{pool.label}</strong>
                       <code>{pool.type}</code>
+                      {pool.parallel_rule_description ? (
+                        <span className="resource-parallel-note">{pool.parallel_rule_description}</span>
+                      ) : null}
                     </div>
                   </td>
                   <td>

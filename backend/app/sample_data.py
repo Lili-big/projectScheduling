@@ -12,6 +12,9 @@ from .models import (
 )
 from .process_library_defaults import historical_default_process_library
 
+PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION = "设备型桩基资源：同一墩同一工艺默认由一台设备顺序或跳孔施工，不默认多机并行。"
+MANUAL_PILE_PARALLEL_RULE_DESCRIPTION = "人工挖孔班组：同一墩内暂不设置额外并行上限，仅受班组数量约束。"
+
 
 def default_bridge() -> BridgeModel:
     piers = []
@@ -120,12 +123,52 @@ def default_logic_rules() -> list[LogicRule]:
 
 def default_resources() -> list[Resource]:
     return [
-        Resource(id="rotary_drill_1", name="旋挖钻1", type="rotary_drill"),
-        Resource(id="rotary_drill_2", name="旋挖钻2", type="rotary_drill"),
-        Resource(id="rotary_drill_3", name="旋挖钻3", type="rotary_drill"),
-        Resource(id="circulation_drill_1", name="回旋钻1", type="circulation_drill"),
-        Resource(id="impact_drill_1", name="冲击钻1", type="impact_drill"),
-        Resource(id="manual_pile_team_1", name="人工挖孔班1", type="manual_pile_team"),
+        Resource(
+            id="rotary_drill_1",
+            name="旋挖钻1",
+            type="rotary_drill",
+            same_structure_resource_binding=True,
+            same_structure_parallel_limit=1,
+            parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
+        ),
+        Resource(
+            id="rotary_drill_2",
+            name="旋挖钻2",
+            type="rotary_drill",
+            same_structure_resource_binding=True,
+            same_structure_parallel_limit=1,
+            parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
+        ),
+        Resource(
+            id="rotary_drill_3",
+            name="旋挖钻3",
+            type="rotary_drill",
+            same_structure_resource_binding=True,
+            same_structure_parallel_limit=1,
+            parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
+        ),
+        Resource(
+            id="circulation_drill_1",
+            name="回旋钻1",
+            type="circulation_drill",
+            same_structure_resource_binding=True,
+            same_structure_parallel_limit=1,
+            parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
+        ),
+        Resource(
+            id="impact_drill_1",
+            name="冲击钻1",
+            type="impact_drill",
+            same_structure_resource_binding=True,
+            same_structure_parallel_limit=1,
+            parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
+        ),
+        Resource(
+            id="manual_pile_team_1",
+            name="人工挖孔班1",
+            type="manual_pile_team",
+            parallel_rule_description=MANUAL_PILE_PARALLEL_RULE_DESCRIPTION,
+        ),
         Resource(id="cap_team_1", name="承台模板1", type="cap_team"),
         Resource(id="pier_body_team_1", name="墩身班组1", type="pier_body_team"),
         Resource(id="cap_beam_team_1", name="盖梁模板1", type="cap_beam_team"),

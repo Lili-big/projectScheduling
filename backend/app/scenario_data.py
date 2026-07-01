@@ -35,6 +35,8 @@ DEFAULT_RESOURCE_MAX_QUANTITIES: dict[str, int] = {
     "pier_body_team": 10,
     "cap_beam_team": 10,
 }
+PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION = "设备型桩基资源：同一墩同一工艺默认由一台设备顺序或跳孔施工，不默认多机并行。"
+MANUAL_PILE_PARALLEL_RULE_DESCRIPTION = "人工挖孔班组：同一墩内暂不设置额外并行上限，仅受班组数量约束。"
 BRIDGE_COMPLETION_MILESTONE_NAME = "下部及现浇结构施工完成"
 
 
@@ -355,10 +357,12 @@ def default_upper_structure_logic_rules() -> list[UpperStructureLogicRule]:
         ),
         UpperStructureLogicRule(
             id="continuous_beam_side_closure",
+            max_finish_gap_days=7,
             note="连续梁边跨合龙段在边跨连续段和相邻T构完成后开始。",
         ),
         UpperStructureLogicRule(
             id="continuous_beam_middle_closure",
+            max_finish_gap_days=7,
             note="连续梁中跨合龙段在相邻两个T构完成后开始。",
         ),
         UpperStructureLogicRule(
@@ -394,10 +398,38 @@ def default_resource_pools() -> list[ResourcePool]:
             cost_type="monthly_rental",
             incremental_unit_cost=180000,
             billing_period_days=30,
+            same_structure_resource_binding=True,
+            same_structure_parallel_limit=1,
+            parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
         ),
-        ResourcePool(id="pool-circulation-drill", type="circulation_drill", label="回旋钻", quantity=1, max_quantity=10),
-        ResourcePool(id="pool-impact-drill", type="impact_drill", label="冲击钻", quantity=1, max_quantity=10),
-        ResourcePool(id="pool-manual-pile", type="manual_pile_team", label="人工挖孔班组", quantity=1, max_quantity=10),
+        ResourcePool(
+            id="pool-circulation-drill",
+            type="circulation_drill",
+            label="回旋钻",
+            quantity=1,
+            max_quantity=10,
+            same_structure_resource_binding=True,
+            same_structure_parallel_limit=1,
+            parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
+        ),
+        ResourcePool(
+            id="pool-impact-drill",
+            type="impact_drill",
+            label="冲击钻",
+            quantity=1,
+            max_quantity=10,
+            same_structure_resource_binding=True,
+            same_structure_parallel_limit=1,
+            parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
+        ),
+        ResourcePool(
+            id="pool-manual-pile",
+            type="manual_pile_team",
+            label="人工挖孔班组",
+            quantity=1,
+            max_quantity=10,
+            parallel_rule_description=MANUAL_PILE_PARALLEL_RULE_DESCRIPTION,
+        ),
         ResourcePool(id="pool-cap", type="cap_team", label="承台模板", quantity=1, max_quantity=10),
         ResourcePool(
             id="pool-pier-body",

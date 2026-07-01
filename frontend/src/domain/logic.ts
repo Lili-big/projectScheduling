@@ -11,10 +11,13 @@ export type UpperLowerLogicConstraint = {
   generation: string;
   relationship: RelationshipType;
   lagDays: number;
+  maxFinishGapDays?: number | null;
   matchedCount: number;
   matchedUnit: string;
   matchedText: string;
   note: string;
+  readOnly?: boolean;
+  constraintLabel?: string;
 };
 
 export type LogicRuleRow = {
@@ -27,12 +30,15 @@ export type LogicRuleRow = {
   matchModeLabel: string;
   relationship: RelationshipType;
   lagDays: number;
+  maxFinishGapDays?: number | null;
   matchedCount: number;
   matchedUnit: string;
   matchedText: string;
   note: string;
   generation?: string;
   lowerRuleIndex?: number;
+  readOnly?: boolean;
+  constraintLabel?: string;
 };
 
 export type LogicRuleSummary = {
@@ -81,11 +87,13 @@ export function buildLogicRuleRows(scenario: ScenarioInput): { rows: LogicRuleRo
       matchModeLabel: predecessorStrategyLabel(rule.predecessor_strategy),
       relationship: rule.relationship,
       lagDays: rule.lag_days,
+      maxFinishGapDays: undefined,
       matchedCount,
       matchedUnit: "个结构物",
       matchedText: matchText(matchedCount, "个结构物"),
       note: rule.note,
       lowerRuleIndex: index,
+      constraintLabel: "无",
     };
   });
 
@@ -99,11 +107,14 @@ export function buildLogicRuleRows(scenario: ScenarioInput): { rows: LogicRuleRo
     matchModeLabel: "按结构自动生成",
     relationship: constraint.relationship,
     lagDays: constraint.lagDays,
+    maxFinishGapDays: constraint.maxFinishGapDays,
     matchedCount: constraint.matchedCount,
     matchedUnit: constraint.matchedUnit,
     matchedText: constraint.matchedText,
     note: constraint.note,
     generation: constraint.generation,
+    readOnly: constraint.readOnly,
+    constraintLabel: constraint.constraintLabel,
   }));
 
   const rows = [...lowerRows, ...upperRows];
@@ -140,6 +151,7 @@ export function buildUpperLowerLogicConstraints(scenario: ScenarioInput): UpperL
     continuous_beam_zero_block_after_main_pier_lower_structure: { count: stats.continuousMainPierCount, unit: "个T构" },
     continuous_beam_side_straight_after_edge_lower_structure: { count: stats.continuousSideStraightCount, unit: "个边跨" },
     continuous_beam_t_chain: { count: stats.continuousMainPierCount, unit: "个T构" },
+    continuous_beam_standard_segment_sync: { count: stats.continuousMainPierCount, unit: "个T构" },
     continuous_beam_side_closure: { count: stats.continuousSideClosureCount, unit: "个边跨" },
     continuous_beam_middle_closure: { count: stats.continuousMiddleClosureCount, unit: "个中跨" },
     continuous_beam_edge_before_middle_closure: { count: stats.continuousMiddleClosureCount, unit: "个中跨" },
@@ -148,14 +160,18 @@ export function buildUpperLowerLogicConstraints(scenario: ScenarioInput): UpperL
   return upperStructureLogicDefinitions.map((definition) => {
     const rule = rulesById.get(definition.id);
     const matched = matchById[definition.id] ?? { count: 0, unit: "个对象" };
+    const maxFinishGapDays = rule?.max_finish_gap_days ?? definition.defaultMaxFinishGapDays ?? null;
     return {
       ...definition,
       relationship: rule?.relationship ?? "FS",
       lagDays: rule?.lag_days ?? 0,
+      maxFinishGapDays,
       matchedCount: matched.count,
       matchedUnit: matched.unit,
       matchedText: matchText(matched.count, matched.unit),
       note: rule?.note || definition.note,
+      readOnly: definition.readOnly,
+      constraintLabel: definition.constraintLabel ?? (maxFinishGapDays !== null ? `完成差≤${maxFinishGapDays}天` : "无"),
     };
   });
 }

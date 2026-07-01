@@ -159,6 +159,7 @@ class UpperStructureLogicRule(BaseModel):
     id: str
     relationship: RelationshipType = "FS"
     lag_days: int = Field(default=0, ge=0)
+    max_finish_gap_days: int | None = Field(default=None, ge=0)
     severity: LogicSeverity = "error"
     note: str = ""
 
@@ -171,6 +172,9 @@ class Resource(BaseModel):
     pool_label: str | None = None
     enabled: bool = True
     calendar_id: str = "continuous"
+    same_structure_resource_binding: bool = False
+    same_structure_parallel_limit: int | None = Field(default=None, ge=1)
+    parallel_rule_description: str = ""
 
 
 class Task(BaseModel):
@@ -191,6 +195,7 @@ class Task(BaseModel):
     quantity_label: str
     duration_days: int = Field(ge=1)
     compatible_resource_types: list[str] = Field(default_factory=list)
+    properties: dict[str, Any] = {}
 
 
 class PrecedenceLink(BaseModel):
@@ -199,6 +204,7 @@ class PrecedenceLink(BaseModel):
     successor_id: str
     relationship: RelationshipType = "FS"
     lag_days: int = Field(ge=0)
+    max_finish_gap_days: int | None = Field(default=None, ge=0)
     source_rule_id: str
     severity: LogicSeverity = "error"
 
@@ -362,6 +368,9 @@ class ResourcePool(BaseModel):
     cost_type: ResourceCostType = "none"
     incremental_unit_cost: int = Field(default=0, ge=0)
     billing_period_days: int = Field(default=30, ge=1)
+    same_structure_resource_binding: bool = False
+    same_structure_parallel_limit: int | None = Field(default=None, ge=1)
+    parallel_rule_description: str = ""
 
     @model_validator(mode="after")
     def ensure_max_quantity(self) -> "ResourcePool":

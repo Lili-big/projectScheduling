@@ -22,14 +22,26 @@ from .models import (
 )
 
 CONTINUITY_PRIMARY_WEIGHT = 1_000_000
-SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT = 1_000
+SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT = 100_000
 SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT = 1
 CONTROL_NODE_LATE_WEIGHT = 1_000_000_000
+CONTROL_BUFFER_RISK_WEIGHT = 1_000_000
 CONTROL_RESOURCE_WAIT_WEIGHT = 1_000_000
-CONTROL_TASK_FINISH_WEIGHT = 10_000
+RESOURCE_WORKLOAD_BALANCE_WEIGHT = 20_000
+RESOURCE_IDLE_WEIGHT = 2_000
+RESOURCE_PATH_CONTINUITY_WEIGHT = 500
 CONTROL_MAKESPAN_WEIGHT = 100
-NORMAL_BALANCE_WEIGHT = 10
+NORMAL_BALANCE_WEIGHT = 1
+CONTROL_NECESSARY_BUFFER_DAYS = 7
+CONTROL_BUFFER_NEAR_RISK_DAYS = 3
 SCHEDULER_RANDOM_SEED = 0
+CONTINUOUS_BEAM_SIDE_CLOSURE_RULE_ID = "continuous_beam_side_closure"
+CONTINUOUS_BEAM_MIDDLE_CLOSURE_RULE_ID = "continuous_beam_middle_closure"
+CONTINUOUS_BEAM_CLOSURE_RULE_IDS = {
+    CONTINUOUS_BEAM_SIDE_CLOSURE_RULE_ID,
+    CONTINUOUS_BEAM_MIDDLE_CLOSURE_RULE_ID,
+}
+DEFAULT_CONTINUOUS_CLOSURE_FINISH_GAP_DAYS = 7
 
 
 def _default_scheduler_search_workers() -> int:
@@ -65,6 +77,219 @@ def _add_precedence_constraint(model: Any, starts: dict[str, Any], ends: dict[st
         model.Add(ends[link.successor_id] >= starts[link.predecessor_id] + link.lag_days)
     else:
         model.Add(starts[link.successor_id] >= ends[link.predecessor_id] + link.lag_days)
+
+
+def _task_properties(task: Task) -> dict[str, Any]:
+    properties = getattr(task, "properties", {})
+    return properties if isinstance(properties, dict) else {}
+
+
+def _add_continuous_beam_v18_constraints(
+    model: Any,
+    starts: dict[str, Any],
+    ends: dict[str, Any],
+    tasks: list[Task],
+    precedence_links: list[PrecedenceLink],
+    horizon: int,
+) -> None:
+    tasks_by_id = {task.id: task for task in tasks}
+
+    sync_groups: dict[str, dict[str, Task]] = defaultdict(dict)
+    for task in tasks:
+        props = _task_properties(task)
+        if props.get("continuous_task_type") != "standard_segment_batch":
+            continue
+        if not props.get("synchronizes_left_right_cantilevers"):
+            continue
+        side = str(props.get("standard_side") or "")
+        if side not in {"left", "right"}:
+            continue
+        group_id = str(
+            props.get("standard_sync_group_id")
+            or f"{task.bridge_id}:{task.work_section_id}:{task.structure_id}:standard"
+        )
+        sync_groups[group_id][side] = task
+
+    for group in sync_groups.values():
+        left_task = group.get("left")
+        right_task = group.get("right")
+        if left_task is None or right_task is None:
+            continue
+        model.Add(starts[left_task.id] == starts[right_task.id])
+        model.Add(ends[left_task.id] == ends[right_task.id])
+
+    closure_links: dict[tuple[str, str], list[PrecedenceLink]] = defaultdict(list)
+    for link in precedence_links:
+        if link.source_rule_id not in CONTINUOUS_BEAM_CLOSURE_RULE_IDS:
+            continue
+        if link.predecessor_id not in tasks_by_id or link.successor_id not in tasks_by_id:
+            continue
+        closure_links[(link.successor_id, link.source_rule_id)].append(link)
+
+    for (successor_id, source_rule_id), links in closure_links.items():
+        predecessor_ids: list[str] = []
+        for link in links:
+            if link.predecessor_id not in predecessor_ids:
+                predecessor_ids.append(link.predecessor_id)
+        if len(predecessor_ids) != 2:
+            continue
+        configured_gap = next((link.max_finish_gap_days for link in links if link.max_finish_gap_days is not None), None)
+        max_gap = DEFAULT_CONTINUOUS_CLOSURE_FINISH_GAP_DAYS if configured_gap is None else int(configured_gap)
+        if max_gap < 0:
+            continue
+        left_id, right_id = predecessor_ids
+        finish_gap = model.NewIntVar(
+            0,
+            horizon,
+            f"continuous_finish_gap_{_safe(source_rule_id)}_{_safe(successor_id)}",
+        )
+        model.AddAbsEquality(finish_gap, ends[left_id] - ends[right_id])
+        model.Add(finish_gap <= max_gap)
+
+
+def _resource_parallel_group_key(resource: Resource) -> str:
+    return resource.pool_id or resource.type
+
+
+def _same_structure_resource_rule_key(task: Task, resource_group_key: str) -> tuple[str, str, str, str]:
+    return (
+        resource_group_key,
+        task.structure_id,
+        task.component_type,
+        task.process_name,
+    )
+
+
+def _configured_parallel_limit(values: list[int | None]) -> int | None:
+    configured = [int(value) for value in values if value is not None]
+    if not configured:
+        return None
+    return max(1, min(configured))
+
+
+def _add_named_same_structure_resource_rules(
+    model: Any,
+    starts: dict[str, Any],
+    ends: dict[str, Any],
+    tasks: list[Task],
+    resource_candidates: dict[str, list[Resource]],
+    assignment_vars: dict[tuple[str, str], Any],
+) -> None:
+    grouped: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for task in tasks:
+        for resource in resource_candidates.get(task.id, []):
+            if not resource.same_structure_resource_binding and resource.same_structure_parallel_limit is None:
+                continue
+            group_key = _resource_parallel_group_key(resource)
+            rule_key = _same_structure_resource_rule_key(task, group_key)
+            bucket = grouped.setdefault(rule_key, {"tasks": {}, "resources": {}})
+            bucket["tasks"][task.id] = task
+            bucket["resources"][resource.id] = resource
+
+    for group_index, bucket in enumerate(grouped.values()):
+        group_tasks = sorted(bucket["tasks"].values(), key=lambda item: (item.sequence_order, item.id))
+        if len(group_tasks) <= 1:
+            continue
+        resources = sorted(bucket["resources"].values(), key=_resource_sort_key)
+        task_active_vars: dict[str, Any] = {}
+        for task in group_tasks:
+            assignments = [
+                assignment_vars[(task.id, resource.id)]
+                for resource in resources
+                if (task.id, resource.id) in assignment_vars
+            ]
+            if not assignments:
+                continue
+            active = model.NewBoolVar(f"same_structure_group_active_{group_index}_{_safe(task.id)}")
+            model.Add(sum(assignments) == active)
+            task_active_vars[task.id] = active
+
+        if len(task_active_vars) <= 1:
+            continue
+
+        if any(resource.same_structure_resource_binding for resource in resources):
+            group_used = model.NewBoolVar(f"same_structure_group_used_{group_index}")
+            active_sum = sum(task_active_vars.values())
+            model.Add(active_sum >= group_used)
+            model.Add(active_sum <= len(task_active_vars) * group_used)
+            selected_by_resource: dict[str, Any] = {}
+            for resource in resources:
+                selected = model.NewBoolVar(f"same_structure_selected_resource_{group_index}_{_safe(resource.id)}")
+                selected_by_resource[resource.id] = selected
+            model.Add(sum(selected_by_resource.values()) == group_used)
+            for task in group_tasks:
+                for resource in resources:
+                    assignment = assignment_vars.get((task.id, resource.id))
+                    if assignment is not None:
+                        model.Add(assignment <= selected_by_resource[resource.id])
+
+        parallel_limit = _configured_parallel_limit(
+            [resource.same_structure_parallel_limit for resource in resources]
+        )
+        if parallel_limit is None or len(task_active_vars) <= parallel_limit:
+            continue
+        intervals = [
+            model.NewOptionalIntervalVar(
+                starts[task.id],
+                task.duration_days,
+                ends[task.id],
+                task_active_vars[task.id],
+                f"same_structure_parallel_{group_index}_{_safe(task.id)}",
+            )
+            for task in group_tasks
+            if task.id in task_active_vars
+        ]
+        if parallel_limit == 1:
+            model.AddNoOverlap(intervals)
+        else:
+            model.AddCumulative(intervals, [1] * len(intervals), parallel_limit)
+
+
+def _add_capacity_same_structure_parallel_rules(
+    model: Any,
+    starts: dict[str, Any],
+    ends: dict[str, Any],
+    tasks: list[Task],
+    groups_by_type: dict[str, list[dict[str, Any]]],
+    assignment_vars: dict[tuple[str, str], Any],
+) -> None:
+    grouped: dict[tuple[str, str, str, str], list[tuple[Task, Any, int]]] = defaultdict(list)
+    for task in tasks:
+        seen_group_keys: set[str] = set()
+        for resource_type in task.compatible_resource_types:
+            for group in groups_by_type.get(resource_type, []):
+                group_key = group["key"]
+                if group_key in seen_group_keys:
+                    continue
+                seen_group_keys.add(group_key)
+                parallel_limit = group.get("same_structure_parallel_limit")
+                if parallel_limit is None:
+                    continue
+                assignment = assignment_vars.get((task.id, group_key))
+                if assignment is None:
+                    continue
+                grouped[_same_structure_resource_rule_key(task, group_key)].append(
+                    (task, assignment, int(parallel_limit))
+                )
+
+    for group_index, items in enumerate(grouped.values()):
+        parallel_limit = _configured_parallel_limit([item[2] for item in items])
+        if parallel_limit is None or len(items) <= parallel_limit:
+            continue
+        intervals = [
+            model.NewOptionalIntervalVar(
+                starts[task.id],
+                task.duration_days,
+                ends[task.id],
+                assignment,
+                f"capacity_same_structure_parallel_{group_index}_{_safe(task.id)}",
+            )
+            for task, assignment, _ in items
+        ]
+        if parallel_limit == 1:
+            model.AddNoOverlap(intervals)
+        else:
+            model.AddCumulative(intervals, [1] * len(intervals), parallel_limit)
 
 
 def _successor_earliest_start_from_link(
@@ -235,6 +460,24 @@ def solve_schedule(schedule_input: ScheduleInput, *, enforce_hard_milestones: bo
             )
             continue
         _add_precedence_constraint(model, starts, ends, link)
+
+    _add_continuous_beam_v18_constraints(
+        model,
+        starts,
+        ends,
+        schedule_input.tasks,
+        schedule_input.precedence_links,
+        horizon,
+    )
+
+    _add_named_same_structure_resource_rules(
+        model,
+        starts,
+        ends,
+        schedule_input.tasks,
+        resource_candidates,
+        assignment_vars,
+    )
 
     for intervals in resource_intervals.values():
         model.AddNoOverlap(intervals)
@@ -509,6 +752,15 @@ def solve_control_priority_schedule(
             continue
         _add_precedence_constraint(model, starts, ends, link)
 
+    _add_continuous_beam_v18_constraints(
+        model,
+        starts,
+        ends,
+        schedule_input.tasks,
+        schedule_input.precedence_links,
+        horizon,
+    )
+
     for intervals in resource_intervals.values():
         model.AddNoOverlap(intervals)
 
@@ -516,6 +768,15 @@ def solve_control_priority_schedule(
     _add_normal_workface_constraints(model, starts, ends, normal_tasks, config)
     if config.resource_guarantee == "strict":
         _add_strict_control_resource_constraints(model, starts, ends, schedule_input.tasks, control_chain_task_ids)
+
+    _add_named_same_structure_resource_rules(
+        model,
+        starts,
+        ends,
+        schedule_input.tasks,
+        resource_candidates,
+        assignment_vars,
+    )
 
     makespan = model.NewIntVar(0, horizon, "makespan")
     model.AddMaxEquality(makespan, [ends[task.id] for task in schedule_input.tasks])
@@ -568,7 +829,15 @@ def solve_control_priority_schedule(
         late_var * _milestone_by_id(schedule_input.milestones, milestone_id).penalty_per_day
         for milestone_id, late_var in soft_lateness_vars.items()
     ]
-    control_wait_terms = _build_control_wait_terms(
+    control_buffer_terms = _build_control_buffer_terms(
+        model,
+        ends,
+        schedule_input=schedule_input,
+        control_chain_task_ids=control_chain_task_ids,
+        horizon=horizon,
+        fallback_deadline_days=baseline_result.objective_days,
+    )
+    control_wait_details = _build_control_wait_term_details(
         model,
         starts,
         ends,
@@ -577,21 +846,39 @@ def solve_control_priority_schedule(
         control_chain_task_ids,
         horizon,
     )
+    risk_related_control_wait_terms = _risk_related_control_wait_terms(
+        model,
+        control_wait_details,
+        control_buffer_terms["risk_by_task"],
+        horizon,
+    )
     normal_balance_terms = (
         _build_normal_balance_terms(model, starts, schedule_input.tasks, baseline_result, config, horizon)
         if config.enable_balance_objective
         else []
     )
     continuity_terms = _build_continuity_soft_terms(model, schedule_input.tasks, resource_candidates, assignment_vars)
+    resource_organization_terms = _build_resource_organization_terms(
+        model,
+        starts,
+        ends,
+        schedule_input.tasks,
+        enabled_resources,
+        resource_candidates,
+        assignment_vars,
+        horizon,
+    )
     continuity_objective = sum(continuity_terms["split_terms"]) * SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT + sum(
         continuity_terms["spatial_terms"]
     ) * SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT
-    control_finish_terms = [ends[task_id] for task_id in control_chain_task_ids if task_id in ends]
 
     model.Minimize(
         sum(control_lateness_terms) * CONTROL_NODE_LATE_WEIGHT
-        + sum(control_wait_terms) * CONTROL_RESOURCE_WAIT_WEIGHT
-        + sum(control_finish_terms) * CONTROL_TASK_FINISH_WEIGHT
+        + sum(control_buffer_terms["terms"]) * CONTROL_BUFFER_RISK_WEIGHT
+        + sum(risk_related_control_wait_terms) * CONTROL_RESOURCE_WAIT_WEIGHT
+        + sum(resource_organization_terms["workload_balance_terms"]) * RESOURCE_WORKLOAD_BALANCE_WEIGHT
+        + sum(resource_organization_terms["idle_terms"]) * RESOURCE_IDLE_WEIGHT
+        + sum(resource_organization_terms["path_terms"]) * RESOURCE_PATH_CONTINUITY_WEIGHT
         + (makespan + sum(soft_penalty_terms)) * CONTROL_MAKESPAN_WEIGHT
         + sum(normal_balance_terms) * NORMAL_BALANCE_WEIGHT
         + continuity_objective
@@ -694,11 +981,33 @@ def solve_control_priority_schedule(
     control_lateness_days = sum(
         result.lateness_days for result in milestone_results if _is_control_milestone_result(result)
     )
+    soft_control_lateness_penalty = sum(
+        result.lateness_days
+        for result in milestone_results
+        if result.mode == "soft" and _is_control_milestone_result(result)
+    )
+    control_buffer_risk_penalty = sum(solver.Value(term) for term in control_buffer_terms["terms"])
+    risk_related_control_wait_penalty = sum(solver.Value(term) for term in risk_related_control_wait_terms)
     continuity_split_penalty = sum(solver.Value(term) for term in continuity_terms["split_terms"])
     spatial_assignment_penalty = sum(
         int(term["penalty"]) * solver.Value(term["assignment"]) for term in continuity_terms["spatial_term_details"]
     )
+    resource_workload_balance_penalty = sum(solver.Value(term) for term in resource_organization_terms["workload_balance_terms"])
+    resource_idle_penalty = sum(solver.Value(term) for term in resource_organization_terms["idle_terms"])
+    resource_path_continuity_penalty = sum(solver.Value(term) for term in resource_organization_terms["path_terms"])
+    continuity_preference_penalty = continuity_split_penalty + spatial_assignment_penalty
     normal_balance_metrics = _build_normal_balance_metrics(scheduled_tasks, config)
+    resource_organization_analysis = _build_resource_organization_analysis(
+        scheduled_tasks,
+        enabled_resources,
+        objective_days=objective_days,
+        continuity_metrics=continuity_metrics,
+    )
+    control_buffer_risks = _control_buffer_risk_details(
+        schedule_input=schedule_input,
+        scheduled_tasks=scheduled_tasks,
+        profiles=control_buffer_terms["profiles"],
+    )
     control_priority_analysis = _build_control_priority_analysis(
         schedule_input=schedule_input,
         baseline_result=baseline_result,
@@ -706,6 +1015,10 @@ def solve_control_priority_schedule(
         allocations=allocations,
         milestone_results=milestone_results,
         control_chain_task_ids=control_chain_task_ids,
+        control_buffer_risks=control_buffer_risks,
+        continuity_metrics=continuity_metrics,
+        normal_balance_metrics=normal_balance_metrics,
+        resource_organization_analysis=resource_organization_analysis,
     )
     stats["continuity_metrics"] = continuity_metrics
     stats["continuity_objective"] = {
@@ -716,12 +1029,26 @@ def solve_control_priority_schedule(
         "spatial_resource_assignment_weight": SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT,
     }
     stats["normal_balance_metrics"] = normal_balance_metrics
+    stats["resource_organization_analysis"] = resource_organization_analysis
     stats["control_priority_analysis"] = control_priority_analysis
+    weighted_objective = (
+        control_lateness_days * CONTROL_NODE_LATE_WEIGHT
+        + control_buffer_risk_penalty * CONTROL_BUFFER_RISK_WEIGHT
+        + risk_related_control_wait_penalty * CONTROL_RESOURCE_WAIT_WEIGHT
+        + resource_workload_balance_penalty * RESOURCE_WORKLOAD_BALANCE_WEIGHT
+        + resource_idle_penalty * RESOURCE_IDLE_WEIGHT
+        + resource_path_continuity_penalty * RESOURCE_PATH_CONTINUITY_WEIGHT
+        + (objective_days + soft_milestone_penalty) * CONTROL_MAKESPAN_WEIGHT
+        + sum(solver.Value(term) for term in normal_balance_terms) * NORMAL_BALANCE_WEIGHT
+        + continuity_split_penalty * SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT
+        + spatial_assignment_penalty * SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT
+    )
     validation.append(
         ValidationMessage(
             level="info",
             message=(
                 f"控制性工程优先策略已完成：控制链工作项 {len(control_chain_task_ids)} 个，"
+                f"控制缓冲状态 {control_priority_analysis['control_buffer_status']}，"
                 f"普通工程均衡评分 {normal_balance_metrics['balance_score']}。"
             ),
         )
@@ -747,14 +1074,36 @@ def solve_control_priority_schedule(
             "makespan_days": objective_days,
             "baseline_makespan_days": baseline_result.objective_days,
             "control_lateness_days": control_lateness_days,
-            "control_resource_wait_penalty": sum(solver.Value(term) for term in control_wait_terms),
+            "soft_control_lateness_penalty": soft_control_lateness_penalty,
+            "control_buffer_risk_penalty": control_buffer_risk_penalty,
+            "risk_related_control_wait_penalty": risk_related_control_wait_penalty,
+            "control_resource_wait_penalty": risk_related_control_wait_penalty,
+            "resource_workload_balance_penalty": resource_workload_balance_penalty,
+            "resource_idle_penalty": resource_idle_penalty,
+            "resource_path_continuity_penalty": resource_path_continuity_penalty,
+            "resource_balance_weight": RESOURCE_WORKLOAD_BALANCE_WEIGHT,
+            "resource_idle_weight": RESOURCE_IDLE_WEIGHT,
             "normal_balance_penalty": sum(solver.Value(term) for term in normal_balance_terms),
             "soft_milestone_penalty": soft_milestone_penalty,
             "same_structure_craft_split_penalty": continuity_split_penalty,
             "spatial_assignment_penalty": spatial_assignment_penalty,
+            "continuity_preference_penalty": continuity_preference_penalty,
             "continuity_score": continuity_metrics["continuity_score"],
             "normal_balance_score": normal_balance_metrics["balance_score"],
-            "weighted_objective": objective_days + soft_milestone_penalty,
+            "resource_organization_analysis": resource_organization_analysis,
+            "weighted_objective": weighted_objective,
+            "objective_weights": {
+                "control_node_late": CONTROL_NODE_LATE_WEIGHT,
+                "control_buffer_risk": CONTROL_BUFFER_RISK_WEIGHT,
+                "risk_related_control_wait": CONTROL_RESOURCE_WAIT_WEIGHT,
+                "resource_workload_balance": RESOURCE_WORKLOAD_BALANCE_WEIGHT,
+                "resource_idle": RESOURCE_IDLE_WEIGHT,
+                "resource_path_continuity": RESOURCE_PATH_CONTINUITY_WEIGHT,
+                "makespan_and_soft_milestone": CONTROL_MAKESPAN_WEIGHT,
+                "normal_balance": NORMAL_BALANCE_WEIGHT,
+                "same_structure_craft_split": SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT,
+                "spatial_resource_assignment": SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT,
+            },
             "control_priority_analysis": control_priority_analysis,
             "normal_balance_metrics": normal_balance_metrics,
         },
@@ -892,6 +1241,29 @@ def _build_control_wait_terms(
     control_chain_task_ids: set[str],
     horizon: int,
 ) -> list[Any]:
+    return [
+        detail["term"]
+        for detail in _build_control_wait_term_details(
+            model,
+            starts,
+            ends,
+            links,
+            task_by_id,
+            control_chain_task_ids,
+            horizon,
+        )
+    ]
+
+
+def _build_control_wait_term_details(
+    model: Any,
+    starts: dict[str, Any],
+    ends: dict[str, Any],
+    links: list[PrecedenceLink],
+    task_by_id: dict[str, Task],
+    control_chain_task_ids: set[str],
+    horizon: int,
+) -> list[dict[str, Any]]:
     terms = []
     for index, link in enumerate(links):
         predecessor = task_by_id.get(link.predecessor_id)
@@ -907,8 +1279,556 @@ def _build_control_wait_terms(
             model.Add(wait >= ends[successor.id] - starts[predecessor.id] - link.lag_days)
         else:
             model.Add(wait >= starts[successor.id] - ends[predecessor.id] - link.lag_days)
-        terms.append(wait)
+        terms.append(
+            {
+                "term": wait,
+                "predecessor_id": predecessor.id,
+                "successor_id": successor.id,
+            }
+        )
     return terms
+
+
+def _build_control_buffer_terms(
+    model: Any,
+    ends: dict[str, Any],
+    *,
+    schedule_input: ScheduleInput,
+    control_chain_task_ids: set[str],
+    horizon: int,
+    fallback_deadline_days: int | None,
+) -> dict[str, Any]:
+    profiles = _control_buffer_profiles(
+        schedule_input,
+        control_chain_task_ids,
+        fallback_deadline_days=fallback_deadline_days,
+    )
+    terms = []
+    risk_by_task: dict[str, Any] = {}
+    for task_id, profile in profiles.items():
+        if task_id not in ends:
+            continue
+        risk = model.NewIntVar(
+            0,
+            horizon + profile["necessary_buffer_days"],
+            f"control_buffer_risk_{_safe(task_id)}",
+        )
+        safe_boundary = profile["latest_safe_finish_offset"] - profile["necessary_buffer_days"]
+        model.Add(risk >= ends[task_id] - safe_boundary)
+        terms.append(risk)
+        risk_by_task[task_id] = risk
+    return {"terms": terms, "risk_by_task": risk_by_task, "profiles": profiles}
+
+
+def _risk_related_control_wait_terms(
+    model: Any,
+    wait_details: list[dict[str, Any]],
+    risk_by_task: dict[str, Any],
+    horizon: int,
+) -> list[Any]:
+    terms = []
+    for index, detail in enumerate(wait_details):
+        risk = risk_by_task.get(detail["successor_id"])
+        if risk is None:
+            continue
+        wait = detail["term"]
+        at_risk = model.NewBoolVar(f"control_wait_at_risk_{index}")
+        model.Add(risk >= 1).OnlyEnforceIf(at_risk)
+        model.Add(risk == 0).OnlyEnforceIf(at_risk.Not())
+        risk_wait = model.NewIntVar(0, horizon, f"risk_related_control_wait_{index}")
+        model.Add(risk_wait <= wait)
+        model.Add(risk_wait <= horizon * at_risk)
+        model.Add(risk_wait >= wait - horizon * (1 - at_risk))
+        terms.append(risk_wait)
+    return terms
+
+
+def _control_buffer_profiles(
+    schedule_input: ScheduleInput,
+    control_chain_task_ids: set[str],
+    *,
+    fallback_deadline_days: int | None,
+) -> dict[str, dict[str, Any]]:
+    task_by_id = {task.id: task for task in schedule_input.tasks}
+    target_ids = _control_target_task_ids(schedule_input)
+    latest_finish, deadline_sources = _control_target_deadlines(
+        schedule_input,
+        target_ids,
+        fallback_deadline_days=fallback_deadline_days,
+    )
+    if not latest_finish:
+        return {}
+
+    source_by_task = dict(deadline_sources)
+    for _ in range(len(control_chain_task_ids) + 1):
+        changed = False
+        for link in reversed(schedule_input.precedence_links):
+            if link.predecessor_id not in control_chain_task_ids or link.successor_id not in control_chain_task_ids:
+                continue
+            successor_deadline = latest_finish.get(link.successor_id)
+            predecessor = task_by_id.get(link.predecessor_id)
+            successor = task_by_id.get(link.successor_id)
+            if successor_deadline is None or predecessor is None or successor is None:
+                continue
+            candidate = max(
+                0,
+                _predecessor_latest_finish_from_successor_deadline(
+                    predecessor=predecessor,
+                    successor=successor,
+                    link=link,
+                    successor_latest_finish=successor_deadline,
+                ),
+            )
+            if link.predecessor_id not in latest_finish or candidate < latest_finish[link.predecessor_id]:
+                latest_finish[link.predecessor_id] = candidate
+                source_by_task[link.predecessor_id] = f"control_chain:{link.successor_id}"
+                changed = True
+        if not changed:
+            break
+
+    profiles: dict[str, dict[str, Any]] = {}
+    for task_id in sorted(control_chain_task_ids):
+        task = task_by_id.get(task_id)
+        latest_safe_finish = latest_finish.get(task_id)
+        if task is None or latest_safe_finish is None:
+            continue
+        profiles[task_id] = {
+            "task_id": task_id,
+            "task_name": _control_display_task_name(task),
+            "control_level": task.control_level,
+            "is_control_target": task_id in target_ids,
+            "target_source": _control_target_source(task),
+            "deadline_source": source_by_task.get(task_id, "unknown"),
+            "latest_safe_finish_offset": latest_safe_finish,
+            "latest_safe_finish_date": _finish_date(schedule_input.start_date, latest_safe_finish),
+            "necessary_buffer_days": CONTROL_NECESSARY_BUFFER_DAYS,
+        }
+    return profiles
+
+
+def _control_target_deadlines(
+    schedule_input: ScheduleInput,
+    target_ids: set[str],
+    *,
+    fallback_deadline_days: int | None,
+) -> tuple[dict[str, int], dict[str, str]]:
+    deadlines: dict[str, int] = {}
+    sources: dict[str, str] = {}
+    for milestone in schedule_input.milestones:
+        if not _is_control_milestone(milestone):
+            continue
+        scoped_task_ids = set(_task_ids_for_milestone(milestone, schedule_input.tasks))
+        if milestone.related_structure_ids:
+            related_structure_ids = set(milestone.related_structure_ids)
+            scoped_task_ids.update(
+                task.id for task in schedule_input.tasks if task.structure_id in related_structure_ids
+            )
+        target_offset = _target_offset(schedule_input.start_date, milestone)
+        for task_id in sorted(target_ids & scoped_task_ids):
+            if task_id not in deadlines or target_offset < deadlines[task_id]:
+                deadlines[task_id] = target_offset
+                sources[task_id] = f"milestone:{milestone.id}"
+
+    if fallback_deadline_days is not None:
+        for task_id in sorted(target_ids):
+            if task_id not in deadlines:
+                deadlines[task_id] = fallback_deadline_days
+                sources[task_id] = "baseline_makespan"
+    return deadlines, sources
+
+
+def _predecessor_latest_finish_from_successor_deadline(
+    *,
+    predecessor: Task,
+    successor: Task,
+    link: PrecedenceLink,
+    successor_latest_finish: int,
+) -> int:
+    successor_latest_start = successor_latest_finish - successor.duration_days
+    if link.relationship == "SS":
+        return successor_latest_start - link.lag_days + predecessor.duration_days
+    if link.relationship == "FF":
+        return successor_latest_finish - link.lag_days
+    if link.relationship == "SF":
+        return successor_latest_finish - link.lag_days + predecessor.duration_days
+    return successor_latest_start - link.lag_days
+
+
+def _control_buffer_risk_details(
+    *,
+    schedule_input: ScheduleInput,
+    scheduled_tasks: list[ScheduledTask],
+    profiles: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    scheduled_by_id = {task.id: task for task in scheduled_tasks}
+    details: list[dict[str, Any]] = []
+    for task_id, profile in profiles.items():
+        task = scheduled_by_id.get(task_id)
+        if task is None:
+            continue
+        remaining_buffer = profile["latest_safe_finish_offset"] - task.end_offset
+        risk_days = max(0, profile["necessary_buffer_days"] - remaining_buffer)
+        if remaining_buffer < 0:
+            status = "affected_node"
+        elif risk_days > 0:
+            status = "buffer_insufficient"
+        elif remaining_buffer <= profile["necessary_buffer_days"] + CONTROL_BUFFER_NEAR_RISK_DAYS:
+            status = "near_risk"
+        else:
+            status = "normal"
+        details.append(
+            {
+                **profile,
+                "start_date": task.start_date,
+                "finish_date": task.finish_date,
+                "finish_offset": task.end_offset,
+                "remaining_buffer_days": remaining_buffer,
+                "buffer_risk_days": risk_days,
+                "status": status,
+            }
+        )
+    return sorted(
+        details,
+        key=lambda item: (
+            -int(item["buffer_risk_days"]),
+            int(item["remaining_buffer_days"]),
+            str(item["task_id"]),
+        ),
+    )
+
+
+def _control_buffer_status(buffer_risks: list[dict[str, Any]]) -> str:
+    if not buffer_risks:
+        return "not_evaluated"
+    statuses = {item["status"] for item in buffer_risks}
+    if "affected_node" in statuses:
+        return "affected_node"
+    if "buffer_insufficient" in statuses:
+        return "buffer_insufficient"
+    if "near_risk" in statuses:
+        return "near_risk"
+    return "normal"
+
+
+def _control_target_source(task: Task) -> str:
+    if task.component_type == "cast_in_place_continuous_beam" or task.structure_type == "continuous_beam":
+        return "cast_in_place_continuous_beam_rule"
+    if task.control_level in {"control", "key"}:
+        return "task_control_level"
+    return "milestone_scope"
+
+
+def _control_source_label(source: str) -> str:
+    labels = {
+        "cast_in_place_continuous_beam_rule": "现浇连续梁规则",
+        "continuous_main_pier_inherited": "连续梁主墩继承",
+        "task_control_level": "任务控制属性",
+        "milestone_scope": "节点范围纳入",
+        "control_chain_predecessor": "控制链前置追溯",
+    }
+    return labels.get(source, source)
+
+
+def _control_object_ref(task: Task, continuous_linked_structure_ids: set[str]) -> dict[str, Any]:
+    location = _task_location(task)
+    structure_display_name = location["label"]
+    if task.component_type == "cast_in_place_continuous_beam" or task.structure_type == "continuous_beam":
+        source = "cast_in_place_continuous_beam_rule"
+        return {
+            "id": f"continuous:{task.structure_id}",
+            "name": structure_display_name,
+            "object_type": "continuous_beam",
+            "source": source,
+            "source_label": _control_source_label(source),
+            "bridge_id": task.bridge_id,
+            "work_section_id": task.work_section_id,
+            "structure_id": task.structure_id,
+            "structure_name": task.structure_name,
+            "side": location["side"] or "N",
+            "side_label": location["side_label"],
+        }
+
+    if task.structure_id in continuous_linked_structure_ids and task.control_level in {"control", "key"}:
+        source = "continuous_main_pier_inherited"
+        return {
+            "id": f"lower:{task.structure_id}",
+            "name": f"{structure_display_name}下部结构",
+            "object_type": "main_pier_lower_structure",
+            "source": source,
+            "source_label": _control_source_label(source),
+            "bridge_id": task.bridge_id,
+            "work_section_id": task.work_section_id,
+            "structure_id": task.structure_id,
+            "structure_name": task.structure_name,
+            "side": location["side"] or "N",
+            "side_label": location["side_label"],
+        }
+
+    source = _control_target_source(task)
+    return {
+        "id": f"structure:{task.structure_id}",
+        "name": structure_display_name,
+        "object_type": "control_structure",
+        "source": source,
+        "source_label": _control_source_label(source),
+        "bridge_id": task.bridge_id,
+        "work_section_id": task.work_section_id,
+        "structure_id": task.structure_id,
+        "structure_name": task.structure_name,
+        "side": location["side"] or "N",
+        "side_label": location["side_label"],
+    }
+
+
+def _control_task_role(task: Task, object_type: str) -> str:
+    if object_type == "main_pier_lower_structure":
+        return "inherited_control_task"
+    if task.component_type == "cast_in_place_continuous_beam" or task.structure_type == "continuous_beam":
+        return "control_object_task"
+    return "control_object_task"
+
+
+def _control_display_task_name(task: Task) -> str:
+    location = _task_location(task)
+    structure_display_name = location["label"]
+    if not location["side"] or location["side"] == "N":
+        return task.name
+    if task.name.startswith(structure_display_name):
+        return task.name
+    if task.structure_name and task.name.startswith(task.structure_name):
+        return f"{structure_display_name}{task.name[len(task.structure_name):]}"
+    side_label = location["side_label"]
+    if task.name.startswith(side_label):
+        return task.name
+    return f"{side_label}{task.name}"
+
+
+def _risk_number(risk: dict[str, Any] | None, key: str) -> int | None:
+    if not risk:
+        return None
+    value = risk.get(key)
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    return None
+
+
+def _risk_string(risk: dict[str, Any] | None, key: str, default: str = "") -> str:
+    if not risk:
+        return default
+    value = risk.get(key)
+    return value if isinstance(value, str) else default
+
+
+def _worst_control_status(statuses: list[str]) -> str:
+    if not statuses:
+        return "not_evaluated"
+    rank = {
+        "not_evaluated": 0,
+        "normal": 1,
+        "near_risk": 2,
+        "buffer_insufficient": 3,
+        "affected_node": 4,
+    }
+    return max(statuses, key=lambda status: rank.get(status, 0))
+
+
+def _downstream_control_targets(
+    *,
+    task_id: str,
+    successors_by_predecessor: dict[str, list[str]],
+    target_ids: set[str],
+    control_chain_task_ids: set[str],
+) -> list[str]:
+    visited = {task_id}
+    stack = list(successors_by_predecessor.get(task_id, []))
+    targets: set[str] = set()
+    while stack:
+        current_id = stack.pop()
+        if current_id in visited:
+            continue
+        visited.add(current_id)
+        if current_id in target_ids:
+            targets.add(current_id)
+        if current_id not in control_chain_task_ids:
+            continue
+        stack.extend(successors_by_predecessor.get(current_id, []))
+    return sorted(targets)
+
+
+def _build_layered_control_diagnostics(
+    *,
+    schedule_input: ScheduleInput,
+    scheduled_by_id: dict[str, ScheduledTask],
+    target_ids: set[str],
+    control_chain_task_ids: set[str],
+    control_buffer_risks: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    task_by_id = {task.id: task for task in schedule_input.tasks}
+    risk_by_task_id = {str(item.get("task_id")): item for item in control_buffer_risks if item.get("task_id")}
+    successors_by_predecessor: dict[str, list[str]] = defaultdict(list)
+    continuous_linked_structure_ids: set[str] = set()
+    for link in schedule_input.precedence_links:
+        if link.predecessor_id in task_by_id and link.successor_id in task_by_id:
+            successors_by_predecessor[link.predecessor_id].append(link.successor_id)
+        predecessor = task_by_id.get(link.predecessor_id)
+        successor = task_by_id.get(link.successor_id)
+        if (
+            predecessor is not None
+            and successor is not None
+            and (successor.component_type == "cast_in_place_continuous_beam" or successor.structure_type == "continuous_beam")
+        ):
+            continuous_linked_structure_ids.add(predecessor.structure_id)
+
+    object_by_id: dict[str, dict[str, Any]] = {}
+    object_ref_by_target_id: dict[str, dict[str, Any]] = {}
+    ordered_target_tasks = sorted(
+        (scheduled_by_id[task_id] for task_id in target_ids if task_id in scheduled_by_id),
+        key=lambda item: (item.start_offset, item.id),
+    )
+    for task in ordered_target_tasks:
+        ref = _control_object_ref(task, continuous_linked_structure_ids)
+        object_ref_by_target_id[task.id] = ref
+        item = object_by_id.setdefault(
+            ref["id"],
+            {
+                **ref,
+                "task_ids": [],
+                "start_offset": task.start_offset,
+                "finish_offset": task.end_offset,
+                "start_date": task.start_date,
+                "finish_date": task.finish_date,
+            },
+        )
+        item["task_ids"].append(task.id)
+        if task.start_offset < item["start_offset"]:
+            item["start_offset"] = task.start_offset
+            item["start_date"] = task.start_date
+        if task.end_offset > item["finish_offset"]:
+            item["finish_offset"] = task.end_offset
+            item["finish_date"] = task.finish_date
+
+    control_object_tasks: list[dict[str, Any]] = []
+    for task in ordered_target_tasks:
+        ref = object_ref_by_target_id[task.id]
+        risk = risk_by_task_id.get(task.id)
+        role = _control_task_role(task, ref["object_type"])
+        source = ref["source"]
+        control_object_tasks.append(
+            {
+                "task_id": task.id,
+                "task_name": _control_display_task_name(task),
+                "object_id": ref["id"],
+                "object_name": ref["name"],
+                "task_role": role,
+                "source": source,
+                "source_label": _control_source_label(source),
+                "control_level": task.control_level,
+                "component_type": task.component_type,
+                "start_date": task.start_date,
+                "finish_date": task.finish_date,
+                "latest_safe_finish_date": risk.get("latest_safe_finish_date") if risk else None,
+                "remaining_buffer_days": _risk_number(risk, "remaining_buffer_days"),
+                "buffer_risk_days": _risk_number(risk, "buffer_risk_days") or 0,
+                "status": _risk_string(risk, "status", "not_evaluated"),
+            }
+        )
+
+    control_objects: list[dict[str, Any]] = []
+    for item in object_by_id.values():
+        task_risks = [risk_by_task_id.get(task_id) for task_id in item["task_ids"]]
+        remaining_values = [
+            value
+            for value in (_risk_number(risk, "remaining_buffer_days") for risk in task_risks)
+            if value is not None
+        ]
+        risk_values = [_risk_number(risk, "buffer_risk_days") or 0 for risk in task_risks]
+        statuses = [_risk_string(risk, "status", "not_evaluated") for risk in task_risks if risk]
+        control_objects.append(
+            {
+                **{key: value for key, value in item.items() if key not in {"task_ids"}},
+                "task_count": len(item["task_ids"]),
+                "task_ids": list(item["task_ids"]),
+                "remaining_buffer_days": min(remaining_values) if remaining_values else None,
+                "buffer_risk_days": max(risk_values, default=0),
+                "status": _worst_control_status(statuses),
+            }
+        )
+
+    control_chain_predecessors: list[dict[str, Any]] = []
+    for task in sorted(
+        (scheduled_by_id[task_id] for task_id in control_chain_task_ids - target_ids if task_id in scheduled_by_id),
+        key=lambda item: (item.start_offset, item.id),
+    ):
+        impacted_targets = _downstream_control_targets(
+            task_id=task.id,
+            successors_by_predecessor=successors_by_predecessor,
+            target_ids=target_ids,
+            control_chain_task_ids=control_chain_task_ids,
+        )
+        impacted_objects = []
+        seen_object_ids: set[str] = set()
+        for target_id in impacted_targets:
+            ref = object_ref_by_target_id.get(target_id)
+            if ref is None or ref["id"] in seen_object_ids:
+                continue
+            impacted_objects.append({"id": ref["id"], "name": ref["name"]})
+            seen_object_ids.add(ref["id"])
+        risk = risk_by_task_id.get(task.id)
+        source = "control_chain_predecessor"
+        control_chain_predecessors.append(
+            {
+                "task_id": task.id,
+                "task_name": _control_display_task_name(task),
+                "source": source,
+                "source_label": _control_source_label(source),
+                "control_level": task.control_level,
+                "component_type": task.component_type,
+                "start_date": task.start_date,
+                "finish_date": task.finish_date,
+                "latest_safe_finish_date": risk.get("latest_safe_finish_date") if risk else None,
+                "remaining_buffer_days": _risk_number(risk, "remaining_buffer_days"),
+                "buffer_risk_days": _risk_number(risk, "buffer_risk_days") or 0,
+                "status": _risk_string(risk, "status", "not_evaluated"),
+                "deadline_source": _risk_string(risk, "deadline_source"),
+                "impacted_control_objects": impacted_objects,
+            }
+        )
+
+    return {
+        "control_objects": sorted(control_objects, key=lambda item: (item["start_offset"], item["id"])),
+        "control_object_tasks": control_object_tasks,
+        "control_chain_predecessors": control_chain_predecessors,
+    }
+
+
+def _normal_balance_status(metrics: dict[str, Any]) -> str:
+    if metrics.get("normal_task_count", 0) <= 0:
+        return "not_evaluated"
+    score = int(metrics.get("balance_score", 0))
+    if score >= 80:
+        return "balanced"
+    bucket_loads = metrics.get("bucket_loads") or []
+    if len(bucket_loads) >= 2:
+        first = int(bucket_loads[0].get("task_count", 0))
+        last = int(bucket_loads[-1].get("task_count", 0))
+        peak = int(metrics.get("peak_task_count", 0))
+        if last == peak and last > first:
+            return "backloaded"
+    return "concentrated"
+
+
+def _resource_path_status(metrics: dict[str, Any]) -> str:
+    if metrics.get("resource_path_count", 0) <= 0:
+        return "not_evaluated"
+    abnormal = int(metrics.get("cross_side_jump_count", 0)) + int(metrics.get("direction_reversal_count", 0))
+    if abnormal > 0:
+        return "abnormal_jump"
+    jumps = int(metrics.get("jump_pier_count", 0)) + int(metrics.get("side_switch_count", 0)) + int(metrics.get("path_group_switch_count", 0))
+    if jumps > 0:
+        return "reasonable_jump"
+    return "smooth"
 
 
 def _build_normal_balance_terms(
@@ -941,6 +1861,210 @@ def _build_normal_balance_terms(
         model.AddAbsEquality(deviation, starts[task.id] - target)
         terms.append(deviation)
     return terms
+
+
+def _build_resource_organization_terms(
+    model: Any,
+    starts: dict[str, Any],
+    ends: dict[str, Any],
+    tasks: list[Task],
+    enabled_resources: list[Resource],
+    resource_candidates: dict[str, list[Resource]],
+    assignment_vars: dict[tuple[str, str], Any],
+    horizon: int,
+) -> dict[str, list[Any]]:
+    assignments_by_resource: dict[str, list[tuple[Task, Any]]] = defaultdict(list)
+    for task in tasks:
+        for resource in resource_candidates.get(task.id, []):
+            assignment = assignment_vars.get((task.id, resource.id))
+            if assignment is not None:
+                assignments_by_resource[resource.id].append((task, assignment))
+
+    resources_with_assignments = [
+        resource for resource in sorted(enabled_resources, key=_resource_sort_key) if assignments_by_resource.get(resource.id)
+    ]
+    resources_by_type: dict[str, list[Resource]] = defaultdict(list)
+    workload_by_resource: dict[str, Any] = {}
+    used_by_resource: dict[str, Any] = {}
+    idle_terms: list[Any] = []
+
+    for resource in resources_with_assignments:
+        task_assignments = assignments_by_resource[resource.id]
+        assignment_bools = [assignment for _, assignment in task_assignments]
+        total_work = sum(task.duration_days for task, _ in task_assignments)
+        workload = model.NewIntVar(0, total_work, f"resource_workload_{_safe(resource.id)}")
+        model.Add(workload == sum(task.duration_days * assignment for task, assignment in task_assignments))
+
+        used = model.NewBoolVar(f"resource_used_{_safe(resource.id)}")
+        for assignment in assignment_bools:
+            model.Add(assignment <= used)
+        model.Add(sum(assignment_bools) >= used)
+
+        first_start = model.NewIntVar(0, horizon, f"resource_first_start_{_safe(resource.id)}")
+        last_end = model.NewIntVar(0, horizon, f"resource_last_end_{_safe(resource.id)}")
+        active_span = model.NewIntVar(0, horizon, f"resource_active_span_{_safe(resource.id)}")
+        idle_days = model.NewIntVar(0, horizon, f"resource_idle_days_{_safe(resource.id)}")
+        for task, assignment in task_assignments:
+            model.Add(first_start <= starts[task.id]).OnlyEnforceIf(assignment)
+            model.Add(last_end >= ends[task.id]).OnlyEnforceIf(assignment)
+        model.Add(first_start == 0).OnlyEnforceIf(used.Not())
+        model.Add(last_end == 0).OnlyEnforceIf(used.Not())
+        model.Add(last_end >= first_start)
+        model.Add(active_span == last_end - first_start)
+        model.Add(idle_days == active_span - workload)
+
+        resources_by_type[resource.type].append(resource)
+        workload_by_resource[resource.id] = workload
+        used_by_resource[resource.id] = used
+        idle_terms.append(idle_days)
+
+    workload_balance_terms: list[Any] = []
+    for resource_type, resources in resources_by_type.items():
+        workloads = [workload_by_resource[resource.id] for resource in resources if resource.id in workload_by_resource]
+        if len(workloads) <= 1:
+            continue
+        total_work = sum(
+            task.duration_days
+            for task in tasks
+            if any(resource.type == resource_type for resource in resource_candidates.get(task.id, []))
+        )
+        max_workload = model.NewIntVar(0, total_work, f"resource_max_workload_{_safe(resource_type)}")
+        min_workload = model.NewIntVar(0, total_work, f"resource_min_workload_{_safe(resource_type)}")
+        workload_range = model.NewIntVar(0, total_work, f"resource_workload_range_{_safe(resource_type)}")
+        model.AddMaxEquality(max_workload, workloads)
+        model.AddMinEquality(min_workload, workloads)
+        model.Add(workload_range == max_workload - min_workload)
+        workload_balance_terms.append(workload_range)
+
+    path_terms = _build_resource_path_continuity_terms(
+        model,
+        assignments_by_resource,
+        used_by_resource,
+    )
+
+    return {
+        "workload_balance_terms": workload_balance_terms,
+        "idle_terms": idle_terms,
+        "path_terms": path_terms["path_terms"],
+        "path_group_terms": path_terms["path_group_terms"],
+        "spatial_gap_terms": path_terms["spatial_gap_terms"],
+    }
+
+
+def _build_resource_path_continuity_terms(
+    model: Any,
+    assignments_by_resource: dict[str, list[tuple[Task, Any]]],
+    used_by_resource: dict[str, Any],
+) -> dict[str, list[Any]]:
+    path_group_terms: list[Any] = []
+    spatial_gap_terms: list[Any] = []
+
+    for resource_id, task_assignments in assignments_by_resource.items():
+        resource_used = used_by_resource.get(resource_id)
+        if resource_used is None:
+            continue
+        task_assignments_by_group: dict[str, list[tuple[Task, Any]]] = defaultdict(list)
+        for task, assignment in task_assignments:
+            task_assignments_by_group[_task_path_group_key_for_resource(task, resource_id)].append((task, assignment))
+
+        group_used_vars = []
+        for group_index, group_task_assignments in enumerate(task_assignments_by_group.values()):
+            group_assignments = [assignment for _, assignment in group_task_assignments]
+            group_used = model.NewBoolVar(f"resource_path_group_used_{_safe(resource_id)}_{group_index}")
+            for assignment in group_assignments:
+                model.Add(assignment <= group_used)
+            model.Add(sum(group_assignments) >= group_used)
+            group_used_vars.append(group_used)
+            spatial_gap = _resource_path_group_spatial_gap_term(
+                model,
+                resource_id=resource_id,
+                group_index=group_index,
+                group_used=group_used,
+                task_assignments=group_task_assignments,
+            )
+            if spatial_gap is not None:
+                spatial_gap_terms.append(spatial_gap)
+
+        if len(group_used_vars) > 1:
+            excess_groups = model.NewIntVar(0, len(group_used_vars) - 1, f"resource_path_group_excess_{_safe(resource_id)}")
+            model.Add(excess_groups == sum(group_used_vars) - resource_used)
+            path_group_terms.append(excess_groups)
+
+    return {
+        "path_terms": path_group_terms + spatial_gap_terms,
+        "path_group_terms": path_group_terms,
+        "spatial_gap_terms": spatial_gap_terms,
+    }
+
+
+def _resource_path_group_spatial_gap_term(
+    model: Any,
+    *,
+    resource_id: str,
+    group_index: int,
+    group_used: Any,
+    task_assignments: list[tuple[Task, Any]],
+) -> Any | None:
+    tasks_by_structure: dict[str, list[tuple[Task, Any]]] = defaultdict(list)
+    sort_key_by_structure: dict[str, tuple[Any, ...]] = {}
+    for task, assignment in task_assignments:
+        location = _task_location(task)
+        if location["support_index"] is None:
+            continue
+        tasks_by_structure[task.structure_id].append((task, assignment))
+        sort_key_by_structure.setdefault(
+            task.structure_id,
+            _continuity_location_sort_key(task, location, include_side=True),
+        )
+
+    if len(tasks_by_structure) <= 1:
+        return None
+
+    ranked_structure_ids = sorted(sort_key_by_structure, key=lambda item: (sort_key_by_structure[item], item))
+    rank_by_structure = {structure_id: rank for rank, structure_id in enumerate(ranked_structure_ids)}
+    location_used_vars = []
+    for structure_id in ranked_structure_ids:
+        assignments = [assignment for _, assignment in tasks_by_structure[structure_id]]
+        location_used = model.NewBoolVar(
+            f"resource_path_location_used_{_safe(resource_id)}_{group_index}_{_safe(structure_id)}"
+        )
+        for assignment in assignments:
+            model.Add(assignment <= location_used)
+        model.Add(sum(assignments) >= location_used)
+        location_used_vars.append(location_used)
+
+    max_rank_value = len(ranked_structure_ids) - 1
+    min_rank = model.NewIntVar(0, max_rank_value, f"resource_path_min_rank_{_safe(resource_id)}_{group_index}")
+    max_rank = model.NewIntVar(0, max_rank_value, f"resource_path_max_rank_{_safe(resource_id)}_{group_index}")
+    for structure_id, location_used in zip(ranked_structure_ids, location_used_vars):
+        rank = rank_by_structure[structure_id]
+        model.Add(min_rank <= rank).OnlyEnforceIf(location_used)
+        model.Add(max_rank >= rank).OnlyEnforceIf(location_used)
+    model.Add(min_rank == 0).OnlyEnforceIf(group_used.Not())
+    model.Add(max_rank == 0).OnlyEnforceIf(group_used.Not())
+    model.Add(max_rank >= min_rank)
+
+    location_span = model.NewIntVar(0, len(ranked_structure_ids), f"resource_path_location_span_{_safe(resource_id)}_{group_index}")
+    gap = model.NewIntVar(0, len(ranked_structure_ids), f"resource_path_location_gap_{_safe(resource_id)}_{group_index}")
+    model.Add(location_span == max_rank - min_rank + group_used)
+    model.Add(gap == location_span - sum(location_used_vars))
+    return gap
+
+
+def _task_path_group_key_for_resource(task: Task, resource_id: str) -> str:
+    location = _task_location(task)
+    resource_type = "|".join(sorted(task.compatible_resource_types))
+    if "_" in resource_id:
+        resource_type = resource_id.rsplit("_", 1)[0]
+    key_parts = (
+        task.bridge_id or "",
+        task.work_section_id or "",
+        location["side"] or "N",
+        resource_type,
+        task.component_type,
+        task.process_name,
+    )
+    return "|".join(str(part) for part in key_parts)
 
 
 def _is_control_milestone(milestone: MilestoneConstraint) -> bool:
@@ -996,6 +2120,186 @@ def _build_normal_balance_metrics(scheduled_tasks: list[ScheduledTask], config: 
     }
 
 
+def _build_resource_organization_analysis(
+    scheduled_tasks: list[ScheduledTask],
+    enabled_resources: list[Resource],
+    *,
+    objective_days: int | None,
+    continuity_metrics: dict[str, Any],
+) -> dict[str, Any]:
+    tasks_by_resource: dict[str, list[ScheduledTask]] = defaultdict(list)
+    for task in scheduled_tasks:
+        if task.assigned_resource_id:
+            tasks_by_resource[task.assigned_resource_id].append(task)
+
+    path_by_resource = {
+        str(path.get("resource_id")): path
+        for path in continuity_metrics.get("resource_paths", [])
+        if isinstance(path, dict) and path.get("resource_id")
+    }
+    resource_items: list[dict[str, Any]] = []
+    resources_by_type: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    project_days = max(1, int(objective_days or 0))
+
+    for resource in sorted(enabled_resources, key=_resource_sort_key):
+        ordered = sorted(
+            tasks_by_resource.get(resource.id, []),
+            key=lambda task: (task.start_offset, task.end_offset, *_task_spatial_sort_key(task)),
+        )
+        active_days = sum(task.end_offset - task.start_offset for task in ordered)
+        first_start = ordered[0].start_offset if ordered else None
+        last_end = ordered[-1].end_offset if ordered else None
+        active_span = (last_end - first_start) if first_start is not None and last_end is not None else 0
+        positive_gaps = [
+            max(0, current.start_offset - previous.end_offset)
+            for previous, current in zip(ordered, ordered[1:])
+            if current.start_offset > previous.end_offset
+        ]
+        idle_days = sum(positive_gaps)
+        path = path_by_resource.get(resource.id, {})
+        item = {
+            "resource_id": resource.id,
+            "resource_name": resource.name,
+            "resource_type": resource.type,
+            "same_structure_resource_binding": resource.same_structure_resource_binding,
+            "same_structure_parallel_limit": resource.same_structure_parallel_limit,
+            "parallel_rule_description": resource.parallel_rule_description,
+            "task_count": len(ordered),
+            "active_days": active_days,
+            "first_start_offset": first_start,
+            "last_end_offset": last_end,
+            "active_span_days": active_span,
+            "idle_days": idle_days,
+            "max_idle_gap_days": max(positive_gaps) if positive_gaps else 0,
+            "idle_gap_count": len(positive_gaps),
+            "utilization_within_span": round(active_days / active_span, 4) if active_span else 0,
+            "project_utilization": round(active_days / project_days, 4) if project_days else 0,
+            "jump_pier_count": int(path.get("jump_pier_count") or 0),
+            "side_switch_count": int(path.get("side_switch_count") or 0),
+            "cross_side_jump_count": int(path.get("cross_side_jump_count") or 0),
+            "path_group_switch_count": int(path.get("path_group_switch_count") or 0),
+        }
+        resource_items.append(item)
+        resources_by_type[resource.type].append(item)
+
+    type_items: list[dict[str, Any]] = []
+    balance_statuses: list[str] = []
+    idle_statuses: list[str] = []
+    for resource_type, resources in sorted(resources_by_type.items()):
+        workloads = [int(item["active_days"]) for item in resources]
+        used = [item for item in resources if int(item["active_days"]) > 0]
+        total_workload = sum(workloads)
+        max_workload = max(workloads) if workloads else 0
+        min_workload = min(workloads) if workloads else 0
+        average_workload = total_workload / len(workloads) if workloads else 0
+        workload_range = max_workload - min_workload
+        parallel_limits = [
+            int(item["same_structure_parallel_limit"])
+            for item in resources
+            if item.get("same_structure_parallel_limit") is not None
+        ]
+        balance_status = _resource_workload_balance_status(
+            resource_count=len(resources),
+            used_resource_count=len(used),
+            average_workload=average_workload,
+            workload_range=workload_range,
+        )
+        idle_status = _resource_idle_status(resources)
+        balance_statuses.append(balance_status)
+        idle_statuses.append(idle_status)
+        type_items.append(
+            {
+                "resource_type": resource_type,
+                "resource_count": len(resources),
+                "used_resource_count": len(used),
+                "same_structure_resource_binding": any(
+                    bool(item.get("same_structure_resource_binding")) for item in resources
+                ),
+                "same_structure_parallel_limit": min(parallel_limits) if parallel_limits else None,
+                "parallel_rule_description": next(
+                    (str(item.get("parallel_rule_description")) for item in resources if item.get("parallel_rule_description")),
+                    "",
+                ),
+                "task_count": sum(int(item["task_count"]) for item in resources),
+                "active_days": total_workload,
+                "min_workload_days": min_workload,
+                "max_workload_days": max_workload,
+                "average_workload_days": round(average_workload, 2),
+                "workload_range_days": workload_range,
+                "idle_days": sum(int(item["idle_days"]) for item in resources),
+                "max_idle_gap_days": max((int(item["max_idle_gap_days"]) for item in resources), default=0),
+                "jump_pier_count": sum(int(item["jump_pier_count"]) for item in resources),
+                "side_switch_count": sum(int(item["side_switch_count"]) for item in resources),
+                "path_group_switch_count": sum(int(item["path_group_switch_count"]) for item in resources),
+                "balance_status": balance_status,
+                "idle_status": idle_status,
+            }
+        )
+
+    return {
+        "resource_count": len(resource_items),
+        "used_resource_count": sum(1 for item in resource_items if int(item["active_days"]) > 0),
+        "resource_balance_status": _worst_resource_status(balance_statuses),
+        "resource_idle_status": _worst_resource_status(idle_statuses),
+        "resources": resource_items,
+        "resource_types": type_items,
+    }
+
+
+def _resource_workload_balance_status(
+    *,
+    resource_count: int,
+    used_resource_count: int,
+    average_workload: float,
+    workload_range: int,
+) -> str:
+    if resource_count <= 1 or average_workload <= 0:
+        return "not_evaluated"
+    if used_resource_count < resource_count:
+        return "under_used"
+    if workload_range <= max(1, math.ceil(average_workload * 0.25)):
+        return "balanced"
+    if workload_range <= max(2, math.ceil(average_workload * 0.5)):
+        return "slightly_unbalanced"
+    return "unbalanced"
+
+
+def _resource_idle_status(resources: list[dict[str, Any]]) -> str:
+    active_resources = [item for item in resources if int(item["active_days"]) > 0]
+    if not active_resources:
+        return "not_evaluated"
+    worst_ratio = max(
+        (
+            (float(item["idle_days"]) / float(item["active_span_days"]))
+            if float(item["active_span_days"] or 0) > 0
+            else 0
+        )
+        for item in active_resources
+    )
+    max_gap = max(int(item["max_idle_gap_days"]) for item in active_resources)
+    if max_gap >= 30 or worst_ratio >= 0.35:
+        return "idle_risk"
+    if max_gap >= 7 or worst_ratio >= 0.15:
+        return "minor_idle"
+    return "continuous"
+
+
+def _worst_resource_status(statuses: list[str]) -> str:
+    if not statuses:
+        return "not_evaluated"
+    rank = {
+        "not_evaluated": 0,
+        "balanced": 1,
+        "continuous": 1,
+        "slightly_unbalanced": 2,
+        "minor_idle": 2,
+        "under_used": 3,
+        "unbalanced": 4,
+        "idle_risk": 4,
+    }
+    return max(statuses, key=lambda status: rank.get(status, 0))
+
+
 def _build_control_priority_analysis(
     *,
     schedule_input: ScheduleInput,
@@ -1004,9 +2308,14 @@ def _build_control_priority_analysis(
     allocations: list[ResourceAllocation],
     milestone_results: list[MilestoneResult],
     control_chain_task_ids: set[str],
+    control_buffer_risks: list[dict[str, Any]],
+    continuity_metrics: dict[str, Any],
+    normal_balance_metrics: dict[str, Any],
+    resource_organization_analysis: dict[str, Any],
 ) -> dict[str, Any]:
     baseline_by_id = {task.id: task for task in baseline_result.tasks}
     scheduled_by_id = {task.id: task for task in scheduled_tasks}
+    target_ids = _control_target_task_ids(schedule_input)
     level_counts: dict[str, int] = defaultdict(int)
     for task in scheduled_tasks:
         level_counts[task.control_level] += 1
@@ -1043,7 +2352,7 @@ def _build_control_priority_analysis(
             explanations.append(
                 {
                     "task_id": task.id,
-                    "task_name": task.name,
+                    "task_name": _control_display_task_name(task),
                     "change_days": delta,
                     "direction": "delayed",
                     "reason": "普通工程让位于控制性工程资源保障，并按均衡节奏推进。",
@@ -1053,7 +2362,7 @@ def _build_control_priority_analysis(
             explanations.append(
                 {
                     "task_id": task.id,
-                    "task_name": task.name,
+                    "task_name": _control_display_task_name(task),
                     "change_days": abs(delta),
                     "direction": "advanced",
                     "reason": "该工作项属于控制性工程链，策略优先压缩其资源等待和节点风险。",
@@ -1089,10 +2398,39 @@ def _build_control_priority_analysis(
         }
         for item in bottlenecks[:3]
     ] if late_control else []
+    layered_control = _build_layered_control_diagnostics(
+        schedule_input=schedule_input,
+        scheduled_by_id=scheduled_by_id,
+        target_ids=target_ids,
+        control_chain_task_ids=control_chain_task_ids,
+        control_buffer_risks=control_buffer_risks,
+    )
 
     return {
         "control_task_count": len(control_chain_task_ids),
         "control_level_counts": dict(level_counts),
+        **layered_control,
+        "control_targets": [
+            {
+                "task_id": task.id,
+                "task_name": _control_display_task_name(task),
+                "control_level": task.control_level,
+                "component_type": task.component_type,
+                "source": _control_target_source(task),
+            }
+            for task in sorted(
+                (scheduled_by_id[task_id] for task_id in target_ids if task_id in scheduled_by_id),
+                key=lambda item: (item.start_offset, item.id),
+            )
+        ],
+        "control_buffer_risks": control_buffer_risks[:50],
+        "control_buffer_status": _control_buffer_status(control_buffer_risks),
+        "normal_balance_status": _normal_balance_status(normal_balance_metrics),
+        "resource_path_status": _resource_path_status(continuity_metrics),
+        "resource_balance_status": resource_organization_analysis.get("resource_balance_status", "not_evaluated"),
+        "resource_idle_status": resource_organization_analysis.get("resource_idle_status", "not_evaluated"),
+        "resource_organization_analysis": resource_organization_analysis,
+        "path_group_diagnostics": continuity_metrics.get("path_group_diagnostics", [])[:50],
         "milestones": milestone_summaries,
         "bottleneck_resources": bottlenecks[:10],
         "resource_increment_suggestions": resource_increment_suggestions,
@@ -1107,7 +2445,7 @@ def _build_control_priority_analysis(
         "scheduled_control_tasks": [
             {
                 "task_id": task.id,
-                "task_name": task.name,
+                "task_name": _control_display_task_name(task),
                 "control_level": task.control_level,
                 "start_date": task.start_date,
                 "finish_date": task.finish_date,
@@ -2039,6 +3377,15 @@ def _solve_resource_model(
             continue
         _add_precedence_constraint(model, starts, ends, link)
 
+    _add_continuous_beam_v18_constraints(
+        model,
+        starts,
+        ends,
+        schedule_input.tasks,
+        schedule_input.precedence_links,
+        horizon,
+    )
+
     for intervals in resource_intervals.values():
         model.AddNoOverlap(intervals)
 
@@ -2202,6 +3549,15 @@ def _solve_capacity_model(
                 )
             )
 
+    _add_capacity_same_structure_parallel_rules(
+        model,
+        starts,
+        ends,
+        schedule_input.tasks,
+        groups_by_type,
+        assignment_vars,
+    )
+
     for group in groups:
         intervals = intervals_by_group.get(group["key"], [])
         if counts is None:
@@ -2290,6 +3646,15 @@ def _solve_capacity_model(
             )
             continue
         _add_precedence_constraint(model, starts, ends, link)
+
+    _add_continuous_beam_v18_constraints(
+        model,
+        starts,
+        ends,
+        schedule_input.tasks,
+        schedule_input.precedence_links,
+        horizon,
+    )
 
     config = schedule_input.schedule_strategy
     control_chain_task_ids = _control_chain_task_ids(schedule_input)
@@ -2916,9 +4281,12 @@ def _build_continuity_metrics(scheduled_tasks: list[ScheduledTask]) -> dict[str,
         "side_switch_count": side_switch_count,
         "cross_side_jump_count": cross_side_jump_count,
         "direction_reversal_count": direction_reversal_count,
+        "path_group_switch_count": path_metrics["path_group_switch_count"],
         "continuity_score": continuity_score,
         "resource_paths": path_metrics["resource_paths"],
         "jump_transition_details": path_metrics["jump_transition_details"][:30],
+        "path_group_switch_details": path_metrics["path_group_switch_details"][:30],
+        "path_group_diagnostics": path_metrics["path_group_diagnostics"][:50],
     }
 
 
@@ -2977,16 +4345,38 @@ def _resource_path_metrics(scheduled_tasks: list[ScheduledTask]) -> dict[str, An
     side_switch_count = 0
     cross_side_jump_count = 0
     direction_reversal_count = 0
+    path_group_switch_count = 0
     max_jump_distance = 0
+    path_group_switch_details: list[dict[str, Any]] = []
 
     for resource_id, tasks in sorted(by_resource.items(), key=lambda item: _resource_sort_tuple(item[0], resource_meta[item[0]]["resource_name"])):
         ordered = sorted(tasks, key=lambda task: (task.start_offset, task.end_offset, *_task_spatial_sort_key(task)))
         path_jump_count = 0
         path_side_switch_count = 0
         path_cross_side_jump_count = 0
+        path_group_switches = 0
         previous_direction: int | None = None
 
         for previous, current in zip(ordered, ordered[1:]):
+            previous_group = _task_path_group(previous)
+            current_group = _task_path_group(current)
+            if previous_group["key"] != current_group["key"]:
+                path_group_switch_count += 1
+                path_group_switches += 1
+                path_group_switch_details.append(
+                    {
+                        "resource_id": resource_id,
+                        "resource_name": resource_meta[resource_id]["resource_name"] or resource_id,
+                        "resource_type": resource_meta[resource_id]["resource_type"],
+                        "from_task_id": previous.id,
+                        "from_task_name": previous.name,
+                        "to_task_id": current.id,
+                        "to_task_name": current.name,
+                        "from_group": previous_group,
+                        "to_group": current_group,
+                        "reason": "资源切换了业务路径组；本期仅作为路径解释诊断，不参与转场目标惩罚。",
+                    }
+                )
             if previous.structure_id == current.structure_id:
                 continue
             from_location = _task_location(previous)
@@ -3068,6 +4458,7 @@ def _resource_path_metrics(scheduled_tasks: list[ScheduledTask]) -> dict[str, An
                 "jump_pier_count": path_jump_count,
                 "side_switch_count": path_side_switch_count,
                 "cross_side_jump_count": path_cross_side_jump_count,
+                "path_group_switch_count": path_group_switches,
                 "path": [
                     {
                         "task_id": task.id,
@@ -3090,8 +4481,11 @@ def _resource_path_metrics(scheduled_tasks: list[ScheduledTask]) -> dict[str, An
         "side_switch_count": side_switch_count,
         "cross_side_jump_count": cross_side_jump_count,
         "direction_reversal_count": direction_reversal_count,
+        "path_group_switch_count": path_group_switch_count,
         "resource_paths": resource_paths,
         "jump_transition_details": jump_transition_details,
+        "path_group_switch_details": path_group_switch_details,
+        "path_group_diagnostics": _path_group_diagnostics(scheduled_tasks),
     }
 
 
@@ -3157,6 +4551,78 @@ def _continuity_scope_key(task: ScheduledTask, location: dict[str, Any], *, incl
         task.component_type,
         task.process_name,
         resource_type,
+    )
+
+
+def _task_path_group(task: ScheduledTask) -> dict[str, Any]:
+    location = _task_location(task)
+    resource_type = task.assigned_resource_type or "|".join(sorted(task.compatible_resource_types))
+    key_parts = (
+        task.bridge_id or "",
+        task.work_section_id or "",
+        location["side"] or "N",
+        resource_type,
+        task.component_type,
+        task.process_name,
+    )
+    return {
+        "key": "|".join(str(part) for part in key_parts),
+        "bridge_id": task.bridge_id,
+        "work_section_id": task.work_section_id,
+        "side": location["side"] or "N",
+        "side_label": location["side_label"],
+        "resource_type": resource_type,
+        "component_type": task.component_type,
+        "component_label": _component_type_label(task.component_type),
+        "process_name": task.process_name,
+    }
+
+
+def _path_group_diagnostics(scheduled_tasks: list[ScheduledTask]) -> list[dict[str, Any]]:
+    groups: dict[str, dict[str, Any]] = {}
+    for task in sorted(scheduled_tasks, key=_task_spatial_sort_key):
+        if not task.assigned_resource_id:
+            continue
+        group = _task_path_group(task)
+        item = groups.setdefault(
+            group["key"],
+            {
+                **group,
+                "task_count": 0,
+                "resource_ids": set(),
+                "resource_names": set(),
+                "actual_sequence": [],
+                "structure_ids": set(),
+            },
+        )
+        item["task_count"] += 1
+        item["resource_ids"].add(task.assigned_resource_id)
+        item["resource_names"].add(task.assigned_resource_name or task.assigned_resource_id)
+        item["structure_ids"].add(task.structure_id)
+        location_label = _task_location(task)["label"]
+        if location_label not in item["actual_sequence"]:
+            item["actual_sequence"].append(location_label)
+
+    diagnostics = []
+    for item in groups.values():
+        diagnostics.append(
+            {
+                **{key: value for key, value in item.items() if key not in {"resource_ids", "resource_names", "structure_ids"}},
+                "resource_count": len(item["resource_ids"]),
+                "resource_names": sorted(item["resource_names"]),
+                "structure_count": len(item["structure_ids"]),
+            }
+        )
+    return sorted(
+        diagnostics,
+        key=lambda item: (
+            str(item["bridge_id"] or ""),
+            str(item["work_section_id"] or ""),
+            str(item["side"]),
+            str(item["resource_type"]),
+            str(item["component_type"]),
+            str(item["process_name"]),
+        ),
     )
 
 
@@ -3570,9 +5036,20 @@ def _resource_groups(resources: list[Resource]) -> list[dict[str, Any]]:
                 "resource_type": resource.type,
                 "max_quantity": 0,
                 "resources": [],
+                "same_structure_resource_binding": False,
+                "same_structure_parallel_limit": None,
+                "parallel_rule_description": "",
             }
         groups[key]["resources"].append(resource)
         groups[key]["max_quantity"] += 1
+        groups[key]["same_structure_resource_binding"] = (
+            groups[key]["same_structure_resource_binding"] or resource.same_structure_resource_binding
+        )
+        groups[key]["same_structure_parallel_limit"] = _configured_parallel_limit(
+            [groups[key]["same_structure_parallel_limit"], resource.same_structure_parallel_limit]
+        )
+        if not groups[key]["parallel_rule_description"] and resource.parallel_rule_description:
+            groups[key]["parallel_rule_description"] = resource.parallel_rule_description
     return sorted(groups.values(), key=lambda group: (group["resource_type"], group["key"], group["label"]))
 
 
