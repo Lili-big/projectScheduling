@@ -278,6 +278,14 @@ type WorkPointOption = {
   label: string;
 };
 
+type PlanListSortMode = "by_time" | "by_structure" | "by_process";
+
+const planListSortOptions: Array<{ value: PlanListSortMode; label: string }> = [
+  { value: "by_time", label: "按时间" },
+  { value: "by_structure", label: "按墩台" },
+  { value: "by_process", label: "按工艺" },
+];
+
 function editableControlLevelValue(value: ControlLevel): ControlLevel {
   return value === "control" || value === "key" ? "control" : "normal";
 }
@@ -1488,6 +1496,7 @@ function ResultsTab({
   const [selectedResultIndex, setSelectedResultIndex] = useState(0);
   const [planWindowStart, setPlanWindowStart] = useState("");
   const [planWindowFinish, setPlanWindowFinish] = useState("");
+  const [planListSortMode, setPlanListSortMode] = useState<PlanListSortMode>("by_time");
   const predecessorHoverOpenTimerRef = useRef<number | null>(null);
   const predecessorHoverCloseTimerRef = useRef<number | null>(null);
   const resultOptions = useMemo(() => scenarioResultOptions(solveResult), [solveResult]);
@@ -1529,10 +1538,10 @@ function ResultsTab({
     () => new Map((result?.tasks ?? []).map((task) => [task.id, task])),
     [result],
   );
-  const filteredPlanTasks = useMemo(
-    () => filterScheduledTasksByWindow(result?.tasks ?? [], planWindowStart, planWindowFinish),
-    [result, planWindowStart, planWindowFinish],
-  );
+  const filteredPlanTasks = useMemo(() => {
+    const filtered = filterScheduledTasksByWindow(result?.tasks ?? [], planWindowStart, planWindowFinish);
+    return isMvp ? sortScheduledTasksForPlan(filtered, planListSortMode) : filtered;
+  }, [isMvp, planListSortMode, result, planWindowStart, planWindowFinish]);
   const linksBySuccessor = useMemo(() => {
     const links = new Map<string, PrecedenceLink[]>();
     for (const link of generatedForDetails?.schedule_input.precedence_links ?? []) {
@@ -1760,7 +1769,7 @@ function ResultsTab({
         <Metric label="资源 / 里程碑" value={summary.resourcesAndMilestones} tone="neutral" icon={<Flag size={18} />} />
       </section>
 
-      {refinementSummary && (
+      {!isMvp && refinementSummary && (
         <section className={`business-conclusion ${refinementSummary.tone}`}>
           <div className="business-conclusion-heading">
             <div className="business-conclusion-icon">
@@ -1822,7 +1831,7 @@ function ResultsTab({
                 onClick={() => setSelectedResultIndex(index)}
                 type="button"
               >
-                {resultOptionLabel(option, index)}
+                {resultOptionLabel(option, index, isMvp)}
               </button>
             ))}
           </div>
@@ -1843,7 +1852,7 @@ function ResultsTab({
                   const item = resultOptionSummaries[index] ?? resultOptionSummary(option);
                   return (
                     <tr key={`${option.scenario_id}-${index}`}>
-                      <td>{resultOptionLabel(option, index)}</td>
+                      <td>{resultOptionLabel(option, index, isMvp)}</td>
                       <td>{formatScheduleStatus(option.result.status)}</td>
                       <td>{option.result.objective_days ?? "-"}</td>
                       <td>{option.result.plan_finish_date ?? "-"}</td>
@@ -1894,7 +1903,7 @@ function ResultsTab({
         </div>
       </section>
 
-      {controlPriorityAnalysis && (
+      {!isMvp && controlPriorityAnalysis && (
         <section className="panel full">
           <PanelTitle title="精排诊断" subtitle="控制对象、对象任务和前置影响任务" />
           <div className="control-diagnostic-grid refinement-diagnostics">
@@ -2237,7 +2246,10 @@ function ResultsTab({
       )}
 
       <section className="panel full">
-        <PanelTitle title="里程碑结果" subtitle="软节点允许超期，迟延天数会进入加权目标" />
+        <PanelTitle
+          title="里程碑结果"
+          subtitle={isMvp ? "节点完成情况和迟延天数" : "软节点允许超期，迟延天数会进入加权目标"}
+        />
         <div className="table-wrap">
           <table>
             <thead>
@@ -2247,7 +2259,7 @@ function ResultsTab({
                 <th>目标</th>
                 <th>实际</th>
                 <th>迟延</th>
-                <th>罚分</th>
+                {!isMvp && <th>罚分</th>}
                 <th>状态</th>
               </tr>
             </thead>
@@ -2259,7 +2271,7 @@ function ResultsTab({
                   <td>{milestone.target_date}</td>
                   <td>{milestone.actual_date ?? "-"}</td>
                   <td>{milestone.lateness_days} 天</td>
-                  <td>{milestone.penalty}</td>
+                  {!isMvp && <td>{milestone.penalty}</td>}
                   <td><span className={`status-pill ${milestoneStatusClass(milestone)}`}>{milestoneStatusLabels[milestone.status]}</span></td>
                 </tr>
               ))}
@@ -2272,6 +2284,20 @@ function ResultsTab({
         <PanelTitle
           title="计划表"
           subtitle={result?.plan_finish_date ? `${result.plan_start_date} 至 ${result.plan_finish_date}` : "等待求解"}
+          action={isMvp ? (
+            <div className="segmented plan-sort-switcher" aria-label="计划表排序">
+              {planListSortOptions.map((option) => (
+                <button
+                  className={planListSortMode === option.value ? "active" : ""}
+                  key={option.value}
+                  onClick={() => setPlanListSortMode(option.value)}
+                  type="button"
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          ) : undefined}
         />
         <div className="table-wrap plan">
           <table>
@@ -2337,29 +2363,31 @@ function ResultsTab({
         </div>
       </section>
 
-      <section className="panel full">
-        <div className="panel-title">
-          <div>
-            <h2>甘特图</h2>
-            <span>{ganttMode === "by_structure" ? "按墩台聚类，墩号从小到大" : "按工艺聚类，子级按计划先后展示"}</span>
+      {!isMvp && (
+        <section className="panel full">
+          <div className="panel-title">
+            <div>
+              <h2>甘特图</h2>
+              <span>{ganttMode === "by_structure" ? "按墩台聚类，墩号从小到大" : "按工艺聚类，子级按计划先后展示"}</span>
+            </div>
+            <div className="segmented">
+              <button className={ganttMode === "by_structure" ? "active" : ""} onClick={() => onGanttModeChange("by_structure")}>
+                按墩台
+              </button>
+              <button className={ganttMode === "by_process" ? "active" : ""} onClick={() => onGanttModeChange("by_process")}>
+                按工艺
+              </button>
+            </div>
           </div>
-          <div className="segmented">
-            <button className={ganttMode === "by_structure" ? "active" : ""} onClick={() => onGanttModeChange("by_structure")}>
-              按墩台
-            </button>
-            <button className={ganttMode === "by_process" ? "active" : ""} onClick={() => onGanttModeChange("by_process")}>
-              按工艺
-            </button>
-          </div>
-        </div>
-        <Gantt
-          tasks={result?.tasks ?? []}
-          makespan={Math.max(result?.objective_days ?? 1, 1)}
-          mode={ganttMode}
-          workSectionDisplayById={workSectionDisplayById}
-          resourcePools={resourcePoolsForDisplay}
-        />
-      </section>
+          <Gantt
+            tasks={result?.tasks ?? []}
+            makespan={Math.max(result?.objective_days ?? 1, 1)}
+            mode={ganttMode}
+            workSectionDisplayById={workSectionDisplayById}
+            resourcePools={resourcePoolsForDisplay}
+          />
+        </section>
+      )}
 
       <section className="panel full">
         <PanelTitle title="资源泳道" subtitle="横轴按计划时间展示每条资源的占用连续性" />
@@ -2370,10 +2398,12 @@ function ResultsTab({
         />
       </section>
 
-      <section className="panel full">
-        <PanelTitle title="资源路径图" subtitle="按施工先后展示资源经过的左/右幅-墩号序列" />
-        <ResourcePathChart resourcePaths={continuityMetrics?.resource_paths ?? []} resourcePools={resourcePoolsForDisplay} />
-      </section>
+      {!isMvp && (
+        <section className="panel full">
+          <PanelTitle title="资源路径图" subtitle="按施工先后展示资源经过的左/右幅-墩号序列" />
+          <ResourcePathChart resourcePaths={continuityMetrics?.resource_paths ?? []} resourcePools={resourcePoolsForDisplay} />
+        </section>
+      )}
 
       {!isMvp && (
         <section className="panel full">
@@ -3370,10 +3400,12 @@ function resultOptionSummary(option: ScenarioSolveResult, baselineResourceCount 
   };
 }
 
-function resultOptionLabel(option: ScenarioSolveResult, index: number): string {
+function resultOptionLabel(option: ScenarioSolveResult, index: number, isMvp = false): string {
   if (index === 0) return "方案1 当前资源";
   const source = stringFromUnknown(option.result.objective_breakdown?.schedule_source ?? option.result.stats?.schedule_source);
-  if (source === "minimum_resources_control_priority_balanced") return `方案${index + 1} 最少资源候选精排`;
+  if (source === "minimum_resources_control_priority_balanced") {
+    return isMvp ? `方案${index + 1} 最少资源候选` : `方案${index + 1} 最少资源候选精排`;
+  }
   if (source === "minimum_resources_refinement_fallback") return `方案${index + 1} 最少资源候选`;
   return `方案${index + 1} 资源候选`;
 }
@@ -3564,6 +3596,37 @@ function filterScheduledTasksByWindow(tasks: ScheduledTask[], startDate: string,
     if (startDate && task.finish_date < startDate) return false;
     if (finishDate && task.start_date > finishDate) return false;
     return true;
+  });
+}
+
+function sortScheduledTasksForPlan(tasks: ScheduledTask[], mode: PlanListSortMode): ScheduledTask[] {
+  return [...tasks].sort((left, right) => {
+    if (mode === "by_structure") {
+      return (
+        compareStructureIds(left.structure_id, right.structure_id)
+        || componentSortIndex(left.component_type) - componentSortIndex(right.component_type)
+        || left.start_offset - right.start_offset
+        || left.name.localeCompare(right.name)
+      );
+    }
+
+    if (mode === "by_process") {
+      return (
+        componentSortIndex(left.component_type) - componentSortIndex(right.component_type)
+        || left.process_name.localeCompare(right.process_name)
+        || left.start_offset - right.start_offset
+        || compareStructureIds(left.structure_id, right.structure_id)
+        || left.name.localeCompare(right.name)
+      );
+    }
+
+    return (
+      left.start_offset - right.start_offset
+      || left.end_offset - right.end_offset
+      || compareStructureIds(left.structure_id, right.structure_id)
+      || componentSortIndex(left.component_type) - componentSortIndex(right.component_type)
+      || left.name.localeCompare(right.name)
+    );
   });
 }
 

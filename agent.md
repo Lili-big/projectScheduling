@@ -108,12 +108,9 @@ Python 后端仍是本地工程化和测试验证的主要实现；Netlify Funct
 
 ### 2.6 项目技能
 
-`skills/write-dev-prd/` 是项目内技能资产。由于 `skills/` 被 `.gitignore` 覆盖，新增或更新技能时需要显式检查目录内容：
+PRD 输出统一使用全局 `$write-prd`，不再维护项目内 PRD skill 分叉。由于 `skills/` 被 `.gitignore` 覆盖，若未来新增项目技能，需要显式检查目录内容。
 
-- `skills/write-dev-prd/SKILL.md`：编写面向研发交底 PRD 的规则，强调实际工程目标、数据定义、前后端职责、联动规则和验收标准。
-- `skills/write-dev-prd/agents/openai.yaml`：技能展示名称和默认 prompt。
-
-当用户要求写、改、沉淀或完善需求文档时，应优先按该技能口径工作。
+当用户要求写、改、沉淀或完善需求文档时，应优先使用 `$write-prd`。默认走产品 PRD 模式；当用户明确要求算法、目标函数、约束规则、指标解释、CP-SAT 或排程算法交底时，由 `$write-prd` 切换到算法 / 规则交底模式。
 
 全局技能中新增 `requirement-review`，用于需求评审、文档评审、方案评审和变更评审。用户提供初始需求文档并明确要“评审”时，应优先使用 `$requirement-review`，把用户文档放到当前项目 Demo、代码和已有文档中对照分析，先共同确认为什么改、改什么、怎么改，再输出可落地的变更说明文档。
 
@@ -121,7 +118,7 @@ Python 后端仍是本地工程化和测试验证的主要实现；Netlify Funct
 
 - 需求评审：使用 `$requirement-review`，默认不改代码、不直接生成 PRD，先输出评审结论、待确认项和变更说明。
 - Demo 实现：进入代码实现流程，读取真实前后端、算法和测试路径，修改源码并运行合适验证。
-- PRD 输出：使用 `skills/write-dev-prd/SKILL.md`，基于已确认的产品口径输出或更新 `docs/` 下的研发交底 PRD。
+- PRD 输出：使用全局 `$write-prd`，基于已确认的产品口径输出或更新 `docs/` 下的研发交底 PRD；明确算法 / 规则交底时使用同一 skill 的算法 / 规则模式。
 
 ### 2.7 本地运行产物边界
 
@@ -253,6 +250,15 @@ npm --prefix frontend run build
 - 页面：`http://127.0.0.1:8000/`
 - 健康检查：`http://127.0.0.1:8000/api/health`
 
+需要让局域网同事临时访问时，不改默认脚本，仍先构建前端并由 FastAPI 单服务托管，只把后端监听地址改为 `0.0.0.0`：
+
+```powershell
+npm --prefix frontend run build
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend
+```
+
+同事应访问 `http://<本机IPv4>:8000/`，其中本机 IPv4 可通过 `ipconfig` 查看；`0.0.0.0` 只用于监听，不作为浏览器地址。若无法访问，优先检查同一局域网/VPN、Windows 防火墙入站规则和端口占用。
+
 前后端分离开发：
 
 ```powershell
@@ -284,7 +290,7 @@ git diff --check -- <changed-files>
 - 修改工艺逻辑：同步检查 `bridge_schedule_logic_ontology.v1.json`、`backend/app/scenario.py`、`frontend/src/domain/logic.ts`、`LogicTab.tsx` 和前置关系追踪展示。
 - 修改资源/成本：同步检查 `ResourcePool` 字段、`frontend/src/domain/resources.ts`、`ResourcesTab.tsx`、`solve_resource_cost_scenario` 和资源成本相关测试。
 - 需求评审：用户明确“评审、审一下、方案评审、变更评审”时，优先使用全局 `$requirement-review`，先读用户初始文档，再扫描当前项目 `agent.md`、`README.md`、`docs/`、相关前后端代码和测试，输出“为什么改、改什么、怎么改、影响范围、验收标准”的变更说明。
-- 修改需求文档或输出 PRD：先读 `skills/write-dev-prd/SKILL.md`，再读相关 `docs/` 文档和代码，避免把 demo 临时限制写成工程化产品目标。
+- 修改需求文档或输出 PRD：使用全局 `$write-prd`，再读相关 `docs/` 文档和代码，避免把 demo 临时限制写成工程化产品目标。
 
 ## 10. 配置与安全
 

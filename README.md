@@ -70,6 +70,22 @@ cd ..
 - 页面：`http://127.0.0.1:8000/`
 - 健康检查：`http://127.0.0.1:8000/api/health`
 
+如果需要让同一局域网内的同事访问，仍推荐使用单个后端服务托管前端和 API，只把监听地址改为 `0.0.0.0`：
+
+```powershell
+cd frontend
+npm run build
+cd ..
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend
+```
+
+启动后先用 `ipconfig` 查看当前 Wi-Fi 或以太网的 IPv4 地址，例如 `192.168.1.23`。同事访问：
+
+- 页面：`http://192.168.1.23:8000/`
+- 健康检查：`http://192.168.1.23:8000/api/health`
+
+`0.0.0.0` 只是服务监听地址，不是浏览器访问地址。如果同事打不开页面，先确认双方在同一局域网或同一 VPN，并在 Windows 防火墙中允许当前 Python/uvicorn 服务或 `8000` 端口入站。
+
 如果 `8000` 被占用，可以换一个端口，例如：
 
 ```powershell
