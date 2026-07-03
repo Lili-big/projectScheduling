@@ -8,6 +8,10 @@ metadata:
 ---
 
 
+## Language Policy
+
+All user-facing Spec Kit outputs and generated Markdown artifacts in this repository MUST use Simplified Chinese. Keep code identifiers, file paths, API names, branch names, task IDs (`T001`, `US1`), requirement IDs (`FR-001`), status markers (`[P]`, `[x]`), and CLI commands in their original form when clearer or required by tooling. If an upstream template or example is in English, translate headings, explanatory text, checklist items, scenarios, and summaries into Simplified Chinese before writing files or replying.
+
 ## User Input
 
 ```text
@@ -124,10 +128,10 @@ Command ends after Phase 2 planning. Report branch, IMPL_PLAN path, and generate
      Task: "Find best practices for {tech} in {domain}"
    ```
 
-3. **Consolidate findings** in `research.md` using format:
-   - Decision: [what was chosen]
-   - Rationale: [why chosen]
-   - Alternatives considered: [what else evaluated]
+3. **汇总研究结论** 到 `research.md`，使用中文简体，并采用以下格式：
+   - 决策：[选择了什么]
+   - 理由：[为什么这样选择]
+   - 已评估的替代方案：[还评估了什么]
 
 **Output**: research.md with all NEEDS CLARIFICATION resolved
 

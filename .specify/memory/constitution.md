@@ -1,25 +1,21 @@
 <!--
 Sync Impact Report
-Version change: 1.0.0 -> 1.1.0
+Version change: 1.1.0 -> 1.1.1
 Modified principles:
-- I. Requirement Review Before Specification -> I. Requirements First
-- II. Project-Fact Grounding -> IV. Reuse Existing Docs and Code
-- III. Spec Kit Gate for Scheduling Work -> VI. Spec Kit Gate Before Implementation
-- IV. Traceable Inputs, Outputs, and Acceptance -> II. Explicit Algorithm Specifications
-- V. Scoped Implementation and Verification -> VII. Completion Report and Verification
+- None
 Added principles:
-- III. Explicit Frontend-Backend Contracts
-- V. Phased Delivery
+- None
 Added sections:
-- Project Constraints
-- Development Workflow
+- None
 Removed sections:
-- Template placeholder section headings and examples
+- None
 Templates requiring updates:
-- ✅ .specify/templates/spec-template.md updated with source/review context
-- ✅ .specify/templates/plan-template.md updated with project gates and real paths
-- ✅ .specify/templates/tasks-template.md updated with project path and validation guidance
-- ✅ .specify/templates/commands/ checked: directory absent in this installation
+- ✅ .specify/templates/spec-template.md updated for Simplified Chinese output
+- ✅ .specify/templates/plan-template.md updated for Simplified Chinese output
+- ✅ .specify/templates/tasks-template.md updated for Simplified Chinese output
+- ✅ .specify/templates/checklist-template.md updated for Simplified Chinese output
+- ✅ .specify/templates/constitution-template.md updated for Simplified Chinese output
+- ✅ .agents/skills/speckit-* updated with repository language policy
 Follow-up TODOs: None
 -->
 
@@ -113,6 +109,12 @@ status and error behavior, and any compatibility gaps.
 - New feature specs live under `specs/<number>-<feature-name>/`.
 - Product and algorithm documents live under `docs/`; temporary analysis MUST NOT be
   scattered in the repository root.
+- All Spec Kit process artifacts and user-facing stage reports MUST be written in
+  Simplified Chinese. This includes `spec.md`, `plan.md`, `research.md`,
+  `data-model.md`, `quickstart.md`, `tasks.md`, checklist files, analyze reports,
+  converge reports, and clarification questions. Code identifiers, file paths, API
+  names, field names, commands, branch names, task IDs, requirement IDs, and necessary
+  English acronyms MAY remain unchanged for traceability and tooling compatibility.
 - Chinese business documents MUST remain UTF-8.
 - Secret-bearing files such as `.local.env` MUST NOT be copied into docs, specs, code,
   or examples with real values.
@@ -148,4 +150,4 @@ Any change to this constitution MUST re-check `AGENTS.md` and the Spec Kit templ
 alignment. `$speckit-analyze` and `$speckit-converge` MUST treat violations of MUST-level
 principles as blocking issues.
 
-**Version**: 1.1.0 | **Ratified**: 2026-07-01 | **Last Amended**: 2026-07-01
+**Version**: 1.1.1 | **Ratified**: 2026-07-01 | **Last Amended**: 2026-07-01

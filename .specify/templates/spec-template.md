@@ -1,145 +1,133 @@
-# Feature Specification: [FEATURE NAME]
+# 功能规格：[功能名称]
 
-**Feature Branch**: `[###-feature-name]`
+**功能目录/分支**：`[###-feature-name]`
 
-**Created**: [DATE]
+**创建日期**：[DATE]
 
-**Status**: Draft
+**状态**：草稿
 
-**Input**: User description: "$ARGUMENTS"
+**输入**：用户描述：“$ARGUMENTS”
 
-## Source & Review Context *(mandatory)*
-
-<!--
-  For this repository, specs must be grounded in current project facts.
-  List the source docs, review decision, and Demo/code facts used.
-  If the change is a narrow bug fix or direct user-approved implementation,
-  state that explicitly instead of inventing a review.
--->
-
-- **Source Documents**: [docs/..., AGENTS.md, agent.md, README.md, or "new request only"]
-- **Review Decision**: [requirement-review conclusion, user-confirmed direct implementation, or "not required for narrow change"]
-- **Demo/Code Facts Used**: [current behavior, relevant modules, or "not inspected yet"]
-- **Out of Scope**: [clear exclusions for this feature]
-
-## User Scenarios & Testing *(mandatory)*
+## 来源与评审上下文（必填）
 
 <!--
-  IMPORTANT: User stories should be PRIORITIZED as user journeys ordered by importance.
-  Each user story/journey must be INDEPENDENTLY TESTABLE - meaning if you implement just ONE of them,
-  you should still have a viable MVP (Minimum Viable Product) that delivers value.
-
-  Assign priorities (P1, P2, P3, etc.) to each story, where P1 is the most critical.
-  Think of each story as a standalone slice of functionality that can be:
-  - Developed independently
-  - Tested independently
-  - Deployed independently
-  - Demonstrated to users independently
+  本仓库的 spec 必须建立在当前项目事实之上。
+  请列出使用过的原始文档、评审结论、Demo/代码事实。
+  如果是窄范围缺陷修复或用户已明确确认的直接实现，请直接说明，不要虚构评审过程。
 -->
 
-### User Story 1 - [Brief Title] (Priority: P1)
+- **来源文档**：[docs/...、AGENTS.md、agent.md、README.md，或“仅基于本次新请求”]
+- **评审结论**：[requirement-review 结论、用户已确认直接实现，或“小范围变更无需评审”]
+- **使用的 Demo/代码事实**：[当前行为、相关模块，或“尚未检查”]
+- **不在范围内**：[本功能明确不做的内容]
 
-[Describe this user journey in plain language]
+## 用户场景与测试（必填）
 
-**Why this priority**: [Explain the value and why it has this priority level]
+<!--
+  用户故事必须按重要性排序，形成可独立验证的用户旅程。
+  每个用户故事都应该能独立实现、独立测试、独立演示，并交付可感知价值。
+  使用 P1、P2、P3 标识优先级，其中 P1 是最关键范围。
+-->
 
-**Independent Test**: [Describe how this can be tested independently - e.g., "Can be fully tested by [specific action] and delivers [specific value]"]
+### 用户故事 1 - [简短标题]（优先级：P1）
 
-**Acceptance Scenarios**:
+[用非技术语言描述用户旅程]
 
-1. **Given** [initial state], **When** [action], **Then** [expected outcome]
-2. **Given** [initial state], **When** [action], **Then** [expected outcome]
+**优先级理由**：[说明该故事的价值以及为什么排在该优先级]
+
+**独立测试**：[说明如何独立验证该故事，例如“通过执行[具体操作]验证[具体价值]”]
+
+**验收场景**：
+
+1. **假设** [初始状态]，**当** [用户动作]，**则** [预期结果]
+2. **假设** [初始状态]，**当** [用户动作]，**则** [预期结果]
 
 ---
 
-### User Story 2 - [Brief Title] (Priority: P2)
+### 用户故事 2 - [简短标题]（优先级：P2）
 
-[Describe this user journey in plain language]
+[用非技术语言描述用户旅程]
 
-**Why this priority**: [Explain the value and why it has this priority level]
+**优先级理由**：[说明该故事的价值以及为什么排在该优先级]
 
-**Independent Test**: [Describe how this can be tested independently]
+**独立测试**：[说明如何独立验证该故事]
 
-**Acceptance Scenarios**:
+**验收场景**：
 
-1. **Given** [initial state], **When** [action], **Then** [expected outcome]
-
----
-
-### User Story 3 - [Brief Title] (Priority: P3)
-
-[Describe this user journey in plain language]
-
-**Why this priority**: [Explain the value and why it has this priority level]
-
-**Independent Test**: [Describe how this can be tested independently]
-
-**Acceptance Scenarios**:
-
-1. **Given** [initial state], **When** [action], **Then** [expected outcome]
+1. **假设** [初始状态]，**当** [用户动作]，**则** [预期结果]
 
 ---
 
-[Add more user stories as needed, each with an assigned priority]
+### 用户故事 3 - [简短标题]（优先级：P3）
 
-### Edge Cases
+[用非技术语言描述用户旅程]
 
-<!--
-  ACTION REQUIRED: The content in this section represents placeholders.
-  Fill them out with the right edge cases.
--->
+**优先级理由**：[说明该故事的价值以及为什么排在该优先级]
 
-- What happens when [boundary condition]?
-- How does system handle [error scenario]?
+**独立测试**：[说明如何独立验证该故事]
 
-## Requirements *(mandatory)*
+**验收场景**：
 
-<!--
-  ACTION REQUIRED: The content in this section represents placeholders.
-  Fill them out with the right functional requirements.
--->
+1. **假设** [初始状态]，**当** [用户动作]，**则** [预期结果]
 
-### Functional Requirements
+---
 
-- **FR-001**: System MUST [specific capability, e.g., "allow users to create accounts"]
-- **FR-002**: System MUST [specific capability, e.g., "validate email addresses"]
-- **FR-003**: Users MUST be able to [key interaction, e.g., "reset their password"]
-- **FR-004**: System MUST [data requirement, e.g., "persist user preferences"]
-- **FR-005**: System MUST [behavior, e.g., "log all security events"]
+[按需增加更多用户故事，并保持优先级和独立测试说明]
 
-*Example of marking unclear requirements:*
-
-- **FR-006**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
-- **FR-007**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
-
-### Key Entities *(include if feature involves data)*
-
-- **[Entity 1]**: [What it represents, key attributes without implementation]
-- **[Entity 2]**: [What it represents, relationships to other entities]
-
-## Success Criteria *(mandatory)*
+### 边界与异常场景
 
 <!--
-  ACTION REQUIRED: Define measurable success criteria.
-  These must be technology-agnostic and measurable.
+  请删除占位内容，补充真实边界条件、失败态、空态、冲突态和兼容场景。
 -->
 
-### Measurable Outcomes
+- 当 [边界条件] 时会发生什么？
+- 系统如何处理 [错误场景]？
 
-- **SC-001**: [Measurable metric, e.g., "Users can complete account creation in under 2 minutes"]
-- **SC-002**: [Measurable metric, e.g., "System handles 1000 concurrent users without degradation"]
-- **SC-003**: [User satisfaction metric, e.g., "90% of users successfully complete primary task on first attempt"]
-- **SC-004**: [Business metric, e.g., "Reduce support tickets related to [X] by 50%"]
-
-## Assumptions
+## 需求（必填）
 
 <!--
-  ACTION REQUIRED: The content in this section represents placeholders.
-  Fill them out with the right assumptions based on reasonable defaults
-  chosen when the feature description did not specify certain details.
+  请删除占位内容，补充真实、可测试的功能需求。
 -->
 
-- [Assumption about target users, e.g., "Users have stable internet connectivity"]
-- [Assumption about scope boundaries, e.g., "Mobile support is out of scope for v1"]
-- [Assumption about data/environment, e.g., "Existing authentication system will be reused"]
-- [Dependency on existing system/service, e.g., "Requires access to the existing user profile API"]
+### 功能需求
+
+- **FR-001**：系统必须 [具体能力，例如“允许用户创建账号”]
+- **FR-002**：系统必须 [具体能力，例如“校验邮箱地址”]
+- **FR-003**：用户必须能够 [关键交互，例如“重置密码”]
+- **FR-004**：系统必须 [数据要求，例如“保存用户偏好”]
+- **FR-005**：系统必须 [行为要求，例如“记录所有安全事件”]
+
+*不清晰需求的标注示例：*
+
+- **FR-006**：系统必须通过 [需澄清：未指定认证方式，如邮箱密码、SSO、OAuth] 认证用户。
+- **FR-007**：系统必须保留用户数据 [需澄清：未指定保留周期]。
+
+### 关键实体（涉及数据时填写）
+
+- **[实体 1]**：[代表什么，关键属性是什么，不写实现细节]
+- **[实体 2]**：[代表什么，与其他实体的关系]
+
+## 成功标准（必填）
+
+<!--
+  成功标准必须可衡量、与技术实现无关，并能从用户或业务角度验证。
+-->
+
+### 可衡量结果
+
+- **SC-001**：[可衡量指标，例如“用户可在 2 分钟内完成账号创建”]
+- **SC-002**：[可衡量指标，例如“系统可支持 1000 名并发用户且无明显降级”]
+- **SC-003**：[用户满意度指标，例如“90% 用户首次尝试即可完成主任务”]
+- **SC-004**：[业务指标，例如“与 [X] 相关的支持工单减少 50%”]
+
+## 默认假设
+
+<!--
+  当功能描述未覆盖某些细节且可以做合理默认时，在这里记录假设。
+  不要把未经确认的假设写成正式业务规则。
+-->
+
+- [关于目标用户的假设，例如“用户具备稳定网络环境”]
+- [关于范围边界的假设，例如“移动端支持不属于 v1 范围”]
+- [关于数据/环境的假设，例如“复用现有认证系统”]
+- [关于外部系统或服务依赖的假设，例如“需要访问现有用户资料 API”]

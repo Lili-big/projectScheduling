@@ -8,6 +8,10 @@ metadata:
 ---
 
 
+## Language Policy
+
+All user-facing Spec Kit outputs and generated Markdown artifacts in this repository MUST use Simplified Chinese. Keep code identifiers, file paths, API names, branch names, task IDs (`T001`, `US1`), requirement IDs (`FR-001`), status markers (`[P]`, `[x]`), and CLI commands in their original form when clearer or required by tooling. If an upstream template or example is in English, translate headings, explanatory text, checklist items, scenarios, and summaries into Simplified Chinese before writing files or replying.
+
 ## User Input
 
 ```text
@@ -142,43 +146,43 @@ Given that feature description, do this:
 
 7. **Specification Quality Validation**: After writing the initial spec, validate it against quality criteria:
 
-   a. **Create Spec Quality Checklist**: Generate a checklist file at `SPECIFY_FEATURE_DIRECTORY/checklists/requirements.md` using the checklist template structure with these validation items:
+   a. **创建规格质量检查表**：在 `SPECIFY_FEATURE_DIRECTORY/checklists/requirements.md` 生成检查表，使用检查表模板结构，并写入以下中文检查项：
 
       ```markdown
-      # Specification Quality Checklist: [FEATURE NAME]
+      # 规格质量检查表：[FEATURE NAME]
       
-      **Purpose**: Validate specification completeness and quality before proceeding to planning
-      **Created**: [DATE]
-      **Feature**: [Link to spec.md]
+      **目的**：在进入计划阶段前验证规格完整性和质量
+      **创建日期**：[DATE]
+      **功能**：[链接到 spec.md]
       
-      ## Content Quality
+      ## 内容质量
       
-      - [ ] No implementation details (languages, frameworks, APIs)
-      - [ ] Focused on user value and business needs
-      - [ ] Written for non-technical stakeholders
-      - [ ] All mandatory sections completed
+      - [ ] 不包含实现细节（语言、框架、API 等）
+      - [ ] 聚焦用户价值和业务需求
+      - [ ] 面向非技术干系人撰写
+      - [ ] 所有必填章节均已完成
       
-      ## Requirement Completeness
+      ## 需求完整性
       
-      - [ ] No [NEEDS CLARIFICATION] markers remain
-      - [ ] Requirements are testable and unambiguous
-      - [ ] Success criteria are measurable
-      - [ ] Success criteria are technology-agnostic (no implementation details)
-      - [ ] All acceptance scenarios are defined
-      - [ ] Edge cases are identified
-      - [ ] Scope is clearly bounded
-      - [ ] Dependencies and assumptions identified
+      - [ ] 不存在 [需澄清] 标记
+      - [ ] 需求可测试且无歧义
+      - [ ] 成功标准可衡量
+      - [ ] 成功标准与技术实现无关
+      - [ ] 所有验收场景已定义
+      - [ ] 边界与异常场景已识别
+      - [ ] 范围边界清晰
+      - [ ] 依赖和默认假设已识别
       
-      ## Feature Readiness
+      ## 功能就绪度
       
-      - [ ] All functional requirements have clear acceptance criteria
-      - [ ] User scenarios cover primary flows
-      - [ ] Feature meets measurable outcomes defined in Success Criteria
-      - [ ] No implementation details leak into specification
+      - [ ] 所有功能需求都有清晰验收标准
+      - [ ] 用户场景覆盖主要流程
+      - [ ] 功能满足成功标准中定义的可衡量结果
+      - [ ] 规格中没有泄露实现细节
       
-      ## Notes
+      ## 备注
       
-      - Items marked incomplete require spec updates before `/speckit-clarify` or `/speckit-plan`
+      - 未完成项需要先更新 spec，再进入 `/speckit-clarify` 或 `/speckit-plan`
       ```
 
    b. **Run Validation Check**: Review the spec against each checklist item:

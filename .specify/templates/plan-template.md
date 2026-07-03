@@ -1,93 +1,78 @@
-# Implementation Plan: [FEATURE]
+# 实施计划：[功能]
 
-**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
+**分支/目录**：`[###-feature-name]` | **日期**：[DATE] | **规格**：[link]
 
-**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
+**输入**：来自 `/specs/[###-feature-name]/spec.md` 的功能规格
 
-**Note**: This template is filled in by the `/speckit-plan` command. See `.specify/templates/plan-template.md` for the execution workflow.
+**说明**：本模板由 `/speckit-plan` 填写。执行流程以 `.specify/templates/plan-template.md` 和 `.agents/skills/speckit-plan/SKILL.md` 为准。
 
-## Summary
+## 概要
 
-[Extract from feature spec: primary requirement + technical approach from research]
+[从功能规格中提取核心需求，并概述技术处理方向]
 
-## Technical Context
+## 技术上下文
 
 <!--
-  ACTION REQUIRED: Replace the content in this section with the technical details
-  for the project. The structure here is presented in advisory capacity to guide
-  the iteration process.
+  请用当前项目真实情况替换本节占位内容。未知项标为“需澄清”，不要凭空补规则。
 -->
 
-**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]
+**语言/版本**：[例如 Python 3.11、TypeScript、Node.js，或“需澄清”]
 
-**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]
+**主要依赖**：[例如 FastAPI、React、OR-Tools，或“需澄清”]
 
-**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
+**存储**：[如适用，例如 PostgreSQL、文件、本地配置，或“不适用”]
 
-**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]
+**测试**：[例如 pytest、前端构建、接口验证，或“需澄清”]
 
-**Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
+**目标平台**：[例如本地 FastAPI 服务、Netlify 前端、Docker 后端，或“需澄清”]
 
-**Project Type**: [e.g., library/cli/web-service/mobile-app/compiler/desktop-app or NEEDS CLARIFICATION]
+**项目类型**：[例如 Web 应用、后端服务、前端页面、文档变更，或“需澄清”]
 
-**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]
+**性能目标**：[领域相关目标，例如求解耗时、批量处理规模，或“需澄清”]
 
-**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]
+**约束**：[领域约束，例如不改变 CP-SAT 目标、不持久化原文件，或“需澄清”]
 
-**Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
+**规模/范围**：[领域范围，例如影响页签、接口、模型、测试数量，或“需澄清”]
 
-## Constitution Check
+## Constitution 检查
 
-*GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
+*门禁：Phase 0 研究前必须通过；Phase 1 设计后再次检查。*
 
-- Requirement review completed or explicitly not required for a narrow change.
-- Source docs and Demo/code facts are cited in `spec.md`.
-- Scheduling, resource, duration, CP-SAT, and frontend/backend contract impacts are explicit.
-- Inputs, outputs, constraints, edge cases, and acceptance criteria are testable.
-- No Demo-only limitation is promoted into product intent without explicit approval.
+- 已完成需求评审，或已明确属于小范围变更无需评审。
+- `spec.md` 已引用来源文档、Demo 事实和代码事实。
+- 排程、资源、工期、CP-SAT、前后端契约影响已明确。
+- 输入、输出、约束、边界场景和验收标准可测试。
+- 未经明确批准，不把 Demo 临时限制提升为正式产品目标。
+- Spec Kit 过程文档和阶段报告使用中文简体；代码标识符、文件路径、接口名、任务编号和必要英文缩写可保持原文。
 
-## Project Structure
+## 项目结构
 
-### Documentation (this feature)
+### 本功能文档
 
 ```text
 specs/[###-feature]/
-├── plan.md              # This file (/speckit-plan command output)
-├── research.md          # Phase 0 output (/speckit-plan command)
-├── data-model.md        # Phase 1 output (/speckit-plan command)
-├── quickstart.md        # Phase 1 output (/speckit-plan command)
-├── contracts/           # Phase 1 output (/speckit-plan command)
-└── tasks.md             # Phase 2 output (/speckit-tasks command - NOT created by /speckit-plan)
+├── plan.md              # 本文件（/speckit-plan 输出）
+├── research.md          # Phase 0 输出
+├── data-model.md        # Phase 1 输出
+├── quickstart.md        # Phase 1 输出
+├── contracts/           # Phase 1 输出
+└── tasks.md             # Phase 2 输出（由 /speckit-tasks 创建）
 ```
 
-### Source Code (repository root)
+### 源码结构（仓库根目录）
+
 <!--
-  ACTION REQUIRED: Replace the placeholder tree below with the concrete layout
-  for this feature. Delete unused options and expand the chosen structure with
-  real paths (e.g., apps/admin, packages/something). The delivered plan must
-  not include Option labels.
+  用本功能真实涉及的目录替换下方示例；删除未使用路径，不保留“选项”标签。
 -->
 
 ```text
-# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
-src/
-├── models/
-├── services/
-├── cli/
-└── lib/
-
-tests/
-├── contract/
-├── integration/
-└── unit/
-
 backend/
 ├── app/
-│   ├── models/
-│   ├── services/
-│   ├── api/
+│   ├── models.py
 │   ├── scenario.py
-│   └── solver.py
+│   ├── solver.py
+│   ├── services/
+│   └── api/
 └── tests/
 
 frontend/
@@ -102,17 +87,15 @@ netlify/
 └── functions/
 
 docs/
-└── [requirements, PRD, review, and algorithm documents]
+└── [需求、PRD、评审和算法文档]
 ```
 
-**Structure Decision**: [Document the selected structure and reference the real
-directories captured above]
+**结构决策**：[说明选择的真实结构，并引用上方具体目录]
 
-## Complexity Tracking
+## 复杂度跟踪
 
-> **Fill ONLY if Constitution Check has violations that must be justified**
+> 仅当 Constitution 检查存在必须解释的违反项时填写。
 
-| Violation | Why Needed | Simpler Alternative Rejected Because |
-|-----------|------------|-------------------------------------|
-| [e.g., 4th project] | [current need] | [why 3 projects insufficient] |
-| [e.g., Repository pattern] | [specific problem] | [why direct DB access insufficient] |
+| 违反项 | 为什么需要 | 拒绝更简单替代方案的原因 |
+|--------|------------|--------------------------|
+| [例如新增第 4 个模块] | [当前需要] | [为什么现有模块不足] |

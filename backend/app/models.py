@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -54,6 +54,28 @@ ScheduleStrategy = Literal[
 ControlLevel = Literal["control", "key", "normal", "rough"]
 ResourceGuaranteeMode = Literal["strict", "priority", "off"]
 BalanceBucket = Literal["week", "month"]
+AiParameterMaterialKind = Literal["text", "word", "excel", "pdf", "image"]
+AiParameterParseStatus = Literal["parsed", "partially_parsed", "failed"]
+AiParameterRunStatus = Literal["ready", "extracting", "completed", "partially_failed", "failed"]
+AiParameterCategory = Literal["process_productivity", "resource_pool", "milestone"]
+AiParameterConfidence = Literal["High", "Medium", "Low"]
+AiParameterSuggestionStatus = Literal[
+    "suggested",
+    "selected",
+    "needs_manual_input",
+    "conflict",
+    "ignored",
+    "applied",
+    "failed",
+]
+AiParameterConflictResolutionStatus = Literal[
+    "unresolved",
+    "selected_suggestion",
+    "manual_value",
+    "keep_current",
+]
+AiParameterCandidateValidationStatus = Literal["valid", "needs_manual_input", "invalid"]
+AiParameterApplicationStatus = Literal["pending", "partially_applied", "applied", "expired"]
 
 
 class ScheduleStrategyConfig(BaseModel):
@@ -429,6 +451,133 @@ class ScenarioInput(BaseModel):
     milestones: list[MilestoneConstraint] = []
     schedule_strategy: ScheduleStrategyConfig = Field(default_factory=ScheduleStrategyConfig)
     time_limit_seconds: float = Field(default=10.0, gt=0)
+
+
+class AiParameterUploadedMaterialSummary(BaseModel):
+    material_id: str
+    file_name: str
+    kind: AiParameterMaterialKind
+    size_bytes: int = Field(ge=0)
+    parse_status: AiParameterParseStatus
+    source_summary: str
+    error_message: str | None = None
+
+
+class AiParameterSourceEvidence(BaseModel):
+    material_id: str
+    excerpt: str
+    page_or_sheet: str | None = None
+    cell_or_region: str | None = None
+    note: str | None = None
+
+
+class AiParameterSuggestion(BaseModel):
+    suggestion_id: str
+    category: AiParameterCategory
+    target_ref: dict[str, Any] = Field(default_factory=dict)
+    parameter_key: str
+    current_value: Any = None
+    proposed_value: Any = None
+    unit: str | None = None
+    confidence_label: AiParameterConfidence
+    confidence_score: int = Field(ge=0, le=100)
+    source_refs: list[AiParameterSourceEvidence] = Field(default_factory=list)
+    conflict_group_id: str | None = None
+    status: AiParameterSuggestionStatus = "suggested"
+    validation_messages: list[ValidationMessage] = Field(default_factory=list)
+
+
+class AiParameterConflictGroup(BaseModel):
+    conflict_group_id: str
+    parameter_key: str
+    target_ref: dict[str, Any] = Field(default_factory=dict)
+    suggestion_ids: list[str] = Field(default_factory=list)
+    current_value: Any = None
+    resolution_status: AiParameterConflictResolutionStatus = "unresolved"
+    selected_suggestion_id: str | None = None
+    manual_value: Any = None
+
+
+class AiParameterCandidateAddition(BaseModel):
+    candidate_id: str
+    category: AiParameterCategory
+    display_name: str
+    proposed_fields: dict[str, Any] = Field(default_factory=dict)
+    confidence_label: AiParameterConfidence
+    confidence_score: int = Field(ge=0, le=100)
+    source_refs: list[AiParameterSourceEvidence] = Field(default_factory=list)
+    validation_status: AiParameterCandidateValidationStatus = "valid"
+
+
+class AiParameterExtractionRun(BaseModel):
+    run_id: str
+    status: AiParameterRunStatus
+    material_count: int = Field(ge=0)
+    total_size_bytes: int = Field(ge=0)
+    suggestion_count: int = Field(ge=0)
+    material_summaries: list[AiParameterUploadedMaterialSummary] = Field(default_factory=list)
+    errors: list[ValidationMessage] = Field(default_factory=list)
+    warnings: list[ValidationMessage] = Field(default_factory=list)
+    expires_at: datetime
+
+
+class AiParameterSuggestionStoreEntry(BaseModel):
+    run_id: str
+    created_at: datetime
+    expires_at: datetime
+    scenario_id: str
+    suggestions: list[AiParameterSuggestion] = Field(default_factory=list)
+    conflict_groups: list[AiParameterConflictGroup] = Field(default_factory=list)
+    candidate_additions: list[AiParameterCandidateAddition] = Field(default_factory=list)
+    material_summaries: list[AiParameterUploadedMaterialSummary] = Field(default_factory=list)
+    application_status: AiParameterApplicationStatus = "pending"
+
+
+class AiParameterParseResponse(AiParameterExtractionRun):
+    suggestions: list[AiParameterSuggestion] = Field(default_factory=list)
+    conflict_groups: list[AiParameterConflictGroup] = Field(default_factory=list)
+    candidate_additions: list[AiParameterCandidateAddition] = Field(default_factory=list)
+    manual_completion_count: int = Field(default=0, ge=0)
+
+
+class AiParameterManualValue(BaseModel):
+    suggestion_id: str | None = None
+    conflict_group_id: str | None = None
+    parameter_key: str | None = None
+    value: Any = None
+
+
+class AiParameterApplyRequest(BaseModel):
+    scenario: ScenarioInput
+    run_id: str
+    selected_suggestion_ids: list[str] = Field(default_factory=list)
+    conflict_resolutions: list[AiParameterConflictGroup] = Field(default_factory=list)
+    manual_values: list[AiParameterManualValue] = Field(default_factory=list)
+
+
+class AiParameterAppliedItem(BaseModel):
+    suggestion_id: str
+    category: AiParameterCategory
+    target_ref: dict[str, Any] = Field(default_factory=dict)
+    parameter_key: str
+    old_value: Any = None
+    new_value: Any = None
+
+
+class AiParameterApplicationSummary(BaseModel):
+    applied_count: int = Field(default=0, ge=0)
+    skipped_count: int = Field(default=0, ge=0)
+    failed_count: int = Field(default=0, ge=0)
+    manual_pending_count: int = Field(default=0, ge=0)
+    applied_items: list[AiParameterAppliedItem] = Field(default_factory=list)
+    failed_items: list[ValidationMessage] = Field(default_factory=list)
+    stale_result_reason: str = ""
+
+
+class AiParameterApplyResponse(BaseModel):
+    scenario: ScenarioInput
+    application_summary: AiParameterApplicationSummary
+    stale_results: bool = False
 
 
 class ProcessNlRequest(BaseModel):

@@ -40,6 +40,7 @@ export type BusyState =
   | "comparing"
   | "importing"
   | "nl"
+  | "aiParameter"
   | "savingProcessLibrary"
   | "savingLogic"
   | "savingResources"
@@ -223,6 +224,139 @@ export type ScenarioInput = {
   milestones: MilestoneConstraint[];
   schedule_strategy?: ScheduleStrategyConfig;
   time_limit_seconds: number;
+};
+
+export type AiParameterMaterialKind = "text" | "word" | "excel" | "pdf" | "image";
+export type AiParameterParseStatus = "parsed" | "partially_parsed" | "failed";
+export type AiParameterRunStatus = "ready" | "extracting" | "completed" | "partially_failed" | "failed";
+export type AiParameterCategory = "process_productivity" | "resource_pool" | "milestone";
+export type AiParameterConfidence = "High" | "Medium" | "Low";
+export type AiParameterSuggestionStatus =
+  | "suggested"
+  | "selected"
+  | "needs_manual_input"
+  | "conflict"
+  | "ignored"
+  | "applied"
+  | "failed";
+export type AiParameterConflictResolutionStatus =
+  | "unresolved"
+  | "selected_suggestion"
+  | "manual_value"
+  | "keep_current";
+export type AiParameterCandidateValidationStatus = "valid" | "needs_manual_input" | "invalid";
+export type AiParameterApplicationStatus = "pending" | "partially_applied" | "applied" | "expired";
+
+export type AiParameterUploadedMaterialSummary = {
+  material_id: string;
+  file_name: string;
+  kind: AiParameterMaterialKind;
+  size_bytes: number;
+  parse_status: AiParameterParseStatus;
+  source_summary: string;
+  error_message?: string | null;
+};
+
+export type AiParameterSourceEvidence = {
+  material_id: string;
+  excerpt: string;
+  page_or_sheet?: string | null;
+  cell_or_region?: string | null;
+  note?: string | null;
+};
+
+export type AiParameterSuggestion = {
+  suggestion_id: string;
+  category: AiParameterCategory;
+  target_ref: Record<string, unknown>;
+  parameter_key: string;
+  current_value?: unknown;
+  proposed_value?: unknown;
+  unit?: string | null;
+  confidence_label: AiParameterConfidence;
+  confidence_score: number;
+  source_refs: AiParameterSourceEvidence[];
+  conflict_group_id?: string | null;
+  status: AiParameterSuggestionStatus;
+  validation_messages: ValidationMessage[];
+};
+
+export type AiParameterConflictGroup = {
+  conflict_group_id: string;
+  parameter_key: string;
+  target_ref: Record<string, unknown>;
+  suggestion_ids: string[];
+  current_value?: unknown;
+  resolution_status: AiParameterConflictResolutionStatus;
+  selected_suggestion_id?: string | null;
+  manual_value?: unknown;
+};
+
+export type AiParameterCandidateAddition = {
+  candidate_id: string;
+  category: AiParameterCategory;
+  display_name: string;
+  proposed_fields: Record<string, unknown>;
+  confidence_label: AiParameterConfidence;
+  confidence_score: number;
+  source_refs: AiParameterSourceEvidence[];
+  validation_status: AiParameterCandidateValidationStatus;
+};
+
+export type AiParameterParseResponse = {
+  run_id: string;
+  status: AiParameterRunStatus;
+  material_count: number;
+  total_size_bytes: number;
+  suggestion_count: number;
+  material_summaries: AiParameterUploadedMaterialSummary[];
+  errors: ValidationMessage[];
+  warnings: ValidationMessage[];
+  expires_at: string;
+  suggestions: AiParameterSuggestion[];
+  conflict_groups: AiParameterConflictGroup[];
+  candidate_additions: AiParameterCandidateAddition[];
+  manual_completion_count: number;
+};
+
+export type AiParameterManualValue = {
+  suggestion_id?: string | null;
+  conflict_group_id?: string | null;
+  parameter_key?: string | null;
+  value?: unknown;
+};
+
+export type AiParameterApplyRequest = {
+  scenario: ScenarioInput;
+  run_id: string;
+  selected_suggestion_ids: string[];
+  conflict_resolutions: AiParameterConflictGroup[];
+  manual_values: AiParameterManualValue[];
+};
+
+export type AiParameterAppliedItem = {
+  suggestion_id: string;
+  category: AiParameterCategory;
+  target_ref: Record<string, unknown>;
+  parameter_key: string;
+  old_value?: unknown;
+  new_value?: unknown;
+};
+
+export type AiParameterApplicationSummary = {
+  applied_count: number;
+  skipped_count: number;
+  failed_count: number;
+  manual_pending_count: number;
+  applied_items: AiParameterAppliedItem[];
+  failed_items: ValidationMessage[];
+  stale_result_reason: string;
+};
+
+export type AiParameterApplyResponse = {
+  scenario: ScenarioInput;
+  application_summary: AiParameterApplicationSummary;
+  stale_results: boolean;
 };
 
 export type LocalScenarioConfig = {

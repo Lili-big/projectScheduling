@@ -327,7 +327,7 @@ let localScenarioConfigCache: Partial<LocalScenarioConfig> | null = null;
 
 export default async function handler(req: Request, context: Context) {
   try {
-    const endpoint = context.params.endpoint;
+    const endpoint = apiEndpointFromRequest(req, context);
     if (endpoint === "health" && req.method === "GET") {
       return json({ status: "ok" });
     }
@@ -388,6 +388,12 @@ export default async function handler(req: Request, context: Context) {
       const body = await req.json();
       return json(await applyProcessNaturalLanguage(body.scenario, String(body.prompt ?? "")));
     }
+    if (endpoint === "ai-parameter-assistant/parse" && req.method === "POST") {
+      return aiParameterAssistantUnavailableResponse("parse");
+    }
+    if (endpoint === "ai-parameter-assistant/apply" && req.method === "POST") {
+      return aiParameterAssistantUnavailableResponse("apply");
+    }
     return json({ detail: `Unknown API endpoint: /api/${endpoint}` }, 404);
   } catch (error) {
     return json({ detail: error instanceof Error ? error.message : String(error) }, 500);
@@ -395,14 +401,32 @@ export default async function handler(req: Request, context: Context) {
 }
 
 export const config: Config = {
-  path: "/api/:endpoint",
+  path: "/api/*",
 };
+
+function apiEndpointFromRequest(req: Request, context: Context): string {
+  const pathname = new URL(req.url).pathname.replace(/^\/api\/+/, "").replace(/^\/+|\/+$/g, "");
+  return pathname || String(context.params.endpoint ?? "");
+}
 
 function json(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), {
     status,
     headers: { "Content-Type": "application/json; charset=utf-8" },
   });
+}
+
+function aiParameterAssistantUnavailableResponse(action: "parse" | "apply") {
+  return json(
+    {
+      detail:
+        action === "parse"
+          ? "Netlify 演示函数不保存上传资料，也不直连 AI adapter。请连接 FastAPI 后端使用 AI 参数解析。"
+          : "Netlify 演示函数没有短期 suggestion store。请连接 FastAPI 后端应用已确认建议。",
+      code: "AI_PARAMETER_ASSISTANT_FASTAPI_REQUIRED",
+    },
+    503,
+  );
 }
 
 function createDefaultScenario(): ScenarioInput {
