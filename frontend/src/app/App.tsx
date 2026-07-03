@@ -273,6 +273,11 @@ const editableControlLevelOptions: Array<{ value: ControlLevel; label: string }>
   { value: "normal", label: "普通工程" },
 ];
 
+type WorkPointOption = {
+  id: string;
+  label: string;
+};
+
 function editableControlLevelValue(value: ControlLevel): ControlLevel {
   return value === "control" || value === "key" ? "control" : "normal";
 }
@@ -286,6 +291,12 @@ export default function App() {
   const [openTabs, setOpenTabs] = useState<TabKey[]>(["tasks"]);
   const [activeTab, setActiveTab] = useState<TabKey | null>("tasks");
   const [ganttMode, setGanttMode] = useState<GanttMode>("by_structure");
+  const [mvpSelectedWorkPointId, setMvpSelectedWorkPointId] = useState("");
+  const [mvpStartDate, setMvpStartDate] = useState(todayDateValue);
+  const [mvpGenerated, setMvpGenerated] = useState<GeneratedScheduleInput | null>(null);
+  const [mvpGeneratedScenarioFingerprint, setMvpGeneratedScenarioFingerprint] = useState<string | null>(null);
+  const [mvpSolveResult, setMvpSolveResult] = useState<ScenarioSolveResult | null>(null);
+  const [mvpSolveResultScenarioFingerprint, setMvpSolveResultScenarioFingerprint] = useState<string | null>(null);
   const [savedResults, setSavedResults] = useState<ScenarioSolveResult[]>([]);
   const [comparison, setComparison] = useState<CompareResponse | null>(null);
   const [busy, setBusy] = useState<BusyState>(null);
@@ -303,8 +314,31 @@ export default function App() {
   const scenarioFingerprint = useMemo(() => (scenario ? scenarioFingerprintForSolve(scenario) : null), [scenario]);
   const currentGenerated = scenarioFingerprint !== null && generatedScenarioFingerprint === scenarioFingerprint ? generated : null;
   const currentSolveResult = scenarioFingerprint !== null && solveResultScenarioFingerprint === scenarioFingerprint ? solveResult : null;
+  const workPointOptions = useMemo(() => workPointOptionsFromScenario(scenario), [scenario]);
+  const activeMvpWorkPointId = mvpSelectedWorkPointId || workPointOptions[0]?.id || "";
+  const mvpScenario = useMemo(
+    () => buildMvpScenario(scenario, activeMvpWorkPointId, mvpStartDate),
+    [activeMvpWorkPointId, mvpStartDate, scenario],
+  );
+  const mvpScenarioFingerprint = useMemo(() => (mvpScenario ? scenarioFingerprintForSolve(mvpScenario) : null), [mvpScenario]);
+  const currentMvpGenerated = mvpScenarioFingerprint !== null && mvpGeneratedScenarioFingerprint === mvpScenarioFingerprint
+    ? mvpGenerated
+    : null;
+  const currentMvpSolveResult = mvpScenarioFingerprint !== null && mvpSolveResultScenarioFingerprint === mvpScenarioFingerprint
+    ? mvpSolveResult
+    : null;
   const previousScenarioFingerprintRef = useRef<string | null>(null);
   const autoTaskViewFingerprintRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!workPointOptions.length) {
+      setMvpSelectedWorkPointId("");
+      return;
+    }
+    setMvpSelectedWorkPointId((current) =>
+      workPointOptions.some((option) => option.id === current) ? current : workPointOptions[0].id,
+    );
+  }, [workPointOptions]);
 
   useEffect(() => {
     if (previousScenarioFingerprintRef.current === null) {
@@ -348,6 +382,10 @@ export default function App() {
       setGeneratedScenarioFingerprint(null);
       setSolveResult(null);
       setSolveResultScenarioFingerprint(null);
+      setMvpGenerated(null);
+      setMvpGeneratedScenarioFingerprint(null);
+      setMvpSolveResult(null);
+      setMvpSolveResultScenarioFingerprint(null);
       setComparison(null);
       setLastImport({ ...imported, scenario: normalizedScenario });
       setOpenTabs((current) => (current.includes("tasks") ? current : [...current, "tasks"]));
@@ -387,15 +425,65 @@ export default function App() {
     }
   }
 
-  async function solveCurrent() {
+  async function solveCurrent(targetTab: TabKey = "results") {
     if (!scenario) return;
     const requestScenario = normalizeScenarioForWorkspace(scenario);
     const requestFingerprint = scenarioFingerprintForSolve(requestScenario);
     setBusy("solving");
     setError(null);
-    openModule("results");
+    openModule(targetTab);
     try {
       await solveWith(requestScenario, requestFingerprint);
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function solveMvpCurrent() {
+    if (!mvpScenario) return;
+    const requestScenario = normalizeScenarioForWorkspace(mvpScenario);
+    const requestFingerprint = scenarioFingerprintForSolve(requestScenario);
+    setBusy("solving");
+    setError(null);
+    openModule("resultsMvp");
+    try {
+      const solved = await solveScenario(requestScenario);
+      setMvpGenerated(solved.generated);
+      setMvpGeneratedScenarioFingerprint(requestFingerprint);
+      setMvpSolveResult(solved);
+      setMvpSolveResultScenarioFingerprint(requestFingerprint);
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function solveMvpMinResources() {
+    if (!mvpScenario) return;
+    const requestScenario = normalizeScenarioForWorkspace(mvpScenario);
+    const requestFingerprint = scenarioFingerprintForSolve(requestScenario);
+    const hasHardMilestone = requestScenario.milestones.some((milestone) => milestone.mode === "hard");
+    const matchingSolveResult = mvpSolveResultScenarioFingerprint === requestFingerprint ? mvpSolveResult : null;
+    const fallbackTargetDays = matchingSolveResult?.result.objective_days ?? null;
+    if (!hasHardMilestone && !fallbackTargetDays) {
+      setError("请先运行“固定资源条件下，推算最短工期”，或设置至少一个可匹配的强制里程碑目标。");
+      return;
+    }
+    setBusy("minResources");
+    setError(null);
+    openModule("resultsMvp");
+    try {
+      const solved = await solveMinResourcesRequest({
+        scenario: requestScenario,
+        fallback_target_days: fallbackTargetDays,
+      });
+      setMvpGenerated(solved.generated);
+      setMvpGeneratedScenarioFingerprint(requestFingerprint);
+      setMvpSolveResult(solved);
+      setMvpSolveResultScenarioFingerprint(requestFingerprint);
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -817,6 +905,33 @@ export default function App() {
             comparing={busy === "comparing"}
           />
         );
+      case "resultsMvp":
+        return (
+          <ResultsTab
+            variant="mvp"
+            scenario={mvpScenario}
+            generated={currentMvpGenerated}
+            solveResult={currentMvpSolveResult}
+            onPatchScenario={() => undefined}
+            onPatchProject={(patch) => {
+              if (patch.start_date !== undefined) setMvpStartDate(patch.start_date);
+            }}
+            onSolveCurrent={solveMvpCurrent}
+            onSolveMinResources={solveMvpMinResources}
+            onSolveResourceCost={() => undefined}
+            busy={busy}
+            ganttMode={ganttMode}
+            onGanttModeChange={setGanttMode}
+            onSaveCurrent={saveCurrentResult}
+            savedResults={savedResults}
+            comparison={comparison}
+            onCompare={() => void compareSavedResults()}
+            comparing={busy === "comparing"}
+            workPointOptions={workPointOptions}
+            selectedWorkPointId={activeMvpWorkPointId}
+            onWorkPointChange={setMvpSelectedWorkPointId}
+          />
+        );
     }
   }
 
@@ -908,6 +1023,32 @@ export default function App() {
             comparison={comparison}
             onCompare={() => void compareSavedResults()}
             comparing={busy === "comparing"}
+          />
+        )}
+        {activeTab === "resultsMvp" && (
+          <ResultsTab
+            variant="mvp"
+            scenario={mvpScenario}
+            generated={currentMvpGenerated}
+            solveResult={currentMvpSolveResult}
+            onPatchScenario={() => undefined}
+            onPatchProject={(patch) => {
+              if (patch.start_date !== undefined) setMvpStartDate(patch.start_date);
+            }}
+            onSolveCurrent={solveMvpCurrent}
+            onSolveMinResources={solveMvpMinResources}
+            onSolveResourceCost={() => undefined}
+            busy={busy}
+            ganttMode={ganttMode}
+            onGanttModeChange={setGanttMode}
+            onSaveCurrent={saveCurrentResult}
+            savedResults={savedResults}
+            comparison={comparison}
+            onCompare={() => void compareSavedResults()}
+            comparing={busy === "comparing"}
+            workPointOptions={workPointOptions}
+            selectedWorkPointId={activeMvpWorkPointId}
+            onWorkPointChange={setMvpSelectedWorkPointId}
           />
         )}
         </div>
@@ -1300,6 +1441,7 @@ function TaskViewTab({
 }
 
 function ResultsTab({
+  variant = "full",
   scenario,
   generated,
   solveResult,
@@ -1316,7 +1458,11 @@ function ResultsTab({
   comparison,
   onCompare,
   comparing,
+  workPointOptions = [],
+  selectedWorkPointId = "",
+  onWorkPointChange,
 }: {
+  variant?: "full" | "mvp";
   scenario: ScenarioInput | null;
   generated: GeneratedScheduleInput | null;
   solveResult: ScenarioSolveResult | null;
@@ -1333,6 +1479,9 @@ function ResultsTab({
   comparison: CompareResponse | null;
   onCompare: () => void;
   comparing: boolean;
+  workPointOptions?: WorkPointOption[];
+  selectedWorkPointId?: string;
+  onWorkPointChange?: (workPointId: string) => void;
 }) {
   const [openPredecessorTaskId, setOpenPredecessorTaskId] = useState<string | null>(null);
   const [predecessorAnchorRect, setPredecessorAnchorRect] = useState<DOMRect | null>(null);
@@ -1364,6 +1513,7 @@ function ResultsTab({
   const controlPriorityAnalysis = controlPriorityAnalysisFromResult(result);
   const resourceOrganization = resourceOrganizationFromResult(result);
   const strategyConfig = withDefaultScheduleStrategy(scenario?.schedule_strategy);
+  const isMvp = variant === "mvp";
   const resourcePoolsForDisplay = scenario?.resource_pools ?? [];
   const workSectionDisplayById = useMemo(
     () => buildWorkSectionDisplayById(scenario?.project ?? null),
@@ -1447,115 +1597,159 @@ function ResultsTab({
       {scenario && (
         <section className="panel full simulation-params-panel">
           <PanelTitle
-            title="模拟参数"
-            subtitle="方案、计划起点和求解配置"
+            title={isMvp ? "模拟求解-MVP" : "模拟参数"}
+            subtitle={isMvp ? "工点和计划开始时间" : "方案、计划起点和求解配置"}
             action={
               <div className="actions inline">
-                <button className="primary" onClick={onSolveCurrent} disabled={Boolean(busy) || !scenario}>
-                  {busy === "solving" || busy === "loading" ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
-                  固定资源条件下，推算最短工期
-                </button>
-                <button className="secondary" onClick={onSolveMinResources} disabled={Boolean(busy) || !scenario}>
-                  {busy === "minResources" ? <Loader2 className="spin" size={16} /> : <Server size={16} />}
-                  固定工期条件下，推算最少资源
-                </button>
-                <button className="primary" onClick={onSolveResourceCost} disabled={Boolean(busy) || !scenario}>
-                  {busy === "resourceCost" ? <Loader2 className="spin" size={16} /> : <Sparkles size={16} />}
-                  资源成本优化排程
-                </button>
+                {isMvp ? (
+                  <>
+                    <button className="primary" onClick={onSolveCurrent} disabled={Boolean(busy) || !scenario || !selectedWorkPointId}>
+                      {busy === "solving" || busy === "loading" ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+                      固定资源条件下，推算最短工期
+                    </button>
+                    <button className="secondary" onClick={onSolveMinResources} disabled={Boolean(busy) || !scenario || !selectedWorkPointId}>
+                      {busy === "minResources" ? <Loader2 className="spin" size={16} /> : <Server size={16} />}
+                      固定工期条件下，推算最少资源
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button className="primary" onClick={onSolveCurrent} disabled={Boolean(busy) || !scenario}>
+                      {busy === "solving" || busy === "loading" ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+                      固定资源条件下，推算最短工期
+                    </button>
+                    <button className="secondary" onClick={onSolveMinResources} disabled={Boolean(busy) || !scenario}>
+                      {busy === "minResources" ? <Loader2 className="spin" size={16} /> : <Server size={16} />}
+                      固定工期条件下，推算最少资源
+                    </button>
+                    <button className="primary" onClick={onSolveResourceCost} disabled={Boolean(busy) || !scenario}>
+                      {busy === "resourceCost" ? <Loader2 className="spin" size={16} /> : <Sparkles size={16} />}
+                      资源成本优化排程
+                    </button>
+                  </>
+                )}
               </div>
             }
           />
-          <div className="form-grid">
-            <label>
-              方案名称
-              <input value={scenario.scenario_name} onChange={(event) => onPatchScenario({ scenario_name: event.target.value })} />
-            </label>
-            <label>
-              项目名称
-              <input value={scenario.project.project_name} onChange={(event) => onPatchProject({ project_name: event.target.value })} />
-            </label>
-            <label>
-              计划开始
-              <input type="date" value={scenario.project.start_date} onChange={(event) => onPatchProject({ start_date: event.target.value })} />
-            </label>
-            <label>
-              求解时限(秒)
-              <input
-                type="number"
-                min={1}
-                value={scenario.time_limit_seconds}
-                onChange={(event) => onPatchScenario({ time_limit_seconds: Number(event.target.value) })}
-              />
-            </label>
-            <label>
-              排程策略
-              <select
-                value={strategyConfig.strategy}
-                onChange={(event) => updateStrategyConfig({ strategy: event.target.value as ScheduleStrategy })}
-              >
-                {Object.entries(scheduleStrategyLabels).map(([value, label]) => (
-                  <option value={value} key={value}>{label}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              资源保障
-              <select
-                value={strategyConfig.resource_guarantee}
-                onChange={(event) => updateStrategyConfig({ resource_guarantee: event.target.value as ResourceGuaranteeMode })}
-              >
-                {Object.entries(resourceGuaranteeLabels).map(([value, label]) => (
-                  <option value={value} key={value}>{label}</option>
-                ))}
-              </select>
-            </label>
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={strategyConfig.enable_balance_objective}
-                onChange={(event) => updateStrategyConfig({ enable_balance_objective: event.target.checked })}
-              />
-              启用普通工程均衡目标
-            </label>
+          <div className={`form-grid ${isMvp ? "mvp-solve-form" : ""}`}>
+            {isMvp ? (
+              <>
+                <label>
+                  工点选择
+                  <select
+                    value={selectedWorkPointId}
+                    onChange={(event) => onWorkPointChange?.(event.target.value)}
+                    disabled={!workPointOptions.length}
+                  >
+                    {workPointOptions.map((option) => (
+                      <option value={option.id} key={option.id}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  计划开始
+                  <input
+                    type="date"
+                    value={scenario.project.start_date}
+                    onChange={(event) => onPatchProject({ start_date: event.target.value })}
+                  />
+                </label>
+              </>
+            ) : (
+              <>
+                <label>
+                  方案名称
+                  <input value={scenario.scenario_name} onChange={(event) => onPatchScenario({ scenario_name: event.target.value })} />
+                </label>
+                <label>
+                  项目名称
+                  <input value={scenario.project.project_name} onChange={(event) => onPatchProject({ project_name: event.target.value })} />
+                </label>
+                <label>
+                  计划开始
+                  <input type="date" value={scenario.project.start_date} onChange={(event) => onPatchProject({ start_date: event.target.value })} />
+                </label>
+                <label>
+                  求解时限(秒)
+                  <input
+                    type="number"
+                    min={1}
+                    value={scenario.time_limit_seconds}
+                    onChange={(event) => onPatchScenario({ time_limit_seconds: Number(event.target.value) })}
+                  />
+                </label>
+                <label>
+                  排程策略
+                  <select
+                    value={strategyConfig.strategy}
+                    onChange={(event) => updateStrategyConfig({ strategy: event.target.value as ScheduleStrategy })}
+                  >
+                    {Object.entries(scheduleStrategyLabels).map(([value, label]) => (
+                      <option value={value} key={value}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  资源保障
+                  <select
+                    value={strategyConfig.resource_guarantee}
+                    onChange={(event) => updateStrategyConfig({ resource_guarantee: event.target.value as ResourceGuaranteeMode })}
+                  >
+                    {Object.entries(resourceGuaranteeLabels).map(([value, label]) => (
+                      <option value={value} key={value}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={strategyConfig.enable_balance_objective}
+                    onChange={(event) => updateStrategyConfig({ enable_balance_objective: event.target.checked })}
+                  />
+                  启用普通工程均衡目标
+                </label>
+              </>
+            )}
           </div>
-          <details className="advanced-schedule-config">
-            <summary>高级排程参数</summary>
-            <div className="form-grid advanced-schedule-grid">
-              <label>
-                普通工程最早开始(天)
-                <input
-                  type="number"
-                  min={0}
-                  value={strategyConfig.normal_earliest_start_offset}
-                  onChange={(event) => updateStrategyConfig({ normal_earliest_start_offset: Math.max(0, Number(event.target.value)) })}
-                />
-              </label>
-              <label>
-                普通工程最晚完成(天)
-                <input
-                  type="number"
-                  min={1}
-                  value={strategyConfig.normal_latest_finish_offset ?? ""}
-                  placeholder="不限制"
-                  onChange={(event) => updateStrategyConfig({
-                    normal_latest_finish_offset: event.target.value ? Math.max(1, Number(event.target.value)) : null,
-                  })}
-                />
-              </label>
-              <label>
-                工区普通工程最大并行
-                <input
-                  type="number"
-                  min={1}
-                  value={strategyConfig.max_parallel_normal_per_work_section}
-                  onChange={(event) => updateStrategyConfig({
-                    max_parallel_normal_per_work_section: Math.max(1, Number(event.target.value)),
-                  })}
-                />
-              </label>
-            </div>
-          </details>
+          {!isMvp && (
+            <details className="advanced-schedule-config">
+              <summary>高级排程参数</summary>
+              <div className="form-grid advanced-schedule-grid">
+                <label>
+                  普通工程最早开始(天)
+                  <input
+                    type="number"
+                    min={0}
+                    value={strategyConfig.normal_earliest_start_offset}
+                    onChange={(event) => updateStrategyConfig({ normal_earliest_start_offset: Math.max(0, Number(event.target.value)) })}
+                  />
+                </label>
+                <label>
+                  普通工程最晚完成(天)
+                  <input
+                    type="number"
+                    min={1}
+                    value={strategyConfig.normal_latest_finish_offset ?? ""}
+                    placeholder="不限制"
+                    onChange={(event) => updateStrategyConfig({
+                      normal_latest_finish_offset: event.target.value ? Math.max(1, Number(event.target.value)) : null,
+                    })}
+                  />
+                </label>
+                <label>
+                  工区普通工程最大并行
+                  <input
+                    type="number"
+                    min={1}
+                    value={strategyConfig.max_parallel_normal_per_work_section}
+                    onChange={(event) => updateStrategyConfig({
+                      max_parallel_normal_per_work_section: Math.max(1, Number(event.target.value)),
+                    })}
+                  />
+                </label>
+              </div>
+            </details>
+          )}
         </section>
       )}
 
@@ -1670,16 +1864,18 @@ function ResultsTab({
             <h2>约束诊断</h2>
             <span>生成层、求解层和里程碑检查的摘要</span>
           </div>
-          <div className="actions inline">
-            <button className="secondary" onClick={() => onSaveCurrent(activeSolveResult)} disabled={!activeSolveResult}>
-              <Save size={15} />
-              保存方案
-            </button>
-            <button className="secondary" onClick={onCompare} disabled={!savedResults.length || comparing}>
-              {comparing ? <Loader2 className="spin" size={15} /> : <GitCompare size={15} />}
-              对比
-            </button>
-          </div>
+          {!isMvp && (
+            <div className="actions inline">
+              <button className="secondary" onClick={() => onSaveCurrent(activeSolveResult)} disabled={!activeSolveResult}>
+                <Save size={15} />
+                保存方案
+              </button>
+              <button className="secondary" onClick={onCompare} disabled={!savedResults.length || comparing}>
+                {comparing ? <Loader2 className="spin" size={15} /> : <GitCompare size={15} />}
+                对比
+              </button>
+            </div>
+          )}
         </div>
         <div className="diagnostics">
           {diagnostics.slice(0, 12).map((message, index) => (
@@ -2179,35 +2375,37 @@ function ResultsTab({
         <ResourcePathChart resourcePaths={continuityMetrics?.resource_paths ?? []} resourcePools={resourcePoolsForDisplay} />
       </section>
 
-      <section className="panel full">
-        <PanelTitle title="方案对比" subtitle={`${savedResults.length} 个已保存方案`} />
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>方案</th>
-                <th>状态</th>
-                <th>总工期</th>
-                <th>软节点迟延数</th>
-                <th>软罚分</th>
-                <th>综合分</th>
-              </tr>
-            </thead>
-            <tbody>
-              {comparison?.summaries.map((item) => (
-                <tr key={String(item.scenario_id)}>
-                  <td>{String(item.scenario_name)}</td>
-                  <td>{formatScheduleStatus(item.status)}</td>
-                  <td>{String(item.total_days ?? "-")}</td>
-                  <td>{String(item.soft_late_count ?? 0)}</td>
-                  <td>{String(item.soft_penalty ?? 0)}</td>
-                  <td>{String(item.score ?? "-")}</td>
+      {!isMvp && (
+        <section className="panel full">
+          <PanelTitle title="方案对比" subtitle={`${savedResults.length} 个已保存方案`} />
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>方案</th>
+                  <th>状态</th>
+                  <th>总工期</th>
+                  <th>软节点迟延数</th>
+                  <th>软罚分</th>
+                  <th>综合分</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+              </thead>
+              <tbody>
+                {comparison?.summaries.map((item) => (
+                  <tr key={String(item.scenario_id)}>
+                    <td>{String(item.scenario_name)}</td>
+                    <td>{formatScheduleStatus(item.status)}</td>
+                    <td>{String(item.total_days ?? "-")}</td>
+                    <td>{String(item.soft_late_count ?? 0)}</td>
+                    <td>{String(item.soft_penalty ?? 0)}</td>
+                    <td>{String(item.score ?? "-")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
     </div>
   );
 }
@@ -3028,6 +3226,39 @@ const legacyBridgeMilestoneNames = new Set([
   "合同下部结构及上部现浇梁完工",
   "下部结构及上部现浇梁强控节点",
 ]);
+
+function workPointOptionsFromScenario(scenario: ScenarioInput | null): WorkPointOption[] {
+  return [...(scenario?.project.bridges ?? [])]
+    .sort((left, right) => left.order - right.order || left.name.localeCompare(right.name))
+    .map((bridge) => ({
+      id: bridge.id,
+      label: bridge.name || bridge.id,
+    }));
+}
+
+function buildMvpScenario(
+  scenario: ScenarioInput | null,
+  selectedWorkPointId: string,
+  startDate: string,
+): ScenarioInput | null {
+  if (!scenario) return null;
+  const options = workPointOptionsFromScenario(scenario);
+  const workPointId = selectedWorkPointId || options[0]?.id || "";
+  const selectedBridges = workPointId
+    ? scenario.project.bridges.filter((bridge) => bridge.id === workPointId)
+    : scenario.project.bridges;
+
+  return normalizeScenarioForWorkspace({
+    ...scenario,
+    scenario_id: `${scenario.scenario_id}-mvp`,
+    scenario_name: `${scenario.scenario_name}-MVP`,
+    project: {
+      ...scenario.project,
+      start_date: startDate || todayDateValue(),
+      bridges: selectedBridges.length ? selectedBridges : scenario.project.bridges,
+    },
+  });
+}
 
 function normalizeScenarioForWorkspace(scenario: ScenarioInput): ScenarioInput {
   return normalizeScenarioResourcePools({

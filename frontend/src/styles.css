@@ -674,6 +674,11 @@ code {
   gap: 12px;
 }
 
+.mvp-solve-form {
+  grid-template-columns: minmax(220px, 360px) minmax(180px, 240px);
+  justify-content: start;
+}
+
 .advanced-schedule-config {
   margin: 0 16px 16px;
   border-top: 1px solid #e2e8f0;

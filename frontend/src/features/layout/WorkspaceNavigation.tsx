@@ -9,6 +9,7 @@ const tabs: Array<{ key: TabKey; label: string; icon: ReactNode }> = [
   { key: "resources", label: "资源配置", icon: <Server size={15} /> },
   { key: "milestones", label: "里程碑", icon: <Flag size={15} /> },
   { key: "results", label: "模拟求解", icon: <CheckCircle2 size={15} /> },
+  { key: "resultsMvp", label: "模拟求解-MVP", icon: <CheckCircle2 size={15} /> },
 ];
 
 export function SideNavigation({
