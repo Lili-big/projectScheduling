@@ -10,6 +10,9 @@ from fastapi.staticfiles import StaticFiles
 
 from .local_config import load_local_config
 from .models import (
+    AiParameterApplyRequest,
+    AiParameterApplyResponse,
+    AiParameterParseResponse,
     DemoPayload,
     GeneratedScheduleInput,
     ImportBridgeParamsResponse,
@@ -52,6 +55,9 @@ from .project_structure_params import (
 )
 from .local_scenario_config import LocalScenarioConfigError
 from .services.bridge_import_service import import_local_bridge_params, import_uploaded_bridge_params
+from .services.ai_parameter_ai_client import AiParameterAssistantConfigError
+from .services.ai_parameter_assistant import AiParameterAssistantError, apply_ai_parameter_suggestions, parse_ai_parameter_assistant
+from .services.ai_parameter_materials import AiParameterMaterialError
 from .services.process_library_service import (
     default_scenario_with_process_library,
     get_process_library,
@@ -219,6 +225,27 @@ def compare_scenarios_endpoint(request: ScenarioCompareRequest) -> ScenarioCompa
 @app.post("/api/apply-process-natural-language", response_model=ProcessNlResponse)
 def apply_process_natural_language_endpoint(request: ProcessNlRequest) -> ProcessNlResponse:
     return apply_process_natural_language(request.scenario, request.prompt)
+
+
+@app.post("/api/ai-parameter-assistant/parse", response_model=AiParameterParseResponse)
+async def parse_ai_parameter_assistant_endpoint(request: Request) -> AiParameterParseResponse:
+    try:
+        fields, files = await parse_multipart_request(request)
+        return parse_ai_parameter_assistant(fields, files)
+    except AiParameterMaterialError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except AiParameterAssistantConfigError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AiParameterAssistantError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@app.post("/api/ai-parameter-assistant/apply", response_model=AiParameterApplyResponse)
+def apply_ai_parameter_assistant_endpoint(request: AiParameterApplyRequest) -> AiParameterApplyResponse:
+    try:
+        return apply_ai_parameter_suggestions(request)
+    except AiParameterAssistantError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 @app.post("/api/import-bridge-params", response_model=ImportBridgeParamsResponse)

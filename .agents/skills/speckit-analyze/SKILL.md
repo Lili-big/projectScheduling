@@ -8,6 +8,10 @@ metadata:
 ---
 
 
+## Language Policy
+
+All user-facing Spec Kit outputs and generated Markdown artifacts in this repository MUST use Simplified Chinese. Keep code identifiers, file paths, API names, branch names, task IDs (`T001`, `US1`), requirement IDs (`FR-001`), status markers (`[P]`, `[x]`), and CLI commands in their original form when clearer or required by tooling. If an upstream template or example is in English, translate headings, explanatory text, checklist items, scenarios, and summaries into Simplified Chinese before writing files or replying.
+
 ## User Input
 
 ```text
@@ -164,17 +168,17 @@ Use this heuristic to prioritize findings:
 
 ### 6. Produce Compact Analysis Report
 
-Output a Markdown report (no file writes) with the following structure:
+Output a Markdown report in Simplified Chinese (no file writes) with the following structure:
 
-## Specification Analysis Report
+## 规格分析报告
 
-| ID | Category | Severity | Location(s) | Summary | Recommendation |
-|----|----------|----------|-------------|---------|----------------|
-| A1 | Duplication | HIGH | spec.md:L120-134 | Two similar requirements ... | Merge phrasing; keep clearer version |
+| ID | 类别 | 严重级别 | 位置 | 摘要 | 建议 |
+|----|------|----------|------|------|------|
+| A1 | 重复 | HIGH | spec.md:L120-134 | 两条需求含义高度相似 ... | 合并表述，保留更清晰的一条 |
 
 (Add one row per finding; generate stable IDs prefixed by category initial.)
 
-**Coverage Summary Table:**
+**覆盖摘要表：**
 
 | Requirement Key | Has Task? | Task IDs | Notes |
 |-----------------|-----------|----------|-------|
@@ -194,7 +198,7 @@ Output a Markdown report (no file writes) with the following structure:
 
 ### 7. Provide Next Actions
 
-At end of report, output a concise Next Actions block:
+At end of report, output a concise `后续动作` block in Simplified Chinese:
 
 - If CRITICAL issues exist: Recommend resolving before `/speckit-implement`
 - If only LOW/MEDIUM: User may proceed, but provide improvement suggestions
@@ -202,7 +206,7 @@ At end of report, output a concise Next Actions block:
 
 ### 8. Offer Remediation
 
-Ask the user: "Would you like me to suggest concrete remediation edits for the top N issues?" (Do NOT apply them automatically.)
+Ask the user in Simplified Chinese whether they want concrete remediation edits for the top N issues. Do NOT apply them automatically.
 
 ### 9. Check for extension hooks
 

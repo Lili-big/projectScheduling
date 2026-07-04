@@ -37,6 +37,74 @@ class ProcessNlIntentPayload(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+def extract_process_method_suggestions(scenario: ScenarioInput, prompt: str, *, material_id: str = "mat_text_001") -> tuple[list[dict[str, Any]], list[str]]:
+    next_scenario = scenario.model_copy(deep=True)
+    suggestions: list[dict[str, Any]] = []
+    warnings: list[str] = []
+
+    intent_payload = _understand_process_prompt(next_scenario, prompt)
+    warnings.extend(intent_payload.warnings)
+    for index, intent in enumerate(intent_payload.intents, start=1):
+        process = _resolve_process(next_scenario, intent)
+        if not process:
+            warnings.append(f"未能匹配工艺库：{intent.process_name or intent.process_method_id or '未指定工艺'}。")
+            continue
+        targets = _match_intent_components(next_scenario, intent)
+        if not targets:
+            warnings.append(f"未找到可应用构件：{_intent_target_label(intent)}。")
+            continue
+        current_values = sorted({component.method_id or "" for component in targets})
+        current_value: str | None
+        if len(current_values) == 1:
+            current_value = current_values[0] or None
+        else:
+            current_value = "mixed"
+        process_method_id = process.method_id or process.id
+        suggestions.append(
+            {
+                "suggestion_id": f"process_method_{index:03d}",
+                "category": "process_method_assignment",
+                "target_ref": {
+                    "component_ids": [component.id for component in targets],
+                    "component_names": [component.name for component in targets[:20]],
+                    "process_id": process.id,
+                    "process_method_id": process_method_id,
+                    "process_name": process.process_name,
+                    "component_type": intent.component_type or process.component_type,
+                    "matched_count": len(targets),
+                    "action": intent.action,
+                },
+                "parameter_key": "component.method_id",
+                "current_value": current_value,
+                "proposed_value": process_method_id,
+                "unit": None,
+                "confidence_score": 88,
+                "source_refs": [{"material_id": material_id, "excerpt": prompt[:120]}],
+            }
+        )
+
+    if not suggestions and not warnings:
+        warnings.append("暂未识别到可应用的工艺设置，请描述构件范围和工艺名称。")
+    return suggestions, warnings
+
+
+def ensure_process_for_assignment(
+    scenario: ScenarioInput,
+    *,
+    component_type: str | None,
+    process_method_id: str | None,
+    process_name: str | None,
+) -> ProcessTemplate | None:
+    return _resolve_process(
+        scenario,
+        ProcessNlIntent(
+            component_type=component_type,
+            process_method_id=process_method_id,
+            process_name=process_name,
+        ),
+    )
+
+
 def apply_process_natural_language(scenario: ScenarioInput, prompt: str) -> ProcessNlResponse:
     next_scenario = scenario.model_copy(deep=True)
     changes: list[ProcessNlChange] = []

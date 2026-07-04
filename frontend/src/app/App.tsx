@@ -24,11 +24,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import {
-  applyProcessNaturalLanguage as applyProcessNaturalLanguageRequest,
+  applyAiParameterSuggestions as applyAiParameterSuggestionsRequest,
   compareScenarios,
   generateScheduleInput,
   getDemoScenario,
   importLocalBridgeParams,
+  parseAiParameterAssistant as parseAiParameterAssistantRequest,
   saveLocalScenarioConfig,
   solveMinResources as solveMinResourcesRequest,
   solveResourceCost as solveResourceCostRequest,
@@ -51,6 +52,9 @@ import type {
   GanttMode,
   TaskViewMode,
   BusyState,
+  AiParameterApplyRequest,
+  AiParameterApplyResponse,
+  AiParameterParseResponse,
   ComponentModel,
   UpperStructureModel,
   StructureModel,
@@ -81,8 +85,6 @@ import type {
   CompareResponse,
   ImportBridgeParamsResponse,
   LocalScenarioConfig,
-  ProcessNlChange,
-  ProcessNlResponse,
   ContinuitySplitDetail,
   ContinuityJumpDetail,
   ResourcePathStep,
@@ -162,7 +164,7 @@ import { ProcessTab } from "../features/process/ProcessTab";
 import { LogicTab } from "../features/logic/LogicTab";
 import { ResourcesTab } from "../features/resources/ResourcesTab";
 import { MilestonesTab } from "../features/milestones/MilestonesTab";
-import { GlobalProcessAssistant } from "../features/assistant/GlobalProcessAssistant";
+import { ParameterAssistantPanel } from "../features/assistant/parameter";
 import { Metric } from "../components/common/Metric";
 import { PanelTitle } from "../components/common/PanelTitle";
 import {
@@ -705,13 +707,28 @@ export default function App() {
     }
   }
 
-  async function applyProcessNaturalLanguage(prompt: string): Promise<ProcessNlResponse | null> {
+  async function parseAiParameterAssistant(payload: FormData): Promise<AiParameterParseResponse | null> {
     if (!scenario) return null;
-    setBusy("nl");
+    setBusy("aiParameter");
+    setError(null);
+    try {
+      payload.set("scenario", JSON.stringify(normalizeScenarioForWorkspace(scenario)));
+      return await parseAiParameterAssistantRequest(payload);
+    } catch (err) {
+      setError(errorText(err));
+      return null;
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function applyAiParameterSuggestions(request: AiParameterApplyRequest): Promise<AiParameterApplyResponse | null> {
+    if (!scenario) return null;
+    setBusy("aiParameter");
     setError(null);
     try {
       const requestScenario = normalizeScenarioForWorkspace(scenario);
-      const result = await applyProcessNaturalLanguageRequest({ scenario: requestScenario, prompt });
+      const result = await applyAiParameterSuggestionsRequest({ ...request, scenario: requestScenario });
       const resultScenario = normalizeScenarioForWorkspace(result.scenario);
       const resultFingerprint = scenarioFingerprintForSolve(resultScenario);
       previousScenarioFingerprintRef.current = resultFingerprint;
@@ -722,10 +739,10 @@ export default function App() {
       if (hasResourcePoolsChanged(scenario.resource_pools, resultScenario.resource_pools)) {
         setResourcesDirty(true);
       }
-      setSolveResult(null);
-      setSolveResultScenarioFingerprint(null);
-      setComparison(null);
-      await generateTaskViewForScenario(resultScenario, { openTasks: false });
+      if (hasMilestonesChanged(scenario.milestones, resultScenario.milestones)) {
+        setMilestonesDirty(true);
+      }
+      clearGeneratedOutputs();
       return { ...result, scenario: resultScenario };
     } catch (err) {
       setError(errorText(err));
@@ -1160,9 +1177,11 @@ export default function App() {
         </div>
       </main>
       {scenario && (
-        <GlobalProcessAssistant
-          onApplyProcessNaturalLanguage={applyProcessNaturalLanguage}
-          applyingProcessText={busy === "nl"}
+        <ParameterAssistantPanel
+          scenario={scenario}
+          busy={busy === "aiParameter"}
+          onParse={parseAiParameterAssistant}
+          onApply={applyAiParameterSuggestions}
         />
       )}
     </div>
@@ -4406,6 +4425,11 @@ function hasProcessLibraryChanged(current: ProcessTemplate[], next: ProcessTempl
 function hasResourcePoolsChanged(current: ResourcePool[], next: ResourcePool[]): boolean {
   if (current.length !== next.length) return true;
   return current.some((pool, index) => JSON.stringify(pool) !== JSON.stringify(next[index]));
+}
+
+function hasMilestonesChanged(current: MilestoneConstraint[], next: MilestoneConstraint[]): boolean {
+  if (current.length !== next.length) return true;
+  return current.some((milestone, index) => JSON.stringify(milestone) !== JSON.stringify(next[index]));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

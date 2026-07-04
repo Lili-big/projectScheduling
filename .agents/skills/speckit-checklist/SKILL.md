@@ -8,9 +8,13 @@ metadata:
 ---
 
 
-## Checklist Purpose: "Unit Tests for English"
+## Language Policy
 
-**CRITICAL CONCEPT**: Checklists are **UNIT TESTS FOR REQUIREMENTS WRITING** - they validate the quality, clarity, and completeness of requirements in a given domain.
+All user-facing Spec Kit outputs and generated Markdown artifacts in this repository MUST use Simplified Chinese. Keep code identifiers, file paths, API names, branch names, task IDs (`T001`, `US1`), requirement IDs (`FR-001`), status markers (`[P]`, `[x]`), and CLI commands in their original form when clearer or required by tooling. If an upstream template or example is in English, translate headings, explanatory text, checklist items, scenarios, and summaries into Simplified Chinese before writing files or replying.
+
+## Checklist Purpose: "需求写作的单元测试"
+
+**CRITICAL CONCEPT**: Checklists are **UNIT TESTS FOR REQUIREMENTS WRITING** - they validate the quality, clarity, and completeness of requirements in a given domain. In this repository, generated checklist titles, categories, items, questions, and summaries MUST be written in Simplified Chinese.
 
 **NOT for verification/testing**:
 
@@ -27,7 +31,7 @@ metadata:
 - ✅ "Are accessibility requirements defined for keyboard navigation?" (coverage)
 - ✅ "Does the spec define what happens when logo image fails to load?" (edge cases)
 
-**Metaphor**: If your spec is code written in English, the checklist is its unit test suite. You're testing whether the requirements are well-written, complete, unambiguous, and ready for implementation - NOT whether the implementation works.
+**Metaphor**: If your spec is code, the checklist is its unit test suite. You're testing whether the requirements are well-written, complete, unambiguous, and ready for implementation - NOT whether the implementation works.
 
 ## User Input
 
@@ -159,7 +163,7 @@ You **MUST** consider the user input before proceeding (if not empty).
    - **Dependencies & Assumptions** (Are they documented and validated?)
    - **Ambiguities & Conflicts** (What needs clarification?)
 
-   **HOW TO WRITE CHECKLIST ITEMS - "Unit Tests for English"**:
+   **HOW TO WRITE CHECKLIST ITEMS - "需求写作单元测试"**:
 
    ❌ **WRONG** (Testing implementation):
    - "Verify landing page displays 3 episode cards"

@@ -8,6 +8,10 @@ metadata:
 ---
 
 
+## Language Policy
+
+All user-facing Spec Kit outputs and generated Markdown artifacts in this repository MUST use Simplified Chinese. Keep code identifiers, file paths, API names, branch names, task IDs (`T001`, `US1`), requirement IDs (`FR-001`), status markers (`[P]`, `[x]`), and CLI commands in their original form when clearer or required by tooling. If an upstream template or example is in English, translate headings, explanatory text, checklist items, scenarios, and summaries into Simplified Chinese before writing files or replying.
+
 ## User Input
 
 ```text
@@ -180,15 +184,15 @@ severity, and a short human-readable description with the evidence (the file/are
 
 ### 6. Present the In-Session Findings Summary
 
-Before appending anything, output a compact, severity-graded summary (no file writes yet):
+Before appending anything, output a compact, severity-graded summary in Simplified Chinese (no file writes yet):
 
-## Convergence Findings
+## 收敛检查发现
 
-| ID | Gap Type | Severity | Source | Evidence | Remaining Work |
-|----|----------|----------|--------|----------|----------------|
-| F1 | missing  | HIGH     | FR-008 | Example: no append-only guard detected in path/to/module.py when writing tasks.md | Add append-only enforcement |
+| ID | 差距类型 | 严重级别 | 来源 | 证据 | 剩余工作 |
+|----|----------|----------|------|------|----------|
+| F1 | missing | HIGH | FR-008 | 示例：`path/to/module.py` 写入 `tasks.md` 时未发现追加保护 | 增加追加写入保护 |
 
-**Summary metrics:**
+**汇总指标：**
 
 - Requirements / acceptance criteria checked
 - Plan decisions checked
@@ -204,12 +208,12 @@ Append to the **end** of `tasks.md`, per the append contract:
 
 1. Scan all existing task IDs; let `M` be the maximum. Determine the next phase number `N`
    (highest existing phase + 1).
-2. Write a single new section header `## Phase N: Convergence`.
+2. Write a single new section header `## Phase N：收敛补充`.
 3. Emit one checklist item per actionable finding, ordered CRITICAL/HIGH first, assigning
    zero-padded IDs `T{M+1:03d}, T{M+2:03d}, …`:
 
    ```markdown
-   - [ ] T042 <imperative description> per <source-ref> (<gap-type>)
+   - [ ] T042 根据 <source-ref> 补齐 <命令式任务描述>（<gap-type>）
    ```
 
    `<source-ref>` traces the task to its origin: e.g. `FR-003`, `SC-002`,
@@ -225,7 +229,7 @@ Append to the **end** of `tasks.md`, per the append contract:
 **If there are no actionable findings** (`converged` outcome):
 
 - Do **not** modify `tasks.md` at all — no empty phase header.
-- Report: **"✅ Converged — the implementation satisfies the spec, plan, and tasks."**
+- Report in Simplified Chinese: **"已收敛：当前实现满足 spec、plan 和 tasks 的要求。"**
 - Include the summary counts of what was checked.
 
 ### 8. Provide Next Actions (Handoff)

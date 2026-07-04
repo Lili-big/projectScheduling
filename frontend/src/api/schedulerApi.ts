@@ -1,5 +1,8 @@
 import { apiGet, apiPost, apiPostFormData, apiPut } from "./client";
 import type {
+  AiParameterApplyRequest,
+  AiParameterApplyResponse,
+  AiParameterParseResponse,
   CompareResponse,
   GeneratedScheduleInput,
   ImportBridgeParamsResponse,
@@ -95,6 +98,14 @@ export function uploadBridgeParams(payload: FormData): Promise<ImportBridgeParam
 
 export function applyProcessNaturalLanguage(request: ProcessNlRequest): Promise<ProcessNlResponse> {
   return apiPost<ProcessNlResponse>("/api/apply-process-natural-language", request);
+}
+
+export function parseAiParameterAssistant(payload: FormData): Promise<AiParameterParseResponse> {
+  return apiPostFormData<AiParameterParseResponse>("/api/ai-parameter-assistant/parse", payload);
+}
+
+export function applyAiParameterSuggestions(request: AiParameterApplyRequest): Promise<AiParameterApplyResponse> {
+  return apiPost<AiParameterApplyResponse>("/api/ai-parameter-assistant/apply", request);
 }
 
 export function saveProcessLibrary(request: ProcessLibrarySaveRequest): Promise<ProcessTemplate[]> {

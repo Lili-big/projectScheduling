@@ -43,6 +43,8 @@ PRD 基于已确认产品口径输出，默认写入或更新 `docs/`。默认�
 
 当需求进入正式规格化开发，尤其涉及算法、排程、资源、工期、CP-SAT、前后端联动、中大型功能或跨模块改造时，必须使用 Spec Kit。
 
+Spec Kit 过程文档必须默认使用中文简体输出，包括 `spec.md`、`plan.md`、`research.md`、`data-model.md`、`quickstart.md`、`tasks.md`、`checklists/` 下的检查表以及 `$speckit-analyze`、`$speckit-converge` 的阶段性报告。代码标识符、接口名、字段名、文件路径、命令、任务编号、需求编号和必要英文缩写可保持原文。
+
 完整门禁流程：
 
 ```text
