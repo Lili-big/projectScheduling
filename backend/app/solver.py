@@ -43,6 +43,7 @@ CONTINUOUS_BEAM_CLOSURE_RULE_IDS = {
     CONTINUOUS_BEAM_MIDDLE_CLOSURE_RULE_ID,
 }
 DEFAULT_CONTINUOUS_CLOSURE_FINISH_GAP_DAYS = 7
+MINIMUM_RESOURCES_BEST_EFFORT_SOURCE = "minimum_resources_best_effort_refinement"
 
 
 def _objective_weights_for_config(config: Any) -> dict[str, int]:
@@ -664,6 +665,7 @@ def solve_control_priority_schedule(
     baseline_result: ScheduleResult | None = None,
     max_makespan_days: int | None = None,
     warm_start_result: ScheduleResult | None = None,
+    relax_target_constraints: bool = False,
 ) -> ScheduleResult:
     if baseline_result is None:
         baseline_input = schedule_input.model_copy(
@@ -720,6 +722,8 @@ def solve_control_priority_schedule(
     milestone_vars: dict[str, Any] = {}
     milestone_target_offsets: dict[str, int] = {}
     soft_lateness_vars: dict[str, Any] = {}
+    relaxed_hard_lateness_vars: dict[str, Any] = {}
+    fixed_duration_overrun_var: Any | None = None
     config = schedule_input.schedule_strategy
     objective_weights = _objective_weights_for_config(config)
     objective_terms_used_payload = _objective_terms_used_for_config(config, objective_weights)
@@ -791,7 +795,12 @@ def solve_control_priority_schedule(
     makespan = model.NewIntVar(0, horizon, "makespan")
     model.AddMaxEquality(makespan, [ends[task.id] for task in schedule_input.tasks])
     if max_makespan_days is not None:
-        model.Add(makespan <= max_makespan_days)
+        if relax_target_constraints:
+            overrun_upper = max(horizon - max_makespan_days, horizon) + 365
+            fixed_duration_overrun_var = model.NewIntVar(0, overrun_upper, "fixed_duration_overrun")
+            model.Add(fixed_duration_overrun_var >= makespan - max_makespan_days)
+        else:
+            model.Add(makespan <= max_makespan_days)
 
     for milestone in schedule_input.milestones:
         scoped_task_ids = _task_ids_for_milestone(milestone, schedule_input.tasks)
@@ -823,7 +832,13 @@ def solve_control_priority_schedule(
         milestone_vars[milestone.id] = event_var
         milestone_target_offsets[milestone.id] = target_offset
         if milestone.mode == "hard":
-            model.Add(event_var <= target_offset)
+            if relax_target_constraints:
+                lateness_upper = max(horizon - target_offset, horizon) + 365
+                lateness_var = model.NewIntVar(0, lateness_upper, f"relaxed_hard_late_{_safe(milestone.id)}")
+                model.Add(lateness_var >= event_var - target_offset)
+                relaxed_hard_lateness_vars[milestone.id] = lateness_var
+            else:
+                model.Add(event_var <= target_offset)
         else:
             lateness_upper = max(horizon - target_offset, horizon) + 365
             lateness_var = model.NewIntVar(0, lateness_upper, f"late_{_safe(milestone.id)}")
@@ -880,9 +895,12 @@ def solve_control_priority_schedule(
         config,
         horizon,
     )
+    target_relaxation_terms = list(relaxed_hard_lateness_vars.values())
+    if fixed_duration_overrun_var is not None:
+        target_relaxation_terms.append(fixed_duration_overrun_var)
 
     model.Minimize(
-        sum(control_lateness_terms) * objective_weights["control_node_late"]
+        (sum(control_lateness_terms) + sum(target_relaxation_terms)) * objective_weights["control_node_late"]
         + sum(control_buffer_terms["terms"]) * objective_weights["control_buffer_risk"]
         + sum(risk_related_control_wait_terms) * objective_weights["risk_related_control_wait"]
         + sum(resource_organization_terms["workload_balance_terms"]) * objective_weights["resource_workload_balance"]
@@ -914,9 +932,14 @@ def solve_control_priority_schedule(
         "solve_mode": "control_priority",
         "baseline_objective_days": baseline_result.objective_days,
         "warm_start_used": warm_start_used,
+        "relax_target_constraints": relax_target_constraints,
     }
     if max_makespan_days is not None:
         stats["max_makespan_days"] = max_makespan_days
+    if relax_target_constraints:
+        stats["relaxed_target_constraint_count"] = len(relaxed_hard_lateness_vars) + (
+            1 if fixed_duration_overrun_var is not None else 0
+        )
 
     if status not in {"OPTIMAL", "FEASIBLE"}:
         return ScheduleResult(
@@ -993,6 +1016,13 @@ def solve_control_priority_schedule(
     control_lateness_days = sum(
         result.lateness_days for result in milestone_results if result.id in soft_control_milestone_ids
     )
+    relaxed_hard_milestone_lateness_days = sum(
+        result.lateness_days for result in milestone_results if result.id in relaxed_hard_lateness_vars
+    )
+    fixed_duration_overrun_days = (
+        solver.Value(fixed_duration_overrun_var) if fixed_duration_overrun_var is not None else 0
+    )
+    target_relaxation_penalty = relaxed_hard_milestone_lateness_days + fixed_duration_overrun_days
     soft_control_lateness_penalty = sum(
         result.lateness_days
         for result in milestone_results
@@ -1046,8 +1076,15 @@ def solve_control_priority_schedule(
     stats["normal_balance_metrics"] = normal_balance_metrics
     stats["resource_organization_analysis"] = resource_organization_analysis
     stats["control_priority_analysis"] = control_priority_analysis
+    if relax_target_constraints:
+        stats["target_relaxation"] = {
+            "relaxed_hard_milestone_lateness_days": relaxed_hard_milestone_lateness_days,
+            "fixed_duration_overrun_days": fixed_duration_overrun_days,
+            "target_relaxation_penalty": target_relaxation_penalty,
+            "target_relaxation_weight": objective_weights["control_node_late"],
+        }
     weighted_objective = (
-        control_lateness_days * objective_weights["control_node_late"]
+        (control_lateness_days + target_relaxation_penalty) * objective_weights["control_node_late"]
         + control_buffer_risk_penalty * objective_weights["control_buffer_risk"]
         + risk_related_control_wait_penalty * objective_weights["risk_related_control_wait"]
         + resource_workload_balance_penalty * objective_weights["resource_workload_balance"]
@@ -1066,6 +1103,25 @@ def solve_control_priority_schedule(
             ),
         )
     )
+    if relax_target_constraints:
+        if target_relaxation_penalty > 0:
+            validation.append(
+                ValidationMessage(
+                    level="warning",
+                    message=(
+                        "最佳努力精排已放松强制节点或固定工期目标："
+                        f"强制节点迟延合计 {relaxed_hard_milestone_lateness_days} 天，"
+                        f"固定工期超期 {fixed_duration_overrun_days} 天。"
+                    ),
+                )
+            )
+        else:
+            validation.append(
+                ValidationMessage(
+                    level="info",
+                    message="最佳努力精排已按目标放松模式求解，当前结果未产生目标迟延。",
+                )
+            )
 
     return ScheduleResult(
         status=status,
@@ -1087,6 +1143,11 @@ def solve_control_priority_schedule(
             "makespan_days": objective_days,
             "baseline_makespan_days": baseline_result.objective_days,
             "control_lateness_days": control_lateness_days,
+            "relaxed_hard_milestone_lateness_days": relaxed_hard_milestone_lateness_days,
+            "fixed_duration_overrun_days": fixed_duration_overrun_days,
+            "target_relaxation_penalty": target_relaxation_penalty,
+            "target_relaxation_weight": objective_weights["control_node_late"],
+            "target_relaxation_weighted_penalty": target_relaxation_penalty * objective_weights["control_node_late"],
             "soft_control_lateness_penalty": soft_control_lateness_penalty,
             "control_buffer_risk_penalty": control_buffer_risk_penalty,
             "risk_related_control_wait_penalty": risk_related_control_wait_penalty,
@@ -1105,6 +1166,8 @@ def solve_control_priority_schedule(
             "normal_balance_score": normal_balance_metrics["balance_score"],
             "resource_organization_analysis": resource_organization_analysis,
             "weighted_objective": weighted_objective,
+            "best_effort_score": weighted_objective if relax_target_constraints else None,
+            "relax_target_constraints": relax_target_constraints,
             "objective_weights": objective_weights,
             "objective_terms_used": objective_terms_used_payload,
             "control_priority_analysis": control_priority_analysis,
@@ -2775,25 +2838,56 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
         target_days=target_days,
         hard_match_count=hard_match_count,
     )
+    best_effort_metadata: dict[str, Any] | None = None
 
     if selected_attempt is not None:
         result = selected_attempt["result"].model_copy(deep=True)
         selected_source = selected_attempt["source"]
         result.validation = validation + capacity_optimization["validation"] + result.validation
     elif capacity_verified:
-        result = capacity_result.model_copy(deep=True)
-        selected_source = "capacity_model_verified_schedule"
-        result.validation = validation + result.validation
-        result.validation.append(
-            ValidationMessage(
-                level="warning",
-                message=(
-                    "Minimum resource counts were verified by the capacity model. "
-                    "Control-priority balanced reoptimization did not return a verified schedule within the solve limit, "
-                    "so the verified capacity schedule is kept."
-                ),
-            )
+        best_effort_attempt = _run_min_resource_best_effort_reoptimization(
+            schedule_input,
+            fixed_counts,
+            target_days=target_days,
+            hard_match_count=hard_match_count,
+            capacity_hint_result=capacity_result,
+            strict_attempts=reoptimization_attempts,
         )
+        reoptimization_attempts.append(best_effort_attempt)
+        if best_effort_attempt["result"].status in {"OPTIMAL", "FEASIBLE"}:
+            result = best_effort_attempt["result"].model_copy(deep=True)
+            selected_source = MINIMUM_RESOURCES_BEST_EFFORT_SOURCE
+            result.validation = validation + capacity_optimization["validation"] + result.validation
+            result.validation.append(
+                ValidationMessage(
+                    level="warning",
+                    message="最少资源严格重排未得到满足目标的结果，已放松强制节点和固定工期目标返回最佳努力精排。",
+                )
+            )
+            strict_attempt = _first_reoptimization_result(
+                reoptimization_attempts,
+                exclude_source=MINIMUM_RESOURCES_BEST_EFFORT_SOURCE,
+            )
+            best_effort_metadata = _best_effort_reoptimization_metadata(
+                result,
+                schedule_source=MINIMUM_RESOURCES_BEST_EFFORT_SOURCE,
+                fallback_from=strict_attempt["source"] if strict_attempt else "control_priority_balanced_reoptimization",
+                strict_result=strict_attempt["result"] if strict_attempt else None,
+            )
+        else:
+            result = capacity_result.model_copy(deep=True)
+            selected_source = "capacity_model_verified_schedule"
+            result.validation = validation + result.validation + best_effort_attempt["result"].validation
+            result.validation.append(
+                ValidationMessage(
+                    level="warning",
+                    message=(
+                        "Minimum resource counts were verified by the capacity model. "
+                        "Control-priority balanced reoptimization and best-effort reoptimization did not return "
+                        "a usable schedule within the solve limit, so the verified capacity schedule is kept."
+                    ),
+                )
+            )
     else:
         result = capacity_result.model_copy(deep=True, update={"status": "INFEASIBLE"})
         selected_source = "capacity_model_unverified"
@@ -2839,6 +2933,16 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
 
     result.stats.update(metadata)
     result.objective_breakdown.update(metadata)
+    if best_effort_metadata is not None:
+        result.stats["best_effort_refinement"] = best_effort_metadata
+        result.objective_breakdown["best_effort_refinement"] = {
+            "enabled": True,
+            "schedule_source": best_effort_metadata["schedule_source"],
+            "target_lateness_days": best_effort_metadata["target_lateness_days"],
+            "fixed_duration_overrun_days": best_effort_metadata["fixed_duration_overrun_days"],
+            "best_effort_score": best_effort_metadata["best_effort_score"],
+            "relaxed_constraints": best_effort_metadata["relaxed_constraints"],
+        }
     return result
 
 
@@ -2883,6 +2987,32 @@ def _run_min_resource_reoptimizations(
         futures = [executor.submit(run, candidate) for candidate in candidates]
         results = [future.result() for future in futures]
     return sorted(results, key=lambda item: _reoptimization_priority(item["source"]))
+
+
+def _run_min_resource_best_effort_reoptimization(
+    schedule_input: ScheduleInput,
+    fixed_counts: dict[str, int],
+    *,
+    target_days: int | None,
+    hard_match_count: int,
+    capacity_hint_result: ScheduleResult | None,
+    strict_attempts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    strict_source = strict_attempts[0]["source"] if strict_attempts else "control_priority_balanced_reoptimization"
+    candidate = _min_resource_reoptimization_candidates(schedule_input, fixed_counts)[0]
+    result = solve_control_priority_schedule(
+        candidate["schedule_input"],
+        enforce_hard_milestones=True,
+        max_makespan_days=target_days if hard_match_count == 0 else None,
+        warm_start_result=capacity_hint_result,
+        relax_target_constraints=True,
+    )
+    return {
+        "source": MINIMUM_RESOURCES_BEST_EFFORT_SOURCE,
+        "result": result,
+        "parallelism": 1,
+        "fallback_from": strict_source,
+    }
 
 
 def _min_resource_reoptimization_candidates(
@@ -2940,10 +3070,107 @@ def _schedule_result_verified(
     return not any(message.level == "error" for message in result.validation)
 
 
+def _first_reoptimization_result(
+    attempts: list[dict[str, Any]],
+    *,
+    exclude_source: str,
+) -> dict[str, Any] | None:
+    for attempt in attempts:
+        if attempt["source"] != exclude_source:
+            return attempt
+    return None
+
+
+def _best_effort_reoptimization_metadata(
+    result: ScheduleResult,
+    *,
+    schedule_source: str,
+    fallback_from: str,
+    strict_result: ScheduleResult | None,
+) -> dict[str, Any]:
+    target_lateness_days = sum(
+        milestone.lateness_days
+        for milestone in result.milestone_results
+        if milestone.mode == "hard"
+    )
+    fixed_duration_overrun_days = int(
+        result.objective_breakdown.get("fixed_duration_overrun_days")
+        or result.stats.get("target_relaxation", {}).get("fixed_duration_overrun_days", 0)
+        or 0
+    )
+    strict_status = strict_result.status if strict_result is not None else "not_attempted"
+    fixed_duration_target = _int_or_none(result.stats.get("max_makespan_days"))
+    best_effort_score = result.objective_breakdown.get("best_effort_score")
+    if best_effort_score is None:
+        best_effort_score = result.objective_breakdown.get("weighted_objective")
+    return {
+        "enabled": True,
+        "schedule_source": schedule_source,
+        "fallback_from": fallback_from,
+        "strict_refinement_status": strict_status,
+        "strict_refinement_failure_reason": f"minimum_resource_refinement_{strict_status.lower()}",
+        "objective_status": result.status,
+        "target_lateness_days": target_lateness_days,
+        "fixed_duration_overrun_days": fixed_duration_overrun_days,
+        "best_effort_score": best_effort_score,
+        "wall_time_seconds": result.stats.get("wall_time_seconds"),
+        "strict_wall_time_seconds": strict_result.stats.get("wall_time_seconds") if strict_result is not None else None,
+        "relaxed_constraints": _best_effort_relaxed_constraints(
+            result,
+            fixed_duration_target=fixed_duration_target,
+            fixed_duration_overrun_days=fixed_duration_overrun_days,
+        ),
+    }
+
+
+def _best_effort_relaxed_constraints(
+    result: ScheduleResult,
+    *,
+    fixed_duration_target: int | None,
+    fixed_duration_overrun_days: int,
+) -> list[dict[str, Any]]:
+    constraints: list[dict[str, Any]] = []
+    for milestone in result.milestone_results:
+        if milestone.mode != "hard" or milestone.actual_date is None:
+            continue
+        constraints.append(
+            {
+                "type": "hard_milestone",
+                "id": milestone.id,
+                "name": milestone.name,
+                "target": milestone.target_date.isoformat(),
+                "actual": milestone.actual_date.isoformat(),
+                "lateness_days": milestone.lateness_days,
+                "scope": milestone.scope_id or milestone.scope_type,
+            }
+        )
+    if fixed_duration_target is not None:
+        constraints.append(
+            {
+                "type": "fixed_duration",
+                "name": "固定工期目标",
+                "target": fixed_duration_target,
+                "actual": result.objective_days,
+                "lateness_days": fixed_duration_overrun_days,
+            }
+        )
+    return constraints
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _reoptimization_priority(source: str) -> int:
     priorities = {
         "control_priority_balanced_reoptimization": 0,
         "control_priority_reoptimization_no_balance": 1,
+        MINIMUM_RESOURCES_BEST_EFFORT_SOURCE: 2,
     }
     return priorities.get(source, 99)
 

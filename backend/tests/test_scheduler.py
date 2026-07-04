@@ -1274,6 +1274,143 @@ def test_fixed_resource_minimum_candidate_keeps_verified_schedule_when_refinemen
     assert alternative.result.stats["recommended_resource_counts"][0]["added_quantity"] == 1
 
 
+def test_fixed_resource_strict_refinement_failure_returns_best_effort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("ortools")
+    scenario = _parallel_fixed_resource_scenario(target_days=10, current_resources=1, max_resources=2)
+    calls: list[bool] = []
+
+    def fake_control_priority(
+        schedule_input: ScheduleInput,
+        *,
+        relax_target_constraints: bool = False,
+        **_: object,
+    ) -> ScheduleResult:
+        calls.append(relax_target_constraints)
+        if not relax_target_constraints:
+            return ScheduleResult(
+                status="UNKNOWN",
+                plan_start_date=schedule_input.start_date,
+                validation=[ValidationMessage(level="warning", message="strict refinement timed out")],
+                stats={"wall_time_seconds": 5.0, "warm_start_used": True},
+            )
+
+        milestone = schedule_input.milestones[0]
+        return ScheduleResult(
+            status="FEASIBLE",
+            objective_days=10,
+            plan_start_date=schedule_input.start_date,
+            plan_finish_date=schedule_input.start_date + timedelta(days=9),
+            milestone_results=[
+                MilestoneResult(
+                    **milestone.model_dump(),
+                    actual_date=schedule_input.start_date + timedelta(days=9),
+                    actual_offset=10,
+                    lateness_days=0,
+                    status="met",
+                )
+            ],
+            validation=[ValidationMessage(level="info", message="best effort refinement")],
+            stats={"wall_time_seconds": 1.0, "warm_start_used": True, "relax_target_constraints": True},
+            objective_breakdown={"weighted_objective": 123, "best_effort_score": 123},
+        )
+
+    monkeypatch.setattr(scenario_module, "solve_control_priority_schedule", fake_control_priority)
+
+    solved = solve_scenario(scenario)
+
+    assert calls == [False, True]
+    assert solved.result.status == "FEASIBLE"
+    assert solved.result.stats["schedule_source"] == "current_resources_best_effort_refinement"
+    assert solved.result.objective_breakdown["performance_path"] == "capacity_fast_path_best_effort_refinement"
+    best_effort = solved.result.stats["best_effort_refinement"]
+    assert best_effort["enabled"] is True
+    assert best_effort["strict_refinement_status"] == "UNKNOWN"
+    assert best_effort["strict_refinement_failure_reason"] == "control_priority_unknown"
+    assert best_effort["best_effort_score"] == 123
+
+
+def test_minimum_resource_candidate_returns_best_effort_when_strict_refinement_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start = date(2026, 1, 1)
+    schedule_input = ScheduleInput(
+        project_name="minimum candidate best effort",
+        start_date=start,
+        tasks=[_solver_task("T1", "候选任务", 5, "team")],
+        precedence_links=[],
+        resources=[Resource(id="team_1", name="班组1", type="team")],
+        milestones=[
+            MilestoneConstraint(
+                id="M-hard",
+                name="强制完工目标",
+                mode="hard",
+                scope_type="project",
+                target_event="finish",
+                target_date=start,
+            )
+        ],
+        schedule_strategy=ScheduleStrategyConfig(strategy="comprehensive"),
+        time_limit_seconds=5,
+    )
+    min_resource_result = ScheduleResult(
+        status="FEASIBLE",
+        objective_days=5,
+        plan_start_date=start,
+        plan_finish_date=start + timedelta(days=4),
+        stats={"recommended_resource_counts": [{"resource_pool_id": "team", "recommended_quantity": 1}]},
+        objective_breakdown={"recommended_resource_counts": [{"resource_pool_id": "team", "recommended_quantity": 1}]},
+    )
+    calls: list[bool] = []
+
+    def fake_control_priority(
+        schedule_input: ScheduleInput,
+        *,
+        relax_target_constraints: bool = False,
+        **_: object,
+    ) -> ScheduleResult:
+        calls.append(relax_target_constraints)
+        if not relax_target_constraints:
+            return ScheduleResult(
+                status="UNKNOWN",
+                plan_start_date=schedule_input.start_date,
+                validation=[ValidationMessage(level="warning", message="strict minimum refinement timed out")],
+            )
+
+        milestone = schedule_input.milestones[0]
+        return ScheduleResult(
+            status="FEASIBLE",
+            objective_days=5,
+            plan_start_date=schedule_input.start_date,
+            plan_finish_date=schedule_input.start_date + timedelta(days=4),
+            milestone_results=[
+                MilestoneResult(
+                    **milestone.model_dump(),
+                    actual_date=schedule_input.start_date + timedelta(days=4),
+                    actual_offset=5,
+                    lateness_days=4,
+                    status="late",
+                )
+            ],
+            stats={"wall_time_seconds": 1.0, "warm_start_used": True, "relax_target_constraints": True},
+            objective_breakdown={"weighted_objective": 456, "best_effort_score": 456},
+        )
+
+    monkeypatch.setattr(scenario_module, "solve_control_priority_schedule", fake_control_priority)
+
+    result = scenario_module._minimum_resource_candidate_result(schedule_input, min_resource_result)
+
+    assert calls == [False, True]
+    assert result.status == "FEASIBLE"
+    assert result.stats["schedule_source"] == "minimum_resources_best_effort_refinement"
+    assert result.stats["recommended_schedule_source"] == "minimum_resources_best_effort_refinement"
+    assert result.stats["minimum_resource_refinement_status"] == "UNKNOWN"
+    best_effort = result.stats["best_effort_refinement"]
+    assert best_effort["target_lateness_days"] == 4
+    assert best_effort["relaxed_constraints"][0]["type"] == "hard_milestone"
+
+
 def test_fixed_resource_late_current_skips_control_refinement_but_keeps_recommendation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1390,6 +1527,7 @@ def test_fixed_resource_shortest_outputs_control_balanced_result_when_hard_miles
     assert solved.result.objective_breakdown["performance_path"] == "capacity_fast_path_named_refinement"
     assert solved.result.objective_breakdown["warm_start_used"] is True
     assert solved.result.stats["warm_start_used"] is True
+    assert "best_effort_refinement" not in solved.result.stats
     assert "control_priority_analysis" in solved.result.stats
     assert "normal_balance_metrics" in solved.result.stats
     assert solved.alternative_results == []
@@ -2237,6 +2375,84 @@ def test_control_priority_enforces_hard_milestone_without_explicit_flag() -> Non
     assert result.status == "INFEASIBLE"
     assert not result.tasks
     assert result.stats["solve_mode"] == "control_priority"
+
+
+def test_control_priority_best_effort_relaxes_hard_milestone_and_keeps_same_structure_limit() -> None:
+    pytest.importorskip("ortools")
+    start = date(2026, 1, 1)
+
+    result = solver_module.solve_control_priority_schedule(
+        ScheduleInput(
+            project_name="best-effort-hard-milestone",
+            start_date=start,
+            tasks=_same_pier_pile_tasks("rotary_drill"),
+            precedence_links=[],
+            resources=[
+                Resource(
+                    id="rotary_1",
+                    name="旋挖钻1",
+                    type="rotary_drill",
+                    same_structure_parallel_limit=1,
+                ),
+                Resource(
+                    id="rotary_2",
+                    name="旋挖钻2",
+                    type="rotary_drill",
+                    same_structure_parallel_limit=1,
+                ),
+            ],
+            milestones=[
+                MilestoneConstraint(
+                    id="M-hard",
+                    name="强制完工目标",
+                    mode="hard",
+                    scope_type="project",
+                    target_event="finish",
+                    target_date=start,
+                )
+            ],
+            schedule_strategy=ScheduleStrategyConfig(strategy="comprehensive"),
+            time_limit_seconds=5,
+        ),
+        relax_target_constraints=True,
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.objective_days == 10
+    assert len({task.assigned_resource_id for task in result.tasks}) == 1
+    assert result.milestone_results[0].lateness_days > 0
+    assert result.stats["relax_target_constraints"] is True
+    assert result.objective_breakdown["relaxed_hard_milestone_lateness_days"] == result.milestone_results[0].lateness_days
+
+
+def test_control_priority_best_effort_relaxes_fixed_duration_target() -> None:
+    pytest.importorskip("ortools")
+    start = date(2026, 1, 1)
+    schedule_input = ScheduleInput(
+        project_name="best-effort-fixed-duration",
+        start_date=start,
+        tasks=[
+            _solver_task("T1", "任务1", 5, "team"),
+            _solver_task("T2", "任务2", 5, "team"),
+        ],
+        precedence_links=[],
+        resources=[Resource(id="team_1", name="班组1", type="team")],
+        schedule_strategy=ScheduleStrategyConfig(strategy="comprehensive"),
+        time_limit_seconds=5,
+    )
+
+    strict = solver_module.solve_control_priority_schedule(schedule_input, max_makespan_days=5)
+    relaxed = solver_module.solve_control_priority_schedule(
+        schedule_input,
+        max_makespan_days=5,
+        relax_target_constraints=True,
+    )
+
+    assert strict.status == "INFEASIBLE"
+    assert relaxed.status in {"OPTIMAL", "FEASIBLE"}
+    assert relaxed.objective_days == 10
+    assert relaxed.objective_breakdown["fixed_duration_overrun_days"] == 5
+    assert relaxed.stats["target_relaxation"]["fixed_duration_overrun_days"] == 5
 
 
 def test_control_priority_hard_milestone_is_not_control_lateness_objective() -> None:
@@ -3094,10 +3310,15 @@ def test_min_resource_solver_keeps_capacity_schedule_when_balanced_reoptimizatio
 ) -> None:
     pytest.importorskip("ortools")
     schedule_input = _min_resource_test_input(max_resources=2)
-    calls: list[bool] = []
+    calls: list[tuple[bool, bool]] = []
 
-    def fake_control_priority(schedule_input: ScheduleInput, **_: object) -> ScheduleResult:
-        calls.append(schedule_input.schedule_strategy.enable_balance_objective)
+    def fake_control_priority(
+        schedule_input: ScheduleInput,
+        *,
+        relax_target_constraints: bool = False,
+        **_: object,
+    ) -> ScheduleResult:
+        calls.append((schedule_input.schedule_strategy.enable_balance_objective, relax_target_constraints))
         return ScheduleResult(
             status="UNKNOWN",
             plan_start_date=schedule_input.start_date,
@@ -3124,7 +3345,7 @@ def test_min_resource_solver_keeps_capacity_schedule_when_balanced_reoptimizatio
     assert result.stats["recommended_resource_counts"][0]["recommended_quantity"] == 2
     assert result.tasks
     assert result.resource_allocations
-    assert calls == [False]
+    assert calls == [(False, False), (False, True)]
     assert any("capacity model" in message.message for message in result.validation)
 
 
@@ -3163,6 +3384,62 @@ def test_min_resource_reoptimization_uses_single_control_priority_candidate(
     assert result.stats["unbalanced_reoptimization_status"] == "not_attempted"
     assert result.stats["parallel_reoptimization_used"] is False
     assert calls == [False]
+
+
+def test_min_resource_solver_returns_best_effort_when_reoptimization_misses_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("ortools")
+    schedule_input = _min_resource_test_input(max_resources=2)
+    calls: list[bool] = []
+
+    def fake_control_priority(
+        schedule_input: ScheduleInput,
+        *,
+        max_makespan_days: int | None = None,
+        relax_target_constraints: bool = False,
+        **_: object,
+    ) -> ScheduleResult:
+        calls.append(relax_target_constraints)
+        if not relax_target_constraints:
+            return ScheduleResult(
+                status="UNKNOWN",
+                plan_start_date=schedule_input.start_date,
+                validation=[ValidationMessage(level="warning", message="strict reoptimization timed out")],
+                stats={"wall_time_seconds": schedule_input.time_limit_seconds},
+            )
+        objective_days = (max_makespan_days or 5) + 1
+        return ScheduleResult(
+            status="FEASIBLE",
+            objective_days=objective_days,
+            plan_start_date=schedule_input.start_date,
+            plan_finish_date=schedule_input.start_date + timedelta(days=objective_days - 1),
+            milestone_results=[],
+            validation=[ValidationMessage(level="warning", message="best effort reoptimization")],
+            stats={
+                "wall_time_seconds": schedule_input.time_limit_seconds,
+                "max_makespan_days": max_makespan_days,
+                "target_relaxation": {"fixed_duration_overrun_days": 1},
+            },
+            objective_breakdown={
+                "fixed_duration_overrun_days": 1,
+                "weighted_objective": 789,
+                "best_effort_score": 789,
+            },
+        )
+
+    monkeypatch.setattr(solver_module, "solve_control_priority_schedule", fake_control_priority)
+
+    result = solve_min_resources_schedule(schedule_input, fallback_target_days=5)
+
+    assert calls == [False, True]
+    assert result.status == "FEASIBLE"
+    assert result.stats["schedule_source"] == "minimum_resources_best_effort_refinement"
+    assert result.stats["recommended_schedule_source"] == "minimum_resources_best_effort_refinement"
+    best_effort = result.stats["best_effort_refinement"]
+    assert best_effort["strict_refinement_status"] == "UNKNOWN"
+    assert best_effort["fixed_duration_overrun_days"] == 1
+    assert best_effort["relaxed_constraints"][0]["type"] == "fixed_duration"
 
 
 def test_min_resource_solver_returns_infeasible_when_reoptimization_cannot_meet_target() -> None:

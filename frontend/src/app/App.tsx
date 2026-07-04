@@ -276,10 +276,12 @@ const controlLevelLabels: Record<ControlLevel, string> = {
 
 const scheduleSourceLabels: Record<string, string> = {
   current_resources_control_priority_balanced: "命名资源精排",
+  current_resources_best_effort_refinement: "最佳努力精排",
   current_resources_capacity_shortest: "固定资源快排",
   current_resources_capacity_shortest_fallback: "固定资源回退",
   control_priority_balanced_reoptimization: "命名资源重排",
   minimum_resources_control_priority_balanced: "最少资源候选精排",
+  minimum_resources_best_effort_refinement: "最少资源候选最佳努力精排",
   minimum_resources_refinement_fallback: "最少资源候选回退",
   capacity_model_verified_schedule: "容量模型校验排程",
 };
@@ -2031,6 +2033,9 @@ function ResultsTab({
           </div>
           {refinementSummary.fallbackReason && (
             <p>{refinementSummary.source.startsWith("minimum_resources_") ? "最少资源候选精排未作为主结果展示，当前保留已验证的候选排程：" : "命名资源精排未作为主结果展示，当前已回退到固定资源参考排程："}{refinementSummary.fallbackReason}</p>
+          )}
+          {refinementSummary.bestEffortMessage && (
+            <p>{refinementSummary.bestEffortMessage}</p>
           )}
         </section>
       )}
@@ -3907,6 +3912,9 @@ function resultOptionLabel(option: ScenarioSolveResult, index: number, isMvp = f
   if (source === "minimum_resources_control_priority_balanced") {
     return isMvp ? `方案${index + 1} 最少资源候选` : `方案${index + 1} 最少资源候选精排`;
   }
+  if (source === "minimum_resources_best_effort_refinement") {
+    return isMvp ? `方案${index + 1} 最少资源候选` : `方案${index + 1} 最少资源候选最佳努力精排`;
+  }
   if (source === "minimum_resources_refinement_fallback") return `方案${index + 1} 最少资源候选`;
   return `方案${index + 1} 资源候选`;
 }
@@ -4193,6 +4201,15 @@ type RefinementSummary = {
   resourcePathStatus: string;
   maxBufferRiskDays: string;
   fallbackReason: string;
+  bestEffortMessage: string;
+};
+
+type BestEffortRefinement = {
+  enabled: boolean;
+  strictStatus: string;
+  strictReason: string;
+  targetLatenessDays: number;
+  fixedDurationOverrunDays: number;
 };
 
 function recommendedResourceCountsFromResult(result: ScheduleResult | null): RecommendedResourceCount[] {
@@ -4442,25 +4459,32 @@ function refinementSummaryFromResult(result: ScheduleResult | null): RefinementS
   const analysis = controlPriorityAnalysisFromResult(result);
   const source = stringFromUnknown(result.objective_breakdown?.schedule_source ?? result.stats?.schedule_source);
   if (!analysis && !source) return null;
+  const bestEffort = bestEffortRefinementFromResult(result);
+  const isBestEffort = Boolean(bestEffort?.enabled)
+    || source === "current_resources_best_effort_refinement"
+    || source === "minimum_resources_best_effort_refinement";
   const hardMilestones = result.milestone_results.filter((milestone) => milestone.mode === "hard");
   const hardLateCount = hardMilestones.filter((milestone) => milestone.lateness_days > 0).length;
   const controlBufferStatus = analysis?.control_buffer_status ?? "not_evaluated";
   const resourcePathStatus = analysis?.resource_path_status ?? "not_evaluated";
-  const fallbackReason = analysis?.fallback_reason
-    ?? stringFromUnknown(result.objective_breakdown?.skipped_named_refinement_reason ?? result.stats?.skipped_named_refinement_reason);
+  const fallbackReason = isBestEffort ? "" : (
+    analysis?.fallback_reason
+    ?? stringFromUnknown(result.objective_breakdown?.skipped_named_refinement_reason ?? result.stats?.skipped_named_refinement_reason)
+  );
   const maxBufferRisk = Math.max(0, ...(analysis?.control_buffer_risks ?? []).map((item) => item.buffer_risk_days));
   const baselineDays = Number(result.objective_breakdown?.baseline_makespan_days ?? result.stats?.baseline_makespan_days);
-  const isFallback = source === "current_resources_capacity_shortest_fallback" || Boolean(fallbackReason);
+  const isFallback = !isBestEffort && (source === "current_resources_capacity_shortest_fallback" || Boolean(fallbackReason));
   const tone = refinementTone({
     hardLateCount,
     controlBufferStatus,
     resourcePathStatus,
     isFallback,
+    isBestEffort,
   });
   return {
     source,
     tone,
-    title: refinementTitle({ source, hardLateCount, controlBufferStatus, isFallback }),
+    title: refinementTitle({ source, hardLateCount, controlBufferStatus, isFallback, isBestEffort }),
     recommendedDays: result.objective_days == null ? "-" : `${result.objective_days} 天`,
     baselineDays: Number.isFinite(baselineDays) ? `${baselineDays} 天` : "-",
     hardMilestoneStatus: hardMilestones.length
@@ -4471,7 +4495,31 @@ function refinementSummaryFromResult(result: ScheduleResult | null): RefinementS
     resourcePathStatus: resourcePathStatusLabels[resourcePathStatus] ?? resourcePathStatus,
     maxBufferRiskDays: `${maxBufferRisk} 天`,
     fallbackReason,
+    bestEffortMessage: bestEffortMessage(bestEffort),
   };
+}
+
+function bestEffortRefinementFromResult(result: ScheduleResult): BestEffortRefinement | null {
+  const raw = result.stats?.best_effort_refinement ?? result.objective_breakdown?.best_effort_refinement;
+  if (!isRecord(raw)) return null;
+  return {
+    enabled: Boolean(raw.enabled),
+    strictStatus: stringFromUnknown(raw.strict_refinement_status),
+    strictReason: stringFromUnknown(raw.strict_refinement_failure_reason),
+    targetLatenessDays: Number(raw.target_lateness_days ?? 0),
+    fixedDurationOverrunDays: Number(raw.fixed_duration_overrun_days ?? 0),
+  };
+}
+
+function bestEffortMessage(bestEffort: BestEffortRefinement | null): string {
+  if (!bestEffort?.enabled) return "";
+  const parts = [
+    bestEffort.strictStatus ? `严格精排状态：${bestEffort.strictStatus}` : "",
+    bestEffort.strictReason ? `原因：${bestEffort.strictReason}` : "",
+    `强制节点迟延合计 ${bestEffort.targetLatenessDays} 天`,
+    `固定工期超期 ${bestEffort.fixedDurationOverrunDays} 天`,
+  ].filter(Boolean);
+  return `当前为放松强制节点/固定工期后的最佳努力精排，不代表目标已满足。${parts.join("；")}。`;
 }
 
 function pathGroupDiagnosticFromRecord(item: Record<string, unknown>) {
@@ -4498,15 +4546,18 @@ function refinementTone({
   controlBufferStatus,
   resourcePathStatus,
   isFallback,
+  isBestEffort,
 }: {
   hardLateCount: number;
   controlBufferStatus: string;
   resourcePathStatus: string;
   isFallback: boolean;
+  isBestEffort: boolean;
 }): MetricTone {
   if (hardLateCount > 0 || controlBufferStatus === "affected_node") return "danger";
   if (
     isFallback
+    || isBestEffort
     || controlBufferStatus === "buffer_insufficient"
     || controlBufferStatus === "near_risk"
     || resourcePathStatus === "abnormal_jump"
@@ -4521,12 +4572,15 @@ function refinementTitle({
   hardLateCount,
   controlBufferStatus,
   isFallback,
+  isBestEffort,
 }: {
   source: string;
   hardLateCount: number;
   controlBufferStatus: string;
   isFallback: boolean;
+  isBestEffort: boolean;
 }): string {
+  if (isBestEffort) return hardLateCount > 0 ? "最佳努力精排，目标未满足" : "最佳努力精排可用于复核";
   if (isFallback) return "已回退固定资源参考排程";
   if (hardLateCount > 0) return "强制节点未满足";
   if (controlBufferStatus === "buffer_insufficient") return "控制链总时差不足，需复核关键链";

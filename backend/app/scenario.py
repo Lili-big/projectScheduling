@@ -52,7 +52,9 @@ CONTINUOUS_BEAM_DEFAULT_STANDARD_SEGMENT_CYCLES = 18
 CAST_IN_PLACE_BOX_BEAM_STRUCTURE_CODE = "castInPlaceBoxGirder"
 SIMPLE_BEAM_STRUCTURE_CODE = "precastTGirder"
 FIXED_RESOURCE_SOLVE_MODE = "fixed_resources_shortest_control_balanced"
+CURRENT_RESOURCES_BEST_EFFORT_SOURCE = "current_resources_best_effort_refinement"
 MINIMUM_RESOURCES_REFINED_SOURCE = "minimum_resources_control_priority_balanced"
+MINIMUM_RESOURCES_BEST_EFFORT_SOURCE = "minimum_resources_best_effort_refinement"
 MINIMUM_RESOURCES_FALLBACK_SOURCE = "minimum_resources_refinement_fallback"
 UPPER_STRUCTURE_LOGIC_RULE_IDS = (
     "cast_in_place_box_beam_after_lower_structure",
@@ -290,12 +292,51 @@ def _solve_fixed_resources_shortest_scenario(
         )
         return final_result, []
 
+    fallback_reason = f"control_priority_{final_result.status.lower()}"
+    best_effort_result = solve_control_priority_schedule(
+        final_input,
+        enforce_hard_milestones=True,
+        baseline_result=baseline_result,
+        warm_start_result=baseline_result,
+        relax_target_constraints=True,
+    )
+    if best_effort_result.status in {"OPTIMAL", "FEASIBLE"}:
+        best_effort = best_effort_result.model_copy(deep=True)
+        best_effort.validation = list(baseline_result.validation) + list(final_result.validation) + list(best_effort.validation)
+        best_effort.validation.append(
+            ValidationMessage(
+                level="warning",
+                message="严格命名资源精排未得到可用结果，已放松强制节点和固定工期目标返回当前资源最佳努力精排。",
+            )
+        )
+        _apply_fixed_resource_metadata(
+            best_effort,
+            baseline_makespan_days=baseline_result.objective_days,
+            hard_milestone_feasible=not _late_hard_milestones(best_effort),
+            schedule_source=CURRENT_RESOURCES_BEST_EFFORT_SOURCE,
+            performance_path="capacity_fast_path_best_effort_refinement",
+            solver_call_count=int(baseline_result.stats.get("solver_call_count", 1) or 1) + 2,
+            capacity_precheck_status=baseline_result.status,
+            warm_start_used=bool(best_effort_result.stats.get("warm_start_used")),
+            skipped_named_refinement_reason=fallback_reason,
+            resource_recommendation_status="not_needed",
+            resource_recommendation_message="当前固定资源最短工期已满足强制里程碑，无需增加资源。",
+        )
+        _apply_best_effort_refinement_metadata(
+            best_effort,
+            schedule_source=CURRENT_RESOURCES_BEST_EFFORT_SOURCE,
+            fallback_from="current_resources_control_priority_balanced",
+            strict_result=final_result,
+            strict_failure_reason=fallback_reason,
+        )
+        return best_effort, []
+
     fallback = baseline_result.model_copy(deep=True)
-    fallback.validation = list(baseline_result.validation) + list(final_result.validation)
+    fallback.validation = list(baseline_result.validation) + list(final_result.validation) + list(best_effort_result.validation)
     fallback.validation.append(
         ValidationMessage(
             level="warning",
-            message="控制优先+均衡推进在硬里程碑约束下未得到可行二次优化结果，已回退展示当前资源最短工期排程。",
+            message="控制优先+均衡推进在严格模式和最佳努力模式下均未得到可用二次优化结果，已回退展示当前资源最短工期排程。",
         )
     )
     _apply_fixed_resource_metadata(
@@ -304,14 +345,14 @@ def _solve_fixed_resources_shortest_scenario(
         hard_milestone_feasible=True,
         schedule_source="current_resources_capacity_shortest_fallback",
         performance_path="capacity_fast_path_named_refinement_fallback",
-        solver_call_count=int(baseline_result.stats.get("solver_call_count", 1) or 1) + 1,
+        solver_call_count=int(baseline_result.stats.get("solver_call_count", 1) or 1) + 2,
         capacity_precheck_status=baseline_result.status,
-        warm_start_used=bool(final_result.stats.get("warm_start_used")),
-        skipped_named_refinement_reason=f"control_priority_{final_result.status.lower()}",
+        warm_start_used=bool(final_result.stats.get("warm_start_used") or best_effort_result.stats.get("warm_start_used")),
+        skipped_named_refinement_reason=fallback_reason,
+        best_effort_refinement_failure_reason=f"best_effort_{best_effort_result.status.lower()}",
         resource_recommendation_status="not_needed",
         resource_recommendation_message="当前固定资源最短工期已满足强制里程碑，无需增加资源。",
     )
-    fallback_reason = f"control_priority_{final_result.status.lower()}"
     fallback.stats["control_priority_analysis"] = {
         "fallback_reason": fallback_reason,
         "control_buffer_status": "not_evaluated",
@@ -342,6 +383,97 @@ def _late_hard_milestones(result: ScheduleResult) -> list[Any]:
         for milestone in result.milestone_results
         if milestone.mode == "hard" and milestone.lateness_days > 0
     ]
+
+
+def _apply_best_effort_refinement_metadata(
+    result: ScheduleResult,
+    *,
+    schedule_source: str,
+    fallback_from: str,
+    strict_result: ScheduleResult,
+    strict_failure_reason: str,
+) -> None:
+    fixed_duration_target = _int_or_none(
+        result.stats.get("max_makespan_days")
+        or result.objective_breakdown.get("max_makespan_days")
+    )
+    fixed_duration_overrun_days = max(0, (result.objective_days or 0) - fixed_duration_target) if fixed_duration_target is not None else 0
+    target_lateness_days = sum(
+        milestone.lateness_days
+        for milestone in result.milestone_results
+        if milestone.mode == "hard"
+    )
+    metadata = {
+        "enabled": True,
+        "schedule_source": schedule_source,
+        "fallback_from": fallback_from,
+        "strict_refinement_status": strict_result.status,
+        "strict_refinement_failure_reason": strict_failure_reason,
+        "objective_status": result.status,
+        "target_lateness_days": target_lateness_days,
+        "fixed_duration_overrun_days": fixed_duration_overrun_days,
+        "best_effort_score": result.objective_breakdown.get("best_effort_score")
+        or result.objective_breakdown.get("weighted_objective"),
+        "wall_time_seconds": result.stats.get("wall_time_seconds"),
+        "strict_wall_time_seconds": strict_result.stats.get("wall_time_seconds"),
+        "relaxed_constraints": _best_effort_relaxed_constraints(
+            result,
+            fixed_duration_target=fixed_duration_target,
+            fixed_duration_overrun_days=fixed_duration_overrun_days,
+        ),
+    }
+    result.stats["best_effort_refinement"] = metadata
+    result.objective_breakdown["best_effort_refinement"] = {
+        "enabled": True,
+        "schedule_source": schedule_source,
+        "target_lateness_days": target_lateness_days,
+        "fixed_duration_overrun_days": fixed_duration_overrun_days,
+        "best_effort_score": metadata["best_effort_score"],
+        "relaxed_constraints": metadata["relaxed_constraints"],
+    }
+
+
+def _best_effort_relaxed_constraints(
+    result: ScheduleResult,
+    *,
+    fixed_duration_target: int | None,
+    fixed_duration_overrun_days: int,
+) -> list[dict[str, Any]]:
+    constraints: list[dict[str, Any]] = []
+    for milestone in result.milestone_results:
+        if milestone.mode != "hard" or milestone.actual_date is None:
+            continue
+        constraints.append(
+            {
+                "type": "hard_milestone",
+                "id": milestone.id,
+                "name": milestone.name,
+                "target": milestone.target_date.isoformat(),
+                "actual": milestone.actual_date.isoformat(),
+                "lateness_days": milestone.lateness_days,
+                "scope": milestone.scope_id or milestone.scope_type,
+            }
+        )
+    if fixed_duration_target is not None:
+        constraints.append(
+            {
+                "type": "fixed_duration",
+                "name": "固定工期目标",
+                "target": fixed_duration_target,
+                "actual": result.objective_days,
+                "lateness_days": fixed_duration_overrun_days,
+            }
+        )
+    return constraints
+
+
+def _int_or_none(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _fixed_resource_recommendation(
@@ -650,13 +782,50 @@ def _minimum_resource_candidate_result(
         result.objective_breakdown.update(metadata)
         return result
 
-    result = min_resource_result.model_copy(deep=True)
     fallback_reason = f"minimum_resource_refinement_{refined_result.status.lower()}"
+    best_effort_result = solve_control_priority_schedule(
+        refined_input,
+        enforce_hard_milestones=True,
+        baseline_result=min_resource_result,
+        warm_start_result=min_resource_result,
+        relax_target_constraints=True,
+    )
+    if best_effort_result.status in {"OPTIMAL", "FEASIBLE"}:
+        result = best_effort_result.model_copy(deep=True)
+        result.validation = list(min_resource_result.validation) + list(refined_result.validation) + list(result.validation)
+        result.validation.append(
+            ValidationMessage(
+                level="warning",
+                message="最少资源候选严格精排未得到可用结果，已放松强制节点和固定工期目标返回候选资源最佳努力精排。",
+            )
+        )
+        metadata = {
+            "schedule_source": MINIMUM_RESOURCES_BEST_EFFORT_SOURCE,
+            "recommended_schedule_source": MINIMUM_RESOURCES_BEST_EFFORT_SOURCE,
+            "minimum_resource_refinement_status": refined_result.status,
+            "minimum_resource_best_effort_status": best_effort_result.status,
+            "minimum_resource_refinement_fallback_reason": fallback_reason,
+            "skipped_named_refinement_reason": fallback_reason,
+            "warm_start_used": bool(best_effort_result.stats.get("warm_start_used")),
+        }
+        result.stats.update(metadata)
+        result.objective_breakdown.update(metadata)
+        _apply_best_effort_refinement_metadata(
+            result,
+            schedule_source=MINIMUM_RESOURCES_BEST_EFFORT_SOURCE,
+            fallback_from=MINIMUM_RESOURCES_REFINED_SOURCE,
+            strict_result=refined_result,
+            strict_failure_reason=fallback_reason,
+        )
+        return result
+
+    result = min_resource_result.model_copy(deep=True)
     result.validation = list(min_resource_result.validation) + list(refined_result.validation)
+    result.validation.extend(best_effort_result.validation)
     result.validation.append(
         ValidationMessage(
             level="warning",
-            message="最少资源候选方案的二次精排未在当前时限内返回可用结果，已保留已验证的可行候选排程。",
+            message="最少资源候选方案的严格二次精排和最佳努力精排均未返回可用结果，已保留已验证的可行候选排程。",
         )
     )
     metadata = {
@@ -664,6 +833,8 @@ def _minimum_resource_candidate_result(
         "recommended_schedule_source": MINIMUM_RESOURCES_FALLBACK_SOURCE,
         "minimum_resource_refinement_status": refined_result.status,
         "minimum_resource_refinement_fallback_reason": fallback_reason,
+        "minimum_resource_best_effort_status": best_effort_result.status,
+        "best_effort_refinement_failure_reason": f"best_effort_{best_effort_result.status.lower()}",
         "skipped_named_refinement_reason": fallback_reason,
     }
     result.stats.update(metadata)
