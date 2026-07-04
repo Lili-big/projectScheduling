@@ -229,7 +229,7 @@ export type ScenarioInput = {
 export type AiParameterMaterialKind = "text" | "word" | "excel" | "pdf" | "image";
 export type AiParameterParseStatus = "parsed" | "partially_parsed" | "failed";
 export type AiParameterRunStatus = "ready" | "extracting" | "completed" | "partially_failed" | "failed";
-export type AiParameterCategory = "process_productivity" | "resource_pool" | "milestone";
+export type AiParameterCategory = "process_productivity" | "process_method_assignment" | "resource_pool" | "milestone";
 export type AiParameterConfidence = "High" | "Medium" | "Low";
 export type AiParameterSuggestionStatus =
   | "suggested"

@@ -123,12 +123,19 @@ export function ParameterSuggestionReview({
 }
 
 function suggestionTitle(suggestion: AiParameterSuggestion): string {
+  if (suggestion.category === "process_method_assignment") return "构件工艺设置";
   if (suggestion.category === "process_productivity") return "工效参数";
   if (suggestion.category === "resource_pool") return "资源配置";
   return "里程碑参数";
 }
 
 function targetLabel(suggestion: AiParameterSuggestion): string {
+  if (suggestion.category === "process_method_assignment") {
+    const count = Number(suggestion.target_ref.matched_count ?? 0);
+    const processName = String(suggestion.target_ref.process_name ?? suggestion.proposed_value ?? "目标工艺");
+    const action = String(suggestion.target_ref.action ?? "工艺设置");
+    return `${action} · ${processName}${count > 0 ? ` · 影响 ${count} 个构件` : ""}`;
+  }
   const values = [
     suggestion.target_ref.process_name,
     suggestion.target_ref.resource_label,

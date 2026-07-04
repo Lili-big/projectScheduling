@@ -57,7 +57,7 @@ BalanceBucket = Literal["week", "month"]
 AiParameterMaterialKind = Literal["text", "word", "excel", "pdf", "image"]
 AiParameterParseStatus = Literal["parsed", "partially_parsed", "failed"]
 AiParameterRunStatus = Literal["ready", "extracting", "completed", "partially_failed", "failed"]
-AiParameterCategory = Literal["process_productivity", "resource_pool", "milestone"]
+AiParameterCategory = Literal["process_productivity", "process_method_assignment", "resource_pool", "milestone"]
 AiParameterConfidence = Literal["High", "Medium", "Low"]
 AiParameterSuggestionStatus = Literal[
     "suggested",

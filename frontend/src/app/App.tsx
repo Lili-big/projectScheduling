@@ -24,7 +24,6 @@ import { createPortal } from "react-dom";
 
 import {
   applyAiParameterSuggestions as applyAiParameterSuggestionsRequest,
-  applyProcessNaturalLanguage as applyProcessNaturalLanguageRequest,
   compareScenarios,
   generateScheduleInput,
   getDemoScenario,
@@ -83,8 +82,6 @@ import type {
   CompareResponse,
   ImportBridgeParamsResponse,
   LocalScenarioConfig,
-  ProcessNlChange,
-  ProcessNlResponse,
   ContinuitySplitDetail,
   ContinuityJumpDetail,
   ResourcePathStep,
@@ -164,7 +161,6 @@ import { ProcessTab } from "../features/process/ProcessTab";
 import { LogicTab } from "../features/logic/LogicTab";
 import { ResourcesTab } from "../features/resources/ResourcesTab";
 import { MilestonesTab } from "../features/milestones/MilestonesTab";
-import { GlobalProcessAssistant } from "../features/assistant/GlobalProcessAssistant";
 import { ParameterAssistantPanel } from "../features/assistant/parameter";
 import { Metric } from "../components/common/Metric";
 import { PanelTitle } from "../components/common/PanelTitle";
@@ -518,36 +514,6 @@ export default function App() {
       await generateTaskViewForScenario(nextScenario, { openTasks: true });
     } catch (err) {
       setError(errorText(err));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function applyProcessNaturalLanguage(prompt: string): Promise<ProcessNlResponse | null> {
-    if (!scenario) return null;
-    setBusy("nl");
-    setError(null);
-    try {
-      const requestScenario = normalizeScenarioForWorkspace(scenario);
-      const result = await applyProcessNaturalLanguageRequest({ scenario: requestScenario, prompt });
-      const resultScenario = normalizeScenarioForWorkspace(result.scenario);
-      const resultFingerprint = scenarioFingerprintForSolve(resultScenario);
-      previousScenarioFingerprintRef.current = resultFingerprint;
-      setScenario(resultScenario);
-      if (hasProcessLibraryChanged(scenario.process_library, resultScenario.process_library)) {
-        setProcessLibraryDirty(true);
-      }
-      if (hasResourcePoolsChanged(scenario.resource_pools, resultScenario.resource_pools)) {
-        setResourcesDirty(true);
-      }
-      setSolveResult(null);
-      setSolveResultScenarioFingerprint(null);
-      setComparison(null);
-      await generateTaskViewForScenario(resultScenario, { openTasks: false });
-      return { ...result, scenario: resultScenario };
-    } catch (err) {
-      setError(errorText(err));
-      return null;
     } finally {
       setBusy(null);
     }
@@ -969,12 +935,6 @@ export default function App() {
           busy={busy === "aiParameter"}
           onParse={parseAiParameterAssistant}
           onApply={applyAiParameterSuggestions}
-        />
-      )}
-      {scenario && (
-        <GlobalProcessAssistant
-          onApplyProcessNaturalLanguage={applyProcessNaturalLanguage}
-          applyingProcessText={busy === "nl"}
         />
       )}
     </div>

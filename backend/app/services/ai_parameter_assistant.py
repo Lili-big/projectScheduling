@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from ..process_nl import ensure_process_for_assignment, extract_process_method_suggestions
 from ..models import (
     AiParameterApplyRequest,
     AiParameterApplyResponse,
@@ -50,6 +51,47 @@ def parse_ai_parameter_assistant(
     parsed_materials = [material for material in materials if material.parse_status != "failed"]
     if not parsed_materials:
         raise AiParameterAssistantError("所有资料都解析失败，请检查文件格式或重新上传。", status_code=422)
+
+    if fields.get("assistant_mode", "parameter") == "process_method":
+        material_by_id = {material.material_id: material for material in materials}
+        prompt = "\n".join(
+            (material.content_text or material.source_summary).strip()
+            for material in parsed_materials
+            if (material.content_text or material.source_summary).strip()
+        )
+        raw_suggestions, payload_warnings = extract_process_method_suggestions(
+            scenario,
+            prompt,
+            material_id=parsed_materials[0].material_id,
+        )
+        suggestions = _standardize_suggestions(raw_suggestions, scenario, material_by_id)
+        suggestions, conflict_groups = _apply_conflicts_and_status(suggestions)
+        summaries = [material.summary() for material in materials]
+        run_id = f"run_{uuid.uuid4().hex[:12]}"
+        entry = store.put(
+            run_id=run_id,
+            scenario_id=scenario.scenario_id,
+            suggestions=suggestions,
+            conflict_groups=conflict_groups,
+            candidate_additions=[],
+            material_summaries=summaries,
+        )
+        warnings = [*material_warnings, *[ValidationMessage(level="warning", message=warning) for warning in payload_warnings]]
+        return AiParameterParseResponse(
+            run_id=run_id,
+            status="partially_failed" if any(summary.parse_status == "failed" for summary in summaries) else "completed",
+            material_count=len(materials),
+            total_size_bytes=sum(material.size_bytes for material in materials),
+            suggestion_count=len(suggestions),
+            material_summaries=summaries,
+            errors=[],
+            warnings=warnings,
+            expires_at=entry.expires_at,
+            suggestions=suggestions,
+            conflict_groups=conflict_groups,
+            candidate_additions=[],
+            manual_completion_count=sum(1 for item in suggestions if item.status == "needs_manual_input"),
+        )
 
     try:
         payload = (client or get_ai_parameter_client()).understand(scenario=scenario, materials=parsed_materials)
@@ -281,6 +323,14 @@ def _current_value_for(scenario: ScenarioInput, category: str, target_ref: dict[
         if not milestone:
             return None
         return milestone.target_date.isoformat()
+    if category == "process_method_assignment":
+        component_ids = target_ref.get("component_ids")
+        components = _find_components_by_ids(scenario, component_ids if isinstance(component_ids, list) else [])
+        values = sorted({component.method_id or "" for component in components})
+        if len(values) == 1:
+            return values[0] or None
+        if len(values) > 1:
+            return "mixed"
     return None
 
 
@@ -345,6 +395,8 @@ def _unresolved_selected_conflicts(
 def _apply_suggestion(scenario: ScenarioInput, suggestion: AiParameterSuggestion, summary: AiParameterApplicationSummary) -> None:
     if suggestion.category == "process_productivity":
         _apply_process_suggestion(scenario, suggestion, summary)
+    elif suggestion.category == "process_method_assignment":
+        _apply_process_method_assignment_suggestion(scenario, suggestion, summary)
     elif suggestion.category == "resource_pool":
         _apply_resource_suggestion(scenario, suggestion, summary)
     elif suggestion.category == "milestone":
@@ -367,6 +419,30 @@ def _apply_process_suggestion(scenario: ScenarioInput, suggestion: AiParameterSu
         default_option.productivity_unit = process.productivity_unit
         default_option.duration_method = process.duration_method
     summary.applied_items.append(_applied_item(suggestion, old, process.productivity_value))
+
+
+def _apply_process_method_assignment_suggestion(scenario: ScenarioInput, suggestion: AiParameterSuggestion, summary: AiParameterApplicationSummary) -> None:
+    target_ref = suggestion.target_ref
+    process = ensure_process_for_assignment(
+        scenario,
+        component_type=str(target_ref.get("component_type") or "") or None,
+        process_method_id=str(target_ref.get("process_method_id") or suggestion.proposed_value or "") or None,
+        process_name=str(target_ref.get("process_name") or "") or None,
+    )
+    if process is None:
+        raise ValueError("未找到目标工艺。")
+    component_ids = target_ref.get("component_ids")
+    if not isinstance(component_ids, list):
+        raise ValueError("缺少目标构件。")
+    components = _find_components_by_ids(scenario, component_ids)
+    if not components:
+        raise ValueError("未找到目标构件。")
+    old_values = sorted({component.method_id or "" for component in components})
+    old: Any = (old_values[0] or None) if len(old_values) == 1 else "mixed"
+    method_id = process.method_id or process.id
+    for component in components:
+        component.method_id = method_id
+    summary.applied_items.append(_applied_item(suggestion, old, {"method_id": method_id, "matched_count": len(components)}))
 
 
 def _apply_resource_suggestion(scenario: ScenarioInput, suggestion: AiParameterSuggestion, summary: AiParameterApplicationSummary) -> None:
@@ -486,6 +562,18 @@ def _find_process(scenario: ScenarioInput, target_ref: dict[str, Any]) -> Proces
     process_id = target_ref.get("process_id")
     process_name = target_ref.get("process_name")
     return next((item for item in scenario.process_library if item.id == process_id or item.process_name == process_name), None)
+
+
+def _find_components_by_ids(scenario: ScenarioInput, component_ids: list[Any]) -> list[Any]:
+    wanted = {str(component_id) for component_id in component_ids}
+    components = []
+    for bridge in scenario.project.bridges:
+        for section in bridge.work_sections:
+            for structure in section.structures:
+                for component in structure.components:
+                    if component.id in wanted:
+                        components.append(component)
+    return components
 
 
 def _find_resource_pool(scenario: ScenarioInput, target_ref: dict[str, Any]) -> ResourcePool | None:

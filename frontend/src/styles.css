@@ -751,30 +751,6 @@ code {
   color: #92400e;
 }
 
-.nl-process-panel {
-  position: fixed;
-  right: 12px;
-  bottom: 16px;
-  z-index: 60;
-  width: min(420px, 100%);
-  max-width: calc(100vw - 24px);
-  max-height: min(440px, calc(100vh - 72px));
-  padding: 12px;
-  display: grid;
-  gap: 10px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 18px 45px rgba(15, 39, 66, 0.18);
-}
-
-.nl-process-title {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-}
-
 .nl-process-heading {
   display: flex;
   align-items: center;
@@ -800,15 +776,6 @@ code {
   color: #0f766e;
 }
 
-.nl-process-title strong {
-  font-size: 14px;
-}
-
-.nl-process-title span {
-  color: #64748b;
-  font-size: 12px;
-}
-
 .icon-button {
   width: 30px;
   height: 30px;
@@ -822,11 +789,6 @@ code {
 
 .icon-button.danger {
   color: #b91c1c;
-}
-
-.nl-process-panel textarea {
-  min-height: 86px;
-  resize: vertical;
 }
 
 .assistant-examples {
@@ -847,47 +809,6 @@ code {
 .assistant-submit {
   width: 100%;
   justify-content: center;
-}
-
-.assistant-launcher {
-  position: fixed;
-  right: 0;
-  bottom: 132px;
-  z-index: 20;
-  height: 42px;
-  padding: 0 12px 0 10px;
-  border-radius: 8px 0 0 8px;
-  border: 1px solid #0ea5a4;
-  border-right: 0;
-  background: #0ea5a4;
-  color: #fff;
-  box-shadow: 0 12px 30px rgba(15, 39, 66, 0.2);
-}
-
-.assistant-launcher span {
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.nl-process-result {
-  display: grid;
-  gap: 6px;
-  max-height: 120px;
-  overflow: auto;
-}
-
-.nl-process-result span {
-  padding: 7px 8px;
-  border-radius: 6px;
-  background: #ecfdf5;
-  color: #047857;
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.nl-process-result .warn {
-  background: #fffbeb;
-  color: #92400e;
 }
 
 .ai-param-panel {
@@ -930,6 +851,29 @@ code {
   font-size: 12px;
 }
 
+.ai-param-mode-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 3px;
+  border-radius: 7px;
+  background: #f1f5f9;
+}
+
+.ai-param-mode-tabs button {
+  height: 30px;
+  border: 0;
+  background: transparent;
+  color: #475569;
+  font-size: 13px;
+}
+
+.ai-param-mode-tabs button.is-active {
+  background: #ffffff;
+  color: #0f766e;
+  box-shadow: 0 1px 4px rgba(15, 39, 66, 0.12);
+}
+
 .ai-param-inputs {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -940,6 +884,10 @@ code {
 .ai-param-inputs textarea {
   min-height: 76px;
   resize: vertical;
+}
+
+.ai-param-inputs textarea:only-child {
+  grid-column: 1 / -1;
 }
 
 .ai-param-upload {
@@ -3037,10 +2985,6 @@ tbody tr:hover {
     overflow: visible;
   }
 
-  .nl-process-panel {
-    width: 100%;
-  }
-
   .ai-param-panel {
     left: 12px;
     right: 12px;
@@ -3123,10 +3067,6 @@ tbody tr:hover {
 
   .check-row {
     justify-self: start;
-  }
-
-  .assistant-launcher {
-    bottom: 90px;
   }
 
   .ai-param-launcher {

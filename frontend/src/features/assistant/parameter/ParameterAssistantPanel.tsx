@@ -27,6 +27,13 @@ import { ParameterConflictResolver } from "./ParameterConflictResolver";
 import { ParameterSuggestionReview } from "./ParameterSuggestionReview";
 
 const maxFiles = 10;
+type AssistantMode = "parameter" | "process_method";
+
+const processExamples = [
+  { label: "默认旋挖", prompt: "桩基默认采用旋挖钻施工，其中1#墩-1桩基、1#墩-2桩基采用人工挖孔桩。" },
+  { label: "主墩爬模", prompt: "渠溪河大桥连续梁主墩使用爬模施工。" },
+  { label: "指定墩位", prompt: "左幅的3#墩和4#墩的桩基工艺设置成人工挖孔。" },
+];
 
 export function ParameterAssistantPanel({
   scenario,
@@ -40,6 +47,7 @@ export function ParameterAssistantPanel({
   onApply: (request: AiParameterApplyRequest) => Promise<AiParameterApplyResponse | null>;
 }) {
   const [open, setOpen] = useState(true);
+  const [assistantMode, setAssistantMode] = useState<AssistantMode>("parameter");
   const [textInput, setTextInput] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [parseResult, setParseResult] = useState<AiParameterParseResponse | null>(null);
@@ -54,6 +62,7 @@ export function ParameterAssistantPanel({
   );
   const canApply = parseResult ? canApplyAiParameterSelection(selectedIds, resolvedConflicts) : false;
   const totalFileSize = files.reduce((sum, file) => sum + file.size, 0);
+  const isProcessMode = assistantMode === "process_method";
 
   if (!open) {
     return (
@@ -64,19 +73,32 @@ export function ParameterAssistantPanel({
     );
   }
 
+  function switchMode(mode: AssistantMode) {
+    setAssistantMode(mode);
+    setParseResult(null);
+    setApplyResult(null);
+    setSelectedIds(new Set());
+    setConflictResolutions({});
+    setLocalError(null);
+    if (mode === "process_method") setFiles([]);
+  }
+
   async function submitParse() {
     const trimmedText = textInput.trim();
     if (busy) return;
-    if (!trimmedText && files.length === 0) {
-      setLocalError("请先添加文本或文件。");
+    if (!trimmedText && (!files.length || isProcessMode)) {
+      setLocalError(isProcessMode ? "请先输入工艺设置要求。" : "请先添加文本或文件。");
       return;
     }
     setLocalError(null);
     setApplyResult(null);
     const payload = new FormData();
     payload.append("scenario", JSON.stringify(scenario));
+    payload.append("assistant_mode", assistantMode);
     if (trimmedText) payload.append("text_input", trimmedText);
-    files.forEach((file, index) => payload.append(`file_${index}`, file, file.name));
+    if (!isProcessMode) {
+      files.forEach((file, index) => payload.append(`file_${index}`, file, file.name));
+    }
     const result = await onParse(payload);
     if (!result) return;
     setParseResult(result);
@@ -131,7 +153,7 @@ export function ParameterAssistantPanel({
           <span className="assistant-mark"><Bot size={16} /></span>
           <div>
             <strong>AI 参数输入助手</strong>
-            <span>当前方案 · 工效 / 资源 / 里程碑</span>
+            <span>当前方案 · 工艺 / 工效 / 资源 / 里程碑</span>
           </div>
         </div>
         <button className="icon-button" type="button" aria-label="收起 AI 参数助手" onClick={() => setOpen(false)}>
@@ -139,29 +161,50 @@ export function ParameterAssistantPanel({
         </button>
       </div>
 
+      <div className="ai-param-mode-tabs" role="tablist" aria-label="AI 助手模式">
+        <button type="button" className={assistantMode === "parameter" ? "is-active" : ""} onClick={() => switchMode("parameter")}>
+          资料补参
+        </button>
+        <button type="button" className={assistantMode === "process_method" ? "is-active" : ""} onClick={() => switchMode("process_method")}>
+          工艺设置
+        </button>
+      </div>
+
       <div className="ai-param-inputs">
         <textarea
           value={textInput}
           onChange={(event) => setTextInput(event.target.value)}
-          placeholder="粘贴设计说明、施组、资源计划或里程碑片段"
+          placeholder={isProcessMode ? "例如：左幅的3#墩和4#墩的桩基工艺设置成人工挖孔。" : "粘贴设计说明、施组、资源计划或里程碑片段"}
         />
-        <label className="ai-param-upload">
-          <Upload size={16} />
-          <span>上传资料</span>
-          <input
-            multiple
-            type="file"
-            accept=".txt,.md,.csv,.xlsx,.xlsm,.doc,.docx,.pdf,.png,.jpg,.jpeg,.webp,.bmp"
-            onChange={(event) => {
-              const selected = Array.from(event.target.files ?? []);
-              setFiles((current) => [...current, ...selected].slice(0, maxFiles));
-              event.currentTarget.value = "";
-            }}
-          />
-        </label>
+        {!isProcessMode && (
+          <label className="ai-param-upload">
+            <Upload size={16} />
+            <span>上传资料</span>
+            <input
+              multiple
+              type="file"
+              accept=".txt,.md,.csv,.xlsx,.xlsm,.doc,.docx,.pdf,.png,.jpg,.jpeg,.webp,.bmp"
+              onChange={(event) => {
+                const selected = Array.from(event.target.files ?? []);
+                setFiles((current) => [...current, ...selected].slice(0, maxFiles));
+                event.currentTarget.value = "";
+              }}
+            />
+          </label>
+        )}
       </div>
 
-      {files.length > 0 && (
+      {isProcessMode && (
+        <div className="assistant-examples" aria-label="工艺设置快捷示例">
+          {processExamples.map((example) => (
+            <button type="button" key={example.label} onClick={() => setTextInput(example.prompt)}>
+              {example.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!isProcessMode && files.length > 0 && (
         <div className="ai-param-file-list">
           <div className="ai-param-file-summary">
             <span>{files.length}/{maxFiles} 个文件</span>
@@ -184,11 +227,11 @@ export function ParameterAssistantPanel({
       <button
         className="primary assistant-submit"
         type="button"
-        disabled={busy || (!textInput.trim() && files.length === 0)}
+        disabled={busy || (!textInput.trim() && (isProcessMode || files.length === 0))}
         onClick={submitParse}
       >
         {busy ? <Loader2 className="spin" size={16} /> : <Sparkles size={16} />}
-        解析参数
+        {isProcessMode ? "解析工艺建议" : "解析参数"}
       </button>
 
       {parseResult && (

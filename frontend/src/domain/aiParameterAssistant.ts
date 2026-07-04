@@ -16,6 +16,7 @@ export type AiParameterSuggestionGroup = {
 };
 
 export const aiParameterCategoryLabels: Record<AiParameterCategory, string> = {
+  process_method_assignment: "工艺设置",
   process_productivity: "工艺工效",
   resource_pool: "资源数量",
   milestone: "里程碑",
@@ -35,7 +36,7 @@ export const aiParameterMaterialKindLabels: Record<AiParameterMaterialKind, stri
   image: "图片",
 };
 
-const categoryOrder: AiParameterCategory[] = ["process_productivity", "resource_pool", "milestone"];
+const categoryOrder: AiParameterCategory[] = ["process_method_assignment", "process_productivity", "resource_pool", "milestone"];
 const confidenceOrder: Record<AiParameterConfidence, number> = { High: 0, Medium: 1, Low: 2 };
 
 export function groupAiParameterSuggestions(suggestions: AiParameterSuggestion[]): AiParameterSuggestionGroup[] {
@@ -94,6 +95,7 @@ export function formatAiParameterValue(value: unknown): string {
     return Number.isInteger(value) ? String(value) : value.toFixed(4).replace(/\.?0+$/, "");
   }
   if (typeof value === "boolean") return value ? "是" : "否";
+  if (value === "mixed") return "多个当前值";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }
