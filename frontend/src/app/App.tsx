@@ -11,6 +11,7 @@
   GitCompare,
   Loader2,
   Play,
+  RotateCcw,
   Save,
   Server,
   Sparkles,
@@ -41,6 +42,8 @@ import type {
   WorkSectionSide,
   ResourceCostType,
   ControlLevel,
+  ObjectiveTermConfig,
+  ObjectiveTermId,
   ScheduleStrategy,
   ScheduleStrategyConfig,
   ResourceGuaranteeMode,
@@ -169,6 +172,93 @@ import {
 } from "../components/common/PredecessorPopover";
 import type { PredecessorDetail } from "../components/common/PredecessorPopover";
 
+type ObjectiveTermDefinition = {
+  id: ObjectiveTermId;
+  label: string;
+  group: string;
+  description: string;
+  defaultWeight: number;
+};
+
+const objectiveTermDefinitions: ObjectiveTermDefinition[] = [
+  {
+    id: "control_node_late",
+    label: "控制节点迟延",
+    group: "控制优先",
+    description: "压低控制/关键里程碑晚点天数；按控制节点迟延天数计罚。",
+    defaultWeight: 1_000_000_000,
+  },
+  {
+    id: "control_buffer_risk",
+    label: "控制缓冲风险",
+    group: "控制优先",
+    description: "提前暴露控制链缓冲不足；按任务完成接近控制期限的风险量计罚。",
+    defaultWeight: 1_000_000,
+  },
+  {
+    id: "risk_related_control_wait",
+    label: "风险相关控制链等待",
+    group: "控制优先",
+    description: "减少风险任务导致的控制链等待；按相关前后置等待间隔计罚。",
+    defaultWeight: 1_000_000,
+  },
+  {
+    id: "same_structure_craft_split",
+    label: "同结构同工艺连续性",
+    group: "连续性",
+    description: "避免同一结构同工艺被多资源拆散；按拆分次数计罚。",
+    defaultWeight: 100_000,
+  },
+  {
+    id: "resource_workload_balance",
+    label: "同类资源工作量均衡",
+    group: "资源组织",
+    description: "均衡同类资源工作量；按资源活跃天数偏差计罚。",
+    defaultWeight: 20_000,
+  },
+  {
+    id: "resource_idle",
+    label: "资源空闲",
+    group: "资源组织",
+    description: "减少已投入资源中途空等；按资源任务间空闲天数计罚。",
+    defaultWeight: 2_000,
+  },
+  {
+    id: "resource_path_continuity",
+    label: "资源路径连续性",
+    group: "资源组织",
+    description: "让同一资源沿相邻结构连续推进；按跨墩跳转距离和换向计罚。",
+    defaultWeight: 500,
+  },
+  {
+    id: "makespan_and_soft_milestone",
+    label: "总工期和软里程碑",
+    group: "工期",
+    description: "压缩总工期并兼顾软里程碑；按完工跨度和软节点罚分计罚。",
+    defaultWeight: 100,
+  },
+  {
+    id: "normal_balance",
+    label: "普通工程均衡",
+    group: "普通工程",
+    description: "让普通工程在窗口内均衡展开；按普通任务相对目标节奏偏差计罚。",
+    defaultWeight: 1,
+  },
+  {
+    id: "spatial_resource_assignment",
+    label: "空间资源分配偏好",
+    group: "连续性",
+    description: "偏好资源服务空间更近的结构；按资源与结构空间匹配代价计罚。",
+    defaultWeight: 1,
+  },
+];
+
+function defaultObjectiveTermsConfig(): Record<ObjectiveTermId, ObjectiveTermConfig> {
+  return Object.fromEntries(
+    objectiveTermDefinitions.map((term) => [term.id, { enabled: true, weight: term.defaultWeight }]),
+  ) as Record<ObjectiveTermId, ObjectiveTermConfig>;
+}
+
 const defaultScheduleStrategyConfig: ScheduleStrategyConfig = {
   strategy: "comprehensive",
   resource_guarantee: "priority",
@@ -178,6 +268,7 @@ const defaultScheduleStrategyConfig: ScheduleStrategyConfig = {
   normal_max_early_finish_days: 60,
   max_parallel_normal_per_work_section: 5,
   enable_balance_objective: true,
+  objective_terms: defaultObjectiveTermsConfig(),
 };
 
 const scheduleStrategyLabels: Record<ScheduleStrategy, string> = {
@@ -298,6 +389,7 @@ export default function App() {
   const [solveResultScenarioFingerprint, setSolveResultScenarioFingerprint] = useState<string | null>(null);
   const [openTabs, setOpenTabs] = useState<TabKey[]>(["tasks"]);
   const [activeTab, setActiveTab] = useState<TabKey | null>("tasks");
+  const [sideNavCollapsed, setSideNavCollapsed] = useState(false);
   const [ganttMode, setGanttMode] = useState<GanttMode>("by_structure");
   const [mvpSelectedWorkPointId, setMvpSelectedWorkPointId] = useState("");
   const [mvpStartDate, setMvpStartDate] = useState(todayDateValue);
@@ -945,8 +1037,14 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <div className="app-body">
-        <SideNavigation activeTab={activeTab} openTabs={openTabs} onOpen={openModule} />
+      <div className={`app-body ${sideNavCollapsed ? "side-nav-collapsed" : ""}`}>
+        <SideNavigation
+          activeTab={activeTab}
+          openTabs={openTabs}
+          onOpen={openModule}
+          collapsed={sideNavCollapsed}
+          onToggleCollapsed={() => setSideNavCollapsed((current) => !current)}
+        />
 
         <main className="workspace">
           <WorkspaceTabStrip
@@ -1522,6 +1620,8 @@ function ResultsTab({
   const controlPriorityAnalysis = controlPriorityAnalysisFromResult(result);
   const resourceOrganization = resourceOrganizationFromResult(result);
   const strategyConfig = withDefaultScheduleStrategy(scenario?.schedule_strategy);
+  const objectiveTerms = strategyConfig.objective_terms ?? defaultObjectiveTermsConfig();
+  const enabledObjectiveCount = objectiveTermDefinitions.filter((term) => objectiveTerms[term.id]?.enabled).length;
   const isMvp = variant === "mvp";
   const resourcePoolsForDisplay = scenario?.resource_pools ?? [];
   const workSectionDisplayById = useMemo(
@@ -1584,7 +1684,31 @@ function ResultsTab({
 
   function updateStrategyConfig(patch: Partial<ScheduleStrategyConfig>) {
     if (!scenario) return;
-    onPatchScenario({ schedule_strategy: { ...strategyConfig, ...patch } });
+    onPatchScenario({ schedule_strategy: withDefaultScheduleStrategy({ ...strategyConfig, ...patch }) });
+  }
+
+  function updateObjectiveTerm(termId: ObjectiveTermId, patch: Partial<ObjectiveTermConfig>) {
+    if (!scenario) return;
+    const current = objectiveTerms[termId] ?? defaultObjectiveTermsConfig()[termId];
+    if (patch.enabled === false && current?.enabled && enabledObjectiveCount <= 1) return;
+    const nextTerms = {
+      ...objectiveTerms,
+      [termId]: {
+        ...current,
+        ...patch,
+      },
+    } as Record<ObjectiveTermId, ObjectiveTermConfig>;
+    updateStrategyConfig({
+      objective_terms: nextTerms,
+      enable_balance_objective: nextTerms.normal_balance.enabled,
+    });
+  }
+
+  function restoreDefaultObjectiveTerms() {
+    updateStrategyConfig({
+      objective_terms: defaultObjectiveTermsConfig(),
+      enable_balance_objective: true,
+    });
   }
 
   function predecessorDetails(task: ScheduledTask): PredecessorDetail[] {
@@ -1709,17 +1833,72 @@ function ResultsTab({
                     ))}
                   </select>
                 </label>
-                <label className="check-row">
-                  <input
-                    type="checkbox"
-                    checked={strategyConfig.enable_balance_objective}
-                    onChange={(event) => updateStrategyConfig({ enable_balance_objective: event.target.checked })}
-                  />
-                  启用普通工程均衡目标
-                </label>
               </>
             )}
           </div>
+          {!isMvp && (
+            <div className="objective-config">
+              <div className="objective-config-header">
+                <div>
+                  <h3>目标函数配置</h3>
+                  <span>已启用 {enabledObjectiveCount}/{objectiveTermDefinitions.length} 项</span>
+                </div>
+                <button className="secondary objective-reset-button" type="button" onClick={restoreDefaultObjectiveTerms}>
+                  <RotateCcw size={15} />
+                  恢复默认
+                </button>
+              </div>
+              <div className="objective-table-wrap">
+                <table className="objective-table">
+                  <thead>
+                    <tr>
+                      <th>启用</th>
+                      <th>指标</th>
+                      <th>说明</th>
+                      <th>当前权重</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {objectiveTermDefinitions.map((term) => {
+                      const termConfig = objectiveTerms[term.id];
+                      const keepOneEnabled = termConfig.enabled && enabledObjectiveCount <= 1;
+                      return (
+                        <tr className={termConfig.enabled ? undefined : "objective-row-disabled"} key={term.id}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={termConfig.enabled}
+                              disabled={keepOneEnabled}
+                              aria-label={`启用${term.label}`}
+                              onChange={(event) => updateObjectiveTerm(term.id, { enabled: event.target.checked })}
+                            />
+                          </td>
+                          <td>
+                            <strong>{term.label}</strong>
+                            <span>{term.group}</span>
+                          </td>
+                          <td className="objective-description">{term.description}</td>
+                          <td>
+                            <input
+                              type="number"
+                              min={1}
+                              max={1_000_000_000}
+                              step={1}
+                              value={termConfig.weight}
+                              disabled={!termConfig.enabled}
+                              onChange={(event) => updateObjectiveTerm(term.id, {
+                                weight: normalizeObjectiveWeight(event.target.value),
+                              })}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
           {!isMvp && (
             <details className="advanced-schedule-config">
               <summary>高级排程参数</summary>
@@ -4064,8 +4243,34 @@ function formatPercent(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
+function normalizeObjectiveWeight(value: string | number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.min(1_000_000_000, Math.max(1, Math.round(parsed)));
+}
+
 function withDefaultScheduleStrategy(config?: ScheduleStrategyConfig | null): ScheduleStrategyConfig {
-  return { ...defaultScheduleStrategyConfig, ...(config ?? {}) };
+  const defaultTerms = defaultObjectiveTermsConfig();
+  const incomingTerms: Partial<Record<ObjectiveTermId, ObjectiveTermConfig>> = config?.objective_terms ?? {};
+  const objectiveTerms = objectiveTermDefinitions.reduce<Record<ObjectiveTermId, ObjectiveTermConfig>>((next, term) => {
+    const incoming = incomingTerms[term.id];
+    next[term.id] = {
+      enabled: incoming?.enabled ?? true,
+      weight: normalizeObjectiveWeight(incoming?.weight ?? term.defaultWeight),
+    };
+    return next;
+  }, defaultTerms);
+
+  if (!config?.objective_terms?.normal_balance && config?.enable_balance_objective === false) {
+    objectiveTerms.normal_balance.enabled = false;
+  }
+
+  return {
+    ...defaultScheduleStrategyConfig,
+    ...(config ?? {}),
+    objective_terms: objectiveTerms,
+    enable_balance_objective: objectiveTerms.normal_balance.enabled,
+  };
 }
 
 type SelectedResourceCost = {

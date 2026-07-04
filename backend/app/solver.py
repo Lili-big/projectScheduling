@@ -9,8 +9,10 @@ from typing import Any, get_args
 
 from .models import (
     ComponentType,
+    DEFAULT_OBJECTIVE_TERM_WEIGHTS,
     MilestoneConstraint,
     MilestoneResult,
+    ObjectiveTermConfig,
     PrecedenceLink,
     Resource,
     ResourceAllocation,
@@ -19,19 +21,21 @@ from .models import (
     ScheduledTask,
     Task,
     ValidationMessage,
+    effective_objective_weights,
+    objective_terms_used,
 )
 
 CONTINUITY_PRIMARY_WEIGHT = 1_000_000
-SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT = 100_000
-SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT = 1
-CONTROL_NODE_LATE_WEIGHT = 1_000_000_000
-CONTROL_BUFFER_RISK_WEIGHT = 1_000_000
-CONTROL_RESOURCE_WAIT_WEIGHT = 1_000_000
-RESOURCE_WORKLOAD_BALANCE_WEIGHT = 20_000
-RESOURCE_IDLE_WEIGHT = 2_000
-RESOURCE_PATH_CONTINUITY_WEIGHT = 500
-CONTROL_MAKESPAN_WEIGHT = 100
-NORMAL_BALANCE_WEIGHT = 1
+SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["same_structure_craft_split"]
+SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["spatial_resource_assignment"]
+CONTROL_NODE_LATE_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["control_node_late"]
+CONTROL_BUFFER_RISK_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["control_buffer_risk"]
+CONTROL_RESOURCE_WAIT_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["risk_related_control_wait"]
+RESOURCE_WORKLOAD_BALANCE_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["resource_workload_balance"]
+RESOURCE_IDLE_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["resource_idle"]
+RESOURCE_PATH_CONTINUITY_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["resource_path_continuity"]
+CONTROL_MAKESPAN_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["makespan_and_soft_milestone"]
+NORMAL_BALANCE_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["normal_balance"]
 CONTROL_NECESSARY_BUFFER_DAYS = 7
 CONTROL_BUFFER_NEAR_RISK_DAYS = 3
 SCHEDULER_RANDOM_SEED = 0
@@ -42,6 +46,31 @@ CONTINUOUS_BEAM_CLOSURE_RULE_IDS = {
     CONTINUOUS_BEAM_MIDDLE_CLOSURE_RULE_ID,
 }
 DEFAULT_CONTINUOUS_CLOSURE_FINISH_GAP_DAYS = 7
+
+
+def _objective_weights_for_config(config: Any) -> dict[str, int]:
+    weights = effective_objective_weights(config.objective_terms)
+    if not config.enable_balance_objective:
+        weights["normal_balance"] = 0
+    return weights
+
+
+def _objective_terms_used_for_config(config: Any, weights: dict[str, int]) -> dict[str, dict[str, int | bool]]:
+    terms_used = objective_terms_used(config.objective_terms)
+    if not config.enable_balance_objective:
+        terms_used["normal_balance"]["enabled"] = False
+    for term_id, effective_weight in weights.items():
+        terms_used[term_id]["effective_weight"] = effective_weight
+    return terms_used
+
+
+def _objective_terms_with_normal_balance_disabled(
+    objective_terms: dict[str, ObjectiveTermConfig],
+) -> dict[str, ObjectiveTermConfig]:
+    next_terms = {term_id: term.model_copy() for term_id, term in objective_terms.items()}
+    normal_term = next_terms["normal_balance"]
+    next_terms["normal_balance"] = normal_term.model_copy(update={"enabled": False})
+    return next_terms
 
 
 def _default_scheduler_search_workers() -> int:
@@ -714,6 +743,8 @@ def solve_control_priority_schedule(
     milestone_target_offsets: dict[str, int] = {}
     soft_lateness_vars: dict[str, Any] = {}
     config = schedule_input.schedule_strategy
+    objective_weights = _objective_weights_for_config(config)
+    objective_terms_used_payload = _objective_terms_used_for_config(config, objective_weights)
     control_chain_task_ids = _control_chain_task_ids(schedule_input)
     normal_tasks = _normal_balance_tasks(schedule_input.tasks, control_chain_task_ids)
 
@@ -854,7 +885,7 @@ def solve_control_priority_schedule(
     )
     normal_balance_terms = (
         _build_normal_balance_terms(model, starts, schedule_input.tasks, baseline_result, config, horizon)
-        if config.enable_balance_objective
+        if objective_weights["normal_balance"] > 0
         else []
     )
     continuity_terms = _build_continuity_soft_terms(model, schedule_input.tasks, resource_candidates, assignment_vars)
@@ -868,19 +899,19 @@ def solve_control_priority_schedule(
         assignment_vars,
         horizon,
     )
-    continuity_objective = sum(continuity_terms["split_terms"]) * SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT + sum(
+    continuity_objective = sum(continuity_terms["split_terms"]) * objective_weights["same_structure_craft_split"] + sum(
         continuity_terms["spatial_terms"]
-    ) * SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT
+    ) * objective_weights["spatial_resource_assignment"]
 
     model.Minimize(
-        sum(control_lateness_terms) * CONTROL_NODE_LATE_WEIGHT
-        + sum(control_buffer_terms["terms"]) * CONTROL_BUFFER_RISK_WEIGHT
-        + sum(risk_related_control_wait_terms) * CONTROL_RESOURCE_WAIT_WEIGHT
-        + sum(resource_organization_terms["workload_balance_terms"]) * RESOURCE_WORKLOAD_BALANCE_WEIGHT
-        + sum(resource_organization_terms["idle_terms"]) * RESOURCE_IDLE_WEIGHT
-        + sum(resource_organization_terms["path_terms"]) * RESOURCE_PATH_CONTINUITY_WEIGHT
-        + (makespan + sum(soft_penalty_terms)) * CONTROL_MAKESPAN_WEIGHT
-        + sum(normal_balance_terms) * NORMAL_BALANCE_WEIGHT
+        sum(control_lateness_terms) * objective_weights["control_node_late"]
+        + sum(control_buffer_terms["terms"]) * objective_weights["control_buffer_risk"]
+        + sum(risk_related_control_wait_terms) * objective_weights["risk_related_control_wait"]
+        + sum(resource_organization_terms["workload_balance_terms"]) * objective_weights["resource_workload_balance"]
+        + sum(resource_organization_terms["idle_terms"]) * objective_weights["resource_idle"]
+        + sum(resource_organization_terms["path_terms"]) * objective_weights["resource_path_continuity"]
+        + (makespan + sum(soft_penalty_terms)) * objective_weights["makespan_and_soft_milestone"]
+        + sum(normal_balance_terms) * objective_weights["normal_balance"]
         + continuity_objective
     )
     warm_start_used = _add_schedule_hints(
@@ -1025,23 +1056,23 @@ def solve_control_priority_schedule(
         "same_structure_craft_split_penalty": continuity_split_penalty,
         "spatial_assignment_penalty": spatial_assignment_penalty,
         "primary_weight": CONTINUITY_PRIMARY_WEIGHT,
-        "same_structure_craft_split_weight": SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT,
-        "spatial_resource_assignment_weight": SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT,
+        "same_structure_craft_split_weight": objective_weights["same_structure_craft_split"],
+        "spatial_resource_assignment_weight": objective_weights["spatial_resource_assignment"],
     }
     stats["normal_balance_metrics"] = normal_balance_metrics
     stats["resource_organization_analysis"] = resource_organization_analysis
     stats["control_priority_analysis"] = control_priority_analysis
     weighted_objective = (
-        control_lateness_days * CONTROL_NODE_LATE_WEIGHT
-        + control_buffer_risk_penalty * CONTROL_BUFFER_RISK_WEIGHT
-        + risk_related_control_wait_penalty * CONTROL_RESOURCE_WAIT_WEIGHT
-        + resource_workload_balance_penalty * RESOURCE_WORKLOAD_BALANCE_WEIGHT
-        + resource_idle_penalty * RESOURCE_IDLE_WEIGHT
-        + resource_path_continuity_penalty * RESOURCE_PATH_CONTINUITY_WEIGHT
-        + (objective_days + soft_milestone_penalty) * CONTROL_MAKESPAN_WEIGHT
-        + sum(solver.Value(term) for term in normal_balance_terms) * NORMAL_BALANCE_WEIGHT
-        + continuity_split_penalty * SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT
-        + spatial_assignment_penalty * SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT
+        control_lateness_days * objective_weights["control_node_late"]
+        + control_buffer_risk_penalty * objective_weights["control_buffer_risk"]
+        + risk_related_control_wait_penalty * objective_weights["risk_related_control_wait"]
+        + resource_workload_balance_penalty * objective_weights["resource_workload_balance"]
+        + resource_idle_penalty * objective_weights["resource_idle"]
+        + resource_path_continuity_penalty * objective_weights["resource_path_continuity"]
+        + (objective_days + soft_milestone_penalty) * objective_weights["makespan_and_soft_milestone"]
+        + sum(solver.Value(term) for term in normal_balance_terms) * objective_weights["normal_balance"]
+        + continuity_split_penalty * objective_weights["same_structure_craft_split"]
+        + spatial_assignment_penalty * objective_weights["spatial_resource_assignment"]
     )
     validation.append(
         ValidationMessage(
@@ -1081,8 +1112,8 @@ def solve_control_priority_schedule(
             "resource_workload_balance_penalty": resource_workload_balance_penalty,
             "resource_idle_penalty": resource_idle_penalty,
             "resource_path_continuity_penalty": resource_path_continuity_penalty,
-            "resource_balance_weight": RESOURCE_WORKLOAD_BALANCE_WEIGHT,
-            "resource_idle_weight": RESOURCE_IDLE_WEIGHT,
+            "resource_balance_weight": objective_weights["resource_workload_balance"],
+            "resource_idle_weight": objective_weights["resource_idle"],
             "normal_balance_penalty": sum(solver.Value(term) for term in normal_balance_terms),
             "soft_milestone_penalty": soft_milestone_penalty,
             "same_structure_craft_split_penalty": continuity_split_penalty,
@@ -1092,18 +1123,8 @@ def solve_control_priority_schedule(
             "normal_balance_score": normal_balance_metrics["balance_score"],
             "resource_organization_analysis": resource_organization_analysis,
             "weighted_objective": weighted_objective,
-            "objective_weights": {
-                "control_node_late": CONTROL_NODE_LATE_WEIGHT,
-                "control_buffer_risk": CONTROL_BUFFER_RISK_WEIGHT,
-                "risk_related_control_wait": CONTROL_RESOURCE_WAIT_WEIGHT,
-                "resource_workload_balance": RESOURCE_WORKLOAD_BALANCE_WEIGHT,
-                "resource_idle": RESOURCE_IDLE_WEIGHT,
-                "resource_path_continuity": RESOURCE_PATH_CONTINUITY_WEIGHT,
-                "makespan_and_soft_milestone": CONTROL_MAKESPAN_WEIGHT,
-                "normal_balance": NORMAL_BALANCE_WEIGHT,
-                "same_structure_craft_split": SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT,
-                "spatial_resource_assignment": SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT,
-            },
+            "objective_weights": objective_weights,
+            "objective_terms_used": objective_terms_used_payload,
             "control_priority_analysis": control_priority_analysis,
             "normal_balance_metrics": normal_balance_metrics,
         },
@@ -2840,14 +2861,20 @@ def _min_resource_reoptimization_candidates(
             ),
         }
     ]
-    if base_strategy.enable_balance_objective:
+    if _objective_weights_for_config(base_strategy)["normal_balance"] > 0:
+        no_balance_strategy = base_strategy.model_copy(
+            update={
+                "enable_balance_objective": False,
+                "objective_terms": _objective_terms_with_normal_balance_disabled(base_strategy.objective_terms),
+            }
+        )
         candidates.append(
             {
                 "source": "control_priority_reoptimization_no_balance",
                 "schedule_input": schedule_input.model_copy(
                     update={
                         "resources": limited_resources,
-                        "schedule_strategy": base_strategy.model_copy(update={"enable_balance_objective": False}),
+                        "schedule_strategy": no_balance_strategy,
                     }
                 ),
             }

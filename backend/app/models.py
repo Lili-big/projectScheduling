@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date
 from typing import Any, Literal
 
@@ -54,6 +55,70 @@ ScheduleStrategy = Literal[
 ControlLevel = Literal["control", "key", "normal", "rough"]
 ResourceGuaranteeMode = Literal["strict", "priority", "off"]
 BalanceBucket = Literal["week", "month"]
+ObjectiveTermId = Literal[
+    "control_node_late",
+    "control_buffer_risk",
+    "risk_related_control_wait",
+    "same_structure_craft_split",
+    "resource_workload_balance",
+    "resource_idle",
+    "resource_path_continuity",
+    "makespan_and_soft_milestone",
+    "normal_balance",
+    "spatial_resource_assignment",
+]
+
+OBJECTIVE_TERM_MAX_WEIGHT = 1_000_000_000
+DEFAULT_OBJECTIVE_TERM_WEIGHTS: dict[ObjectiveTermId, int] = {
+    "control_node_late": 1_000_000_000,
+    "control_buffer_risk": 1_000_000,
+    "risk_related_control_wait": 1_000_000,
+    "same_structure_craft_split": 100_000,
+    "resource_workload_balance": 20_000,
+    "resource_idle": 2_000,
+    "resource_path_continuity": 500,
+    "makespan_and_soft_milestone": 100,
+    "normal_balance": 1,
+    "spatial_resource_assignment": 1,
+}
+OBJECTIVE_TERM_IDS = tuple(DEFAULT_OBJECTIVE_TERM_WEIGHTS.keys())
+
+
+class ObjectiveTermConfig(BaseModel):
+    enabled: bool = True
+    weight: int = Field(ge=0, le=OBJECTIVE_TERM_MAX_WEIGHT)
+
+
+def default_objective_terms() -> dict[ObjectiveTermId, ObjectiveTermConfig]:
+    return {
+        term_id: ObjectiveTermConfig(enabled=True, weight=weight)
+        for term_id, weight in DEFAULT_OBJECTIVE_TERM_WEIGHTS.items()
+    }
+
+
+def effective_objective_weights(
+    objective_terms: Mapping[str, ObjectiveTermConfig] | None,
+) -> dict[ObjectiveTermId, int]:
+    terms = objective_terms or default_objective_terms()
+    return {
+        term_id: terms[term_id].weight if terms[term_id].enabled else 0
+        for term_id in DEFAULT_OBJECTIVE_TERM_WEIGHTS
+    }
+
+
+def objective_terms_used(
+    objective_terms: Mapping[str, ObjectiveTermConfig] | None,
+) -> dict[ObjectiveTermId, dict[str, int | bool]]:
+    terms = objective_terms or default_objective_terms()
+    weights = effective_objective_weights(terms)
+    return {
+        term_id: {
+            "enabled": terms[term_id].enabled,
+            "weight": terms[term_id].weight,
+            "effective_weight": weights[term_id],
+        }
+        for term_id in DEFAULT_OBJECTIVE_TERM_WEIGHTS
+    }
 
 
 class ScheduleStrategyConfig(BaseModel):
@@ -65,6 +130,62 @@ class ScheduleStrategyConfig(BaseModel):
     normal_max_early_finish_days: int = Field(default=60, ge=0)
     max_parallel_normal_per_work_section: int = Field(default=5, ge=1)
     enable_balance_objective: bool = True
+    objective_terms: dict[ObjectiveTermId, ObjectiveTermConfig] = Field(default_factory=default_objective_terms)
+
+    @model_validator(mode="before")
+    @classmethod
+    def merge_objective_terms(cls, data: Any) -> Any:
+        if not isinstance(data, Mapping):
+            return data
+
+        values = dict(data)
+        raw_terms = values.get("objective_terms")
+        explicit_terms = raw_terms is not None
+        if raw_terms is None:
+            raw_terms = {}
+        if not isinstance(raw_terms, Mapping):
+            raise ValueError("objective_terms must be an object keyed by objective term id")
+
+        unknown_terms = sorted(set(raw_terms) - set(DEFAULT_OBJECTIVE_TERM_WEIGHTS))
+        if unknown_terms:
+            raise ValueError(f"unknown objective_terms: {', '.join(str(term) for term in unknown_terms)}")
+
+        merged: dict[str, dict[str, Any]] = {}
+        for term_id, default_weight in DEFAULT_OBJECTIVE_TERM_WEIGHTS.items():
+            raw_config = raw_terms.get(term_id, {})
+            if isinstance(raw_config, ObjectiveTermConfig):
+                raw_config = raw_config.model_dump()
+            if not isinstance(raw_config, Mapping):
+                raise ValueError(f"objective_terms.{term_id} must be an object")
+
+            merged[term_id] = {
+                "enabled": raw_config.get("enabled", True),
+                "weight": raw_config.get("weight", default_weight),
+            }
+
+        if not explicit_terms or "normal_balance" not in raw_terms:
+            if values.get("enable_balance_objective") is False:
+                merged["normal_balance"]["enabled"] = False
+
+        values["objective_terms"] = merged
+        return values
+
+    @model_validator(mode="after")
+    def validate_objective_terms(self) -> "ScheduleStrategyConfig":
+        invalid_enabled_terms = [
+            term_id
+            for term_id, term in self.objective_terms.items()
+            if term.enabled and term.weight < 1
+        ]
+        if invalid_enabled_terms:
+            raise ValueError(
+                "enabled objective term weights must be between 1 and "
+                f"{OBJECTIVE_TERM_MAX_WEIGHT}: {', '.join(invalid_enabled_terms)}"
+            )
+        if not any(term.enabled for term in self.objective_terms.values()):
+            raise ValueError("at least one objective term must be enabled")
+        self.enable_balance_objective = self.objective_terms["normal_balance"].enabled
+        return self
 
 
 class PierConfig(BaseModel):

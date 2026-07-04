@@ -135,6 +135,44 @@ type MilestoneConstraint = {
   penalty_per_day: number;
 };
 
+type ScheduleStrategy =
+  | "shortest_duration"
+  | "min_resource"
+  | "resource_cost"
+  | "control_priority"
+  | "balanced_normal"
+  | "comprehensive";
+type ResourceGuaranteeMode = "strict" | "priority" | "off";
+type BalanceBucket = "week" | "month";
+type ObjectiveTermId =
+  | "control_node_late"
+  | "control_buffer_risk"
+  | "risk_related_control_wait"
+  | "same_structure_craft_split"
+  | "resource_workload_balance"
+  | "resource_idle"
+  | "resource_path_continuity"
+  | "makespan_and_soft_milestone"
+  | "normal_balance"
+  | "spatial_resource_assignment";
+
+type ObjectiveTermConfig = {
+  enabled: boolean;
+  weight: number;
+};
+
+type ScheduleStrategyConfig = {
+  strategy: ScheduleStrategy;
+  resource_guarantee: ResourceGuaranteeMode;
+  normal_balance_bucket: BalanceBucket;
+  normal_earliest_start_offset: number;
+  normal_latest_finish_offset?: number | null;
+  normal_max_early_finish_days: number;
+  max_parallel_normal_per_work_section: number;
+  enable_balance_objective: boolean;
+  objective_terms?: Record<ObjectiveTermId, ObjectiveTermConfig>;
+};
+
 type ScenarioInput = {
   scenario_id: string;
   scenario_name: string;
@@ -178,6 +216,7 @@ type ScenarioInput = {
   }>;
   resource_pools: ResourcePool[];
   milestones: MilestoneConstraint[];
+  schedule_strategy?: ScheduleStrategyConfig;
   time_limit_seconds: number;
 };
 
@@ -250,6 +289,7 @@ type GeneratedScheduleInput = {
     precedence_links: PrecedenceLink[];
     resources: Resource[];
     milestones: MilestoneConstraint[];
+    schedule_strategy: ScheduleStrategyConfig;
     time_limit_seconds: number;
   };
   validation: Array<{ level: "info" | "warning" | "error"; message: string; subject_id?: string | null }>;
@@ -268,6 +308,28 @@ const DEFAULT_RESOURCE_MAX_QUANTITIES: Record<string, number> = {
   cap_team: 10,
   pier_body_team: 10,
   cap_beam_team: 10,
+};
+const DEFAULT_OBJECTIVE_TERM_WEIGHTS: Record<ObjectiveTermId, number> = {
+  control_node_late: 1_000_000_000,
+  control_buffer_risk: 1_000_000,
+  risk_related_control_wait: 1_000_000,
+  same_structure_craft_split: 100_000,
+  resource_workload_balance: 20_000,
+  resource_idle: 2_000,
+  resource_path_continuity: 500,
+  makespan_and_soft_milestone: 100,
+  normal_balance: 1,
+  spatial_resource_assignment: 1,
+};
+const DEFAULT_SCHEDULE_STRATEGY: Omit<ScheduleStrategyConfig, "objective_terms"> = {
+  strategy: "comprehensive",
+  resource_guarantee: "priority",
+  normal_balance_bucket: "month",
+  normal_earliest_start_offset: 0,
+  normal_latest_finish_offset: null,
+  normal_max_early_finish_days: 60,
+  max_parallel_normal_per_work_section: 5,
+  enable_balance_objective: true,
 };
 const KEY_RESOURCE_COMPONENT_TYPES = new Set<ComponentType>(["pile", "cap", "pier_body", "cap_beam", "cast_in_place_continuous_beam"]);
 const DEFAULT_RESOURCE_TYPE_BY_COMPONENT: Partial<Record<ComponentType, string>> = {
@@ -299,6 +361,65 @@ const UPPER_STRUCTURE_LOGIC_RULE_IDS = [
   "continuous_beam_edge_before_middle_closure",
   "continuous_beam_middle_closure_sequence",
 ] as const;
+
+function normalizeObjectiveWeight(value: unknown, enabled = true): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return enabled ? 1 : 0;
+  return Math.min(1_000_000_000, Math.max(enabled ? 1 : 0, Math.round(parsed)));
+}
+
+function normalizeScheduleStrategy(config?: ScheduleStrategyConfig | null): ScheduleStrategyConfig {
+  const rawTerms = config?.objective_terms ?? {};
+  const hasExplicitNormalBalance = Object.prototype.hasOwnProperty.call(rawTerms, "normal_balance");
+  const objectiveTerms = Object.fromEntries(
+    (Object.keys(DEFAULT_OBJECTIVE_TERM_WEIGHTS) as ObjectiveTermId[]).map((termId) => {
+      const incoming = rawTerms[termId];
+      const enabled = incoming?.enabled ?? true;
+      return [
+        termId,
+        {
+          enabled,
+          weight: normalizeObjectiveWeight(incoming?.weight ?? DEFAULT_OBJECTIVE_TERM_WEIGHTS[termId], enabled),
+        },
+      ];
+    }),
+  ) as Record<ObjectiveTermId, ObjectiveTermConfig>;
+
+  if (!hasExplicitNormalBalance && config?.enable_balance_objective === false) {
+    objectiveTerms.normal_balance.enabled = false;
+  }
+
+  return {
+    ...DEFAULT_SCHEDULE_STRATEGY,
+    ...(config ?? {}),
+    objective_terms: objectiveTerms,
+    enable_balance_objective: objectiveTerms.normal_balance.enabled,
+  };
+}
+
+function objectiveTermsUsed(strategy: ScheduleStrategyConfig): Record<ObjectiveTermId, { enabled: boolean; weight: number; effective_weight: number }> {
+  const terms = strategy.objective_terms ?? normalizeScheduleStrategy(strategy).objective_terms ?? {};
+  return Object.fromEntries(
+    (Object.keys(DEFAULT_OBJECTIVE_TERM_WEIGHTS) as ObjectiveTermId[]).map((termId) => {
+      const config = terms[termId] ?? { enabled: true, weight: DEFAULT_OBJECTIVE_TERM_WEIGHTS[termId] };
+      return [
+        termId,
+        {
+          enabled: config.enabled,
+          weight: config.weight,
+          effective_weight: config.enabled ? config.weight : 0,
+        },
+      ];
+    }),
+  );
+}
+
+function objectiveWeights(strategy: ScheduleStrategyConfig): Record<ObjectiveTermId, number> {
+  const termsUsed = objectiveTermsUsed(strategy);
+  return Object.fromEntries(
+    (Object.keys(DEFAULT_OBJECTIVE_TERM_WEIGHTS) as ObjectiveTermId[]).map((termId) => [termId, termsUsed[termId].effective_weight]),
+  ) as Record<ObjectiveTermId, number>;
+}
 
 type ProcessIntent = {
   component_type?: ComponentType | null;
@@ -1223,6 +1344,7 @@ function generateScheduleInput(scenario: ScenarioInput, useMaxResources = false)
     ...built.generatedLinks,
   ];
   const resources = expandResources(scenario.resource_pools, useMaxResources);
+  const scheduleStrategy = normalizeScheduleStrategy(scenario.schedule_strategy);
   return {
     schedule_input: {
       project_name: scenario.project.project_name,
@@ -1231,6 +1353,7 @@ function generateScheduleInput(scenario: ScenarioInput, useMaxResources = false)
       precedence_links: precedenceLinks,
       resources,
       milestones: scenario.milestones,
+      schedule_strategy: scheduleStrategy,
       time_limit_seconds: scenario.time_limit_seconds,
     },
     validation: [
@@ -2300,6 +2423,7 @@ function earliestStartFromPrecedenceLink(link: PrecedenceLink, predecessor: Sche
 
 function schedule(generated: GeneratedScheduleInput) {
   const input = generated.schedule_input;
+  const scheduleStrategy = normalizeScheduleStrategy(input.schedule_strategy);
   const predecessorLinks = groupBy(input.precedence_links, (link) => link.successor_id);
   const taskById = new Map(input.tasks.map((task) => [task.id, task]));
   const resourcesByType = groupBy(input.resources, (resource) => resource.type);
@@ -2382,6 +2506,10 @@ function schedule(generated: GeneratedScheduleInput) {
     },
     objective_breakdown: {
       solve_mode: "netlify_functions_demo_scheduler",
+      strategy: scheduleStrategy.strategy,
+      resource_guarantee: scheduleStrategy.resource_guarantee,
+      objective_weights: objectiveWeights(scheduleStrategy),
+      objective_terms_used: objectiveTermsUsed(scheduleStrategy),
     },
   };
 }

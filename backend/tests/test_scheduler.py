@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -26,6 +27,63 @@ from app.scenario_data import apply_resource_max_quantity_defaults, default_scen
 from app.services.bridge_import_service import import_local_bridge_params  # noqa: E402
 from app.solver import _resource_path_metrics, _task_ids_for_milestone, solve_capacity_shortest_schedule, solve_min_resources_schedule, solve_resource_cost_schedule, solve_schedule  # noqa: E402
 from app.wbs import calculate_duration, generate_wbs  # noqa: E402
+
+
+def test_schedule_strategy_merges_objective_term_defaults_and_syncs_legacy_balance_flag() -> None:
+    config = ScheduleStrategyConfig(enable_balance_objective=False)
+
+    assert set(config.objective_terms) == {
+        "control_node_late",
+        "control_buffer_risk",
+        "risk_related_control_wait",
+        "same_structure_craft_split",
+        "resource_workload_balance",
+        "resource_idle",
+        "resource_path_continuity",
+        "makespan_and_soft_milestone",
+        "normal_balance",
+        "spatial_resource_assignment",
+    }
+    assert config.objective_terms["normal_balance"].enabled is False
+    assert config.enable_balance_objective is False
+    assert config.objective_terms["control_node_late"].weight == 1_000_000_000
+
+    explicit_config = ScheduleStrategyConfig(
+        enable_balance_objective=False,
+        objective_terms={"normal_balance": {"enabled": True, "weight": 7}},
+    )
+
+    assert explicit_config.enable_balance_objective is True
+    assert explicit_config.objective_terms["normal_balance"].enabled is True
+    assert explicit_config.objective_terms["normal_balance"].weight == 7
+
+    disabled_zero_weight = ScheduleStrategyConfig(objective_terms={"resource_idle": {"enabled": False, "weight": 0}})
+    assert disabled_zero_weight.objective_terms["resource_idle"].weight == 0
+    assert disabled_zero_weight.objective_terms["resource_idle"].enabled is False
+
+
+def test_schedule_strategy_rejects_invalid_objective_term_config() -> None:
+    with pytest.raises(ValidationError, match="unknown objective_terms"):
+        ScheduleStrategyConfig(objective_terms={"unknown_term": {"enabled": True, "weight": 1}})
+
+    with pytest.raises(ValidationError, match="less than or equal"):
+        ScheduleStrategyConfig(objective_terms={"resource_idle": {"enabled": True, "weight": 1_000_000_001}})
+
+    with pytest.raises(ValidationError, match="at least one objective term must be enabled"):
+        ScheduleStrategyConfig(
+            objective_terms={
+                "control_node_late": {"enabled": False, "weight": 1},
+                "control_buffer_risk": {"enabled": False, "weight": 1},
+                "risk_related_control_wait": {"enabled": False, "weight": 1},
+                "same_structure_craft_split": {"enabled": False, "weight": 1},
+                "resource_workload_balance": {"enabled": False, "weight": 1},
+                "resource_idle": {"enabled": False, "weight": 1},
+                "resource_path_continuity": {"enabled": False, "weight": 1},
+                "makespan_and_soft_milestone": {"enabled": False, "weight": 1},
+                "normal_balance": {"enabled": False, "weight": 1},
+                "spatial_resource_assignment": {"enabled": False, "weight": 1},
+            }
+        )
 
 
 def test_duration_calculation_uses_fixed_days_per_pile() -> None:
@@ -1716,6 +1774,41 @@ def test_control_priority_reports_resource_idle_penalty_for_forced_gap() -> None
     assert result.objective_breakdown["resource_idle_penalty"] >= 20
 
 
+def test_control_priority_reports_configured_objective_terms_used() -> None:
+    pytest.importorskip("ortools")
+    first = _solver_task("A-first", "first", 2, "team")
+    second = _solver_task("B-second", "second", 2, "team")
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="objective-term-config",
+            start_date=date(2026, 1, 1),
+            tasks=[first, second],
+            precedence_links=[],
+            resources=[Resource(id="team_1", name="Team 1", type="team")],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms={
+                    "resource_idle": {"enabled": False, "weight": 1234},
+                    "makespan_and_soft_milestone": {"enabled": True, "weight": 333},
+                    "normal_balance": {"enabled": False, "weight": 55},
+                },
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    weights = result.objective_breakdown["objective_weights"]
+    terms_used = result.objective_breakdown["objective_terms_used"]
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert weights["resource_idle"] == 0
+    assert weights["makespan_and_soft_milestone"] == 333
+    assert weights["normal_balance"] == 0
+    assert terms_used["resource_idle"] == {"enabled": False, "weight": 1234, "effective_weight": 0}
+    assert terms_used["normal_balance"] == {"enabled": False, "weight": 55, "effective_weight": 0}
+
+
 def test_control_priority_keeps_control_task_ahead_of_competing_normal_task() -> None:
     pytest.importorskip("ortools")
     start = date(2026, 1, 1)
@@ -2388,6 +2481,34 @@ def test_min_resource_solver_reoptimizes_with_control_priority() -> None:
     assert recommended["recommended_quantity"] == 1
     assert by_task["Z-control"].start_offset == 0
     assert by_task["A-normal"].start_offset >= by_task["Z-control"].end_offset
+
+
+def test_min_resource_reoptimization_candidates_copy_objective_configuration() -> None:
+    schedule_input = _min_resource_test_input(max_resources=2).model_copy(
+        update={
+            "schedule_strategy": ScheduleStrategyConfig(
+                strategy="min_resource",
+                resource_guarantee="off",
+                objective_terms={
+                    "resource_idle": {"enabled": False, "weight": 1234},
+                    "makespan_and_soft_milestone": {"enabled": True, "weight": 333},
+                },
+            )
+        }
+    )
+
+    candidates = solver_module._min_resource_reoptimization_candidates(schedule_input, {"team": 2})
+
+    assert len(candidates) == 2
+    primary_strategy = candidates[0]["schedule_input"].schedule_strategy
+    no_balance_strategy = candidates[1]["schedule_input"].schedule_strategy
+    assert primary_strategy.objective_terms["resource_idle"].enabled is False
+    assert primary_strategy.objective_terms["resource_idle"].weight == 1234
+    assert primary_strategy.objective_terms["makespan_and_soft_milestone"].weight == 333
+    assert primary_strategy.objective_terms["normal_balance"].enabled is True
+    assert no_balance_strategy.objective_terms["resource_idle"].enabled is False
+    assert no_balance_strategy.objective_terms["makespan_and_soft_milestone"].weight == 333
+    assert no_balance_strategy.objective_terms["normal_balance"].enabled is False
 
 
 def test_min_resource_solver_falls_back_to_binary_search_when_global_optimization_times_out(

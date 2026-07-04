@@ -1,4 +1,4 @@
-import { CheckCircle2, ClipboardList, Database, Flag, Server, Workflow, X } from "lucide-react";
+import { CheckCircle2, ClipboardList, Database, Flag, PanelLeftClose, PanelLeftOpen, Server, Workflow, X } from "lucide-react";
 import type { ReactNode } from "react";
 import type { TabKey } from "../../types/scheduler";
 
@@ -16,24 +16,40 @@ export function SideNavigation({
   activeTab,
   openTabs,
   onOpen,
+  collapsed,
+  onToggleCollapsed,
 }: {
   activeTab: TabKey | null;
   openTabs: TabKey[];
   onOpen: (tabKey: TabKey) => void;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
 }) {
   return (
-    <aside className="side-nav">
+    <aside className={`side-nav ${collapsed ? "collapsed" : ""}`}>
       <div className="side-nav-section">
-        <div className="side-nav-heading">功能导航</div>
+        <div className="side-nav-header">
+          {!collapsed && <div className="side-nav-heading">功能导航</div>}
+          <button
+            className="side-nav-toggle"
+            type="button"
+            aria-label={collapsed ? "展开功能导航" : "折叠功能导航"}
+            title={collapsed ? "展开功能导航" : "折叠功能导航"}
+            onClick={onToggleCollapsed}
+          >
+            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
+        </div>
         {tabs.map((tab) => (
           <button
             key={tab.key}
             className={`side-nav-item ${activeTab === tab.key ? "active" : ""}`}
             type="button"
+            title={collapsed ? tab.label : undefined}
             onClick={() => onOpen(tab.key)}
           >
             <span className="side-nav-icon">{tab.icon}</span>
-            <span>{tab.label}</span>
+            <span className="side-nav-label">{tab.label}</span>
             {openTabs.includes(tab.key) && <span className="side-nav-dot" />}
           </button>
         ))}

@@ -28,6 +28,17 @@ export type ScheduleStrategy =
 export type ControlLevel = "control" | "key" | "normal" | "rough";
 export type ResourceGuaranteeMode = "strict" | "priority" | "off";
 export type BalanceBucket = "week" | "month";
+export type ObjectiveTermId =
+  | "control_node_late"
+  | "control_buffer_risk"
+  | "risk_related_control_wait"
+  | "same_structure_craft_split"
+  | "resource_workload_balance"
+  | "resource_idle"
+  | "resource_path_continuity"
+  | "makespan_and_soft_milestone"
+  | "normal_balance"
+  | "spatial_resource_assignment";
 export type TabKey = "process" | "logic" | "resources" | "milestones" | "tasks" | "results" | "resultsMvp";
 export type GanttMode = "by_structure" | "by_process";
 export type TaskViewMode = "by_structure" | "by_process";
@@ -67,6 +78,12 @@ export type ScheduleStrategyConfig = {
   normal_max_early_finish_days: number;
   max_parallel_normal_per_work_section: number;
   enable_balance_objective: boolean;
+  objective_terms?: Record<ObjectiveTermId, ObjectiveTermConfig>;
+};
+
+export type ObjectiveTermConfig = {
+  enabled: boolean;
+  weight: number;
 };
 
 export type UpperStructureModel = {
