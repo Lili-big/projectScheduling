@@ -26,7 +26,7 @@ Add pre-solve objective-function controls to the full historical simulation page
 
 **Constraints**: No README update, no commit, no deploy, no hard-constraint editing, no MVP page changes, no new dependencies
 
-**Scale/Scope**: Current bridge scheduling demo scenarios and the 10 existing refinement soft objective terms
+**Scale/Scope**: Current bridge scheduling demo scenarios and the 9 remaining refinement soft objective terms after removing `spatial_resource_assignment`
 
 ## Constitution Check
 

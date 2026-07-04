@@ -82,27 +82,22 @@ ObjectiveTermId = Literal[
     "control_node_late",
     "control_buffer_risk",
     "risk_related_control_wait",
-    "same_structure_craft_split",
-    "resource_workload_balance",
-    "resource_idle",
-    "resource_path_continuity",
     "makespan_and_soft_milestone",
-    "normal_balance",
-    "spatial_resource_assignment",
+    "resource_path_continuity",
+    "resource_idle",
+    "resource_workload_balance",
 ]
 
 OBJECTIVE_TERM_MAX_WEIGHT = 1_000_000_000
+DEPRECATED_OBJECTIVE_TERM_IDS = {"spatial_resource_assignment", "same_structure_craft_split", "normal_balance"}
 DEFAULT_OBJECTIVE_TERM_WEIGHTS: dict[ObjectiveTermId, int] = {
     "control_node_late": 1_000_000_000,
-    "control_buffer_risk": 1_000_000,
+    "control_buffer_risk": 5_000_000,
     "risk_related_control_wait": 1_000_000,
-    "same_structure_craft_split": 100_000,
-    "resource_workload_balance": 20_000,
-    "resource_idle": 2_000,
-    "resource_path_continuity": 500,
-    "makespan_and_soft_milestone": 100,
-    "normal_balance": 1,
-    "spatial_resource_assignment": 1,
+    "makespan_and_soft_milestone": 10_000,
+    "resource_path_continuity": 3_000,
+    "resource_idle": 1_000,
+    "resource_workload_balance": 100,
 }
 OBJECTIVE_TERM_IDS = tuple(DEFAULT_OBJECTIVE_TERM_WEIGHTS.keys())
 
@@ -152,7 +147,7 @@ class ScheduleStrategyConfig(BaseModel):
     normal_latest_finish_offset: int | None = Field(default=None, ge=1)
     normal_max_early_finish_days: int = Field(default=60, ge=0)
     max_parallel_normal_per_work_section: int = Field(default=5, ge=1)
-    enable_balance_objective: bool = True
+    enable_balance_objective: bool = False
     objective_terms: dict[ObjectiveTermId, ObjectiveTermConfig] = Field(default_factory=default_objective_terms)
 
     @model_validator(mode="before")
@@ -163,13 +158,12 @@ class ScheduleStrategyConfig(BaseModel):
 
         values = dict(data)
         raw_terms = values.get("objective_terms")
-        explicit_terms = raw_terms is not None
         if raw_terms is None:
             raw_terms = {}
         if not isinstance(raw_terms, Mapping):
             raise ValueError("objective_terms must be an object keyed by objective term id")
 
-        unknown_terms = sorted(set(raw_terms) - set(DEFAULT_OBJECTIVE_TERM_WEIGHTS))
+        unknown_terms = sorted(set(raw_terms) - set(DEFAULT_OBJECTIVE_TERM_WEIGHTS) - DEPRECATED_OBJECTIVE_TERM_IDS)
         if unknown_terms:
             raise ValueError(f"unknown objective_terms: {', '.join(str(term) for term in unknown_terms)}")
 
@@ -185,10 +179,6 @@ class ScheduleStrategyConfig(BaseModel):
                 "enabled": raw_config.get("enabled", True),
                 "weight": raw_config.get("weight", default_weight),
             }
-
-        if not explicit_terms or "normal_balance" not in raw_terms:
-            if values.get("enable_balance_objective") is False:
-                merged["normal_balance"]["enabled"] = False
 
         values["objective_terms"] = merged
         return values
@@ -207,7 +197,7 @@ class ScheduleStrategyConfig(BaseModel):
             )
         if not any(term.enabled for term in self.objective_terms.values()):
             raise ValueError("at least one objective term must be enabled")
-        self.enable_balance_objective = self.objective_terms["normal_balance"].enabled
+        self.enable_balance_objective = False
         return self
 
 
@@ -317,7 +307,7 @@ class Resource(BaseModel):
     enabled: bool = True
     calendar_id: str = "continuous"
     same_structure_resource_binding: bool = False
-    same_structure_parallel_limit: int | None = Field(default=None, ge=1)
+    same_structure_parallel_limit: int | None = Field(default=None, ge=0)
     parallel_rule_description: str = ""
 
 
@@ -513,7 +503,7 @@ class ResourcePool(BaseModel):
     incremental_unit_cost: int = Field(default=0, ge=0)
     billing_period_days: int = Field(default=30, ge=1)
     same_structure_resource_binding: bool = False
-    same_structure_parallel_limit: int | None = Field(default=None, ge=1)
+    same_structure_parallel_limit: int | None = Field(default=None, ge=0)
     parallel_rule_description: str = ""
 
     @model_validator(mode="after")

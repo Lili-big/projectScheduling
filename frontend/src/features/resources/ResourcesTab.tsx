@@ -1,6 +1,7 @@
 import { CheckCircle2, Loader2, Save, XCircle } from "lucide-react";
 import { PanelTitle } from "../../components/common/PanelTitle";
 import {
+  resourcePoolSameStructureParallelLimit,
   resourcePoolQuantity,
 } from "../../domain/resources";
 import type { ResourcePool, ScenarioInput } from "../../types/scheduler";
@@ -44,6 +45,7 @@ export function ResourcesTab({
               <th>资源</th>
               <th>默认投入</th>
               <th>可增上限</th>
+              <th>同墩同工艺最多设备数</th>
               <th>状态</th>
             </tr>
           </thead>
@@ -51,6 +53,7 @@ export function ResourcesTab({
             {scenario.resource_pools.map((pool, index) => {
               const quantity = resourcePoolQuantity(pool);
               const maxQuantity = Math.max(pool.max_quantity ?? quantity, quantity);
+              const sameStructureParallelLimit = resourcePoolSameStructureParallelLimit(pool) ?? 0;
               return (
                 <tr key={pool.id}>
                   <td>
@@ -88,6 +91,25 @@ export function ResourcesTab({
                         resource_mode: "LIMITED",
                         max_quantity: Math.max(Number(event.target.value), Math.max(0, quantity)),
                       })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="number"
+                      min={0}
+                      value={sameStructureParallelLimit}
+                      aria-label={`${pool.label} 同墩同工艺最多设备数`}
+                      title="0 表示不额外限制，1 表示一台设备干完，2 表示最多两台设备干完"
+                      onChange={(event) => {
+                        const nextLimit = Math.max(0, Math.floor(Number(event.target.value)));
+                        onUpdateResourcePool(index, {
+                          same_structure_resource_binding: false,
+                          same_structure_parallel_limit: Number.isFinite(nextLimit) ? nextLimit : 0,
+                          parallel_rule_description: nextLimit > 0
+                            ? `同一墩同一工艺最多由 ${nextLimit} 台设备/班组承担；设置为 0 表示不额外限制。`
+                            : "同一墩同一工艺不设置最多参与设备数，仅受资源数量约束。",
+                        });
+                      }}
                     />
                   </td>
                   <td>

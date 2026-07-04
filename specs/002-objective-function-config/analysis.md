@@ -13,7 +13,7 @@ Date: 2026-07-03
 | Requirement Key | Has Task? | Task IDs | Notes |
 | --- | --- | --- | --- |
 | FR-001 | Yes | T011, T013, T029 | Full page only; MVP unchanged |
-| FR-002 | Yes | T005, T007, T011 | 10 term ids shared across backend/frontend |
+| FR-002 | Yes | T005, T007, T011 | 9 term ids shared across backend/frontend |
 | FR-003 | Yes | T011, T012, T025 | Checkbox and weight editing |
 | FR-004 | Yes | T020, T022 | Hard constraints remain outside controls |
 | FR-005 | Yes | T005, T006, T017 | Strategy contract compatibility |
@@ -26,6 +26,7 @@ Date: 2026-07-03
 | FR-012 | Yes | T018 | Result metadata |
 | FR-013 | Yes | T014 | Fingerprint includes strategy |
 | FR-014 | Yes | T026 | Netlify demo compatibility |
+| FR-015 | Yes | T031 | Deprecated spatial resource assignment term removed across backend, frontend, Netlify, docs, and tests |
 
 ## Constitution Alignment Issues
 
@@ -37,8 +38,8 @@ None.
 
 ## Metrics
 
-- Total Functional Requirements: 14
-- Total Tasks: 30
+- Total Functional Requirements: 15
+- Total Tasks: 31
 - Coverage: 100%
 - Ambiguity Count: 0
 - Duplication Count: 0

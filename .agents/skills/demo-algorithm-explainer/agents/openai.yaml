@@ -1,0 +1,6 @@
+interface:
+  display_name: "Demo Algorithm Explainer"
+  short_description: "Product-style algorithm explanations"
+  default_prompt: "Use $demo-algorithm-explainer to explain a demo scheduling algorithm from real implementation with calculation steps and concrete examples."
+policy:
+  allow_implicit_invocation: true

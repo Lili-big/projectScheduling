@@ -12,7 +12,6 @@ from .models import (
     DEFAULT_OBJECTIVE_TERM_WEIGHTS,
     MilestoneConstraint,
     MilestoneResult,
-    ObjectiveTermConfig,
     PrecedenceLink,
     Resource,
     ResourceAllocation,
@@ -26,8 +25,6 @@ from .models import (
 )
 
 CONTINUITY_PRIMARY_WEIGHT = 1_000_000
-SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["same_structure_craft_split"]
-SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["spatial_resource_assignment"]
 CONTROL_NODE_LATE_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["control_node_late"]
 CONTROL_BUFFER_RISK_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["control_buffer_risk"]
 CONTROL_RESOURCE_WAIT_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["risk_related_control_wait"]
@@ -35,7 +32,7 @@ RESOURCE_WORKLOAD_BALANCE_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["resource_work
 RESOURCE_IDLE_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["resource_idle"]
 RESOURCE_PATH_CONTINUITY_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["resource_path_continuity"]
 CONTROL_MAKESPAN_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["makespan_and_soft_milestone"]
-NORMAL_BALANCE_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["normal_balance"]
+UNCONFIGURED_NORMAL_BALANCE_WEIGHT = 10
 CONTROL_NECESSARY_BUFFER_DAYS = 7
 CONTROL_BUFFER_NEAR_RISK_DAYS = 3
 SCHEDULER_RANDOM_SEED = 0
@@ -49,28 +46,14 @@ DEFAULT_CONTINUOUS_CLOSURE_FINISH_GAP_DAYS = 7
 
 
 def _objective_weights_for_config(config: Any) -> dict[str, int]:
-    weights = effective_objective_weights(config.objective_terms)
-    if not config.enable_balance_objective:
-        weights["normal_balance"] = 0
-    return weights
+    return effective_objective_weights(config.objective_terms)
 
 
 def _objective_terms_used_for_config(config: Any, weights: dict[str, int]) -> dict[str, dict[str, int | bool]]:
     terms_used = objective_terms_used(config.objective_terms)
-    if not config.enable_balance_objective:
-        terms_used["normal_balance"]["enabled"] = False
     for term_id, effective_weight in weights.items():
         terms_used[term_id]["effective_weight"] = effective_weight
     return terms_used
-
-
-def _objective_terms_with_normal_balance_disabled(
-    objective_terms: dict[str, ObjectiveTermConfig],
-) -> dict[str, ObjectiveTermConfig]:
-    next_terms = {term_id: term.model_copy() for term_id, term in objective_terms.items()}
-    normal_term = next_terms["normal_balance"]
-    next_terms["normal_balance"] = normal_term.model_copy(update={"enabled": False})
-    return next_terms
 
 
 def _default_scheduler_search_workers() -> int:
@@ -190,10 +173,23 @@ def _same_structure_resource_rule_key(task: Task, resource_group_key: str) -> tu
 
 
 def _configured_parallel_limit(values: list[int | None]) -> int | None:
-    configured = [int(value) for value in values if value is not None]
+    configured = [int(value) for value in values if value is not None and int(value) > 0]
     if not configured:
         return None
-    return max(1, min(configured))
+    return min(configured)
+
+
+def _effective_same_structure_parallel_limit(resources: list[Resource]) -> int | None:
+    configured = _configured_parallel_limit(
+        [resource.same_structure_parallel_limit for resource in resources]
+    )
+    if configured is not None:
+        return configured
+    if any(resource.same_structure_parallel_limit == 0 for resource in resources):
+        return None
+    if any(resource.same_structure_resource_binding for resource in resources):
+        return 1
+    return None
 
 
 def _add_named_same_structure_resource_rules(
@@ -204,14 +200,26 @@ def _add_named_same_structure_resource_rules(
     resource_candidates: dict[str, list[Resource]],
     assignment_vars: dict[tuple[str, str], Any],
 ) -> None:
+    resources_by_group_key: dict[str, dict[str, Resource]] = defaultdict(dict)
+    for resources in resource_candidates.values():
+        for resource in resources:
+            resources_by_group_key[_resource_parallel_group_key(resource)][resource.id] = resource
+    limit_by_group_key = {
+        group_key: limit
+        for group_key, resources_by_id in resources_by_group_key.items()
+        if (limit := _effective_same_structure_parallel_limit(list(resources_by_id.values()))) is not None
+    }
+    if not limit_by_group_key:
+        return
+
     grouped: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     for task in tasks:
         for resource in resource_candidates.get(task.id, []):
-            if not resource.same_structure_resource_binding and resource.same_structure_parallel_limit is None:
-                continue
             group_key = _resource_parallel_group_key(resource)
+            if group_key not in limit_by_group_key:
+                continue
             rule_key = _same_structure_resource_rule_key(task, group_key)
-            bucket = grouped.setdefault(rule_key, {"tasks": {}, "resources": {}})
+            bucket = grouped.setdefault(rule_key, {"tasks": {}, "resources": {}, "limit": limit_by_group_key[group_key]})
             bucket["tasks"][task.id] = task
             bucket["resources"][resource.id] = resource
 
@@ -236,42 +244,26 @@ def _add_named_same_structure_resource_rules(
         if len(task_active_vars) <= 1:
             continue
 
-        if any(resource.same_structure_resource_binding for resource in resources):
-            group_used = model.NewBoolVar(f"same_structure_group_used_{group_index}")
-            active_sum = sum(task_active_vars.values())
-            model.Add(active_sum >= group_used)
-            model.Add(active_sum <= len(task_active_vars) * group_used)
-            selected_by_resource: dict[str, Any] = {}
-            for resource in resources:
-                selected = model.NewBoolVar(f"same_structure_selected_resource_{group_index}_{_safe(resource.id)}")
-                selected_by_resource[resource.id] = selected
-            model.Add(sum(selected_by_resource.values()) == group_used)
-            for task in group_tasks:
-                for resource in resources:
-                    assignment = assignment_vars.get((task.id, resource.id))
-                    if assignment is not None:
-                        model.Add(assignment <= selected_by_resource[resource.id])
-
-        parallel_limit = _configured_parallel_limit(
-            [resource.same_structure_parallel_limit for resource in resources]
-        )
-        if parallel_limit is None or len(task_active_vars) <= parallel_limit:
+        parallel_limit = int(bucket["limit"])
+        if len(resources) <= parallel_limit:
             continue
-        intervals = [
-            model.NewOptionalIntervalVar(
-                starts[task.id],
-                task.duration_days,
-                ends[task.id],
-                task_active_vars[task.id],
-                f"same_structure_parallel_{group_index}_{_safe(task.id)}",
-            )
-            for task in group_tasks
-            if task.id in task_active_vars
-        ]
-        if parallel_limit == 1:
-            model.AddNoOverlap(intervals)
-        else:
-            model.AddCumulative(intervals, [1] * len(intervals), parallel_limit)
+
+        selected_by_resource: dict[str, Any] = {}
+        for resource in resources:
+            assignments = [
+                assignment_vars[(task.id, resource.id)]
+                for task in group_tasks
+                if (task.id, resource.id) in assignment_vars
+            ]
+            if not assignments:
+                continue
+            selected = model.NewBoolVar(f"same_structure_selected_resource_{group_index}_{_safe(resource.id)}")
+            selected_by_resource[resource.id] = selected
+            for assignment in assignments:
+                model.Add(assignment <= selected)
+            model.Add(sum(assignments) >= selected)
+        if selected_by_resource:
+            model.Add(sum(selected_by_resource.values()) <= parallel_limit)
 
 
 def _add_capacity_same_structure_parallel_rules(
@@ -548,12 +540,8 @@ def solve_schedule(schedule_input: ScheduleInput, *, enforce_hard_milestones: bo
         late_var * _milestone_by_id(schedule_input.milestones, milestone_id).penalty_per_day
         for milestone_id, late_var in soft_lateness_vars.items()
     ]
-    continuity_terms = _build_continuity_soft_terms(model, schedule_input.tasks, resource_candidates, assignment_vars)
     primary_objective = makespan + sum(soft_penalty_terms)
-    continuity_objective = sum(continuity_terms["split_terms"]) * SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT + sum(
-        continuity_terms["spatial_terms"]
-    ) * SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT
-    model.Minimize(primary_objective * CONTINUITY_PRIMARY_WEIGHT + continuity_objective)
+    model.Minimize(primary_objective * CONTINUITY_PRIMARY_WEIGHT)
 
     solver = cp_model.CpSolver()
     _configure_solver(solver, schedule_input.time_limit_seconds)
@@ -642,17 +630,9 @@ def solve_schedule(schedule_input: ScheduleInput, *, enforce_hard_milestones: bo
     continuity_metrics = _build_continuity_metrics(scheduled_tasks)
     validation.extend(_continuity_validation_messages(continuity_metrics))
     soft_milestone_penalty = sum(result.penalty for result in milestone_results if result.mode == "soft")
-    continuity_split_penalty = sum(solver.Value(term) for term in continuity_terms["split_terms"])
-    spatial_assignment_penalty = sum(
-        int(term["penalty"]) * solver.Value(term["assignment"]) for term in continuity_terms["spatial_term_details"]
-    )
     stats["continuity_metrics"] = continuity_metrics
     stats["continuity_objective"] = {
-        "same_structure_craft_split_penalty": continuity_split_penalty,
-        "spatial_assignment_penalty": spatial_assignment_penalty,
         "primary_weight": CONTINUITY_PRIMARY_WEIGHT,
-        "same_structure_craft_split_weight": SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT,
-        "spatial_resource_assignment_weight": SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT,
     }
 
     return ScheduleResult(
@@ -671,8 +651,6 @@ def solve_schedule(schedule_input: ScheduleInput, *, enforce_hard_milestones: bo
         objective_breakdown={
             "makespan_days": objective_days,
             "soft_milestone_penalty": soft_milestone_penalty,
-            "same_structure_craft_split_penalty": continuity_split_penalty,
-            "spatial_assignment_penalty": spatial_assignment_penalty,
             "continuity_score": continuity_metrics["continuity_score"],
             "weighted_objective": objective_days + soft_milestone_penalty,
         },
@@ -747,6 +725,7 @@ def solve_control_priority_schedule(
     objective_terms_used_payload = _objective_terms_used_for_config(config, objective_weights)
     control_chain_task_ids = _control_chain_task_ids(schedule_input)
     normal_tasks = _normal_balance_tasks(schedule_input.tasks, control_chain_task_ids)
+    normal_resource_groups = _split_normal_tasks_by_resource_configuration(normal_tasks, resource_candidates)
 
     for task in schedule_input.tasks:
         starts[task.id] = model.NewIntVar(0, horizon, f"start_{_safe(task.id)}")
@@ -843,7 +822,7 @@ def solve_control_priority_schedule(
         target_offset = _target_offset(schedule_input.start_date, milestone)
         milestone_vars[milestone.id] = event_var
         milestone_target_offsets[milestone.id] = target_offset
-        if milestone.mode == "hard" and enforce_hard_milestones:
+        if milestone.mode == "hard":
             model.Add(event_var <= target_offset)
         else:
             lateness_upper = max(horizon - target_offset, horizon) + 365
@@ -851,14 +830,15 @@ def solve_control_priority_schedule(
             model.Add(lateness_var >= event_var - target_offset)
             soft_lateness_vars[milestone.id] = lateness_var
 
+    soft_control_milestone_ids = {
+        milestone_id
+        for milestone_id in soft_lateness_vars
+        if _is_soft_control_milestone(_milestone_by_id(schedule_input.milestones, milestone_id))
+    }
     control_lateness_terms = [
         late_var
         for milestone_id, late_var in soft_lateness_vars.items()
-        if _is_control_milestone(_milestone_by_id(schedule_input.milestones, milestone_id))
-    ]
-    soft_penalty_terms = [
-        late_var * _milestone_by_id(schedule_input.milestones, milestone_id).penalty_per_day
-        for milestone_id, late_var in soft_lateness_vars.items()
+        if milestone_id in soft_control_milestone_ids
     ]
     control_buffer_terms = _build_control_buffer_terms(
         model,
@@ -883,12 +863,6 @@ def solve_control_priority_schedule(
         control_buffer_terms["risk_by_task"],
         horizon,
     )
-    normal_balance_terms = (
-        _build_normal_balance_terms(model, starts, schedule_input.tasks, baseline_result, config, horizon)
-        if objective_weights["normal_balance"] > 0
-        else []
-    )
-    continuity_terms = _build_continuity_soft_terms(model, schedule_input.tasks, resource_candidates, assignment_vars)
     resource_organization_terms = _build_resource_organization_terms(
         model,
         starts,
@@ -899,9 +873,13 @@ def solve_control_priority_schedule(
         assignment_vars,
         horizon,
     )
-    continuity_objective = sum(continuity_terms["split_terms"]) * objective_weights["same_structure_craft_split"] + sum(
-        continuity_terms["spatial_terms"]
-    ) * objective_weights["spatial_resource_assignment"]
+    unconfigured_normal_balance_terms = _build_unconfigured_normal_balance_terms(
+        model,
+        starts,
+        normal_resource_groups["unconfigured"],
+        config,
+        horizon,
+    )
 
     model.Minimize(
         sum(control_lateness_terms) * objective_weights["control_node_late"]
@@ -910,9 +888,8 @@ def solve_control_priority_schedule(
         + sum(resource_organization_terms["workload_balance_terms"]) * objective_weights["resource_workload_balance"]
         + sum(resource_organization_terms["idle_terms"]) * objective_weights["resource_idle"]
         + sum(resource_organization_terms["path_terms"]) * objective_weights["resource_path_continuity"]
-        + (makespan + sum(soft_penalty_terms)) * objective_weights["makespan_and_soft_milestone"]
-        + sum(normal_balance_terms) * objective_weights["normal_balance"]
-        + continuity_objective
+        + makespan * objective_weights["makespan_and_soft_milestone"]
+        + sum(unconfigured_normal_balance_terms["terms"]) * UNCONFIGURED_NORMAL_BALANCE_WEIGHT
     )
     warm_start_used = _add_schedule_hints(
         model,
@@ -1008,26 +985,37 @@ def solve_control_priority_schedule(
     validation.extend(_validate_milestone_results(milestone_results))
     continuity_metrics = _build_continuity_metrics(scheduled_tasks)
     validation.extend(_continuity_validation_messages(continuity_metrics))
-    soft_milestone_penalty = sum(result.penalty for result in milestone_results if result.mode == "soft")
+    soft_milestone_penalty = sum(
+        result.penalty
+        for result in milestone_results
+        if result.mode == "soft" and result.id not in soft_control_milestone_ids
+    )
     control_lateness_days = sum(
-        result.lateness_days for result in milestone_results if _is_control_milestone_result(result)
+        result.lateness_days for result in milestone_results if result.id in soft_control_milestone_ids
     )
     soft_control_lateness_penalty = sum(
         result.lateness_days
         for result in milestone_results
-        if result.mode == "soft" and _is_control_milestone_result(result)
+        if result.id in soft_control_milestone_ids
     )
     control_buffer_risk_penalty = sum(solver.Value(term) for term in control_buffer_terms["terms"])
     risk_related_control_wait_penalty = sum(solver.Value(term) for term in risk_related_control_wait_terms)
-    continuity_split_penalty = sum(solver.Value(term) for term in continuity_terms["split_terms"])
-    spatial_assignment_penalty = sum(
-        int(term["penalty"]) * solver.Value(term["assignment"]) for term in continuity_terms["spatial_term_details"]
-    )
     resource_workload_balance_penalty = sum(solver.Value(term) for term in resource_organization_terms["workload_balance_terms"])
     resource_idle_penalty = sum(solver.Value(term) for term in resource_organization_terms["idle_terms"])
     resource_path_continuity_penalty = sum(solver.Value(term) for term in resource_organization_terms["path_terms"])
-    continuity_preference_penalty = continuity_split_penalty + spatial_assignment_penalty
-    normal_balance_metrics = _build_normal_balance_metrics(scheduled_tasks, config)
+    unconfigured_normal_balance_penalty = sum(
+        solver.Value(term) for term in unconfigured_normal_balance_terms["terms"]
+    )
+    normal_balance_metrics = _build_normal_balance_metrics(
+        scheduled_tasks,
+        config,
+        normal_task_ids={task.id for task in normal_tasks},
+        configured_resource_task_ids={task.id for task in normal_resource_groups["configured"]},
+        unconfigured_resource_task_ids={task.id for task in normal_resource_groups["unconfigured"]},
+        bucket_definitions=unconfigured_normal_balance_terms["bucket_definitions"],
+        balance_penalty=unconfigured_normal_balance_penalty,
+        balance_weight=UNCONFIGURED_NORMAL_BALANCE_WEIGHT,
+    )
     resource_organization_analysis = _build_resource_organization_analysis(
         scheduled_tasks,
         enabled_resources,
@@ -1053,11 +1041,7 @@ def solve_control_priority_schedule(
     )
     stats["continuity_metrics"] = continuity_metrics
     stats["continuity_objective"] = {
-        "same_structure_craft_split_penalty": continuity_split_penalty,
-        "spatial_assignment_penalty": spatial_assignment_penalty,
         "primary_weight": CONTINUITY_PRIMARY_WEIGHT,
-        "same_structure_craft_split_weight": objective_weights["same_structure_craft_split"],
-        "spatial_resource_assignment_weight": objective_weights["spatial_resource_assignment"],
     }
     stats["normal_balance_metrics"] = normal_balance_metrics
     stats["resource_organization_analysis"] = resource_organization_analysis
@@ -1069,10 +1053,8 @@ def solve_control_priority_schedule(
         + resource_workload_balance_penalty * objective_weights["resource_workload_balance"]
         + resource_idle_penalty * objective_weights["resource_idle"]
         + resource_path_continuity_penalty * objective_weights["resource_path_continuity"]
-        + (objective_days + soft_milestone_penalty) * objective_weights["makespan_and_soft_milestone"]
-        + sum(solver.Value(term) for term in normal_balance_terms) * objective_weights["normal_balance"]
-        + continuity_split_penalty * objective_weights["same_structure_craft_split"]
-        + spatial_assignment_penalty * objective_weights["spatial_resource_assignment"]
+        + objective_days * objective_weights["makespan_and_soft_milestone"]
+        + unconfigured_normal_balance_penalty * UNCONFIGURED_NORMAL_BALANCE_WEIGHT
     )
     validation.append(
         ValidationMessage(
@@ -1080,7 +1062,7 @@ def solve_control_priority_schedule(
             message=(
                 f"控制性工程优先策略已完成：控制链工作项 {len(control_chain_task_ids)} 个，"
                 f"控制缓冲状态 {control_priority_analysis['control_buffer_status']}，"
-                f"普通工程均衡评分 {normal_balance_metrics['balance_score']}。"
+                f"未配置资源普通工程均衡评分 {normal_balance_metrics['balance_score']}。"
             ),
         )
     )
@@ -1114,11 +1096,11 @@ def solve_control_priority_schedule(
             "resource_path_continuity_penalty": resource_path_continuity_penalty,
             "resource_balance_weight": objective_weights["resource_workload_balance"],
             "resource_idle_weight": objective_weights["resource_idle"],
-            "normal_balance_penalty": sum(solver.Value(term) for term in normal_balance_terms),
+            "unconfigured_normal_balance_penalty": unconfigured_normal_balance_penalty,
+            "unconfigured_normal_balance_weight": UNCONFIGURED_NORMAL_BALANCE_WEIGHT,
+            "unconfigured_normal_balance_score": normal_balance_metrics["balance_score"],
+            "normal_balance_penalty": unconfigured_normal_balance_penalty,
             "soft_milestone_penalty": soft_milestone_penalty,
-            "same_structure_craft_split_penalty": continuity_split_penalty,
-            "spatial_assignment_penalty": spatial_assignment_penalty,
-            "continuity_preference_penalty": continuity_preference_penalty,
             "continuity_score": continuity_metrics["continuity_score"],
             "normal_balance_score": normal_balance_metrics["balance_score"],
             "resource_organization_analysis": resource_organization_analysis,
@@ -1185,6 +1167,97 @@ def _normal_balance_tasks(tasks: list[Task], control_chain_task_ids: set[str]) -
         for task in tasks
         if task.id not in control_chain_task_ids and task.control_level == "normal"
     ]
+
+
+def _split_normal_tasks_by_resource_configuration(
+    normal_tasks: list[Task],
+    resource_candidates: dict[str, list[Resource]],
+) -> dict[str, list[Task]]:
+    configured: list[Task] = []
+    unconfigured: list[Task] = []
+    for task in normal_tasks:
+        if resource_candidates.get(task.id):
+            configured.append(task)
+        else:
+            unconfigured.append(task)
+    return {
+        "configured": configured,
+        "unconfigured": unconfigured,
+    }
+
+
+def _normal_balance_bucket_definitions(config: Any, horizon: int) -> list[dict[str, int]]:
+    bucket_size = 7 if config.normal_balance_bucket == "week" else 30
+    window_start = max(0, int(config.normal_earliest_start_offset or 0))
+    latest = config.normal_latest_finish_offset
+    window_finish = min(horizon, int(latest)) if latest is not None else horizon
+    window_finish = max(window_start + 1, window_finish)
+    bucket_count = max(1, math.ceil((window_finish - window_start) / bucket_size))
+    return [
+        {
+            "bucket_index": bucket_index,
+            "start_offset": window_start + bucket_index * bucket_size,
+            "finish_offset": min(window_finish, window_start + (bucket_index + 1) * bucket_size),
+        }
+        for bucket_index in range(bucket_count)
+    ]
+
+
+def _build_unconfigured_normal_balance_terms(
+    model: Any,
+    starts: dict[str, Any],
+    unconfigured_normal_tasks: list[Task],
+    config: Any,
+    horizon: int,
+) -> dict[str, Any]:
+    bucket_definitions = _normal_balance_bucket_definitions(config, horizon)
+    active_tasks = [task for task in unconfigured_normal_tasks if task.duration_days > 0]
+    if len(active_tasks) < 2 or len(bucket_definitions) <= 1:
+        return {
+            "terms": [],
+            "bucket_definitions": bucket_definitions,
+            "ideal_workload_floor_days": 0,
+            "ideal_workload_ceiling_days": 0,
+        }
+
+    total_workload = sum(task.duration_days for task in active_tasks)
+    ideal_floor = total_workload // len(bucket_definitions)
+    ideal_ceiling = math.ceil(total_workload / len(bucket_definitions))
+    bucket_task_flags: dict[int, list[tuple[Task, Any]]] = defaultdict(list)
+
+    for task in active_tasks:
+        task_bucket_flags = []
+        for bucket in bucket_definitions:
+            bucket_index = bucket["bucket_index"]
+            in_bucket = model.NewBoolVar(f"unconfigured_normal_bucket_{_safe(task.id)}_{bucket_index}")
+            model.Add(starts[task.id] >= bucket["start_offset"]).OnlyEnforceIf(in_bucket)
+            model.Add(starts[task.id] <= bucket["finish_offset"] - 1).OnlyEnforceIf(in_bucket)
+            task_bucket_flags.append(in_bucket)
+            bucket_task_flags[bucket_index].append((task, in_bucket))
+        model.AddExactlyOne(task_bucket_flags)
+
+    terms: list[Any] = []
+    for bucket in bucket_definitions:
+        bucket_index = bucket["bucket_index"]
+        bucket_load = model.NewIntVar(0, total_workload, f"unconfigured_normal_load_{bucket_index}")
+        model.Add(
+            bucket_load == sum(
+                task.duration_days * in_bucket
+                for task, in_bucket in bucket_task_flags.get(bucket_index, [])
+            )
+        )
+        over_target = model.NewIntVar(0, total_workload, f"unconfigured_normal_over_{bucket_index}")
+        under_target = model.NewIntVar(0, total_workload, f"unconfigured_normal_under_{bucket_index}")
+        model.Add(over_target >= bucket_load - ideal_ceiling)
+        model.Add(under_target >= ideal_floor - bucket_load)
+        terms.extend([over_target, under_target])
+
+    return {
+        "terms": terms,
+        "bucket_definitions": bucket_definitions,
+        "ideal_workload_floor_days": ideal_floor,
+        "ideal_workload_ceiling_days": ideal_ceiling,
+    }
 
 
 def _add_normal_time_window_constraints(
@@ -1825,16 +1898,16 @@ def _build_layered_control_diagnostics(
 
 
 def _normal_balance_status(metrics: dict[str, Any]) -> str:
-    if metrics.get("normal_task_count", 0) <= 0:
+    if metrics.get("unconfigured_resource_normal_task_count", metrics.get("normal_task_count", 0)) <= 0:
         return "not_evaluated"
     score = int(metrics.get("balance_score", 0))
     if score >= 80:
         return "balanced"
     bucket_loads = metrics.get("bucket_loads") or []
     if len(bucket_loads) >= 2:
-        first = int(bucket_loads[0].get("task_count", 0))
-        last = int(bucket_loads[-1].get("task_count", 0))
-        peak = int(metrics.get("peak_task_count", 0))
+        first = int(bucket_loads[0].get("duration_days", 0))
+        last = int(bucket_loads[-1].get("duration_days", 0))
+        peak = int(metrics.get("peak_duration_days", metrics.get("peak_task_count", 0)))
         if last == peak and last > first:
             return "backloaded"
     return "concentrated"
@@ -1850,38 +1923,6 @@ def _resource_path_status(metrics: dict[str, Any]) -> str:
     if jumps > 0:
         return "reasonable_jump"
     return "smooth"
-
-
-def _build_normal_balance_terms(
-    model: Any,
-    starts: dict[str, Any],
-    tasks: list[Task],
-    baseline_result: ScheduleResult,
-    config: Any,
-    horizon: int,
-) -> list[Any]:
-    normal_tasks = sorted(
-        [task for task in tasks if task.control_level == "normal"],
-        key=_task_spatial_sort_key,
-    )
-    if len(normal_tasks) <= 1:
-        return []
-    baseline_by_id = {task.id: task for task in baseline_result.tasks}
-    earliest = config.normal_earliest_start_offset
-    baseline_latest = max((baseline_by_id[task.id].end_offset for task in normal_tasks if task.id in baseline_by_id), default=0)
-    latest = config.normal_latest_finish_offset or max(
-        baseline_latest,
-        earliest + max(1, len(normal_tasks) - 1) * max(1, math.ceil(sum(task.duration_days for task in normal_tasks) / len(normal_tasks))),
-    )
-    latest = min(horizon, max(latest, earliest + 1))
-    span = max(1, latest - earliest)
-    terms = []
-    for rank, task in enumerate(normal_tasks):
-        target = earliest + round(rank * span / max(1, len(normal_tasks) - 1))
-        deviation = model.NewIntVar(0, horizon, f"normal_balance_dev_{rank}_{_safe(task.id)}")
-        model.AddAbsEquality(deviation, starts[task.id] - target)
-        terms.append(deviation)
-    return terms
 
 
 def _build_resource_organization_terms(
@@ -1961,6 +2002,8 @@ def _build_resource_organization_terms(
         model,
         assignments_by_resource,
         used_by_resource,
+        starts,
+        ends,
     )
 
     return {
@@ -1976,168 +2019,173 @@ def _build_resource_path_continuity_terms(
     model: Any,
     assignments_by_resource: dict[str, list[tuple[Task, Any]]],
     used_by_resource: dict[str, Any],
+    starts: dict[str, Any],
+    ends: dict[str, Any],
 ) -> dict[str, list[Any]]:
-    path_group_terms: list[Any] = []
-    spatial_gap_terms: list[Any] = []
+    same_side_gap_terms: list[Any] = []
+    side_switch_terms: list[Any] = []
 
     for resource_id, task_assignments in assignments_by_resource.items():
         resource_used = used_by_resource.get(resource_id)
-        if resource_used is None:
+        if resource_used is None or len(task_assignments) <= 1:
             continue
-        task_assignments_by_group: dict[str, list[tuple[Task, Any]]] = defaultdict(list)
-        for task, assignment in task_assignments:
-            task_assignments_by_group[_task_path_group_key_for_resource(task, resource_id)].append((task, assignment))
 
-        group_used_vars = []
-        for group_index, group_task_assignments in enumerate(task_assignments_by_group.values()):
-            group_assignments = [assignment for _, assignment in group_task_assignments]
-            group_used = model.NewBoolVar(f"resource_path_group_used_{_safe(resource_id)}_{group_index}")
-            for assignment in group_assignments:
-                model.Add(assignment <= group_used)
-            model.Add(sum(group_assignments) >= group_used)
-            group_used_vars.append(group_used)
-            spatial_gap = _resource_path_group_spatial_gap_term(
-                model,
-                resource_id=resource_id,
-                group_index=group_index,
-                group_used=group_used,
-                task_assignments=group_task_assignments,
-            )
-            if spatial_gap is not None:
-                spatial_gap_terms.append(spatial_gap)
+        indexed_assignments = list(enumerate(task_assignments, start=1))
+        arcs = [(0, 0, resource_used.Not())]
+        for node_index, (_, assignment) in indexed_assignments:
+            arcs.append((node_index, node_index, assignment.Not()))
+            arcs.append((0, node_index, model.NewBoolVar(f"resource_path_start_{_safe(resource_id)}_{node_index}")))
+            arcs.append((node_index, 0, model.NewBoolVar(f"resource_path_end_{_safe(resource_id)}_{node_index}")))
 
-        if len(group_used_vars) > 1:
-            excess_groups = model.NewIntVar(0, len(group_used_vars) - 1, f"resource_path_group_excess_{_safe(resource_id)}")
-            model.Add(excess_groups == sum(group_used_vars) - resource_used)
-            path_group_terms.append(excess_groups)
+        for previous_index, (previous_task, _) in indexed_assignments:
+            for current_index, (current_task, _) in indexed_assignments:
+                if previous_index == current_index:
+                    continue
+                transition = model.NewBoolVar(
+                    f"resource_path_arc_{_safe(resource_id)}_{previous_index}_{current_index}"
+                )
+                arcs.append((previous_index, current_index, transition))
+                model.Add(starts[current_task.id] >= ends[previous_task.id]).OnlyEnforceIf(transition)
+
+                same_side_gap_penalty, side_switch_penalty = _resource_path_transition_penalties(
+                    previous_task,
+                    current_task,
+                )
+                if same_side_gap_penalty:
+                    same_side_gap_terms.append(same_side_gap_penalty * transition)
+                if side_switch_penalty:
+                    side_switch_terms.append(side_switch_penalty * transition)
+
+        model.AddCircuit(arcs)
 
     return {
-        "path_terms": path_group_terms + spatial_gap_terms,
-        "path_group_terms": path_group_terms,
-        "spatial_gap_terms": spatial_gap_terms,
+        "path_terms": same_side_gap_terms + side_switch_terms,
+        "path_group_terms": [],
+        "spatial_gap_terms": [],
+        "same_side_gap_terms": same_side_gap_terms,
+        "side_switch_terms": side_switch_terms,
     }
 
 
-def _resource_path_group_spatial_gap_term(
-    model: Any,
-    *,
-    resource_id: str,
-    group_index: int,
-    group_used: Any,
-    task_assignments: list[tuple[Task, Any]],
-) -> Any | None:
-    tasks_by_structure: dict[str, list[tuple[Task, Any]]] = defaultdict(list)
-    sort_key_by_structure: dict[str, tuple[Any, ...]] = {}
-    for task, assignment in task_assignments:
-        location = _task_location(task)
-        if location["support_index"] is None:
-            continue
-        tasks_by_structure[task.structure_id].append((task, assignment))
-        sort_key_by_structure.setdefault(
-            task.structure_id,
-            _continuity_location_sort_key(task, location, include_side=True),
-        )
+def _resource_path_transition_penalties(previous_task: Task, current_task: Task) -> tuple[int, int]:
+    previous_location = _task_location(previous_task)
+    current_location = _task_location(current_task)
+    previous_side = previous_location["side"]
+    current_side = current_location["side"]
 
-    if len(tasks_by_structure) <= 1:
-        return None
-
-    ranked_structure_ids = sorted(sort_key_by_structure, key=lambda item: (sort_key_by_structure[item], item))
-    rank_by_structure = {structure_id: rank for rank, structure_id in enumerate(ranked_structure_ids)}
-    location_used_vars = []
-    for structure_id in ranked_structure_ids:
-        assignments = [assignment for _, assignment in tasks_by_structure[structure_id]]
-        location_used = model.NewBoolVar(
-            f"resource_path_location_used_{_safe(resource_id)}_{group_index}_{_safe(structure_id)}"
-        )
-        for assignment in assignments:
-            model.Add(assignment <= location_used)
-        model.Add(sum(assignments) >= location_used)
-        location_used_vars.append(location_used)
-
-    max_rank_value = len(ranked_structure_ids) - 1
-    min_rank = model.NewIntVar(0, max_rank_value, f"resource_path_min_rank_{_safe(resource_id)}_{group_index}")
-    max_rank = model.NewIntVar(0, max_rank_value, f"resource_path_max_rank_{_safe(resource_id)}_{group_index}")
-    for structure_id, location_used in zip(ranked_structure_ids, location_used_vars):
-        rank = rank_by_structure[structure_id]
-        model.Add(min_rank <= rank).OnlyEnforceIf(location_used)
-        model.Add(max_rank >= rank).OnlyEnforceIf(location_used)
-    model.Add(min_rank == 0).OnlyEnforceIf(group_used.Not())
-    model.Add(max_rank == 0).OnlyEnforceIf(group_used.Not())
-    model.Add(max_rank >= min_rank)
-
-    location_span = model.NewIntVar(0, len(ranked_structure_ids), f"resource_path_location_span_{_safe(resource_id)}_{group_index}")
-    gap = model.NewIntVar(0, len(ranked_structure_ids), f"resource_path_location_gap_{_safe(resource_id)}_{group_index}")
-    model.Add(location_span == max_rank - min_rank + group_used)
-    model.Add(gap == location_span - sum(location_used_vars))
-    return gap
-
-
-def _task_path_group_key_for_resource(task: Task, resource_id: str) -> str:
-    location = _task_location(task)
-    resource_type = "|".join(sorted(task.compatible_resource_types))
-    if "_" in resource_id:
-        resource_type = resource_id.rsplit("_", 1)[0]
-    key_parts = (
-        task.bridge_id or "",
-        task.work_section_id or "",
-        location["side"] or "N",
-        resource_type,
-        task.component_type,
-        task.process_name,
+    side_switch_penalty = (
+        1
+        if previous_side in {"L", "R"} and current_side in {"L", "R"} and previous_side != current_side
+        else 0
     )
-    return "|".join(str(part) for part in key_parts)
+    same_side_gap_penalty = 0
+    if (
+        previous_task.bridge_id == current_task.bridge_id
+        and previous_side in {"L", "R"}
+        and previous_side == current_side
+        and previous_location["support_index"] is not None
+        and current_location["support_index"] is not None
+    ):
+        support_gap = abs(current_location["support_index"] - previous_location["support_index"])
+        same_side_gap_penalty = support_gap
+    return same_side_gap_penalty, side_switch_penalty
 
 
 def _is_control_milestone(milestone: MilestoneConstraint) -> bool:
     return milestone.level == "control" or milestone.mode == "hard" or bool(milestone.related_structure_ids)
 
 
+def _is_soft_control_milestone(milestone: MilestoneConstraint) -> bool:
+    return milestone.mode == "soft" and (milestone.level == "control" or bool(milestone.related_structure_ids))
+
+
 def _is_control_milestone_result(milestone: MilestoneResult) -> bool:
     return milestone.level == "control" or milestone.mode == "hard"
 
 
-def _build_normal_balance_metrics(scheduled_tasks: list[ScheduledTask], config: Any) -> dict[str, Any]:
-    normal_tasks = [task for task in scheduled_tasks if task.control_level == "normal"]
+def _build_normal_balance_metrics(
+    scheduled_tasks: list[ScheduledTask],
+    config: Any,
+    *,
+    normal_task_ids: set[str] | None = None,
+    configured_resource_task_ids: set[str] | None = None,
+    unconfigured_resource_task_ids: set[str] | None = None,
+    bucket_definitions: list[dict[str, int]] | None = None,
+    balance_penalty: int = 0,
+    balance_weight: int = 0,
+) -> dict[str, Any]:
+    normal_tasks = [
+        task
+        for task in scheduled_tasks
+        if task.control_level == "normal" and (normal_task_ids is None or task.id in normal_task_ids)
+    ]
+    if configured_resource_task_ids is None:
+        configured_resource_task_ids = {task.id for task in normal_tasks if task.assigned_resource_id}
+    if unconfigured_resource_task_ids is None:
+        unconfigured_resource_task_ids = {task.id for task in normal_tasks if not task.assigned_resource_id}
+
+    configured_tasks = [task for task in normal_tasks if task.id in configured_resource_task_ids]
+    unconfigured_tasks = [task for task in normal_tasks if task.id in unconfigured_resource_task_ids]
     bucket_size = 7 if config.normal_balance_bucket == "week" else 30
-    if not normal_tasks:
-        return {
-            "bucket": config.normal_balance_bucket,
-            "bucket_size_days": bucket_size,
-            "normal_task_count": 0,
-            "bucket_loads": [],
-            "peak_task_count": 0,
-            "min_task_count": 0,
-            "balance_score": 100,
-        }
-    min_bucket = min(task.start_offset // bucket_size for task in normal_tasks)
-    max_bucket = max(task.start_offset // bucket_size for task in normal_tasks)
+    bucket_definitions = bucket_definitions or _normal_balance_bucket_definitions(
+        config,
+        max((task.end_offset for task in scheduled_tasks), default=bucket_size),
+    )
+    total_workload = sum(task.duration_days for task in unconfigured_tasks)
+    bucket_count = len(bucket_definitions)
+    ideal_floor = total_workload // bucket_count if bucket_count else 0
+    ideal_ceiling = math.ceil(total_workload / bucket_count) if bucket_count else 0
     bucket_loads = []
     task_counts = []
-    for bucket in range(min_bucket, max_bucket + 1):
-        bucket_tasks = [task for task in normal_tasks if task.start_offset // bucket_size == bucket]
+    duration_loads = []
+    for bucket in bucket_definitions:
+        bucket_tasks = [
+            task
+            for task in unconfigured_tasks
+            if bucket["start_offset"] <= task.start_offset < bucket["finish_offset"]
+        ]
         count = len(bucket_tasks)
+        duration_days = sum(task.duration_days for task in bucket_tasks)
         task_counts.append(count)
+        duration_loads.append(duration_days)
         bucket_loads.append(
             {
-                "bucket_index": bucket,
-                "start_offset": bucket * bucket_size,
-                "finish_offset": (bucket + 1) * bucket_size,
+                "bucket_index": bucket["bucket_index"],
+                "start_offset": bucket["start_offset"],
+                "finish_offset": bucket["finish_offset"],
                 "task_count": count,
-                "duration_days": sum(task.duration_days for task in bucket_tasks),
+                "duration_days": duration_days,
+                "ideal_workload_floor_days": ideal_floor,
+                "ideal_workload_ceiling_days": ideal_ceiling,
+                "deviation_days": max(0, duration_days - ideal_ceiling, ideal_floor - duration_days),
+                "task_ids": [task.id for task in sorted(bucket_tasks, key=lambda item: (item.start_offset, item.id))],
                 "resource_types": sorted({task.assigned_resource_type or "" for task in bucket_tasks if task.assigned_resource_type}),
             }
         )
-    peak = max(task_counts, default=0)
-    low = min(task_counts, default=0)
-    score = max(0, 100 - (peak - low) * 10)
+
+    peak_task_count = max(task_counts, default=0)
+    min_task_count = min(task_counts, default=0)
+    peak_duration = max(duration_loads, default=0)
+    min_duration = min(duration_loads, default=0)
+    score = 100 if not unconfigured_tasks else max(0, 100 - int(balance_penalty) * 10)
     return {
         "bucket": config.normal_balance_bucket,
         "bucket_size_days": bucket_size,
         "normal_task_count": len(normal_tasks),
-        "bucket_loads": bucket_loads,
-        "peak_task_count": peak,
-        "min_task_count": low,
+        "configured_resource_normal_task_count": len(configured_tasks),
+        "unconfigured_resource_normal_task_count": len(unconfigured_tasks),
+        "bucket_loads": bucket_loads if unconfigured_tasks else [],
+        "peak_task_count": peak_task_count,
+        "min_task_count": min_task_count,
+        "peak_duration_days": peak_duration,
+        "min_duration_days": min_duration,
+        "total_unconfigured_workload_days": total_workload,
+        "ideal_workload_floor_days": ideal_floor,
+        "ideal_workload_ceiling_days": ideal_ceiling,
+        "balance_penalty": balance_penalty,
+        "balance_weight": balance_weight,
         "balance_score": score,
+        "metric_scope": "unconfigured_resource_normal_work",
     }
 
 
@@ -2447,6 +2495,7 @@ def _build_control_priority_analysis(
         "control_buffer_risks": control_buffer_risks[:50],
         "control_buffer_status": _control_buffer_status(control_buffer_risks),
         "normal_balance_status": _normal_balance_status(normal_balance_metrics),
+        "unconfigured_normal_balance_status": _normal_balance_status(normal_balance_metrics),
         "resource_path_status": _resource_path_status(continuity_metrics),
         "resource_balance_status": resource_organization_analysis.get("resource_balance_status", "not_evaluated"),
         "resource_idle_status": resource_organization_analysis.get("resource_idle_status", "not_evaluated"),
@@ -2861,24 +2910,6 @@ def _min_resource_reoptimization_candidates(
             ),
         }
     ]
-    if _objective_weights_for_config(base_strategy)["normal_balance"] > 0:
-        no_balance_strategy = base_strategy.model_copy(
-            update={
-                "enable_balance_objective": False,
-                "objective_terms": _objective_terms_with_normal_balance_disabled(base_strategy.objective_terms),
-            }
-        )
-        candidates.append(
-            {
-                "source": "control_priority_reoptimization_no_balance",
-                "schedule_input": schedule_input.model_copy(
-                    update={
-                        "resources": limited_resources,
-                        "schedule_strategy": no_balance_strategy,
-                    }
-                ),
-            }
-        )
     return candidates
 
 
@@ -3460,19 +3491,13 @@ def _solve_resource_model(
         late_var * _milestone_by_id(schedule_input.milestones, milestone_id).penalty_per_day
         for milestone_id, late_var in soft_lateness_vars.items()
     ]
-    continuity_terms = {"split_terms": [], "spatial_terms": [], "spatial_term_details": []}
-    if not feasibility_only:
-        continuity_terms = _build_continuity_soft_terms(model, schedule_input.tasks, resource_candidates, assignment_vars)
     if feasibility_only:
         pass
     elif minimize_group_key:
         model.Minimize(group_count_exprs.get(minimize_group_key, 0))
     else:
         primary_objective = makespan + sum(soft_penalty_terms)
-        continuity_objective = sum(continuity_terms["split_terms"]) * SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT + sum(
-            continuity_terms["spatial_terms"]
-        ) * SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT
-        model.Minimize(primary_objective * CONTINUITY_PRIMARY_WEIGHT + continuity_objective)
+        model.Minimize(primary_objective * CONTINUITY_PRIMARY_WEIGHT)
 
     solver = cp_model.CpSolver()
     _configure_solver(solver, schedule_input.time_limit_seconds)
@@ -3493,7 +3518,6 @@ def _solve_resource_model(
         "milestone_vars": milestone_vars,
         "milestone_target_offsets": milestone_target_offsets,
         "soft_lateness_vars": soft_lateness_vars,
-        "continuity_terms": continuity_terms,
         "makespan": makespan,
         "validation": validation,
         "group_counts": group_counts,
@@ -3915,11 +3939,7 @@ def _capacity_model_result(
         "capacity_model_schedule": True,
         "continuity_metrics": continuity_metrics,
         "continuity_objective": {
-            "same_structure_craft_split_penalty": 0,
-            "spatial_assignment_penalty": 0,
             "primary_weight": CONTINUITY_PRIMARY_WEIGHT,
-            "same_structure_craft_split_weight": SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT,
-            "spatial_resource_assignment_weight": SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT,
         },
     }
     return ScheduleResult(
@@ -3935,8 +3955,6 @@ def _capacity_model_result(
         objective_breakdown={
             "makespan_days": objective_days,
             "soft_milestone_penalty": soft_milestone_penalty,
-            "same_structure_craft_split_penalty": 0,
-            "spatial_assignment_penalty": 0,
             "continuity_score": continuity_metrics["continuity_score"],
             "weighted_objective": objective_days + soft_milestone_penalty,
         },
@@ -4140,20 +4158,11 @@ def _resource_model_result(schedule_input: ScheduleInput, solved: dict[str, Any]
     continuity_metrics = _build_continuity_metrics(scheduled_tasks)
     validation.extend(_continuity_validation_messages(continuity_metrics))
     soft_milestone_penalty = sum(result.penalty for result in milestone_results if result.mode == "soft")
-    continuity_terms = solved.get("continuity_terms", {"split_terms": [], "spatial_term_details": []})
-    continuity_split_penalty = sum(solver.Value(term) for term in continuity_terms["split_terms"])
-    spatial_assignment_penalty = sum(
-        int(term["penalty"]) * solver.Value(term["assignment"]) for term in continuity_terms["spatial_term_details"]
-    )
     stats = {
         **solved["stats"],
         "continuity_metrics": continuity_metrics,
         "continuity_objective": {
-            "same_structure_craft_split_penalty": continuity_split_penalty,
-            "spatial_assignment_penalty": spatial_assignment_penalty,
             "primary_weight": CONTINUITY_PRIMARY_WEIGHT,
-            "same_structure_craft_split_weight": SAME_STRUCTURE_CRAFT_SPLIT_WEIGHT,
-            "spatial_resource_assignment_weight": SPATIAL_RESOURCE_ASSIGNMENT_WEIGHT,
         },
     }
     return ScheduleResult(
@@ -4169,118 +4178,10 @@ def _resource_model_result(schedule_input: ScheduleInput, solved: dict[str, Any]
         objective_breakdown={
             "makespan_days": objective_days,
             "soft_milestone_penalty": soft_milestone_penalty,
-            "same_structure_craft_split_penalty": continuity_split_penalty,
-            "spatial_assignment_penalty": spatial_assignment_penalty,
             "continuity_score": continuity_metrics["continuity_score"],
             "weighted_objective": objective_days + soft_milestone_penalty,
         },
     )
-
-
-def _build_continuity_soft_terms(
-    model: Any,
-    tasks: list[Task],
-    resource_candidates: dict[str, list[Resource]],
-    assignment_vars: dict[tuple[str, str], Any],
-) -> dict[str, list[Any]]:
-    split_terms = _same_structure_craft_split_terms(model, tasks, resource_candidates, assignment_vars)
-    spatial_term_details = _spatial_resource_assignment_term_details(tasks, resource_candidates, assignment_vars)
-    return {
-        "split_terms": split_terms,
-        "spatial_terms": [detail["assignment"] * detail["penalty"] for detail in spatial_term_details],
-        "spatial_term_details": spatial_term_details,
-    }
-
-
-def _same_structure_craft_split_terms(
-    model: Any,
-    tasks: list[Task],
-    resource_candidates: dict[str, list[Resource]],
-    assignment_vars: dict[tuple[str, str], Any],
-) -> list[Any]:
-    grouped_tasks: dict[tuple[str, str, str], list[Task]] = defaultdict(list)
-    for task in tasks:
-        grouped_tasks[(task.structure_id, task.component_type, task.process_name)].append(task)
-
-    terms: list[Any] = []
-    for group_index, group_tasks in enumerate(grouped_tasks.values()):
-        if len(group_tasks) <= 1:
-            continue
-        resource_ids = sorted(
-            {
-                resource.id
-                for task in group_tasks
-                for resource in resource_candidates.get(task.id, [])
-                if (task.id, resource.id) in assignment_vars
-            }
-        )
-        if len(resource_ids) <= 1:
-            continue
-
-        used_vars = []
-        for resource_id in resource_ids:
-            assignments = [
-                assignment_vars[(task.id, resource_id)]
-                for task in group_tasks
-                if (task.id, resource_id) in assignment_vars
-            ]
-            if not assignments:
-                continue
-            used = model.NewBoolVar(f"continuity_used_{group_index}_{_safe(resource_id)}")
-            for assigned in assignments:
-                model.Add(assigned <= used)
-            model.Add(sum(assignments) >= used)
-            used_vars.append(used)
-
-        if len(used_vars) <= 1:
-            continue
-        excess = model.NewIntVar(0, len(used_vars) - 1, f"continuity_split_{group_index}")
-        model.Add(excess == sum(used_vars) - 1)
-        terms.append(excess)
-    return terms
-
-
-def _spatial_resource_assignment_term_details(
-    tasks: list[Task],
-    resource_candidates: dict[str, list[Resource]],
-    assignment_vars: dict[tuple[str, str], Any],
-) -> list[dict[str, Any]]:
-    resources_by_type: dict[str, dict[str, Resource]] = defaultdict(dict)
-    tasks_by_type: dict[str, dict[str, Task]] = defaultdict(dict)
-    for task in tasks:
-        for resource in resource_candidates.get(task.id, []):
-            if (task.id, resource.id) not in assignment_vars:
-                continue
-            resources_by_type[resource.type][resource.id] = resource
-            tasks_by_type[resource.type][task.id] = task
-
-    details: list[dict[str, Any]] = []
-    for resource_type, typed_tasks_by_id in tasks_by_type.items():
-        typed_resources = sorted(resources_by_type[resource_type].values(), key=_resource_sort_key)
-        if len(typed_resources) <= 1:
-            continue
-        resource_rank = {resource.id: index for index, resource in enumerate(typed_resources)}
-        ordered_tasks = sorted(typed_tasks_by_id.values(), key=_task_spatial_sort_key)
-        total_tasks = len(ordered_tasks)
-        if total_tasks <= 1:
-            continue
-        target_rank_by_task = {
-            task.id: min(len(typed_resources) - 1, index * len(typed_resources) // total_tasks)
-            for index, task in enumerate(ordered_tasks)
-        }
-        for task in ordered_tasks:
-            target_rank = target_rank_by_task[task.id]
-            for resource in resource_candidates.get(task.id, []):
-                if resource.type != resource_type:
-                    continue
-                assignment = assignment_vars.get((task.id, resource.id))
-                if assignment is None:
-                    continue
-                penalty = abs(resource_rank[resource.id] - target_rank)
-                if penalty <= 0:
-                    continue
-                details.append({"assignment": assignment, "penalty": penalty})
-    return details
 
 
 def _build_continuity_metrics(scheduled_tasks: list[ScheduledTask]) -> dict[str, Any]:
@@ -5073,7 +4974,7 @@ def _resource_groups(resources: list[Resource]) -> list[dict[str, Any]]:
             groups[key]["same_structure_resource_binding"] or resource.same_structure_resource_binding
         )
         groups[key]["same_structure_parallel_limit"] = _configured_parallel_limit(
-            [groups[key]["same_structure_parallel_limit"], resource.same_structure_parallel_limit]
+            [groups[key]["same_structure_parallel_limit"], _effective_same_structure_parallel_limit([resource])]
         )
         if not groups[key]["parallel_rule_description"] and resource.parallel_rule_description:
             groups[key]["parallel_rule_description"] = resource.parallel_rule_description

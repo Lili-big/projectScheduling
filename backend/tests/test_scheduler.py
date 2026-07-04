@@ -29,37 +29,42 @@ from app.solver import _resource_path_metrics, _task_ids_for_milestone, solve_ca
 from app.wbs import calculate_duration, generate_wbs  # noqa: E402
 
 
-def test_schedule_strategy_merges_objective_term_defaults_and_syncs_legacy_balance_flag() -> None:
-    config = ScheduleStrategyConfig(enable_balance_objective=False)
+def test_schedule_strategy_merges_objective_term_defaults_and_ignores_legacy_balance_target() -> None:
+    config = ScheduleStrategyConfig(enable_balance_objective=True)
 
     assert set(config.objective_terms) == {
         "control_node_late",
         "control_buffer_risk",
         "risk_related_control_wait",
-        "same_structure_craft_split",
         "resource_workload_balance",
         "resource_idle",
         "resource_path_continuity",
         "makespan_and_soft_milestone",
-        "normal_balance",
-        "spatial_resource_assignment",
     }
-    assert config.objective_terms["normal_balance"].enabled is False
     assert config.enable_balance_objective is False
     assert config.objective_terms["control_node_late"].weight == 1_000_000_000
 
-    explicit_config = ScheduleStrategyConfig(
-        enable_balance_objective=False,
+    legacy_config = ScheduleStrategyConfig(
+        enable_balance_objective=True,
         objective_terms={"normal_balance": {"enabled": True, "weight": 7}},
     )
 
-    assert explicit_config.enable_balance_objective is True
-    assert explicit_config.objective_terms["normal_balance"].enabled is True
-    assert explicit_config.objective_terms["normal_balance"].weight == 7
+    assert legacy_config.enable_balance_objective is False
+    assert "normal_balance" not in legacy_config.objective_terms
 
     disabled_zero_weight = ScheduleStrategyConfig(objective_terms={"resource_idle": {"enabled": False, "weight": 0}})
     assert disabled_zero_weight.objective_terms["resource_idle"].weight == 0
     assert disabled_zero_weight.objective_terms["resource_idle"].enabled is False
+
+    deprecated_spatial = ScheduleStrategyConfig(
+        objective_terms={"spatial_resource_assignment": {"enabled": True, "weight": 1}}
+    )
+    assert "spatial_resource_assignment" not in deprecated_spatial.objective_terms
+
+    deprecated_same_structure = ScheduleStrategyConfig(
+        objective_terms={"same_structure_craft_split": {"enabled": False, "weight": 1}}
+    )
+    assert "same_structure_craft_split" not in deprecated_same_structure.objective_terms
 
 
 def test_schedule_strategy_rejects_invalid_objective_term_config() -> None:
@@ -75,15 +80,28 @@ def test_schedule_strategy_rejects_invalid_objective_term_config() -> None:
                 "control_node_late": {"enabled": False, "weight": 1},
                 "control_buffer_risk": {"enabled": False, "weight": 1},
                 "risk_related_control_wait": {"enabled": False, "weight": 1},
-                "same_structure_craft_split": {"enabled": False, "weight": 1},
                 "resource_workload_balance": {"enabled": False, "weight": 1},
                 "resource_idle": {"enabled": False, "weight": 1},
                 "resource_path_continuity": {"enabled": False, "weight": 1},
                 "makespan_and_soft_milestone": {"enabled": False, "weight": 1},
-                "normal_balance": {"enabled": False, "weight": 1},
-                "spatial_resource_assignment": {"enabled": False, "weight": 1},
             }
         )
+
+
+def _objective_terms_with_only(enabled_term: str, weight: int) -> dict[str, dict[str, bool | int]]:
+    term_ids = [
+        "control_node_late",
+        "control_buffer_risk",
+        "risk_related_control_wait",
+        "makespan_and_soft_milestone",
+        "resource_path_continuity",
+        "resource_idle",
+        "resource_workload_balance",
+    ]
+    return {
+        term_id: {"enabled": term_id == enabled_term, "weight": weight if term_id == enabled_term else 1}
+        for term_id in term_ids
+    }
 
 
 def test_duration_calculation_uses_fixed_days_per_pile() -> None:
@@ -1457,9 +1475,9 @@ def test_logic_links_are_hard_precedence_constraints() -> None:
             milestones=[
                 MilestoneConstraint(
                     id="M-finish",
-                    name="5天完工",
+                    name="5天参考完工",
                     level="contract",
-                    mode="hard",
+                    mode="soft",
                     scope_type="project",
                     target_event="finish",
                     target_date=date(2026, 1, 5),
@@ -1475,7 +1493,7 @@ def test_logic_links_are_hard_precedence_constraints() -> None:
     assert any(message.level == "info" and "工艺逻辑关系均已满足" in message.message for message in result.validation)
 
 
-def test_solver_prefers_same_resource_for_same_structure_and_craft() -> None:
+def test_solver_reports_same_structure_split_as_diagnostic_only() -> None:
     pytest.importorskip("ortools")
     start = date(2026, 1, 1)
     tasks = [
@@ -1539,8 +1557,14 @@ def test_solver_prefers_same_resource_for_same_structure_and_craft() -> None:
 
     assert result.status in {"OPTIMAL", "FEASIBLE"}
     by_task = {task.id: task for task in result.tasks}
-    assert by_task["B1-L-P03-PILE-01"].assigned_resource_id == by_task["B1-L-P03-PILE-02"].assigned_resource_id
-    assert result.stats["continuity_metrics"]["same_structure_craft_split_count"] == 0
+    assigned_resource_ids = {
+        by_task["B1-L-P03-PILE-01"].assigned_resource_id,
+        by_task["B1-L-P03-PILE-02"].assigned_resource_id,
+    }
+    expected_split_count = max(0, len(assigned_resource_ids) - 1)
+    assert result.stats["continuity_metrics"]["same_structure_craft_split_count"] == expected_split_count
+    assert "same_structure_craft_split_penalty" not in result.objective_breakdown
+    assert "same_structure_craft_split_weight" not in result.stats["continuity_objective"]
 
 
 def test_same_structure_drill_parallel_rule_comes_from_resource_config() -> None:
@@ -1573,14 +1597,14 @@ def test_same_structure_drill_parallel_rule_comes_from_resource_config() -> None
                     id="rotary_1",
                     name="旋挖钻1",
                     type="rotary_drill",
-                    same_structure_resource_binding=True,
+                    same_structure_resource_binding=False,
                     same_structure_parallel_limit=1,
                 ),
                 Resource(
                     id="rotary_2",
                     name="旋挖钻2",
                     type="rotary_drill",
-                    same_structure_resource_binding=True,
+                    same_structure_resource_binding=False,
                     same_structure_parallel_limit=1,
                 ),
             ],
@@ -1595,6 +1619,74 @@ def test_same_structure_drill_parallel_rule_comes_from_resource_config() -> None
     assert configured_result.status in {"OPTIMAL", "FEASIBLE"}
     assert configured_result.objective_days == 10
     assert len({task.assigned_resource_id for task in configured_result.tasks}) == 1
+
+
+def test_same_structure_parallel_limit_caps_total_participating_resources() -> None:
+    pytest.importorskip("ortools")
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="same pier at most two participating resources",
+            start_date=date(2026, 1, 1),
+            tasks=_same_pier_pile_tasks("rotary_drill", count=6),
+            precedence_links=[],
+            resources=[
+                Resource(
+                    id=f"rotary_{index}",
+                    name=f"旋挖钻{index}",
+                    type="rotary_drill",
+                    same_structure_parallel_limit=2,
+                )
+                for index in range(1, 9)
+            ],
+            time_limit_seconds=5,
+        )
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.objective_days == 15
+    assert len({task.assigned_resource_id for task in result.tasks}) <= 2
+
+
+def test_same_structure_parallel_limit_zero_means_unlimited() -> None:
+    pytest.importorskip("ortools")
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="same pier explicit unlimited",
+            start_date=date(2026, 1, 1),
+            tasks=_same_pier_pile_tasks("rotary_drill"),
+            precedence_links=[],
+            resources=[
+                Resource(id="rotary_1", name="旋挖钻1", type="rotary_drill", same_structure_parallel_limit=0),
+                Resource(id="rotary_2", name="旋挖钻2", type="rotary_drill", same_structure_parallel_limit=0),
+            ],
+            time_limit_seconds=5,
+        )
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.objective_days == 5
+    assert len({task.assigned_resource_id for task in result.tasks}) == 2
+
+
+def test_legacy_same_structure_binding_without_limit_is_limit_one() -> None:
+    pytest.importorskip("ortools")
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="legacy same pier binding",
+            start_date=date(2026, 1, 1),
+            tasks=_same_pier_pile_tasks("rotary_drill"),
+            precedence_links=[],
+            resources=[
+                Resource(id="rotary_1", name="旋挖钻1", type="rotary_drill", same_structure_resource_binding=True),
+                Resource(id="rotary_2", name="旋挖钻2", type="rotary_drill", same_structure_resource_binding=True),
+            ],
+            time_limit_seconds=5,
+        )
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.objective_days == 10
+    assert len({task.assigned_resource_id for task in result.tasks}) == 1
 
 
 def test_manual_pile_team_allows_same_structure_parallel_without_extra_limit() -> None:
@@ -1624,32 +1716,25 @@ def test_capacity_model_enforces_configured_same_structure_parallel_limit() -> N
         ScheduleInput(
             project_name="capacity same pier parallel limit",
             start_date=date(2026, 1, 1),
-            tasks=_same_pier_pile_tasks("rotary_drill"),
+            tasks=_same_pier_pile_tasks("rotary_drill", count=6),
             precedence_links=[],
             resources=[
                 Resource(
-                    id="rotary_1",
-                    name="旋挖钻1",
+                    id=f"rotary_{index}",
+                    name=f"旋挖钻{index}",
                     type="rotary_drill",
                     pool_id="pool-rotary",
                     pool_label="旋挖钻",
-                    same_structure_parallel_limit=1,
-                ),
-                Resource(
-                    id="rotary_2",
-                    name="旋挖钻2",
-                    type="rotary_drill",
-                    pool_id="pool-rotary",
-                    pool_label="旋挖钻",
-                    same_structure_parallel_limit=1,
-                ),
+                    same_structure_parallel_limit=2,
+                )
+                for index in range(1, 9)
             ],
             time_limit_seconds=5,
         )
     )
 
     assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert result.objective_days == 10
+    assert result.objective_days == 15
 
 
 def test_default_pile_resource_parallel_rules_are_configuration_fields() -> None:
@@ -1657,7 +1742,7 @@ def test_default_pile_resource_parallel_rules_are_configuration_fields() -> None
     pool_by_type = {pool.type: pool for pool in scenario.resource_pools}
 
     for resource_type in {"rotary_drill", "circulation_drill", "impact_drill"}:
-        assert pool_by_type[resource_type].same_structure_resource_binding is True
+        assert pool_by_type[resource_type].same_structure_resource_binding is False
         assert pool_by_type[resource_type].same_structure_parallel_limit == 1
         assert pool_by_type[resource_type].parallel_rule_description
     assert pool_by_type["manual_pile_team"].same_structure_resource_binding is False
@@ -1668,7 +1753,7 @@ def test_default_pile_resource_parallel_rules_are_configuration_fields() -> None
     assert validation == []
     rotary = next(resource for resource in resources if resource.type == "rotary_drill")
     manual = next(resource for resource in resources if resource.type == "manual_pile_team")
-    assert rotary.same_structure_resource_binding is True
+    assert rotary.same_structure_resource_binding is False
     assert rotary.same_structure_parallel_limit == 1
     assert manual.same_structure_resource_binding is False
     assert manual.same_structure_parallel_limit is None
@@ -1707,7 +1792,10 @@ def test_control_priority_balances_workload_across_fixed_rotary_resources() -> N
                 Resource(id=f"rotary_drill_{index}", name=f"Rotary {index}", type="rotary_drill")
                 for index in range(1, 7)
             ],
-            schedule_strategy=ScheduleStrategyConfig(strategy="comprehensive", enable_balance_objective=False),
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("resource_workload_balance", 100),
+            ),
             time_limit_seconds=5,
         )
     )
@@ -1774,6 +1862,311 @@ def test_control_priority_reports_resource_idle_penalty_for_forced_gap() -> None
     assert result.objective_breakdown["resource_idle_penalty"] >= 20
 
 
+def test_control_priority_resource_path_continuity_counts_same_side_gap_and_side_switch() -> None:
+    pytest.importorskip("ortools")
+
+    def path_task(task_id: str, side: str, pier_no: int) -> Task:
+        return Task(
+            id=task_id,
+            name=f"{side}{pier_no} pile",
+            bridge_id="B1",
+            work_section_id=f"WS-{side}",
+            sequence_order=pier_no,
+            structure_id=f"B1-{side}-P{pier_no:02d}",
+            structure_name=f"{pier_no}# pier",
+            structure_type="pier",
+            component_type="pile",
+            process_name="pile",
+            productivity_rule_id="pile",
+            quantity=1,
+            quantity_label="1",
+            duration_days=1,
+            compatible_resource_types=["path_team"],
+        )
+
+    first = path_task("B1-L-P01-PILE", "L", 1)
+    second = path_task("B1-L-P04-PILE", "L", 4)
+    third = path_task("B1-R-P04-PILE", "R", 4)
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="resource-path-transition-penalty",
+            start_date=date(2026, 1, 1),
+            tasks=[first, second, third],
+            precedence_links=[
+                PrecedenceLink(
+                    id="left-1-before-left-4",
+                    predecessor_id=first.id,
+                    successor_id=second.id,
+                    relationship="FS",
+                    lag_days=0,
+                    source_rule_id="test",
+                ),
+                PrecedenceLink(
+                    id="left-4-before-right-4",
+                    predecessor_id=second.id,
+                    successor_id=third.id,
+                    relationship="FS",
+                    lag_days=0,
+                    source_rule_id="test",
+                ),
+            ],
+            resources=[Resource(id="path_team_1", name="Path Team 1", type="path_team")],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("resource_path_continuity", 3_000),
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.objective_breakdown["resource_path_continuity_penalty"] == 4
+
+
+def test_control_priority_resource_path_continuity_penalizes_back_and_forth_adjacent_piers() -> None:
+    pytest.importorskip("ortools")
+
+    def path_task(task_id: str, pier_no: int) -> Task:
+        return Task(
+            id=task_id,
+            name=f"L{pier_no} pile",
+            bridge_id="B1",
+            work_section_id="WS-L",
+            sequence_order=pier_no,
+            structure_id=f"B1-L-P{pier_no:02d}",
+            structure_name=f"{pier_no}# pier",
+            structure_type="pier",
+            component_type="pile",
+            process_name="pile",
+            productivity_rule_id="pile",
+            quantity=1,
+            quantity_label="1",
+            duration_days=1,
+            compatible_resource_types=["path_team"],
+        )
+
+    first = path_task("B1-L-P04-PILE-A", 4)
+    second = path_task("B1-L-P03-PILE", 3)
+    third = path_task("B1-L-P04-PILE-B", 4)
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="resource-path-adjacent-back-and-forth-penalty",
+            start_date=date(2026, 1, 1),
+            tasks=[first, second, third],
+            precedence_links=[
+                PrecedenceLink(
+                    id="left-4-before-left-3",
+                    predecessor_id=first.id,
+                    successor_id=second.id,
+                    relationship="FS",
+                    lag_days=0,
+                    source_rule_id="test",
+                ),
+                PrecedenceLink(
+                    id="left-3-before-left-4",
+                    predecessor_id=second.id,
+                    successor_id=third.id,
+                    relationship="FS",
+                    lag_days=0,
+                    source_rule_id="test",
+                ),
+            ],
+            resources=[Resource(id="path_team_1", name="Path Team 1", type="path_team")],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("resource_path_continuity", 3_000),
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.objective_breakdown["resource_path_continuity_penalty"] == 2
+
+
+def test_configured_resource_normal_work_uses_resource_continuity_not_unconfigured_balance() -> None:
+    pytest.importorskip("ortools")
+
+    def normal_path_task(task_id: str, side: str, pier_no: int) -> Task:
+        return Task(
+            id=task_id,
+            name=f"{side}{pier_no}#墩桩基",
+            bridge_id="B1",
+            work_section_id=f"WS-{side}",
+            sequence_order=pier_no,
+            structure_id=f"B1-{side}-P{pier_no:02d}",
+            structure_name=f"{pier_no}#墩",
+            structure_type="pier",
+            component_type="pile",
+            process_name="桩基",
+            productivity_rule_id="pile",
+            quantity=1,
+            quantity_label="1根",
+            duration_days=1,
+            compatible_resource_types=["rotary_drill"],
+            control_level="normal",
+        )
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="configured-normal-resource-continuity",
+            start_date=date(2026, 1, 1),
+            tasks=[
+                normal_path_task("B1-L-P01-PILE", "L", 1),
+                normal_path_task("B1-L-P04-PILE", "L", 4),
+                normal_path_task("B1-R-P04-PILE", "R", 4),
+            ],
+            precedence_links=[],
+            resources=[Resource(id="rotary_drill_1", name="旋挖钻1", type="rotary_drill")],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("resource_path_continuity", 3_000),
+                normal_balance_bucket="week",
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    metrics = result.stats["normal_balance_metrics"]
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert metrics["normal_task_count"] == 3
+    assert metrics["configured_resource_normal_task_count"] == 3
+    assert metrics["unconfigured_resource_normal_task_count"] == 0
+    assert result.objective_breakdown["unconfigured_normal_balance_penalty"] == 0
+    assert result.objective_breakdown["normal_balance_penalty"] == 0
+    assert result.objective_breakdown["resource_path_continuity_penalty"] >= 1
+
+
+def test_unconfigured_resource_normal_work_balances_weekly_workload_without_extending_critical_path() -> None:
+    pytest.importorskip("ortools")
+
+    control = _solver_task("Z-control", "控制墩盖梁", 30, "critical_team").model_copy(
+        update={
+            "bridge_id": "B1",
+            "work_section_id": "WS-C",
+            "structure_id": "B1-C-P99",
+            "control_level": "control",
+        }
+    )
+    normal_tasks = [
+        _solver_task(f"N{index}", f"普通附属工作{index}", 2, "unconfigured_team").model_copy(
+            update={
+                "bridge_id": "B1",
+                "work_section_id": "WS-N",
+                "structure_id": f"B1-N-P{index:02d}",
+                "control_level": "normal",
+            }
+        )
+        for index in range(1, 7)
+    ]
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="unconfigured-normal-weekly-balance",
+            start_date=date(2026, 1, 1),
+            tasks=[control, *normal_tasks],
+            precedence_links=[],
+            resources=[Resource(id="critical_team_1", name="控制班组1", type="critical_team")],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                normal_balance_bucket="week",
+                normal_latest_finish_offset=21,
+                max_parallel_normal_per_work_section=10,
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    metrics = result.stats["normal_balance_metrics"]
+    bucket_workloads = [bucket["duration_days"] for bucket in metrics["bucket_loads"]]
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.objective_days == 30
+    assert metrics["normal_task_count"] == 6
+    assert metrics["configured_resource_normal_task_count"] == 0
+    assert metrics["unconfigured_resource_normal_task_count"] == 6
+    assert bucket_workloads == [4, 4, 4]
+    assert result.objective_breakdown["unconfigured_normal_balance_penalty"] == 0
+    assert result.objective_breakdown["unconfigured_normal_balance_weight"] == 10
+
+
+def test_control_chain_normal_predecessor_is_excluded_from_unconfigured_balance() -> None:
+    pytest.importorskip("ortools")
+
+    predecessor = _solver_task("N-control-predecessor", "控制链普通前置", 5, "unconfigured_team").model_copy(
+        update={
+            "bridge_id": "B1",
+            "work_section_id": "WS-C",
+            "structure_id": "B1-C-P01",
+            "control_level": "normal",
+        }
+    )
+    control = _solver_task("Z-control", "控制墩盖梁", 3, "critical_team").model_copy(
+        update={
+            "bridge_id": "B1",
+            "work_section_id": "WS-C",
+            "structure_id": "B1-C-P02",
+            "control_level": "control",
+        }
+    )
+    ordinary = [
+        _solver_task(f"N-fill-{index}", f"普通补充工作{index}", 2, "unconfigured_team").model_copy(
+            update={
+                "bridge_id": "B1",
+                "work_section_id": "WS-N",
+                "structure_id": f"B1-N-P{index:02d}",
+                "control_level": "normal",
+            }
+        )
+        for index in range(1, 3)
+    ]
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="control-chain-normal-excluded",
+            start_date=date(2026, 1, 1),
+            tasks=[predecessor, control, *ordinary],
+            precedence_links=[
+                PrecedenceLink(
+                    id="pre-before-control",
+                    predecessor_id=predecessor.id,
+                    successor_id=control.id,
+                    relationship="FS",
+                    lag_days=0,
+                    source_rule_id="test",
+                )
+            ],
+            resources=[Resource(id="critical_team_1", name="控制班组1", type="critical_team")],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                normal_earliest_start_offset=7,
+                normal_balance_bucket="week",
+                normal_latest_finish_offset=21,
+                max_parallel_normal_per_work_section=10,
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    tasks_by_id = {task.id: task for task in result.tasks}
+    metrics = result.stats["normal_balance_metrics"]
+    bucket_task_ids = {
+        task_id
+        for bucket in metrics["bucket_loads"]
+        for task_id in bucket["task_ids"]
+    }
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert tasks_by_id[predecessor.id].start_offset == 0
+    assert tasks_by_id[control.id].start_offset == predecessor.duration_days
+    assert metrics["normal_task_count"] == 2
+    assert metrics["unconfigured_resource_normal_task_count"] == 2
+    assert predecessor.id not in bucket_task_ids
+
+
 def test_control_priority_reports_configured_objective_terms_used() -> None:
     pytest.importorskip("ortools")
     first = _solver_task("A-first", "first", 2, "team")
@@ -1804,9 +2197,156 @@ def test_control_priority_reports_configured_objective_terms_used() -> None:
     assert result.status in {"OPTIMAL", "FEASIBLE"}
     assert weights["resource_idle"] == 0
     assert weights["makespan_and_soft_milestone"] == 333
-    assert weights["normal_balance"] == 0
+    assert "normal_balance" not in weights
+    assert "same_structure_craft_split" not in weights
+    assert "same_structure_craft_split" not in terms_used
+    assert "normal_balance" not in terms_used
+    assert "same_structure_craft_split_penalty" not in result.objective_breakdown
     assert terms_used["resource_idle"] == {"enabled": False, "weight": 1234, "effective_weight": 0}
-    assert terms_used["normal_balance"] == {"enabled": False, "weight": 55, "effective_weight": 0}
+    assert result.objective_breakdown["normal_balance_penalty"] == 0
+
+
+def test_control_priority_enforces_hard_milestone_without_explicit_flag() -> None:
+    pytest.importorskip("ortools")
+    start = date(2026, 1, 1)
+    task = _solver_task("T-hard", "Hard constrained task", 5, "team")
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="hard-milestone-refinement",
+            start_date=start,
+            tasks=[task],
+            precedence_links=[],
+            resources=[Resource(id="team_1", name="Team 1", type="team")],
+            milestones=[
+                MilestoneConstraint(
+                    id="M-hard",
+                    name="Hard finish",
+                    level="contract",
+                    mode="hard",
+                    scope_type="project",
+                    target_event="finish",
+                    target_date=start,
+                )
+            ],
+            schedule_strategy=ScheduleStrategyConfig(strategy="comprehensive"),
+            time_limit_seconds=5,
+        )
+    )
+
+    assert result.status == "INFEASIBLE"
+    assert not result.tasks
+    assert result.stats["solve_mode"] == "control_priority"
+
+
+def test_control_priority_hard_milestone_is_not_control_lateness_objective() -> None:
+    pytest.importorskip("ortools")
+    start = date(2026, 1, 1)
+    task = _solver_task("T-hard-met", "Hard milestone task", 3, "team")
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="hard-milestone-not-soft-objective",
+            start_date=start,
+            tasks=[task],
+            precedence_links=[],
+            resources=[Resource(id="team_1", name="Team 1", type="team")],
+            milestones=[
+                MilestoneConstraint(
+                    id="M-hard-met",
+                    name="Hard finish",
+                    level="contract",
+                    mode="hard",
+                    scope_type="project",
+                    target_event="finish",
+                    target_date=start + timedelta(days=4),
+                )
+            ],
+            schedule_strategy=ScheduleStrategyConfig(strategy="comprehensive"),
+            time_limit_seconds=5,
+        )
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.milestone_results[0].mode == "hard"
+    assert result.milestone_results[0].lateness_days == 0
+    assert result.objective_breakdown["control_lateness_days"] == 0
+    assert result.objective_breakdown["soft_control_lateness_penalty"] == 0
+
+
+def test_control_priority_soft_control_lateness_uses_highest_weight() -> None:
+    pytest.importorskip("ortools")
+    start = date(2026, 1, 1)
+    task = _solver_task("T-soft-control", "Soft control task", 5, "team")
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="soft-control-lateness",
+            start_date=start,
+            tasks=[task],
+            precedence_links=[],
+            resources=[Resource(id="team_1", name="Team 1", type="team")],
+            milestones=[
+                MilestoneConstraint(
+                    id="M-soft-control",
+                    name="Soft control finish",
+                    level="control",
+                    mode="soft",
+                    scope_type="project",
+                    target_event="finish",
+                    target_date=start + timedelta(days=2),
+                    penalty_per_day=7,
+                )
+            ],
+            schedule_strategy=ScheduleStrategyConfig(strategy="comprehensive"),
+            time_limit_seconds=5,
+        )
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.milestone_results[0].lateness_days == 2
+    assert result.objective_breakdown["control_lateness_days"] == 2
+    assert result.objective_breakdown["soft_control_lateness_penalty"] == 2
+    assert result.objective_breakdown["soft_milestone_penalty"] == 0
+    assert result.objective_breakdown["weighted_objective"] >= 2_000_000_000
+
+
+def test_control_priority_plain_soft_milestone_is_diagnostic_not_makespan_objective() -> None:
+    pytest.importorskip("ortools")
+    start = date(2026, 1, 1)
+    task = _solver_task("T-soft-diagnostic", "Soft diagnostic task", 5, "team")
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="plain-soft-milestone-diagnostic",
+            start_date=start,
+            tasks=[task],
+            precedence_links=[],
+            resources=[Resource(id="team_1", name="Team 1", type="team")],
+            milestones=[
+                MilestoneConstraint(
+                    id="M-soft-diagnostic",
+                    name="Soft diagnostic finish",
+                    level="internal",
+                    mode="soft",
+                    scope_type="project",
+                    target_event="finish",
+                    target_date=start,
+                    penalty_per_day=10,
+                )
+            ],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("makespan_and_soft_milestone", 10_000),
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.objective_breakdown["soft_milestone_penalty"] > 0
+    assert result.objective_breakdown["control_lateness_days"] == 0
+    assert result.objective_breakdown["weighted_objective"] == result.objective_days * 10_000
 
 
 def test_control_priority_keeps_control_task_ahead_of_competing_normal_task() -> None:
@@ -2133,6 +2673,8 @@ def test_control_priority_applies_normal_windows_and_workface_limit() -> None:
     for previous, current in zip(ordered, ordered[1:]):
         assert current.start_offset >= previous.end_offset
     assert result.stats["normal_balance_metrics"]["normal_task_count"] == 3
+    assert "normal_balance" not in result.objective_breakdown["objective_weights"]
+    assert result.objective_breakdown["normal_balance_penalty"] == 0
     assert result.objective_breakdown["normal_balance_score"] >= 0
 
 
@@ -2483,7 +3025,7 @@ def test_min_resource_solver_reoptimizes_with_control_priority() -> None:
     assert by_task["A-normal"].start_offset >= by_task["Z-control"].end_offset
 
 
-def test_min_resource_reoptimization_candidates_copy_objective_configuration() -> None:
+def test_min_resource_reoptimization_candidates_copy_objective_configuration_without_legacy_balance_target() -> None:
     schedule_input = _min_resource_test_input(max_resources=2).model_copy(
         update={
             "schedule_strategy": ScheduleStrategyConfig(
@@ -2499,16 +3041,13 @@ def test_min_resource_reoptimization_candidates_copy_objective_configuration() -
 
     candidates = solver_module._min_resource_reoptimization_candidates(schedule_input, {"team": 2})
 
-    assert len(candidates) == 2
+    assert len(candidates) == 1
     primary_strategy = candidates[0]["schedule_input"].schedule_strategy
-    no_balance_strategy = candidates[1]["schedule_input"].schedule_strategy
     assert primary_strategy.objective_terms["resource_idle"].enabled is False
     assert primary_strategy.objective_terms["resource_idle"].weight == 1234
     assert primary_strategy.objective_terms["makespan_and_soft_milestone"].weight == 333
-    assert primary_strategy.objective_terms["normal_balance"].enabled is True
-    assert no_balance_strategy.objective_terms["resource_idle"].enabled is False
-    assert no_balance_strategy.objective_terms["makespan_and_soft_milestone"].weight == 333
-    assert no_balance_strategy.objective_terms["normal_balance"].enabled is False
+    assert primary_strategy.enable_balance_objective is False
+    assert "normal_balance" not in primary_strategy.objective_terms
 
 
 def test_min_resource_solver_falls_back_to_binary_search_when_global_optimization_times_out(
@@ -2581,15 +3120,15 @@ def test_min_resource_solver_keeps_capacity_schedule_when_balanced_reoptimizatio
     assert result.stats["recommended_schedule_source"] == "capacity_model_verified_schedule"
     assert result.stats["capacity_verification_status"] == "verified"
     assert result.stats["balanced_reoptimization_status"] == "UNKNOWN"
-    assert result.stats["unbalanced_reoptimization_status"] == "UNKNOWN"
+    assert result.stats["unbalanced_reoptimization_status"] == "not_attempted"
     assert result.stats["recommended_resource_counts"][0]["recommended_quantity"] == 2
     assert result.tasks
     assert result.resource_allocations
-    assert calls == [True, False]
+    assert calls == [False]
     assert any("capacity model" in message.message for message in result.validation)
 
 
-def test_min_resource_reoptimization_candidates_can_run_in_parallel(
+def test_min_resource_reoptimization_uses_single_control_priority_candidate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pytest.importorskip("ortools")
@@ -2603,13 +3142,6 @@ def test_min_resource_reoptimization_candidates_can_run_in_parallel(
         **_: object,
     ) -> ScheduleResult:
         calls.append(schedule_input.schedule_strategy.enable_balance_objective)
-        if schedule_input.schedule_strategy.enable_balance_objective:
-            return ScheduleResult(
-                status="UNKNOWN",
-                plan_start_date=schedule_input.start_date,
-                milestone_results=[],
-                stats={"wall_time_seconds": schedule_input.time_limit_seconds},
-            )
         objective_days = max_makespan_days or 5
         return ScheduleResult(
             status="FEASIBLE",
@@ -2620,17 +3152,17 @@ def test_min_resource_reoptimization_candidates_can_run_in_parallel(
             stats={"wall_time_seconds": schedule_input.time_limit_seconds},
         )
 
-    monkeypatch.setattr(solver_module, "_solve_task_parallelism", lambda count: 2)
+    monkeypatch.setattr(solver_module, "_solve_task_parallelism", lambda count: count)
     monkeypatch.setattr(solver_module, "solve_control_priority_schedule", fake_control_priority)
 
     result = solve_min_resources_schedule(schedule_input, fallback_target_days=5)
 
     assert result.status == "FEASIBLE"
-    assert result.stats["schedule_source"] == "control_priority_reoptimization_no_balance"
-    assert result.stats["balanced_reoptimization_status"] == "UNKNOWN"
-    assert result.stats["unbalanced_reoptimization_status"] == "FEASIBLE"
-    assert result.stats["parallel_reoptimization_used"] is True
-    assert sorted(calls) == [False, True]
+    assert result.stats["schedule_source"] == "control_priority_balanced_reoptimization"
+    assert result.stats["balanced_reoptimization_status"] == "FEASIBLE"
+    assert result.stats["unbalanced_reoptimization_status"] == "not_attempted"
+    assert result.stats["parallel_reoptimization_used"] is False
+    assert calls == [False]
 
 
 def test_min_resource_solver_returns_infeasible_when_reoptimization_cannot_meet_target() -> None:
@@ -3155,7 +3687,7 @@ def _solver_task(task_id: str, name: str, duration_days: int, resource_type: str
     )
 
 
-def _same_pier_pile_tasks(resource_type: str) -> list[Task]:
+def _same_pier_pile_tasks(resource_type: str, count: int = 2) -> list[Task]:
     return [
         _solver_task(f"P10-PILE-{index}", f"10#墩-{index}#桩基", 5, resource_type).model_copy(
             update={
@@ -3170,7 +3702,7 @@ def _same_pier_pile_tasks(resource_type: str) -> list[Task]:
                 "quantity_label": "1根",
             }
         )
-        for index in range(1, 3)
+        for index in range(1, count + 1)
     ]
 
 

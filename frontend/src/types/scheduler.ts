@@ -32,15 +32,12 @@ export type ObjectiveTermId =
   | "control_node_late"
   | "control_buffer_risk"
   | "risk_related_control_wait"
-  | "same_structure_craft_split"
-  | "resource_workload_balance"
-  | "resource_idle"
-  | "resource_path_continuity"
   | "makespan_and_soft_milestone"
-  | "normal_balance"
-  | "spatial_resource_assignment";
+  | "resource_path_continuity"
+  | "resource_idle"
+  | "resource_workload_balance";
 export type TabKey = "process" | "logic" | "resources" | "milestones" | "tasks" | "results" | "resultsMvp";
-export type GanttMode = "by_structure" | "by_process";
+export type GanttMode = "by_time" | "by_structure" | "by_process";
 export type TaskViewMode = "by_structure" | "by_process";
 export type BusyState =
   | "loading"
@@ -765,6 +762,39 @@ export type ResourceOrganizationAnalysis = {
   resource_types: ResourceOrganizationType[];
 };
 
+export type NormalBalanceBucket = {
+  bucket_index: number;
+  start_offset: number;
+  finish_offset: number;
+  task_count: number;
+  duration_days: number;
+  ideal_workload_floor_days?: number;
+  ideal_workload_ceiling_days?: number;
+  deviation_days?: number;
+  task_ids?: string[];
+  resource_types?: string[];
+};
+
+export type NormalBalanceMetrics = {
+  bucket: BalanceBucket;
+  bucket_size_days: number;
+  normal_task_count: number;
+  configured_resource_normal_task_count: number;
+  unconfigured_resource_normal_task_count: number;
+  bucket_loads: NormalBalanceBucket[];
+  peak_task_count: number;
+  min_task_count: number;
+  peak_duration_days?: number;
+  min_duration_days?: number;
+  total_unconfigured_workload_days?: number;
+  ideal_workload_floor_days?: number;
+  ideal_workload_ceiling_days?: number;
+  balance_penalty?: number;
+  balance_weight?: number;
+  balance_score: number;
+  metric_scope?: string;
+};
+
 export type ControlPriorityAnalysis = {
   control_task_count: number;
   control_objects: ControlObject[];
@@ -774,6 +804,7 @@ export type ControlPriorityAnalysis = {
   control_buffer_risks: ControlBufferRisk[];
   control_buffer_status: string;
   normal_balance_status: string;
+  unconfigured_normal_balance_status?: string;
   resource_path_status: string;
   resource_balance_status?: string;
   resource_idle_status?: string;

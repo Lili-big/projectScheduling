@@ -148,13 +148,10 @@ type ObjectiveTermId =
   | "control_node_late"
   | "control_buffer_risk"
   | "risk_related_control_wait"
-  | "same_structure_craft_split"
-  | "resource_workload_balance"
-  | "resource_idle"
-  | "resource_path_continuity"
   | "makespan_and_soft_milestone"
-  | "normal_balance"
-  | "spatial_resource_assignment";
+  | "resource_path_continuity"
+  | "resource_idle"
+  | "resource_workload_balance";
 
 type ObjectiveTermConfig = {
   enabled: boolean;
@@ -311,15 +308,12 @@ const DEFAULT_RESOURCE_MAX_QUANTITIES: Record<string, number> = {
 };
 const DEFAULT_OBJECTIVE_TERM_WEIGHTS: Record<ObjectiveTermId, number> = {
   control_node_late: 1_000_000_000,
-  control_buffer_risk: 1_000_000,
+  control_buffer_risk: 5_000_000,
   risk_related_control_wait: 1_000_000,
-  same_structure_craft_split: 100_000,
-  resource_workload_balance: 20_000,
-  resource_idle: 2_000,
-  resource_path_continuity: 500,
-  makespan_and_soft_milestone: 100,
-  normal_balance: 1,
-  spatial_resource_assignment: 1,
+  makespan_and_soft_milestone: 10_000,
+  resource_path_continuity: 3_000,
+  resource_idle: 1_000,
+  resource_workload_balance: 100,
 };
 const DEFAULT_SCHEDULE_STRATEGY: Omit<ScheduleStrategyConfig, "objective_terms"> = {
   strategy: "comprehensive",
@@ -329,7 +323,7 @@ const DEFAULT_SCHEDULE_STRATEGY: Omit<ScheduleStrategyConfig, "objective_terms">
   normal_latest_finish_offset: null,
   normal_max_early_finish_days: 60,
   max_parallel_normal_per_work_section: 5,
-  enable_balance_objective: true,
+  enable_balance_objective: false,
 };
 const KEY_RESOURCE_COMPONENT_TYPES = new Set<ComponentType>(["pile", "cap", "pier_body", "cap_beam", "cast_in_place_continuous_beam"]);
 const DEFAULT_RESOURCE_TYPE_BY_COMPONENT: Partial<Record<ComponentType, string>> = {
@@ -370,7 +364,6 @@ function normalizeObjectiveWeight(value: unknown, enabled = true): number {
 
 function normalizeScheduleStrategy(config?: ScheduleStrategyConfig | null): ScheduleStrategyConfig {
   const rawTerms = config?.objective_terms ?? {};
-  const hasExplicitNormalBalance = Object.prototype.hasOwnProperty.call(rawTerms, "normal_balance");
   const objectiveTerms = Object.fromEntries(
     (Object.keys(DEFAULT_OBJECTIVE_TERM_WEIGHTS) as ObjectiveTermId[]).map((termId) => {
       const incoming = rawTerms[termId];
@@ -385,15 +378,11 @@ function normalizeScheduleStrategy(config?: ScheduleStrategyConfig | null): Sche
     }),
   ) as Record<ObjectiveTermId, ObjectiveTermConfig>;
 
-  if (!hasExplicitNormalBalance && config?.enable_balance_objective === false) {
-    objectiveTerms.normal_balance.enabled = false;
-  }
-
   return {
     ...DEFAULT_SCHEDULE_STRATEGY,
     ...(config ?? {}),
     objective_terms: objectiveTerms,
-    enable_balance_objective: objectiveTerms.normal_balance.enabled,
+    enable_balance_objective: false,
   };
 }
 

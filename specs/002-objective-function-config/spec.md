@@ -45,12 +45,12 @@ As a product and test user, I want existing scenarios without explicit objective
 
 **Why this priority**: The project already has fixed-resource and refinement tests; default behavior must remain stable unless the user changes configuration.
 
-**Independent Test**: Can be tested by solving a scenario with no `objective_terms` provided and confirming the default effective weights match the previous constants and `enable_balance_objective` remains compatible.
+**Independent Test**: Can be tested by solving a scenario with no `objective_terms` provided and confirming the default effective weights match the current 7 objective terms while legacy `enable_balance_objective` remains accepted but does not enable a removed objective.
 
 **Acceptance Scenarios**:
 
 1. **Given** a scenario omits `objective_terms`, **When** the backend receives it, **Then** defaults are merged and the run uses the previous objective weights.
-2. **Given** a legacy scenario sets `enable_balance_objective` to false, **When** no explicit `normal_balance` term is provided, **Then** ordinary-work balance is treated as disabled for compatibility.
+2. **Given** a legacy scenario sets `enable_balance_objective` or sends `objective_terms.normal_balance`, **When** the backend normalizes the request, **Then** the legacy ordinary-work balance target is ignored and not returned as an active objective term.
 3. **Given** a user edits objective terms, **When** the scenario fingerprint changes, **Then** stale solve results are not reused as the current result.
 
 ---
@@ -86,8 +86,9 @@ As a tester or product user, I want invalid objective configuration to fail clea
 
 ### Edge Cases
 
-- The user disables only the ordinary-work balance term: the legacy `enable_balance_objective` flag is synchronized to false for compatibility.
-- The user restores defaults: all 10 editable soft objective terms return to their default enabled state and weight.
+- A legacy request includes the ordinary-work balance term: the backend ignores it so old browser state does not fail, but it is no longer listed, weighted, or returned as an active objective term.
+- The user restores defaults: all 7 editable soft objective terms return to their default enabled state and weight.
+- A legacy request contains `spatial_resource_assignment`: the backend ignores this deprecated term so old browser state does not fail, but it is no longer listed, weighted, or returned as an active objective term.
 - A term is disabled and its saved weight is invalid or blank in the UI: the UI normalizes the value before submission; the backend still validates the final request.
 - Refinement falls back or times out: the returned result still reports the effective objective terms that were attempted where a refinement result is available.
 - Netlify demo receives objective terms: it accepts the contract and can echo effective defaults, but it does not claim full CP-SAT parity.
@@ -97,7 +98,7 @@ As a tester or product user, I want invalid objective configuration to fail clea
 ### Functional Requirements
 
 - **FR-001**: The full simulation page MUST show a pre-solve objective-function configuration area; the MVP simulation page MUST NOT be changed by this feature.
-- **FR-002**: The objective configuration area MUST list the 10 currently implemented editable soft objective terms: `control_node_late`, `control_buffer_risk`, `risk_related_control_wait`, `same_structure_craft_split`, `resource_workload_balance`, `resource_idle`, `resource_path_continuity`, `makespan_and_soft_milestone`, `normal_balance`, and `spatial_resource_assignment`.
+- **FR-002**: The objective configuration area MUST list the 7 currently implemented editable soft objective terms: `control_node_late`, `control_buffer_risk`, `risk_related_control_wait`, `resource_workload_balance`, `resource_idle`, `resource_path_continuity`, and `makespan_and_soft_milestone`.
 - **FR-003**: Users MUST be able to enable or disable each listed objective term with a checkbox and edit each term's numeric weight.
 - **FR-004**: The system MUST treat construction logic, task duration, resource compatibility, resource non-overlap, configured same-structure rules, and enforced hard milestones as hard constraints that cannot be disabled through objective controls.
 - **FR-005**: `ScheduleStrategyConfig` MUST support objective-term configuration while retaining backward compatibility with existing `enable_balance_objective`.
@@ -110,6 +111,7 @@ As a tester or product user, I want invalid objective configuration to fail clea
 - **FR-012**: `ScheduleResult.objective_breakdown` MUST include `objective_terms_used` and keep `objective_weights` as the effective weight mapping for compatibility.
 - **FR-013**: Frontend scenario fingerprints MUST include objective-term configuration so changed checkboxes or weights invalidate stale generated and solved results.
 - **FR-014**: Netlify demo code MUST remain contract-compatible with objective-term fields and must not claim Python CP-SAT parity when only echoing/defaulting the configuration.
+- **FR-015**: The system MUST completely remove `spatial_resource_assignment`, `same_structure_craft_split`, and `normal_balance` from editable objective terms, default objective weights, CP-SAT objective assembly, result metadata, and Netlify demo defaults; legacy payloads containing only these deprecated keys MUST be ignored rather than treated as active objectives.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -122,7 +124,7 @@ As a tester or product user, I want invalid objective configuration to fail clea
 
 ### Measurable Outcomes
 
-- **SC-001**: Users can identify all 10 editable objective terms, each enabled state, and each weight before clicking a solve button on the full simulation page.
+- **SC-001**: Users can identify all 7 editable objective terms, each enabled state, and each weight before clicking a solve button on the full simulation page.
 - **SC-002**: For scenarios without explicit objective-term configuration, default solve output reports the same effective objective weights as the previous constants.
 - **SC-003**: For a run with one disabled objective term, the returned `objective_terms_used` shows that term with effective weight 0 and all enabled terms with positive effective weights.
 - **SC-004**: Invalid objective-term payloads are rejected before solving with a clear validation error in 100% of malformed test cases.
@@ -131,7 +133,7 @@ As a tester or product user, I want invalid objective configuration to fail clea
 
 ## Assumptions
 
-- User-confirmed defaults apply: all 10 soft objective terms are editable; hard constraints stay locked; configuration is part of the current scenario request but is not saved to local scenario persistence in this phase.
+- User-confirmed defaults apply: all 7 current soft objective terms are editable; hard constraints stay locked; configuration is part of the current scenario request but is not saved to local scenario persistence in this phase.
 - The Python FastAPI backend remains authoritative for CP-SAT behavior.
 - Existing full simulation page layout can be extended within the "模拟参数" area without adding a new top-level tab.
 - Objective weights are integer values and share the existing solver weight scale.

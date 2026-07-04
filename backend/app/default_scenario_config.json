@@ -788,9 +788,9 @@
       "cost_type": "monthly_rental",
       "incremental_unit_cost": 180000,
       "billing_period_days": 30,
-      "same_structure_resource_binding": true,
+      "same_structure_resource_binding": false,
       "same_structure_parallel_limit": 1,
-      "parallel_rule_description": "设备型桩基资源：同一墩同一工艺默认由一台设备顺序或跳孔施工，不默认多机并行。"
+      "parallel_rule_description": "设备型桩基资源：同一墩同一工艺默认最多由 1 台设备承担；设置为 0 表示不额外限制。"
     },
     {
       "id": "pool-circulation-drill",
@@ -805,9 +805,9 @@
       "cost_type": "none",
       "incremental_unit_cost": 0,
       "billing_period_days": 30,
-      "same_structure_resource_binding": true,
+      "same_structure_resource_binding": false,
       "same_structure_parallel_limit": 1,
-      "parallel_rule_description": "设备型桩基资源：同一墩同一工艺默认由一台设备顺序或跳孔施工，不默认多机并行。"
+      "parallel_rule_description": "设备型桩基资源：同一墩同一工艺默认最多由 1 台设备承担；设置为 0 表示不额外限制。"
     },
     {
       "id": "pool-impact-drill",
@@ -822,9 +822,9 @@
       "cost_type": "none",
       "incremental_unit_cost": 0,
       "billing_period_days": 30,
-      "same_structure_resource_binding": true,
+      "same_structure_resource_binding": false,
       "same_structure_parallel_limit": 1,
-      "parallel_rule_description": "设备型桩基资源：同一墩同一工艺默认由一台设备顺序或跳孔施工，不默认多机并行。"
+      "parallel_rule_description": "设备型桩基资源：同一墩同一工艺默认最多由 1 台设备承担；设置为 0 表示不额外限制。"
     },
     {
       "id": "pool-manual-pile",
@@ -841,7 +841,7 @@
       "billing_period_days": 30,
       "same_structure_resource_binding": false,
       "same_structure_parallel_limit": null,
-      "parallel_rule_description": "人工挖孔班组：同一墩内暂不设置额外并行上限，仅受班组数量约束。"
+      "parallel_rule_description": "人工挖孔班组：同一墩内不设置最多参与设备数，默认仅受班组数量约束。"
     },
     {
       "id": "pool-cap",

@@ -185,73 +185,52 @@ type ObjectiveTermDefinition = {
 const objectiveTermDefinitions: ObjectiveTermDefinition[] = [
   {
     id: "control_node_late",
-    label: "控制节点迟延",
+    label: "软控制节点迟延",
     group: "控制优先",
-    description: "压低控制/关键里程碑晚点天数；按控制节点迟延天数计罚。",
+    description: "看软控制节点晚于目标日期的天数；每晚 1 天按最高权重计罚，优先压低控制节点迟延。",
     defaultWeight: 1_000_000_000,
   },
   {
     id: "control_buffer_risk",
-    label: "控制缓冲风险",
+    label: "控制链总时差不足风险",
     group: "控制优先",
-    description: "提前暴露控制链缓冲不足；按任务完成接近控制期限的风险量计罚。",
-    defaultWeight: 1_000_000,
+    description: "检查控制链任务距离最晚安全完成时间还剩多少余量；余量越少，越容易影响目标节点，风险越高。",
+    defaultWeight: 5_000_000,
   },
   {
     id: "risk_related_control_wait",
-    label: "风险相关控制链等待",
+    label: "控制链衔接空档风险",
     group: "控制优先",
-    description: "减少风险任务导致的控制链等待；按相关前后置等待间隔计罚。",
+    description: "检查已经存在风险的控制链中，前后置任务之间是否还有可压缩空档；空档越长，越需要优化衔接。",
     defaultWeight: 1_000_000,
   },
   {
-    id: "same_structure_craft_split",
-    label: "同结构同工艺连续性",
-    group: "连续性",
-    description: "避免同一结构同工艺被多资源拆散；按拆分次数计罚。",
-    defaultWeight: 100_000,
-  },
-  {
-    id: "resource_workload_balance",
-    label: "同类资源工作量均衡",
-    group: "资源组织",
-    description: "均衡同类资源工作量；按资源活跃天数偏差计罚。",
-    defaultWeight: 20_000,
-  },
-  {
-    id: "resource_idle",
-    label: "资源空闲",
-    group: "资源组织",
-    description: "减少已投入资源中途空等；按资源任务间空闲天数计罚。",
-    defaultWeight: 2_000,
+    id: "makespan_and_soft_milestone",
+    label: "总工期",
+    group: "工期",
+    description: "看项目整体完工跨度；总工期越长，罚分越高。",
+    defaultWeight: 10_000,
   },
   {
     id: "resource_path_continuity",
     label: "资源路径连续性",
     group: "资源组织",
-    description: "让同一资源沿相邻结构连续推进；按跨墩跳转距离和换向计罚。",
-    defaultWeight: 500,
+    description: "看同一资源相邻任务是否同幅邻近推进；同幅墩号间隔越大、左右幅切换越多，罚分越高。",
+    defaultWeight: 3_000,
   },
   {
-    id: "makespan_and_soft_milestone",
-    label: "总工期和软里程碑",
-    group: "工期",
-    description: "压缩总工期并兼顾软里程碑；按完工跨度和软节点罚分计罚。",
+    id: "resource_idle",
+    label: "资源空闲",
+    group: "资源组织",
+    description: "看单个资源两次任务之间是否长时间停等；中途空闲天数越多，罚分越高。",
+    defaultWeight: 1_000,
+  },
+  {
+    id: "resource_workload_balance",
+    label: "同类资源工作量均衡",
+    group: "资源组织",
+    description: "看同类型资源的活跃工作天数是否接近；忙闲差距越大，罚分越高。",
     defaultWeight: 100,
-  },
-  {
-    id: "normal_balance",
-    label: "普通工程均衡",
-    group: "普通工程",
-    description: "让普通工程在窗口内均衡展开；按普通任务相对目标节奏偏差计罚。",
-    defaultWeight: 1,
-  },
-  {
-    id: "spatial_resource_assignment",
-    label: "空间资源分配偏好",
-    group: "连续性",
-    description: "偏好资源服务空间更近的结构；按资源与结构空间匹配代价计罚。",
-    defaultWeight: 1,
   },
 ];
 
@@ -269,7 +248,7 @@ const defaultScheduleStrategyConfig: ScheduleStrategyConfig = {
   normal_latest_finish_offset: null,
   normal_max_early_finish_days: 60,
   max_parallel_normal_per_work_section: 5,
-  enable_balance_objective: true,
+  enable_balance_objective: false,
   objective_terms: defaultObjectiveTermsConfig(),
 };
 
@@ -278,7 +257,7 @@ const scheduleStrategyLabels: Record<ScheduleStrategy, string> = {
   min_resource: "资源投入最少",
   resource_cost: "资源成本最低",
   control_priority: "控制性工程优先",
-  balanced_normal: "普通工程均衡推进",
+  balanced_normal: "控制优先精排（兼容）",
   comprehensive: "控制优先 + 均衡推进",
 };
 
@@ -291,8 +270,8 @@ const resourceGuaranteeLabels: Record<ResourceGuaranteeMode, string> = {
 const controlLevelLabels: Record<ControlLevel, string> = {
   control: "控制性工程",
   key: "控制性工程",
-  normal: "普通工程",
-  rough: "普通工程",
+  normal: "非控制工程",
+  rough: "非控制工程",
 };
 
 const scheduleSourceLabels: Record<string, string> = {
@@ -310,13 +289,6 @@ const controlBufferStatusLabels: Record<string, string> = {
   near_risk: "接近风险",
   buffer_insufficient: "缓冲不足",
   affected_node: "已影响节点",
-  not_evaluated: "未评价",
-};
-
-const normalBalanceStatusLabels: Record<string, string> = {
-  balanced: "均衡",
-  concentrated: "偏集中",
-  backloaded: "后期堆积",
   not_evaluated: "未评价",
 };
 
@@ -363,7 +335,7 @@ const controlTaskRoleLabels: Record<string, string> = {
 
 const editableControlLevelOptions: Array<{ value: ControlLevel; label: string }> = [
   { value: "control", label: "控制性工程" },
-  { value: "normal", label: "普通工程" },
+  { value: "normal", label: "非控制工程" },
 ];
 
 type WorkPointOption = {
@@ -372,12 +344,25 @@ type WorkPointOption = {
 };
 
 type PlanListSortMode = "by_time" | "by_structure" | "by_process";
+type PlanWindowMode = "detail" | "gantt";
 
 const planListSortOptions: Array<{ value: PlanListSortMode; label: string }> = [
   { value: "by_time", label: "按时间" },
   { value: "by_structure", label: "按墩台" },
   { value: "by_process", label: "按工艺" },
 ];
+
+type ControlPlanTaskDisplay = {
+  taskId: string;
+  level: ControlLevel;
+  objectName: string;
+  roleLabel: string;
+  sourceLabel: string;
+  latestSafeFinishDate: string | null;
+  remainingBufferDays: number | null;
+  bufferRiskDays: number;
+  status: string;
+};
 
 function editableControlLevelValue(value: ControlLevel): ControlLevel {
   return value === "control" || value === "key" ? "control" : "normal";
@@ -392,7 +377,7 @@ export default function App() {
   const [openTabs, setOpenTabs] = useState<TabKey[]>(["tasks"]);
   const [activeTab, setActiveTab] = useState<TabKey | null>("tasks");
   const [sideNavCollapsed, setSideNavCollapsed] = useState(false);
-  const [ganttMode, setGanttMode] = useState<GanttMode>("by_structure");
+  const [ganttMode, setGanttMode] = useState<GanttMode>("by_time");
   const [mvpSelectedWorkPointId, setMvpSelectedWorkPointId] = useState("");
   const [mvpStartDate, setMvpStartDate] = useState(todayDateValue);
   const [mvpGenerated, setMvpGenerated] = useState<GeneratedScheduleInput | null>(null);
@@ -527,13 +512,13 @@ export default function App() {
     }
   }
 
-  async function solveCurrent(targetTab: TabKey = "results") {
+  async function solveCurrent() {
     if (!scenario) return;
     const requestScenario = normalizeScenarioForWorkspace(scenario);
     const requestFingerprint = scenarioFingerprintForSolve(requestScenario);
     setBusy("solving");
     setError(null);
-    openModule(targetTab);
+    openModule("results");
     try {
       await solveWith(requestScenario, requestFingerprint);
     } catch (err) {
@@ -1613,7 +1598,9 @@ function ResultsTab({
   const [selectedResultIndex, setSelectedResultIndex] = useState(0);
   const [planWindowStart, setPlanWindowStart] = useState("");
   const [planWindowFinish, setPlanWindowFinish] = useState("");
-  const [planListSortMode, setPlanListSortMode] = useState<PlanListSortMode>("by_time");
+  const [planWindowMode, setPlanWindowMode] = useState<PlanWindowMode>("detail");
+  const [selectedPlanTaskId, setSelectedPlanTaskId] = useState<string | null>(null);
+  const [selectedResourceId, setSelectedResourceId] = useState<string | null>(null);
   const predecessorHoverOpenTimerRef = useRef<number | null>(null);
   const predecessorHoverCloseTimerRef = useRef<number | null>(null);
   const resultOptions = useMemo(() => scenarioResultOptions(solveResult), [solveResult]);
@@ -1637,12 +1624,19 @@ function ResultsTab({
   const continuityMetrics = continuityMetricsFromResult(result);
   const refinementSummary = refinementSummaryFromResult(result);
   const controlPriorityAnalysis = controlPriorityAnalysisFromResult(result);
+  const controlPlanDisplayByTaskId = useMemo(
+    () => buildControlPlanDisplayByTaskId(controlPriorityAnalysis),
+    [controlPriorityAnalysis],
+  );
   const resourceOrganization = resourceOrganizationFromResult(result);
   const strategyConfig = withDefaultScheduleStrategy(scenario?.schedule_strategy);
   const objectiveTerms = strategyConfig.objective_terms ?? defaultObjectiveTermsConfig();
   const enabledObjectiveCount = objectiveTermDefinitions.filter((term) => objectiveTerms[term.id]?.enabled).length;
   const isMvp = variant === "mvp";
+  const activePlanWindowMode: PlanWindowMode = isMvp ? "detail" : planWindowMode;
+  const planSortLabel = planListSortOptions.find((option) => option.value === ganttMode)?.label ?? "按时间";
   const resourcePoolsForDisplay = scenario?.resource_pools ?? [];
+  const resourceAllocations = useMemo(() => result?.resource_allocations ?? [], [result]);
   const workSectionDisplayById = useMemo(
     () => buildWorkSectionDisplayById(scenario?.project ?? null),
     [scenario?.project],
@@ -1657,10 +1651,19 @@ function ResultsTab({
     () => new Map((result?.tasks ?? []).map((task) => [task.id, task])),
     [result],
   );
+  const selectedResourceAllocations = useMemo(
+    () => sortResourceAllocationsByPlan(resourceAllocations.filter((item) => item.resource_id === selectedResourceId)),
+    [resourceAllocations, selectedResourceId],
+  );
+  const selectedResource = selectedResourceAllocations[0] ?? null;
   const filteredPlanTasks = useMemo(() => {
     const filtered = filterScheduledTasksByWindow(result?.tasks ?? [], planWindowStart, planWindowFinish);
-    return isMvp ? sortScheduledTasksForPlan(filtered, planListSortMode) : filtered;
-  }, [isMvp, planListSortMode, result, planWindowStart, planWindowFinish]);
+    return sortScheduledTasksForPlan(filtered, ganttMode);
+  }, [ganttMode, result, planWindowStart, planWindowFinish]);
+  const selectedPlanTask = useMemo(
+    () => filteredPlanTasks.find((task) => task.id === selectedPlanTaskId) ?? filteredPlanTasks[0] ?? null,
+    [filteredPlanTasks, selectedPlanTaskId],
+  );
   const linksBySuccessor = useMemo(() => {
     const links = new Map<string, PrecedenceLink[]>();
     for (const link of generatedForDetails?.schedule_input.precedence_links ?? []) {
@@ -1672,7 +1675,25 @@ function ResultsTab({
   }, [generatedForDetails]);
   useEffect(() => {
     setSelectedResultIndex(0);
+    setSelectedPlanTaskId(null);
+    setSelectedResourceId(null);
   }, [solveResult]);
+
+  useEffect(() => {
+    if (!filteredPlanTasks.length) {
+      if (selectedPlanTaskId !== null) setSelectedPlanTaskId(null);
+      return;
+    }
+    if (!selectedPlanTaskId || !filteredPlanTasks.some((task) => task.id === selectedPlanTaskId)) {
+      setSelectedPlanTaskId(filteredPlanTasks[0].id);
+    }
+  }, [filteredPlanTasks, selectedPlanTaskId]);
+
+  useEffect(() => {
+    if (selectedResourceId && !resourceAllocations.some((item) => item.resource_id === selectedResourceId)) {
+      setSelectedResourceId(null);
+    }
+  }, [resourceAllocations, selectedResourceId]);
 
   useEffect(() => () => {
     clearPredecessorHoverTimers(predecessorHoverOpenTimerRef, predecessorHoverCloseTimerRef);
@@ -1719,14 +1740,14 @@ function ResultsTab({
     } as Record<ObjectiveTermId, ObjectiveTermConfig>;
     updateStrategyConfig({
       objective_terms: nextTerms,
-      enable_balance_objective: nextTerms.normal_balance.enabled,
+      enable_balance_objective: false,
     });
   }
 
   function restoreDefaultObjectiveTerms() {
     updateStrategyConfig({
       objective_terms: defaultObjectiveTermsConfig(),
-      enable_balance_objective: true,
+      enable_balance_objective: false,
     });
   }
 
@@ -1923,7 +1944,7 @@ function ResultsTab({
               <summary>高级排程参数</summary>
               <div className="form-grid advanced-schedule-grid">
                 <label>
-                  普通工程最早开始(天)
+                  非控制工程最早开始(天)
                   <input
                     type="number"
                     min={0}
@@ -1932,7 +1953,7 @@ function ResultsTab({
                   />
                 </label>
                 <label>
-                  普通工程最晚完成(天)
+                  非控制工程最晚完成(天)
                   <input
                     type="number"
                     min={1}
@@ -1944,7 +1965,7 @@ function ResultsTab({
                   />
                 </label>
                 <label>
-                  工区普通工程最大并行
+                  工区非控制工程最大并行
                   <input
                     type="number"
                     min={1}
@@ -1996,19 +2017,15 @@ function ResultsTab({
               <strong>{refinementSummary.scheduleSource}</strong>
             </div>
             <div>
-              <span>控制缓冲状态</span>
+              <span>控制链总时差状态</span>
               <strong>{refinementSummary.controlBufferStatus}</strong>
-            </div>
-            <div>
-              <span>普通工程均衡</span>
-              <strong>{refinementSummary.normalBalanceStatus}</strong>
             </div>
             <div>
               <span>资源路径状态</span>
               <strong>{refinementSummary.resourcePathStatus}</strong>
             </div>
             <div>
-              <span>最大缓冲风险</span>
+              <span>最大总时差不足</span>
               <strong>{refinementSummary.maxBufferRiskDays}</strong>
             </div>
           </div>
@@ -2446,7 +2463,7 @@ function ResultsTab({
       <section className="panel full">
         <PanelTitle
           title="里程碑结果"
-          subtitle={isMvp ? "节点完成情况和迟延天数" : "软节点允许超期，迟延天数会进入加权目标"}
+          subtitle={isMvp ? "节点完成情况和迟延天数" : "软节点允许超期，迟延天数仅作为诊断展示"}
         />
         <div className="table-wrap">
           <table>
@@ -2480,118 +2497,91 @@ function ResultsTab({
 
       <section className="panel full">
         <PanelTitle
-          title="计划表"
-          subtitle={result?.plan_finish_date ? `${result.plan_start_date} 至 ${result.plan_finish_date}` : "等待求解"}
-          action={isMvp ? (
-            <div className="segmented plan-sort-switcher" aria-label="计划表排序">
-              {planListSortOptions.map((option) => (
-                <button
-                  className={planListSortMode === option.value ? "active" : ""}
-                  key={option.value}
-                  onClick={() => setPlanListSortMode(option.value)}
-                  type="button"
-                >
-                  {option.label}
-                </button>
-              ))}
+          title="计划视图"
+          subtitle={result?.plan_finish_date ? `${result.plan_start_date} 至 ${result.plan_finish_date} · ${planSortLabel}` : "等待求解"}
+          action={(
+            <div className="schedule-view-actions">
+              <div className="segmented plan-sort-switcher" aria-label="计划排序">
+                {planListSortOptions.map((option) => (
+                  <button
+                    className={ganttMode === option.value ? "active" : ""}
+                    key={option.value}
+                    onClick={() => onGanttModeChange(option.value)}
+                    type="button"
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              {!isMvp && (
+                <div className="segmented" aria-label="计划视图窗口">
+                  <button
+                    className={activePlanWindowMode === "detail" ? "active" : ""}
+                    onClick={() => setPlanWindowMode("detail")}
+                    type="button"
+                  >
+                    工作项详情
+                  </button>
+                  <button
+                    className={activePlanWindowMode === "gantt" ? "active" : ""}
+                    onClick={() => setPlanWindowMode("gantt")}
+                    type="button"
+                  >
+                    甘特图
+                  </button>
+                </div>
+              )}
             </div>
-          ) : undefined}
+          )}
         />
-        <div className="table-wrap plan">
-          <table>
-            <thead>
-              <tr>
-                <th>工作项</th>
-                <th>幅别</th>
-                <th>构件</th>
-                <th>计划表达式</th>
-                <th>工期</th>
-                <th>计划开始</th>
-                <th>计划完成</th>
-                <th>资源</th>
-                <th>前置数</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredPlanTasks.map((task) => {
-                const isOpen = openPredecessorTaskId === task.id;
-                return (
-                  <tr key={task.id}>
-                    <td>{task.name}</td>
-                    <td><span className="side-tag">{workSectionLabelForTask(task, workSectionDisplayById)}</span></td>
-                    <td><span className="tag">{componentLabels[task.component_type]}</span></td>
-                    <td className="duration-expression" title={durationExpression(task, scenario)}>
-                      {durationExpression(task, scenario)}
-                    </td>
-                    <td>{effectiveTaskDurationDays(task, scenario)} 天</td>
-                    <td>{task.start_date}</td>
-                    <td>{task.finish_date}</td>
-                    <td>{task.assigned_resource_name ?? "-"}</td>
-                    <td className="predecessor-cell">
-                      {task.predecessor_ids.length > 0 ? (
-                        <button
-                          className="predecessor-count has-items"
-                          type="button"
-                          onMouseEnter={(event) => showPredecessorPopover(task.id, event.currentTarget)}
-                          onMouseLeave={schedulePredecessorPopoverClose}
-                          onFocus={(event) => showPredecessorPopover(task.id, event.currentTarget)}
-                          onBlur={schedulePredecessorPopoverClose}
-                          aria-expanded={isOpen}
-                        >
-                          {task.predecessor_ids.length}
-                        </button>
-                      ) : (
-                        <span className="predecessor-zero">0</span>
-                      )}
-                      {isOpen && (
-                        <PredecessorPopover
-                          task={task}
-                          details={predecessorDetails(task)}
-                          anchorRect={predecessorAnchorRect}
-                          onMouseEnter={keepPredecessorPopoverOpen}
-                          onMouseLeave={schedulePredecessorPopoverClose}
-                        />
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      {!isMvp && (
-        <section className="panel full">
-          <div className="panel-title">
-            <div>
-              <h2>甘特图</h2>
-              <span>{ganttMode === "by_structure" ? "按墩台聚类，墩号从小到大" : "按工艺聚类，子级按计划先后展示"}</span>
-            </div>
-            <div className="segmented">
-              <button className={ganttMode === "by_structure" ? "active" : ""} onClick={() => onGanttModeChange("by_structure")}>
-                按墩台
-              </button>
-              <button className={ganttMode === "by_process" ? "active" : ""} onClick={() => onGanttModeChange("by_process")}>
-                按工艺
-              </button>
-            </div>
-          </div>
-          <Gantt
-            tasks={result?.tasks ?? []}
+        {activePlanWindowMode === "gantt" ? (
+          <PlanTimelineView
+            tasks={filteredPlanTasks}
             makespan={Math.max(result?.objective_days ?? 1, 1)}
-            mode={ganttMode}
+            selectedTaskId={selectedPlanTask?.id ?? null}
+            onSelectTask={setSelectedPlanTaskId}
             workSectionDisplayById={workSectionDisplayById}
             resourcePools={resourcePoolsForDisplay}
           />
-        </section>
-      )}
+        ) : (
+          <div className="schedule-split-view">
+            <PlanWorkList
+              tasks={filteredPlanTasks}
+              selectedTaskId={selectedPlanTask?.id ?? null}
+              onSelectTask={setSelectedPlanTaskId}
+            />
+            <PlanTaskDetailTable
+              tasks={filteredPlanTasks}
+              selectedTaskId={selectedPlanTask?.id ?? null}
+              onSelectTask={setSelectedPlanTaskId}
+              scenario={scenario}
+              workSectionDisplayById={workSectionDisplayById}
+              controlDisplayByTaskId={controlPlanDisplayByTaskId}
+              predecessorDetails={predecessorDetails}
+              openPredecessorTaskId={openPredecessorTaskId}
+              predecessorAnchorRect={predecessorAnchorRect}
+              showPredecessorPopover={showPredecessorPopover}
+              schedulePredecessorPopoverClose={schedulePredecessorPopoverClose}
+              keepPredecessorPopoverOpen={keepPredecessorPopoverOpen}
+            />
+          </div>
+        )}
+      </section>
 
       <section className="panel full">
         <PanelTitle title="资源泳道" subtitle="横轴按计划时间展示每条资源的占用连续性" />
         <ResourceLanes
-          allocations={result?.resource_allocations ?? []}
+          allocations={resourceAllocations}
           makespan={Math.max(result?.objective_days ?? 1, 1)}
+          resourcePools={resourcePoolsForDisplay}
+          selectedResourceId={selectedResourceId}
+          onSelectResource={setSelectedResourceId}
+        />
+        <ResourceAllocationDetails
+          allocations={selectedResourceAllocations}
+          selectedResource={selectedResource}
+          taskById={scheduledTaskById}
+          workSectionDisplayById={workSectionDisplayById}
           resourcePools={resourcePoolsForDisplay}
         />
       </section>
@@ -2638,55 +2628,297 @@ function ResultsTab({
   );
 }
 
-function Gantt({
+function buildControlPlanDisplayByTaskId(analysis: ControlPriorityAnalysis | null): Map<string, ControlPlanTaskDisplay> {
+  const displays = new Map<string, ControlPlanTaskDisplay>();
+  if (!analysis) return displays;
+
+  const risksByTaskId = new Map(analysis.control_buffer_risks.map((risk) => [risk.task_id, risk]));
+
+  for (const target of analysis.control_targets) {
+    const risk = risksByTaskId.get(target.task_id);
+    displays.set(target.task_id, {
+      taskId: target.task_id,
+      level: target.control_level,
+      objectName: "-",
+      roleLabel: "控制目标",
+      sourceLabel: controlTargetSourceLabels[target.source] ?? target.source,
+      latestSafeFinishDate: risk?.latest_safe_finish_date || null,
+      remainingBufferDays: risk?.remaining_buffer_days ?? null,
+      bufferRiskDays: risk?.buffer_risk_days ?? 0,
+      status: risk?.status ?? "not_evaluated",
+    });
+  }
+
+  for (const item of analysis.control_object_tasks) {
+    const risk = risksByTaskId.get(item.task_id);
+    const existing = displays.get(item.task_id);
+    displays.set(item.task_id, {
+      taskId: item.task_id,
+      level: item.control_level,
+      objectName: item.object_name || existing?.objectName || "-",
+      roleLabel: controlTaskRoleLabels[item.task_role] ?? (item.task_role || existing?.roleLabel || "控制对象任务"),
+      sourceLabel: item.source_label || existing?.sourceLabel || "-",
+      latestSafeFinishDate: risk?.latest_safe_finish_date || item.latest_safe_finish_date || existing?.latestSafeFinishDate || null,
+      remainingBufferDays: risk?.remaining_buffer_days ?? item.remaining_buffer_days ?? existing?.remainingBufferDays ?? null,
+      bufferRiskDays: risk?.buffer_risk_days ?? item.buffer_risk_days ?? existing?.bufferRiskDays ?? 0,
+      status: risk?.status ?? item.status ?? existing?.status ?? "not_evaluated",
+    });
+  }
+
+  for (const risk of analysis.control_buffer_risks) {
+    if (displays.has(risk.task_id)) continue;
+    displays.set(risk.task_id, {
+      taskId: risk.task_id,
+      level: risk.control_level,
+      objectName: "-",
+      roleLabel: "总时差不足",
+      sourceLabel: controlTargetSourceLabels[risk.target_source] ?? risk.target_source,
+      latestSafeFinishDate: risk.latest_safe_finish_date || null,
+      remainingBufferDays: risk.remaining_buffer_days,
+      bufferRiskDays: risk.buffer_risk_days,
+      status: risk.status,
+    });
+  }
+
+  return displays;
+}
+
+function controlPlanDisplayFromTask(task: ScheduledTask): ControlPlanTaskDisplay | null {
+  const level = task.control_level ?? "normal";
+  if (level !== "control" && level !== "key") return null;
+  return {
+    taskId: task.id,
+    level,
+    objectName: task.structure_name,
+    roleLabel: "任务控制属性",
+    sourceLabel: "任务控制属性",
+    latestSafeFinishDate: null,
+    remainingBufferDays: null,
+    bufferRiskDays: 0,
+    status: "not_evaluated",
+  };
+}
+
+function controlPlanDeadlineText(display: ControlPlanTaskDisplay | null): string {
+  return display?.latestSafeFinishDate ?? "-";
+}
+
+function PlanWorkList({
+  tasks,
+  selectedTaskId,
+  onSelectTask,
+}: {
+  tasks: ScheduledTask[];
+  selectedTaskId: string | null;
+  onSelectTask: (taskId: string) => void;
+}) {
+  return (
+    <div className="plan-work-list">
+      <div className="plan-work-list-header">工作项</div>
+      <div className="plan-work-list-body">
+        {tasks.length ? (
+          tasks.map((task) => (
+            <button
+              className={`plan-work-list-row ${selectedTaskId === task.id ? "selected" : ""}`}
+              key={task.id}
+              onClick={() => onSelectTask(task.id)}
+              title={task.name}
+              type="button"
+            >
+              {task.name}
+            </button>
+          ))
+        ) : (
+          <div className="schedule-split-empty">暂无工作项</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PlanTimelineView({
   tasks,
   makespan,
-  mode,
+  selectedTaskId,
+  onSelectTask,
   workSectionDisplayById,
   resourcePools,
 }: {
   tasks: ScheduledTask[];
   makespan: number;
-  mode: GanttMode;
+  selectedTaskId: string | null;
+  onSelectTask: (taskId: string) => void;
   workSectionDisplayById: Map<string, WorkSectionDisplay>;
   resourcePools: ResourcePool[];
 }) {
-  if (!tasks.length) return <div className="empty">暂无排程结果</div>;
-  const groups = buildGanttGroups(tasks, mode, workSectionDisplayById);
+  if (!tasks.length) return <div className="schedule-split-empty">暂无工作项</div>;
+  const safeMakespan = Math.max(makespan, ...tasks.map((task) => task.end_offset), 1);
   return (
-    <div className="gantt">
-      {groups.map((group) => (
-        <div className="gantt-group" key={group.id}>
-          <div className="gantt-group-title">
-            <strong>{group.title}</strong>
-            <span>{group.startDate} 至 {group.finishDate}</span>
-          </div>
-          {group.tasks.map((task) => {
-            const sideLabel = workSectionLabelForTask(task, workSectionDisplayById);
-            return (
-              <div className="gantt-row" key={task.id}>
-                <div className="gantt-label">
-                  {sideLabel !== "-" && <span className="side-tag mini">{sideLabel}</span>}
-                  <span className="gantt-task-name">{task.name}</span>
-                </div>
-                <div className="gantt-track">
-                  <div
-                    className="gantt-bar"
-                    style={{
-                      left: `${(task.start_offset / makespan) * 100}%`,
-                      width: `${Math.max(((task.end_offset - task.start_offset) / makespan) * 100, 1.2)}%`,
-                      backgroundColor: componentColors[task.component_type],
-                    }}
-                    title={ganttTaskHoverTitle(task, sideLabel, resourcePools)}
-                  >
-                    <span>{task.duration_days}d</span>
-                  </div>
+    <div className="plan-timeline-view">
+      <div className="plan-timeline-header">
+        <span>工作项</span>
+        <span>计划时间</span>
+      </div>
+      <div className="plan-timeline-body">
+        {tasks.map((task) => {
+          const sideLabel = workSectionLabelForTask(task, workSectionDisplayById);
+          const selected = selectedTaskId === task.id;
+          return (
+            <div className={`plan-timeline-row ${selected ? "selected" : ""}`} key={task.id}>
+              <button
+                className="plan-timeline-work"
+                onClick={() => onSelectTask(task.id)}
+                title={task.name}
+                type="button"
+              >
+                {task.name}
+              </button>
+              <div className="plan-timeline-track">
+                <div
+                  className="plan-timeline-bar"
+                  style={{
+                    left: `${(task.start_offset / safeMakespan) * 100}%`,
+                    width: `${Math.max(((task.end_offset - task.start_offset) / safeMakespan) * 100, 1.2)}%`,
+                    backgroundColor: componentColors[task.component_type],
+                  }}
+                  title={ganttTaskHoverTitle(task, sideLabel, resourcePools)}
+                >
+                  <span>{task.duration_days}d</span>
                 </div>
               </div>
-            );
-          })}
-        </div>
-      ))}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PlanTaskDetailTable({
+  tasks,
+  selectedTaskId,
+  onSelectTask,
+  scenario,
+  workSectionDisplayById,
+  controlDisplayByTaskId,
+  predecessorDetails,
+  openPredecessorTaskId,
+  predecessorAnchorRect,
+  showPredecessorPopover,
+  schedulePredecessorPopoverClose,
+  keepPredecessorPopoverOpen,
+}: {
+  tasks: ScheduledTask[];
+  selectedTaskId: string | null;
+  onSelectTask: (taskId: string) => void;
+  scenario: ScenarioInput | null;
+  workSectionDisplayById: Map<string, WorkSectionDisplay>;
+  controlDisplayByTaskId: Map<string, ControlPlanTaskDisplay>;
+  predecessorDetails: (task: ScheduledTask) => PredecessorDetail[];
+  openPredecessorTaskId: string | null;
+  predecessorAnchorRect: DOMRect | null;
+  showPredecessorPopover: (taskId: string, anchor: HTMLElement) => void;
+  schedulePredecessorPopoverClose: () => void;
+  keepPredecessorPopoverOpen: () => void;
+}) {
+  if (!tasks.length) {
+    return (
+      <div className="schedule-detail-pane">
+        <div className="schedule-split-empty">暂无工作项详情</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="schedule-detail-pane">
+      <div className="plan-detail-table-wrap">
+        <table className="plan-detail-table">
+          <colgroup>
+            <col className="plan-detail-side-col" />
+            <col className="plan-detail-component-col" />
+            <col className="plan-detail-expression-col" />
+            <col className="plan-detail-duration-col" />
+            <col className="plan-detail-date-col" />
+            <col className="plan-detail-date-col" />
+            <col className="plan-detail-resource-col" />
+            <col className="plan-detail-control-col" />
+            <col className="plan-detail-predecessor-col" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>幅别</th>
+              <th>构件</th>
+              <th>计划表达式</th>
+              <th>工期</th>
+              <th>计划开始</th>
+              <th>计划完成</th>
+              <th>资源</th>
+              <th>控制性</th>
+              <th>前置工作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tasks.map((task) => {
+              const details = predecessorDetails(task);
+              const isOpen = openPredecessorTaskId === task.id;
+              const selected = selectedTaskId === task.id;
+              const controlDisplay = controlDisplayByTaskId.get(task.id) ?? controlPlanDisplayFromTask(task);
+              return (
+                <tr
+                  className={selected ? "selected" : ""}
+                  key={task.id}
+                  onClick={() => onSelectTask(task.id)}
+                >
+                  <td title={workSectionLabelForTask(task, workSectionDisplayById)}>
+                    <span className="side-tag">{workSectionLabelForTask(task, workSectionDisplayById)}</span>
+                  </td>
+                  <td title={componentLabels[task.component_type]}>{componentLabels[task.component_type]}</td>
+                  <td className="duration-expression" title={durationExpression(task, scenario)}>
+                    {durationExpression(task, scenario)}
+                  </td>
+                  <td>{effectiveTaskDurationDays(task, scenario)} 天</td>
+                  <td>{task.start_date}</td>
+                  <td>{task.finish_date}</td>
+                  <td title={task.assigned_resource_name ?? "-"}>{task.assigned_resource_name ?? "-"}</td>
+                  <td className="control-plan-deadline-cell">{controlPlanDeadlineText(controlDisplay)}</td>
+                  <td className="predecessor-cell">
+                    {details.length > 0 ? (
+                      <button
+                        className="predecessor-count has-items"
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onSelectTask(task.id);
+                          showPredecessorPopover(task.id, event.currentTarget);
+                        }}
+                        onMouseEnter={(event) => showPredecessorPopover(task.id, event.currentTarget)}
+                        onMouseLeave={schedulePredecessorPopoverClose}
+                        onPointerEnter={(event) => showPredecessorPopover(task.id, event.currentTarget)}
+                        onPointerLeave={schedulePredecessorPopoverClose}
+                        onFocus={(event) => showPredecessorPopover(task.id, event.currentTarget)}
+                        onBlur={schedulePredecessorPopoverClose}
+                      >
+                        {details.length}
+                      </button>
+                    ) : (
+                      <span className="predecessor-zero">0</span>
+                    )}
+                    {isOpen && (
+                      <PredecessorPopover
+                        task={task}
+                        details={details}
+                        anchorRect={predecessorAnchorRect}
+                        onMouseEnter={keepPredecessorPopoverOpen}
+                        onMouseLeave={schedulePredecessorPopoverClose}
+                      />
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -2695,36 +2927,131 @@ function ResourceLanes({
   allocations,
   makespan,
   resourcePools,
+  selectedResourceId,
+  onSelectResource,
 }: {
   allocations: ResourceAllocation[];
   makespan: number;
   resourcePools: ResourcePool[];
+  selectedResourceId: string | null;
+  onSelectResource: (resourceId: string) => void;
 }) {
   if (!allocations.length) return <div className="empty">暂无资源分配</div>;
   const groups = groupBy(allocations, (item) => item.resource_id);
   return (
     <div className="lanes">
-      {Object.entries(groups).map(([, items]) => (
-        <div className="lane-row" key={items[0].resource_id}>
-          <div className="lane-label">
-            <strong>{items[0].resource_name}</strong>
-            <code>{resourceTypeLabel(items[0].resource_type, resourcePools)}</code>
+      {Object.entries(groups).map(([, rawItems]) => {
+        const items = sortResourceAllocationsByPlan(rawItems);
+        const resourceId = items[0].resource_id;
+        const selected = selectedResourceId === resourceId;
+        return (
+          <div
+            aria-pressed={selected}
+            className={`lane-row ${selected ? "selected" : ""}`}
+            key={resourceId}
+            onClick={() => onSelectResource(resourceId)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onSelectResource(resourceId);
+              }
+            }}
+            role="button"
+            tabIndex={0}
+          >
+            <div className="lane-label">
+              <strong>{items[0].resource_name}</strong>
+              <code>{resourceTypeLabel(items[0].resource_type, resourcePools)}</code>
+            </div>
+            <div className="lane-track">
+              {items.map((allocation) => (
+                <div
+                  className="lane-bar"
+                  key={allocation.task_id}
+                  style={{
+                    left: `${(allocation.start_offset / makespan) * 100}%`,
+                    width: `${Math.max(((allocation.end_offset - allocation.start_offset) / makespan) * 100, 1.2)}%`,
+                  }}
+                  title={allocationHoverTitle(allocation, resourcePools)}
+                />
+              ))}
+            </div>
           </div>
-          <div className="lane-track">
-            {items.map((allocation) => (
-              <div
-                className="lane-bar"
-                key={allocation.task_id}
-                style={{
-                  left: `${(allocation.start_offset / makespan) * 100}%`,
-                  width: `${Math.max(((allocation.end_offset - allocation.start_offset) / makespan) * 100, 1.2)}%`,
-                }}
-                title={allocationHoverTitle(allocation, resourcePools)}
-              />
-            ))}
-          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ResourceAllocationDetails({
+  allocations,
+  selectedResource,
+  taskById,
+  workSectionDisplayById,
+  resourcePools,
+}: {
+  allocations: ResourceAllocation[];
+  selectedResource: ResourceAllocation | null;
+  taskById: Map<string, ScheduledTask>;
+  workSectionDisplayById: Map<string, WorkSectionDisplay>;
+  resourcePools: ResourcePool[];
+}) {
+  if (!selectedResource) {
+    return (
+      <div className="resource-task-detail">
+        <div className="empty">未选择资源</div>
+      </div>
+    );
+  }
+  const totalActiveDays = allocations.reduce((total, allocation) => total + resourceAllocationDurationDays(allocation), 0);
+  return (
+    <div className="resource-task-detail">
+      <div className="resource-task-detail-header">
+        <div>
+          <strong>{selectedResource.resource_name}</strong>
+          <span>{resourceTypeLabel(selectedResource.resource_type, resourcePools)}</span>
         </div>
-      ))}
+        <div className="resource-task-stats">
+          <span>{allocations.length} 项</span>
+          <span>{totalActiveDays} 天</span>
+        </div>
+      </div>
+      <div className="table-wrap short resource-task-table">
+        <table>
+          <thead>
+            <tr>
+              <th>序号</th>
+              <th>工作项</th>
+              <th>幅别</th>
+              <th>构件</th>
+              <th>工艺</th>
+              <th>计划开始</th>
+              <th>计划完成</th>
+              <th>工期</th>
+            </tr>
+          </thead>
+          <tbody>
+            {allocations.map((allocation, index) => {
+              const task = taskById.get(allocation.task_id);
+              return (
+                <tr key={allocation.task_id}>
+                  <td>{index + 1}</td>
+                  <td>
+                    <strong>{allocation.task_name}</strong>
+                    <span className="muted-cell">{allocation.task_id}</span>
+                  </td>
+                  <td><span className="side-tag">{task ? workSectionLabelForTask(task, workSectionDisplayById) : "-"}</span></td>
+                  <td>{task ? componentLabels[task.component_type] : "-"}</td>
+                  <td>{task?.process_name ?? "-"}</td>
+                  <td>{allocation.start_date}</td>
+                  <td>{allocation.finish_date}</td>
+                  <td>{resourceAllocationDurationDays(allocation)} 天</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -2784,6 +3111,19 @@ function allocationHoverTitle(allocation: ResourceAllocation, resourcePools: Res
   ].join("\n");
 }
 
+function sortResourceAllocationsByPlan(allocations: ResourceAllocation[]): ResourceAllocation[] {
+  return [...allocations].sort((a, b) => (
+    a.start_offset - b.start_offset
+    || a.end_offset - b.end_offset
+    || a.task_name.localeCompare(b.task_name)
+    || a.task_id.localeCompare(b.task_id)
+  ));
+}
+
+function resourceAllocationDurationDays(allocation: ResourceAllocation): number {
+  return Math.max(allocation.end_offset - allocation.start_offset, 0);
+}
+
 function resourcePathHoverTitle(path: ResourcePath, labels: string[], resourcePools: ResourcePool[] = []): string {
   return [
     `资源：${path.resource_name}`,
@@ -2832,43 +3172,6 @@ function buildWorkSectionDisplayById(project: ProjectModel | null): Map<string, 
 function workSectionLabelForTask(task: Task, workSectionDisplayById: Map<string, WorkSectionDisplay>): string {
   if (!task.work_section_id) return "-";
   return workSectionDisplayById.get(task.work_section_id)?.label ?? "-";
-}
-
-function titleWithWorkSectionLabel(title: string, task: Task, workSectionDisplayById: Map<string, WorkSectionDisplay>): string {
-  const sideLabel = workSectionLabelForTask(task, workSectionDisplayById);
-  if (sideLabel === "-" || title.includes(sideLabel)) return title;
-  return `${sideLabel} ${title}`;
-}
-
-function buildGanttGroups(
-  tasks: ScheduledTask[],
-  mode: GanttMode,
-  workSectionDisplayById: Map<string, WorkSectionDisplay>,
-) {
-  if (mode === "by_process") {
-    return componentOrder
-      .map((component) => {
-        const children = tasks
-          .filter((task) => task.component_type === component)
-          .sort((a, b) => a.start_offset - b.start_offset || compareStructureIds(a.structure_id, b.structure_id));
-        return { id: component, title: componentLabels[component], tasks: children, ...taskDateRange(children) };
-      })
-      .filter((group) => group.tasks.length > 0);
-  }
-
-  return Object.entries(groupBy(tasks, (task) => task.structure_id))
-    .sort(([left], [right]) => compareStructureIds(left, right))
-    .map(([structureId, children]) => ({
-      id: structureId,
-      title: titleWithWorkSectionLabel(children[0].structure_name, children[0], workSectionDisplayById),
-      tasks: children.sort(
-        (a, b) =>
-          componentOrder.indexOf(a.component_type) - componentOrder.indexOf(b.component_type)
-          || a.start_offset - b.start_offset
-          || a.name.localeCompare(b.name),
-      ),
-      ...taskDateRange(children),
-    }));
 }
 
 function buildPredecessorLinksBySuccessor(generated: GeneratedScheduleInput | null): Map<string, PrecedenceLink[]> {
@@ -3887,7 +4190,6 @@ type RefinementSummary = {
   hardMilestoneStatus: string;
   scheduleSource: string;
   controlBufferStatus: string;
-  normalBalanceStatus: string;
   resourcePathStatus: string;
   maxBufferRiskDays: string;
   fallbackReason: string;
@@ -4123,6 +4425,9 @@ function controlPriorityAnalysisFromResult(result: ScheduleResult | null): Contr
     control_buffer_risks: bufferRisks,
     control_buffer_status: String(raw.control_buffer_status ?? "not_evaluated"),
     normal_balance_status: String(raw.normal_balance_status ?? "not_evaluated"),
+    unconfigured_normal_balance_status: String(
+      raw.unconfigured_normal_balance_status ?? raw.normal_balance_status ?? "not_evaluated",
+    ),
     resource_path_status: String(raw.resource_path_status ?? "not_evaluated"),
     resource_balance_status: String(raw.resource_balance_status ?? resourceOrganization?.resource_balance_status ?? "not_evaluated"),
     resource_idle_status: String(raw.resource_idle_status ?? resourceOrganization?.resource_idle_status ?? "not_evaluated"),
@@ -4140,7 +4445,6 @@ function refinementSummaryFromResult(result: ScheduleResult | null): RefinementS
   const hardMilestones = result.milestone_results.filter((milestone) => milestone.mode === "hard");
   const hardLateCount = hardMilestones.filter((milestone) => milestone.lateness_days > 0).length;
   const controlBufferStatus = analysis?.control_buffer_status ?? "not_evaluated";
-  const normalBalanceStatus = analysis?.normal_balance_status ?? "not_evaluated";
   const resourcePathStatus = analysis?.resource_path_status ?? "not_evaluated";
   const fallbackReason = analysis?.fallback_reason
     ?? stringFromUnknown(result.objective_breakdown?.skipped_named_refinement_reason ?? result.stats?.skipped_named_refinement_reason);
@@ -4150,7 +4454,6 @@ function refinementSummaryFromResult(result: ScheduleResult | null): RefinementS
   const tone = refinementTone({
     hardLateCount,
     controlBufferStatus,
-    normalBalanceStatus,
     resourcePathStatus,
     isFallback,
   });
@@ -4165,7 +4468,6 @@ function refinementSummaryFromResult(result: ScheduleResult | null): RefinementS
       : "未配置",
     scheduleSource: scheduleSourceLabels[source] ?? (source || "-"),
     controlBufferStatus: controlBufferStatusLabels[controlBufferStatus] ?? controlBufferStatus,
-    normalBalanceStatus: normalBalanceStatusLabels[normalBalanceStatus] ?? normalBalanceStatus,
     resourcePathStatus: resourcePathStatusLabels[resourcePathStatus] ?? resourcePathStatus,
     maxBufferRiskDays: `${maxBufferRisk} 天`,
     fallbackReason,
@@ -4194,13 +4496,11 @@ function pathGroupDiagnosticFromRecord(item: Record<string, unknown>) {
 function refinementTone({
   hardLateCount,
   controlBufferStatus,
-  normalBalanceStatus,
   resourcePathStatus,
   isFallback,
 }: {
   hardLateCount: number;
   controlBufferStatus: string;
-  normalBalanceStatus: string;
   resourcePathStatus: string;
   isFallback: boolean;
 }): MetricTone {
@@ -4209,7 +4509,6 @@ function refinementTone({
     isFallback
     || controlBufferStatus === "buffer_insufficient"
     || controlBufferStatus === "near_risk"
-    || normalBalanceStatus === "backloaded"
     || resourcePathStatus === "abnormal_jump"
   ) {
     return "warn";
@@ -4230,7 +4529,7 @@ function refinementTitle({
 }): string {
   if (isFallback) return "已回退固定资源参考排程";
   if (hardLateCount > 0) return "强制节点未满足";
-  if (controlBufferStatus === "buffer_insufficient") return "控制缓冲不足，需复核关键链";
+  if (controlBufferStatus === "buffer_insufficient") return "控制链总时差不足，需复核关键链";
   if (source === "current_resources_control_priority_balanced") return "命名资源精排可用于复核";
   return scheduleSourceLabels[source] ?? "排程结果可用于复核";
 }
@@ -4280,15 +4579,11 @@ function withDefaultScheduleStrategy(config?: ScheduleStrategyConfig | null): Sc
     return next;
   }, defaultTerms);
 
-  if (!config?.objective_terms?.normal_balance && config?.enable_balance_objective === false) {
-    objectiveTerms.normal_balance.enabled = false;
-  }
-
   return {
     ...defaultScheduleStrategyConfig,
     ...(config ?? {}),
     objective_terms: objectiveTerms,
-    enable_balance_objective: objectiveTerms.normal_balance.enabled,
+    enable_balance_objective: false,
   };
 }
 
@@ -4454,13 +4749,6 @@ function formatResourceUnitCost(resource: SelectedResourceCost): string {
     return `${formatMoney(resource.incremental_unit_cost)} / ${resource.billing_period_days} 天`;
   }
   return `${formatMoney(resource.incremental_unit_cost)} / 套台`;
-}
-
-function taskDateRange(tasks: ScheduledTask[]): { startDate: string; finishDate: string } {
-  if (!tasks.length) return { startDate: "-", finishDate: "-" };
-  const first = tasks.reduce((current, task) => (task.start_offset < current.start_offset ? task : current), tasks[0]);
-  const last = tasks.reduce((current, task) => (task.end_offset > current.end_offset ? task : current), tasks[0]);
-  return { startDate: first.start_date, finishDate: last.finish_date };
 }
 
 function compareStructureIds(left: string, right: string): number {

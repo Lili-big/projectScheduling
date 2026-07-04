@@ -56,18 +56,18 @@
 
 ## Phase 4: User Story 2 - Preserve Existing Defaults (Priority: P1)
 
-**Goal**: Existing scenarios without explicit objective terms solve with previous defaults and legacy ordinary-balance behavior.
+**Goal**: Existing scenarios without explicit objective terms solve with current defaults while legacy ordinary-balance inputs remain accepted and filtered out.
 
-**Independent Test**: Backend tests prove no explicit objective terms produces previous effective weights and `enable_balance_objective=false` disables normal balance when no explicit term is sent.
+**Independent Test**: Backend tests prove no explicit objective terms produces current effective weights and legacy `normal_balance` / `enable_balance_objective` inputs do not re-enable the removed target.
 
 ### Tests for User Story 2
 
 - [X] T015 [P] [US2] Add backend test for omitted objective terms matching previous default weights in `backend/tests/test_scheduler.py`.
-- [X] T016 [P] [US2] Add backend test for legacy `enable_balance_objective=false` compatibility in `backend/tests/test_scheduler.py`.
+- [X] T016 [P] [US2] Add backend test for legacy `enable_balance_objective` and `normal_balance` compatibility in `backend/tests/test_scheduler.py`.
 
 ### Implementation for User Story 2
 
-- [X] T017 [US2] Preserve `enable_balance_objective` compatibility while allowing explicit `normal_balance` to be authoritative in `backend/app/models.py`.
+- [X] T017 [US2] Preserve `enable_balance_objective` compatibility while filtering legacy `normal_balance` from current objective terms in `backend/app/models.py`.
 - [X] T018 [US2] Return `objective_terms_used` and effective `objective_weights` for refinement results in `backend/app/solver.py`.
 
 **Checkpoint**: Existing runs remain compatible and auditable.
@@ -122,6 +122,7 @@
 - [X] T028 Run frontend build with `npm --prefix frontend run build`.
 - [X] T029 Validate the full simulation page in the browser using `specs/002-objective-function-config/quickstart.md`.
 - [X] T030 Verify Spec Kit analyze/converge status and update this task list to `[X]`.
+- [X] T031 Remove deprecated `spatial_resource_assignment` from objective terms, solver objective assembly, frontend controls, Netlify contract, tests, and objective documentation.
 
 ---
 

@@ -17,16 +17,16 @@ Impacted endpoints:
 {
   "schedule_strategy": {
     "strategy": "comprehensive",
-    "enable_balance_objective": true,
+    "enable_balance_objective": false,
     "objective_terms": {
       "control_node_late": { "enabled": true, "weight": 1000000000 },
-      "normal_balance": { "enabled": true, "weight": 1 }
+      "resource_idle": { "enabled": true, "weight": 1000 }
     }
   }
 }
 ```
 
-Missing terms are filled with defaults. Unknown terms or invalid enabled weights reject the request.
+Missing current terms are filled with defaults. Unknown terms or invalid enabled weights reject the request. Legacy `normal_balance` is accepted for compatibility but filtered out.
 
 ## Result Contract
 
@@ -37,7 +37,7 @@ Refinement results include effective objective metadata:
   "objective_breakdown": {
     "objective_weights": {
       "control_node_late": 1000000000,
-      "normal_balance": 0
+      "resource_idle": 1000
     },
     "objective_terms_used": {
       "control_node_late": {
@@ -46,11 +46,11 @@ Refinement results include effective objective metadata:
         "weight": 1000000000,
         "effective_weight": 1000000000
       },
-      "normal_balance": {
-        "label": "普通工程均衡",
-        "enabled": false,
-        "weight": 1,
-        "effective_weight": 0
+      "resource_idle": {
+        "label": "资源空闲",
+        "enabled": true,
+        "weight": 1000,
+        "effective_weight": 1000
       }
     }
   }

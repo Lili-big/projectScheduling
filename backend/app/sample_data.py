@@ -12,8 +12,8 @@ from .models import (
 )
 from .process_library_defaults import historical_default_process_library
 
-PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION = "设备型桩基资源：同一墩同一工艺默认由一台设备顺序或跳孔施工，不默认多机并行。"
-MANUAL_PILE_PARALLEL_RULE_DESCRIPTION = "人工挖孔班组：同一墩内暂不设置额外并行上限，仅受班组数量约束。"
+PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION = "设备型桩基资源：同一墩同一工艺默认最多由 1 台设备承担；设置为 0 表示不额外限制。"
+MANUAL_PILE_PARALLEL_RULE_DESCRIPTION = "人工挖孔班组：同一墩内不设置最多参与设备数，默认仅受班组数量约束。"
 
 
 def default_bridge() -> BridgeModel:
@@ -127,7 +127,7 @@ def default_resources() -> list[Resource]:
             id="rotary_drill_1",
             name="旋挖钻1",
             type="rotary_drill",
-            same_structure_resource_binding=True,
+            same_structure_resource_binding=False,
             same_structure_parallel_limit=1,
             parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
         ),
@@ -135,7 +135,7 @@ def default_resources() -> list[Resource]:
             id="rotary_drill_2",
             name="旋挖钻2",
             type="rotary_drill",
-            same_structure_resource_binding=True,
+            same_structure_resource_binding=False,
             same_structure_parallel_limit=1,
             parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
         ),
@@ -143,7 +143,7 @@ def default_resources() -> list[Resource]:
             id="rotary_drill_3",
             name="旋挖钻3",
             type="rotary_drill",
-            same_structure_resource_binding=True,
+            same_structure_resource_binding=False,
             same_structure_parallel_limit=1,
             parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
         ),
@@ -151,7 +151,7 @@ def default_resources() -> list[Resource]:
             id="circulation_drill_1",
             name="回旋钻1",
             type="circulation_drill",
-            same_structure_resource_binding=True,
+            same_structure_resource_binding=False,
             same_structure_parallel_limit=1,
             parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
         ),
@@ -159,7 +159,7 @@ def default_resources() -> list[Resource]:
             id="impact_drill_1",
             name="冲击钻1",
             type="impact_drill",
-            same_structure_resource_binding=True,
+            same_structure_resource_binding=False,
             same_structure_parallel_limit=1,
             parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
         ),

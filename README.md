@@ -54,13 +54,13 @@ cd ..
 & 'C:\Program Files\nodejs\npm.cmd' run dev
 ```
 
-### 2. 推荐启动方式：构建前端后启动单个后端服务
+### 2. 演示模式：构建前端后启动单个后端服务
 
-这种方式最接近最终部署形态：先构建前端，再由 FastAPI 同时提供页面和接口。
+这种方式最接近最终部署形态，适合演示、验收或给同事临时查看：先构建前端，再由 FastAPI 同时提供页面和接口。
 
 ```powershell
 cd frontend
-npm run build
+npm.cmd run build
 cd ..
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir backend
 ```
@@ -70,11 +70,13 @@ cd ..
 - 页面：`http://127.0.0.1:8000/`
 - 健康检查：`http://127.0.0.1:8000/api/health`
 
+演示模式下，前端代码已经被打包到 `frontend/dist`。如果修改了前端代码，需要重新执行 `npm.cmd run build` 并刷新页面；如果修改了后端 Python 代码，需要重启后端服务后重新求解。
+
 如果需要让同一局域网内的同事访问，仍推荐使用单个后端服务托管前端和 API，只把监听地址改为 `0.0.0.0`：
 
 ```powershell
 cd frontend
-npm run build
+npm.cmd run build
 cd ..
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend
 ```
@@ -94,9 +96,9 @@ cd ..
 
 此时访问 `http://127.0.0.1:8002/`。
 
-### 3. 开发模式：后端和前端分别启动
+### 3. 开发模式：后端和前端分别启动，支持自动更新
 
-需要频繁改前端时，可以开两个 PowerShell 窗口。
+需要频繁修改前端、后端算法或联调接口时，推荐使用开发模式。开发模式需要开两个 PowerShell 窗口。
 
 窗口 A 启动后端：
 
@@ -108,10 +110,21 @@ cd ..
 
 ```powershell
 cd frontend
-npm run dev
+npm.cmd run dev
 ```
 
-开发模式下访问 `http://127.0.0.1:5173/`。前端的 `/api` 请求会通过 `frontend/vite.config.ts` 代理到 `http://127.0.0.1:8000`。
+开发模式下访问：
+
+- 页面：`http://127.0.0.1:5173/`
+- 后端健康检查：`http://127.0.0.1:8000/api/health`
+
+前端的 `/api` 请求会通过 `frontend/vite.config.ts` 代理到 `http://127.0.0.1:8000`。
+
+开发模式的更新规则：
+
+- 修改前端 `frontend/src/` 下的代码后，Vite 会自动热更新；多数情况下页面会自己更新，如果没有变化，刷新 `http://127.0.0.1:5173/` 即可看到新效果。
+- 修改后端 Python 代码后，`--reload` 会自动重载后端服务；如果是算法逻辑变化，需要在页面上重新点击求解，已有求解结果不会自动重算。
+- 不要用 `http://127.0.0.1:8000/` 检查前端热更新效果；`8000` 在演示模式下读取的是上一次构建后的静态文件，开发模式请看 `5173`。
 
 ## 云端部署
 

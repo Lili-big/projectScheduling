@@ -71,10 +71,12 @@ export function resourcePoolBillingPeriodDays(pool: ResourcePool): number {
 }
 
 export function resourcePoolSameStructureParallelLimit(pool: ResourcePool): number | null {
-  if (pool.same_structure_parallel_limit === null || pool.same_structure_parallel_limit === undefined) return null;
+  if (pool.same_structure_parallel_limit === null || pool.same_structure_parallel_limit === undefined) {
+    return pool.same_structure_resource_binding ? 1 : null;
+  }
   const value = Number(pool.same_structure_parallel_limit);
   if (!Number.isFinite(value)) return null;
-  return Math.max(1, Math.floor(value));
+  return Math.max(0, Math.floor(value));
 }
 
 export function normalizeLimitedResourcePool(pool: ResourcePool): ResourcePool {
