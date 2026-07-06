@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import sys
+from collections import defaultdict
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -1804,6 +1805,119 @@ def test_same_structure_parallel_limit_zero_means_unlimited() -> None:
     assert result.status in {"OPTIMAL", "FEASIBLE"}
     assert result.objective_days == 5
     assert len({task.assigned_resource_id for task in result.tasks}) == 2
+
+
+@pytest.mark.parametrize("parallel_limit", [None, 0])
+def test_resource_path_continuity_uses_task_nodes_when_parallel_limit_unset_or_zero(parallel_limit) -> None:
+    pytest.importorskip("ortools")
+    tasks = _multi_pier_pile_tasks("rotary_drill", pier_count=3, piles_per_pier=2)
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="task-level resource path continuity",
+            start_date=date(2026, 1, 1),
+            tasks=tasks,
+            precedence_links=[],
+            resources=[
+                Resource(
+                    id="rotary_1",
+                    name="Rotary 1",
+                    type="rotary_drill",
+                    same_structure_parallel_limit=parallel_limit,
+                )
+            ],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("resource_path_continuity", 3_000),
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    objective = result.stats["continuity_objective"]
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert objective["resource_path_node_count"] == len(tasks)
+    assert objective["resource_path_transition_arc_count"] == len(tasks) * (len(tasks) - 1)
+    assert objective["resource_path_granularity_counts"]["task"] == len(tasks)
+    assert objective["resource_path_granularity_counts"]["same_structure"] == 0
+    assert objective["resource_path_granularity_counts"]["same_structure_slot"] == 0
+
+
+def test_resource_path_continuity_groups_nodes_by_structure_when_parallel_limit_one() -> None:
+    pytest.importorskip("ortools")
+    tasks = _multi_pier_pile_tasks("rotary_drill", pier_count=3, piles_per_pier=2)
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="same-structure resource path continuity",
+            start_date=date(2026, 1, 1),
+            tasks=tasks,
+            precedence_links=[],
+            resources=[
+                Resource(
+                    id="rotary_1",
+                    name="Rotary 1",
+                    type="rotary_drill",
+                    same_structure_parallel_limit=1,
+                )
+            ],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("resource_path_continuity", 3_000),
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    objective = result.stats["continuity_objective"]
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert objective["resource_path_node_count"] == 3
+    assert objective["resource_path_transition_arc_count"] == 6
+    assert objective["resource_path_granularity_counts"]["task"] == 0
+    assert objective["resource_path_granularity_counts"]["same_structure"] == 3
+    assert objective["resource_path_granularity_counts"]["same_structure_slot"] == 0
+
+
+def test_resource_path_continuity_uses_structure_slots_and_balances_limit_two() -> None:
+    pytest.importorskip("ortools")
+    tasks = _same_pier_pile_tasks("rotary_drill", count=4)
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="same-structure slot continuity",
+            start_date=date(2026, 1, 1),
+            tasks=tasks,
+            precedence_links=[],
+            resources=[
+                Resource(
+                    id=f"rotary_{index}",
+                    name=f"Rotary {index}",
+                    type="rotary_drill",
+                    same_structure_parallel_limit=2,
+                )
+                for index in range(1, 4)
+            ],
+            schedule_strategy=ScheduleStrategyConfig(strategy="comprehensive"),
+            time_limit_seconds=5,
+        )
+    )
+
+    objective = result.stats["continuity_objective"]
+    workload_by_resource: dict[str, int] = defaultdict(int)
+    for task in result.tasks:
+        workload_by_resource[task.assigned_resource_id or ""] += task.duration_days
+    participating_workloads = sorted(value for value in workload_by_resource.values() if value > 0)
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert len(participating_workloads) == 2
+    assert participating_workloads == [10, 10]
+    assert objective["resource_path_node_count"] == 3
+    assert objective["resource_path_transition_arc_count"] == 0
+    assert objective["resource_path_granularity_counts"]["same_structure_slot"] == 3
+    assert objective["resource_slot_balance_term_count"] == 3
+    assert objective["resource_slot_balance_penalty"] == 0
 
 
 def test_legacy_same_structure_binding_without_limit_is_limit_one() -> None:
@@ -3981,6 +4095,33 @@ def _same_pier_pile_tasks(resource_type: str, count: int = 2) -> list[Task]:
         )
         for index in range(1, count + 1)
     ]
+
+
+def _multi_pier_pile_tasks(resource_type: str, *, pier_count: int, piles_per_pier: int) -> list[Task]:
+    tasks: list[Task] = []
+    for pier_index in range(1, pier_count + 1):
+        for pile_index in range(1, piles_per_pier + 1):
+            tasks.append(
+                _solver_task(
+                    f"P{pier_index:02d}-PILE-{pile_index:02d}",
+                    f"{pier_index}# pier {pile_index}# pile",
+                    5,
+                    resource_type,
+                ).model_copy(
+                    update={
+                        "bridge_id": "B1",
+                        "work_section_id": "WS-L",
+                        "sequence_order": pier_index * 100 + pile_index,
+                        "structure_id": f"B1-L-P{pier_index:02d}",
+                        "structure_name": f"{pier_index}# pier",
+                        "structure_type": "pier",
+                        "component_type": "pile",
+                        "process_name": "pile",
+                        "quantity_label": "1",
+                    }
+                )
+            )
+    return tasks
 
 
 def _task_named(tasks: list[Task], name_part: str) -> Task:

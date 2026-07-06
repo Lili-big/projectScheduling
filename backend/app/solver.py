@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
@@ -342,10 +343,31 @@ def _precedence_violated(predecessor: ScheduledTask, successor: ScheduledTask, l
 
 
 def _configure_solver(solver: Any, time_limit_seconds: float) -> None:
-    solver.parameters.max_time_in_seconds = time_limit_seconds
+    # Temporarily ignore the configured time limit so long-running quality checks can finish.
     solver.parameters.num_search_workers = _scheduler_search_workers()
     solver.parameters.random_seed = SCHEDULER_RANDOM_SEED
     solver.parameters.randomize_search = False
+
+
+def _solver_timing_stats(
+    started_at: float,
+    solver: Any,
+    *,
+    configured_time_limit_seconds: float,
+    model_built_at: float | None = None,
+) -> dict[str, Any]:
+    elapsed = time.perf_counter() - started_at
+    stats: dict[str, Any] = {
+        "elapsed_seconds": elapsed,
+        "wall_time_seconds": elapsed,
+        "cp_sat_wall_time_seconds": solver.WallTime(),
+        "solver_time_limit_enabled": False,
+        "configured_time_limit_seconds": configured_time_limit_seconds,
+    }
+    if model_built_at is not None:
+        stats["model_build_seconds"] = max(0.0, model_built_at - started_at)
+        stats["solve_elapsed_seconds"] = max(0.0, elapsed - stats["model_build_seconds"])
+    return stats
 
 
 def _add_schedule_hints(
@@ -408,6 +430,7 @@ def _uses_control_priority_strategy(schedule_input: ScheduleInput) -> bool:
 
 
 def solve_schedule(schedule_input: ScheduleInput, *, enforce_hard_milestones: bool = False) -> ScheduleResult:
+    started_at = time.perf_counter()
     if _uses_control_priority_strategy(schedule_input):
         return solve_control_priority_schedule(schedule_input, enforce_hard_milestones=enforce_hard_milestones)
 
@@ -545,13 +568,19 @@ def solve_schedule(schedule_input: ScheduleInput, *, enforce_hard_milestones: bo
     model.Minimize(primary_objective * CONTINUITY_PRIMARY_WEIGHT)
 
     solver = cp_model.CpSolver()
+    model_built_at = time.perf_counter()
     _configure_solver(solver, schedule_input.time_limit_seconds)
     status_code = solver.Solve(model)
     status = _status_name(status_code, cp_model)
 
     stats = {
         "horizon_days": horizon,
-        "wall_time_seconds": solver.WallTime(),
+        **_solver_timing_stats(
+            started_at,
+            solver,
+            configured_time_limit_seconds=schedule_input.time_limit_seconds,
+            model_built_at=model_built_at,
+        ),
         "conflicts": solver.NumConflicts(),
         "branches": solver.NumBranches(),
         "random_seed": SCHEDULER_RANDOM_SEED,
@@ -667,6 +696,7 @@ def solve_control_priority_schedule(
     warm_start_result: ScheduleResult | None = None,
     relax_target_constraints: bool = False,
 ) -> ScheduleResult:
+    started_at = time.perf_counter()
     if baseline_result is None:
         baseline_input = schedule_input.model_copy(
             update={
@@ -918,13 +948,19 @@ def solve_control_priority_schedule(
     )
 
     solver = cp_model.CpSolver()
+    model_built_at = time.perf_counter()
     _configure_solver(solver, schedule_input.time_limit_seconds)
     status_code = solver.Solve(model)
     status = _status_name(status_code, cp_model)
 
     stats = {
         "horizon_days": horizon,
-        "wall_time_seconds": solver.WallTime(),
+        **_solver_timing_stats(
+            started_at,
+            solver,
+            configured_time_limit_seconds=schedule_input.time_limit_seconds,
+            model_built_at=model_built_at,
+        ),
         "conflicts": solver.NumConflicts(),
         "branches": solver.NumBranches(),
         "random_seed": SCHEDULER_RANDOM_SEED,
@@ -1033,6 +1069,7 @@ def solve_control_priority_schedule(
     resource_workload_balance_penalty = sum(solver.Value(term) for term in resource_organization_terms["workload_balance_terms"])
     resource_idle_penalty = sum(solver.Value(term) for term in resource_organization_terms["idle_terms"])
     resource_path_continuity_penalty = sum(solver.Value(term) for term in resource_organization_terms["path_terms"])
+    resource_slot_balance_penalty = sum(solver.Value(term) for term in resource_organization_terms["slot_balance_terms"])
     unconfigured_normal_balance_penalty = sum(
         solver.Value(term) for term in unconfigured_normal_balance_terms["terms"]
     )
@@ -1072,6 +1109,10 @@ def solve_control_priority_schedule(
     stats["continuity_metrics"] = continuity_metrics
     stats["continuity_objective"] = {
         "primary_weight": CONTINUITY_PRIMARY_WEIGHT,
+        "resource_path_continuity_weight": objective_weights["resource_path_continuity"],
+        "resource_path_continuity_penalty": resource_path_continuity_penalty,
+        "resource_slot_balance_penalty": resource_slot_balance_penalty,
+        **resource_organization_terms["path_metadata"],
     }
     stats["normal_balance_metrics"] = normal_balance_metrics
     stats["resource_organization_analysis"] = resource_organization_analysis
@@ -1155,6 +1196,7 @@ def solve_control_priority_schedule(
             "resource_workload_balance_penalty": resource_workload_balance_penalty,
             "resource_idle_penalty": resource_idle_penalty,
             "resource_path_continuity_penalty": resource_path_continuity_penalty,
+            "resource_slot_balance_penalty": resource_slot_balance_penalty,
             "resource_balance_weight": objective_weights["resource_workload_balance"],
             "resource_idle_weight": objective_weights["resource_idle"],
             "unconfigured_normal_balance_penalty": unconfigured_normal_balance_penalty,
@@ -2064,55 +2106,91 @@ def _build_resource_organization_terms(
     path_terms = _build_resource_path_continuity_terms(
         model,
         assignments_by_resource,
+        enabled_resources,
         used_by_resource,
         starts,
         ends,
+        horizon,
     )
 
     return {
         "workload_balance_terms": workload_balance_terms,
         "idle_terms": idle_terms,
         "path_terms": path_terms["path_terms"],
+        "slot_balance_terms": path_terms["slot_balance_terms"],
         "path_group_terms": path_terms["path_group_terms"],
         "spatial_gap_terms": path_terms["spatial_gap_terms"],
+        "path_metadata": path_terms["path_metadata"],
     }
 
 
 def _build_resource_path_continuity_terms(
     model: Any,
     assignments_by_resource: dict[str, list[tuple[Task, Any]]],
+    enabled_resources: list[Resource],
     used_by_resource: dict[str, Any],
     starts: dict[str, Any],
     ends: dict[str, Any],
-) -> dict[str, list[Any]]:
+    horizon: int,
+) -> dict[str, Any]:
     same_side_gap_terms: list[Any] = []
     side_switch_terms: list[Any] = []
+    slot_balance_terms: list[Any] = []
+    resources_by_id = {resource.id: resource for resource in enabled_resources}
+    limits_by_group_key = _resource_path_parallel_limits_by_group(enabled_resources)
+    metadata: dict[str, Any] = {
+        "resource_path_granularity_counts": {
+            "task": 0,
+            "same_structure": 0,
+            "same_structure_slot": 0,
+        },
+        "resource_path_node_count": 0,
+        "resource_path_transition_arc_count": 0,
+        "resource_path_task_candidate_count": sum(len(items) for items in assignments_by_resource.values()),
+    }
 
     for resource_id, task_assignments in assignments_by_resource.items():
+        resource = resources_by_id.get(resource_id)
         resource_used = used_by_resource.get(resource_id)
-        if resource_used is None or len(task_assignments) <= 1:
+        if resource is None or resource_used is None:
             continue
 
-        indexed_assignments = list(enumerate(task_assignments, start=1))
+        nodes = _resource_path_nodes_for_resource(
+            model,
+            resource,
+            task_assignments,
+            limits_by_group_key,
+            starts,
+            ends,
+            horizon,
+        )
+        for node in nodes:
+            metadata["resource_path_granularity_counts"][node["granularity"]] += 1
+        metadata["resource_path_node_count"] += len(nodes)
+        if len(nodes) <= 1:
+            continue
+
+        indexed_assignments = list(enumerate(nodes, start=1))
         arcs = [(0, 0, resource_used.Not())]
-        for node_index, (_, assignment) in indexed_assignments:
-            arcs.append((node_index, node_index, assignment.Not()))
+        for node_index, node in indexed_assignments:
+            arcs.append((node_index, node_index, node["presence"].Not()))
             arcs.append((0, node_index, model.NewBoolVar(f"resource_path_start_{_safe(resource_id)}_{node_index}")))
             arcs.append((node_index, 0, model.NewBoolVar(f"resource_path_end_{_safe(resource_id)}_{node_index}")))
 
-        for previous_index, (previous_task, _) in indexed_assignments:
-            for current_index, (current_task, _) in indexed_assignments:
+        for previous_index, previous_node in indexed_assignments:
+            for current_index, current_node in indexed_assignments:
                 if previous_index == current_index:
                     continue
                 transition = model.NewBoolVar(
                     f"resource_path_arc_{_safe(resource_id)}_{previous_index}_{current_index}"
                 )
                 arcs.append((previous_index, current_index, transition))
-                model.Add(starts[current_task.id] >= ends[previous_task.id]).OnlyEnforceIf(transition)
+                metadata["resource_path_transition_arc_count"] += 1
+                model.Add(current_node["start"] >= previous_node["end"]).OnlyEnforceIf(transition)
 
                 same_side_gap_penalty, side_switch_penalty = _resource_path_transition_penalties(
-                    previous_task,
-                    current_task,
+                    previous_node["representative_task"],
+                    current_node["representative_task"],
                 )
                 if same_side_gap_penalty:
                     same_side_gap_terms.append(same_side_gap_penalty * transition)
@@ -2121,13 +2199,198 @@ def _build_resource_path_continuity_terms(
 
         model.AddCircuit(arcs)
 
+    slot_balance_terms = _build_same_structure_slot_balance_terms(
+        model,
+        assignments_by_resource,
+        resources_by_id,
+        limits_by_group_key,
+    )
+    metadata["resource_slot_balance_term_count"] = len(slot_balance_terms)
+
     return {
-        "path_terms": same_side_gap_terms + side_switch_terms,
+        "path_terms": same_side_gap_terms + side_switch_terms + slot_balance_terms,
         "path_group_terms": [],
         "spatial_gap_terms": [],
         "same_side_gap_terms": same_side_gap_terms,
         "side_switch_terms": side_switch_terms,
+        "slot_balance_terms": slot_balance_terms,
+        "path_metadata": metadata,
     }
+
+
+def _resource_path_parallel_limits_by_group(resources: list[Resource]) -> dict[str, int]:
+    resources_by_group: dict[str, list[Resource]] = defaultdict(list)
+    for resource in resources:
+        resources_by_group[_resource_parallel_group_key(resource)].append(resource)
+    return {
+        group_key: limit
+        for group_key, group_resources in resources_by_group.items()
+        if (limit := _effective_same_structure_parallel_limit(group_resources)) is not None
+    }
+
+
+def _resource_path_granularity(resource: Resource, limits_by_group_key: dict[str, int]) -> tuple[str, int | None]:
+    limit = limits_by_group_key.get(_resource_parallel_group_key(resource))
+    if limit is None:
+        return "task", None
+    if limit <= 1:
+        return "same_structure", limit
+    return "same_structure_slot", limit
+
+
+def _resource_path_nodes_for_resource(
+    model: Any,
+    resource: Resource,
+    task_assignments: list[tuple[Task, Any]],
+    limits_by_group_key: dict[str, int],
+    starts: dict[str, Any],
+    ends: dict[str, Any],
+    horizon: int,
+) -> list[dict[str, Any]]:
+    granularity, _ = _resource_path_granularity(resource, limits_by_group_key)
+    if granularity == "task":
+        return [
+            {
+                "presence": assignment,
+                "start": starts[task.id],
+                "end": ends[task.id],
+                "representative_task": task,
+                "granularity": "task",
+            }
+            for task, assignment in task_assignments
+        ]
+
+    group_key = _resource_parallel_group_key(resource)
+    grouped: dict[tuple[str, str, str, str], list[tuple[Task, Any]]] = defaultdict(list)
+    for task, assignment in task_assignments:
+        grouped[_same_structure_resource_rule_key(task, group_key)].append((task, assignment))
+
+    nodes: list[dict[str, Any]] = []
+    for index, grouped_assignments in enumerate(grouped.values()):
+        representative_task = min(grouped_assignments, key=lambda item: (item[0].sequence_order, item[0].id))[0]
+        assignments = [assignment for _, assignment in grouped_assignments]
+        if len(assignments) == 1:
+            task, assignment = grouped_assignments[0]
+            presence = assignment
+            node_start = starts[task.id]
+            node_end = ends[task.id]
+        else:
+            presence = model.NewBoolVar(f"resource_path_group_present_{_safe(resource.id)}_{index}")
+            for assignment in assignments:
+                model.Add(assignment <= presence)
+            model.Add(sum(assignments) >= presence)
+
+            start_candidates = []
+            end_candidates = []
+            for task_index, (task, assignment) in enumerate(grouped_assignments):
+                start_candidate = model.NewIntVar(
+                    0,
+                    horizon,
+                    f"resource_path_group_start_candidate_{_safe(resource.id)}_{index}_{task_index}",
+                )
+                end_candidate = model.NewIntVar(
+                    0,
+                    horizon,
+                    f"resource_path_group_end_candidate_{_safe(resource.id)}_{index}_{task_index}",
+                )
+                model.Add(start_candidate == starts[task.id]).OnlyEnforceIf(assignment)
+                model.Add(start_candidate == horizon).OnlyEnforceIf(assignment.Not())
+                model.Add(end_candidate == ends[task.id]).OnlyEnforceIf(assignment)
+                model.Add(end_candidate == 0).OnlyEnforceIf(assignment.Not())
+                start_candidates.append(start_candidate)
+                end_candidates.append(end_candidate)
+
+            node_start = model.NewIntVar(0, horizon, f"resource_path_group_start_{_safe(resource.id)}_{index}")
+            node_end = model.NewIntVar(0, horizon, f"resource_path_group_end_{_safe(resource.id)}_{index}")
+            model.AddMinEquality(node_start, start_candidates)
+            model.AddMaxEquality(node_end, end_candidates)
+
+        nodes.append(
+            {
+                "presence": presence,
+                "start": node_start,
+                "end": node_end,
+                "representative_task": representative_task,
+                "granularity": granularity,
+            }
+        )
+    return nodes
+
+
+def _build_same_structure_slot_balance_terms(
+    model: Any,
+    assignments_by_resource: dict[str, list[tuple[Task, Any]]],
+    resources_by_id: dict[str, Resource],
+    limits_by_group_key: dict[str, int],
+) -> list[Any]:
+    grouped: dict[tuple[str, str, str, str], dict[str, list[tuple[Task, Any]]]] = defaultdict(lambda: defaultdict(list))
+    for resource_id, task_assignments in assignments_by_resource.items():
+        resource = resources_by_id.get(resource_id)
+        if resource is None:
+            continue
+        group_key = _resource_parallel_group_key(resource)
+        limit = limits_by_group_key.get(group_key)
+        if limit is None or limit <= 1:
+            continue
+        for task, assignment in task_assignments:
+            grouped[_same_structure_resource_rule_key(task, group_key)][resource_id].append((task, assignment))
+
+    terms: list[Any] = []
+    for group_index, resources in enumerate(grouped.values()):
+        if len(resources) <= 1:
+            continue
+        unique_task_ids = {task.id for assignments in resources.values() for task, _ in assignments}
+        if len(unique_task_ids) <= 1:
+            continue
+        task_duration_by_id = {
+            task.id: task.duration_days
+            for assignments in resources.values()
+            for task, _ in assignments
+        }
+        total_work = sum(task_duration_by_id[task_id] for task_id in unique_task_ids)
+        workloads: dict[str, Any] = {}
+        selected_by_resource: dict[str, Any] = {}
+        for resource_id, assignments in sorted(resources.items()):
+            workload = model.NewIntVar(0, total_work, f"same_structure_slot_workload_{group_index}_{_safe(resource_id)}")
+            model.Add(workload == sum(task.duration_days * assignment for task, assignment in assignments))
+            selected = model.NewBoolVar(f"same_structure_slot_selected_{group_index}_{_safe(resource_id)}")
+            assignment_bools = [assignment for _, assignment in assignments]
+            for assignment in assignment_bools:
+                model.Add(assignment <= selected)
+            model.Add(sum(assignment_bools) >= selected)
+            workloads[resource_id] = workload
+            selected_by_resource[resource_id] = selected
+
+        resource_ids = sorted(workloads)
+        for previous_index, previous_resource_id in enumerate(resource_ids):
+            for current_index, current_resource_id in enumerate(resource_ids[previous_index + 1:], start=previous_index + 1):
+                both_selected = model.NewBoolVar(
+                    f"same_structure_slot_pair_selected_{group_index}_{_safe(previous_resource_id)}_{_safe(current_resource_id)}"
+                )
+                model.AddImplication(both_selected, selected_by_resource[previous_resource_id])
+                model.AddImplication(both_selected, selected_by_resource[current_resource_id])
+                model.AddBoolOr(
+                    [
+                        selected_by_resource[previous_resource_id].Not(),
+                        selected_by_resource[current_resource_id].Not(),
+                        both_selected,
+                    ]
+                )
+                difference = model.NewIntVar(
+                    0,
+                    total_work,
+                    f"same_structure_slot_diff_{group_index}_{previous_index}_{current_index}",
+                )
+                model.AddAbsEquality(difference, workloads[previous_resource_id] - workloads[current_resource_id])
+                active_difference = model.NewIntVar(
+                    0,
+                    total_work,
+                    f"same_structure_slot_active_diff_{group_index}_{previous_index}_{current_index}",
+                )
+                model.Add(active_difference == difference).OnlyEnforceIf(both_selected)
+                model.Add(active_difference == 0).OnlyEnforceIf(both_selected.Not())
+                terms.append(active_difference)
+    return terms
 
 
 def _resource_path_transition_penalties(previous_task: Task, current_task: Task) -> tuple[int, int]:
@@ -3593,6 +3856,7 @@ def _solve_resource_model(
     resource_limits: dict[str, int] | None = None,
     feasibility_only: bool = False,
 ) -> dict[str, Any]:
+    started_at = time.perf_counter()
     enabled_resources = [resource for resource in schedule_input.resources if resource.enabled]
     effective_limits = {**fixed_counts, **(resource_limits or {})}
     if effective_limits:
@@ -3727,6 +3991,7 @@ def _solve_resource_model(
         model.Minimize(primary_objective * CONTINUITY_PRIMARY_WEIGHT)
 
     solver = cp_model.CpSolver()
+    model_built_at = time.perf_counter()
     _configure_solver(solver, schedule_input.time_limit_seconds)
     status_code = solver.Solve(model)
     status = _status_name(status_code, cp_model)
@@ -3750,7 +4015,12 @@ def _solve_resource_model(
         "group_counts": group_counts,
         "stats": {
             "horizon_days": horizon,
-            "wall_time_seconds": solver.WallTime(),
+            **_solver_timing_stats(
+                started_at,
+                solver,
+                configured_time_limit_seconds=schedule_input.time_limit_seconds,
+                model_built_at=model_built_at,
+            ),
             "conflicts": solver.NumConflicts(),
             "branches": solver.NumBranches(),
             "random_seed": SCHEDULER_RANDOM_SEED,
@@ -3772,6 +4042,7 @@ def _solve_capacity_model(
     minimize_makespan: bool = False,
     resource_linear_costs_by_group: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    started_at = time.perf_counter()
     validation: list[ValidationMessage] = []
     model = cp_model.CpModel()
     horizon = _build_horizon(schedule_input)
@@ -3996,20 +4267,24 @@ def _solve_capacity_model(
         model.Minimize(makespan + total_soft_penalty)
 
     solver = cp_model.CpSolver()
+    model_built_at = time.perf_counter()
     _configure_solver(solver, schedule_input.time_limit_seconds)
     status_code = solver.Solve(model)
+    solve_pass_count = 1
     status = _status_name(status_code, cp_model)
     if minimize_total_cost and status in {"OPTIMAL", "FEASIBLE"}:
         best_resource_cost = solver.Value(total_resource_cost)
         model.Add(total_resource_cost == best_resource_cost)
         model.Minimize(total_soft_penalty)
         status_code = solver.Solve(model)
+        solve_pass_count += 1
         status = _status_name(status_code, cp_model)
     if minimize_total_cost and status in {"OPTIMAL", "FEASIBLE"}:
         best_soft_penalty = solver.Value(total_soft_penalty)
         model.Add(total_soft_penalty == best_soft_penalty)
         model.Minimize(makespan)
         status_code = solver.Solve(model)
+        solve_pass_count += 1
         status = _status_name(status_code, cp_model)
 
     selected_resource_costs: list[dict[str, Any]] = []
@@ -4045,7 +4320,13 @@ def _solve_capacity_model(
         "resource_incremental_cost": sum(int(resource["incremental_cost"]) for resource in selected_resource_costs),
         "stats": {
             "horizon_days": horizon,
-            "wall_time_seconds": solver.WallTime(),
+            **_solver_timing_stats(
+                started_at,
+                solver,
+                configured_time_limit_seconds=schedule_input.time_limit_seconds,
+                model_built_at=model_built_at,
+            ),
+            "solve_pass_count": solve_pass_count,
             "conflicts": solver.NumConflicts(),
             "branches": solver.NumBranches(),
             "random_seed": SCHEDULER_RANDOM_SEED,

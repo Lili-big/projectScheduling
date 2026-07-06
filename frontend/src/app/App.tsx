@@ -15,6 +15,7 @@
   Save,
   Server,
   Sparkles,
+  Timer,
   Upload,
   Workflow,
   X,
@@ -1845,7 +1846,7 @@ function ResultsTab({
                   <input type="date" value={scenario.project.start_date} onChange={(event) => onPatchProject({ start_date: event.target.value })} />
                 </label>
                 <label>
-                  求解时限(秒)
+                  时限参数(暂不生效)
                   <input
                     type="number"
                     min={1}
@@ -1987,6 +1988,7 @@ function ResultsTab({
         <Metric label="计划状态" value={planStatus.label} tone={planStatus.tone} hint={planStatus.hint} icon={<Server size={18} />} />
         <Metric label="总工期" value={summary.days} tone="neutral" icon={<CalendarDays size={18} />} />
         <Metric label="工作项" value={summary.tasks} tone="neutral" icon={<CheckCircle2 size={18} />} />
+        <Metric label="求解耗时" value={summary.elapsed} tone="neutral" icon={<Timer size={18} />} />
         <Metric label="资源 / 里程碑" value={summary.resourcesAndMilestones} tone="neutral" icon={<Flag size={18} />} />
       </section>
 
@@ -3865,11 +3867,30 @@ function buildSummary(
     ?? scenario?.resource_pools.reduce((sum, pool) => sum + (pool.enabled && resourcePoolMode(pool) === "LIMITED" ? resourcePoolQuantity(pool) : 0), 0)
     ?? 0;
   const milestoneCount = scenario?.milestones.length ?? 0;
+  const elapsedSeconds = elapsedSecondsFromResult(solveResult?.result ?? null);
   return {
     days: solveResult?.result.objective_days ? `${solveResult.result.objective_days} 天` : "-",
     tasks: generated?.schedule_input.tasks.length ? `${generated.schedule_input.tasks.length} 项` : "-",
+    elapsed: formatElapsedSeconds(elapsedSeconds),
     resourcesAndMilestones: `${resourceCount} / ${milestoneCount}`,
   };
+}
+
+function elapsedSecondsFromResult(result: ScheduleResult | null): number | null {
+  if (!result) return null;
+  const stats = result.stats ?? {};
+  for (const key of ["total_elapsed_seconds", "request_elapsed_seconds", "wall_time_seconds", "cp_sat_wall_time_seconds"]) {
+    const value = Number(stats[key]);
+    if (Number.isFinite(value) && value >= 0) return value;
+  }
+  return null;
+}
+
+function formatElapsedSeconds(value: number | null): string {
+  if (value === null) return "-";
+  if (value < 10) return `${value.toFixed(2)} 秒`;
+  if (value < 60) return `${value.toFixed(1)} 秒`;
+  return `${(value / 60).toFixed(1)} 分钟`;
 }
 
 function scenarioResultOptions(solveResult: ScenarioSolveResult | null): ScenarioSolveResult[] {

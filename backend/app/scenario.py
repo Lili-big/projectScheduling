@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from collections import defaultdict
 from typing import Any
 
@@ -170,6 +171,7 @@ def generate_schedule_input_from_scenario(scenario: ScenarioInput, *, use_max_re
 
 
 def solve_scenario(scenario: ScenarioInput) -> ScenarioSolveResult:
+    started_at = time.perf_counter()
     generated = generate_schedule_input_from_scenario(scenario)
     alternative_results: list[ScenarioAlternativeResult] = []
     if any(message.level == "error" for message in generated.validation):
@@ -183,6 +185,10 @@ def solve_scenario(scenario: ScenarioInput) -> ScenarioSolveResult:
     else:
         result, alternative_results = _solve_fixed_resources_shortest_scenario(scenario, generated)
 
+    _apply_request_timing(result, started_at)
+    for alternative in alternative_results:
+        _apply_request_timing(alternative.result, started_at)
+        alternative.metrics.update(_scenario_metrics(alternative.generated, alternative.result))
     diagnostics = _build_diagnostics(generated.validation, result)
     return ScenarioSolveResult(
         scenario_id=scenario.scenario_id,
@@ -900,6 +906,7 @@ def _apply_fixed_resource_metadata(
 
 
 def solve_min_resources_scenario(request: MinResourcesSolveRequest) -> ScenarioSolveResult:
+    started_at = time.perf_counter()
     scenario = request.scenario
     generated = generate_schedule_input_from_scenario(scenario, use_max_resources=True)
     if any(message.level == "error" for message in generated.validation):
@@ -913,6 +920,7 @@ def solve_min_resources_scenario(request: MinResourcesSolveRequest) -> ScenarioS
     else:
         result = solve_min_resources_schedule(generated.schedule_input, fallback_target_days=request.fallback_target_days)
 
+    _apply_request_timing(result, started_at)
     diagnostics = _build_diagnostics(generated.validation, result)
     return ScenarioSolveResult(
         scenario_id=scenario.scenario_id,
@@ -926,6 +934,7 @@ def solve_min_resources_scenario(request: MinResourcesSolveRequest) -> ScenarioS
 
 
 def solve_resource_cost_scenario(request: ResourceCostSolveRequest) -> ScenarioSolveResult:
+    started_at = time.perf_counter()
     scenario = request.scenario
     generated = generate_schedule_input_from_scenario(scenario, use_max_resources=True)
     if any(message.level == "error" for message in generated.validation):
@@ -943,6 +952,7 @@ def solve_resource_cost_scenario(request: ResourceCostSolveRequest) -> ScenarioS
             fallback_target_days=request.fallback_target_days,
         )
 
+    _apply_request_timing(result, started_at)
     diagnostics = _build_diagnostics(generated.validation, result)
     return ScenarioSolveResult(
         scenario_id=scenario.scenario_id,
@@ -2475,6 +2485,17 @@ def _build_diagnostics(
     return diagnostics
 
 
+def _apply_request_timing(result: ScheduleResult, started_at: float) -> None:
+    elapsed = time.perf_counter() - started_at
+    timing = {
+        "total_elapsed_seconds": elapsed,
+        "request_elapsed_seconds": elapsed,
+        "solver_time_limit_enabled": False,
+    }
+    result.stats.update(timing)
+    result.objective_breakdown.update(timing)
+
+
 def _scenario_metrics(generated: GeneratedScheduleInput, result: ScheduleResult) -> dict[str, Any]:
     soft_penalty = sum(milestone.penalty for milestone in result.milestone_results if milestone.mode == "soft")
     soft_late = sum(1 for milestone in result.milestone_results if milestone.mode == "soft" and milestone.lateness_days > 0)
@@ -2491,4 +2512,9 @@ def _scenario_metrics(generated: GeneratedScheduleInput, result: ScheduleResult)
         "soft_penalty": soft_penalty,
         "hard_milestones_met": hard_met,
         "hard_milestone_count": hard_count,
+        "total_elapsed_seconds": result.stats.get("total_elapsed_seconds"),
+        "request_elapsed_seconds": result.stats.get("request_elapsed_seconds"),
+        "wall_time_seconds": result.stats.get("wall_time_seconds"),
+        "cp_sat_wall_time_seconds": result.stats.get("cp_sat_wall_time_seconds"),
+        "solver_time_limit_enabled": result.stats.get("solver_time_limit_enabled", False),
     }
