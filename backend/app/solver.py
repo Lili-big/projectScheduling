@@ -12,6 +12,7 @@ from .models import (
     ComponentType,
     DEFAULT_OBJECTIVE_TERM_WEIGHTS,
     MilestoneConstraint,
+    OBJECTIVE_METRIC_DEFINITIONS,
     MilestoneResult,
     PrecedenceLink,
     Resource,
@@ -29,11 +30,9 @@ CONTINUITY_PRIMARY_WEIGHT = 1_000_000
 CONTROL_NODE_LATE_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["control_node_late"]
 CONTROL_BUFFER_RISK_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["control_buffer_risk"]
 CONTROL_RESOURCE_WAIT_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["risk_related_control_wait"]
-RESOURCE_WORKLOAD_BALANCE_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["resource_workload_balance"]
 RESOURCE_IDLE_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["resource_idle"]
 RESOURCE_PATH_CONTINUITY_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["resource_path_continuity"]
 CONTROL_MAKESPAN_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["makespan_and_soft_milestone"]
-UNCONFIGURED_NORMAL_BALANCE_WEIGHT = 10
 CONTROL_NECESSARY_BUFFER_DAYS = 7
 CONTROL_BUFFER_NEAR_RISK_DAYS = 3
 SCHEDULER_RANDOM_SEED = 0
@@ -56,6 +55,97 @@ def _objective_terms_used_for_config(config: Any, weights: dict[str, int]) -> di
     for term_id, effective_weight in weights.items():
         terms_used[term_id]["effective_weight"] = effective_weight
     return terms_used
+
+
+def _objective_contributions_for_result(
+    *,
+    objective_terms_used_payload: dict[str, dict[str, int | bool]],
+    raw_penalties: dict[str, int],
+    active_terms: dict[str, bool] | None = None,
+    notes_by_term: dict[str, str] | None = None,
+    effective_weight_overrides: dict[str, int] | None = None,
+) -> list[dict[str, Any]]:
+    active_terms = active_terms or {}
+    notes_by_term = notes_by_term or {}
+    effective_weight_overrides = effective_weight_overrides or {}
+    contributions: list[dict[str, Any]] = []
+    for term_id in DEFAULT_OBJECTIVE_TERM_WEIGHTS:
+        term_payload = objective_terms_used_payload.get(term_id, {})
+        effective_weight = int(effective_weight_overrides.get(term_id, term_payload.get("effective_weight", 0)) or 0)
+        configured_weight = int(term_payload.get("weight", DEFAULT_OBJECTIVE_TERM_WEIGHTS[term_id]) or 0)
+        enabled = bool(term_payload.get("enabled", effective_weight > 0))
+        raw_penalty = int(raw_penalties.get(term_id, 0) or 0)
+        active = bool(active_terms.get(term_id, effective_weight > 0))
+        definition = OBJECTIVE_METRIC_DEFINITIONS.get(term_id, {})
+        weighted_contribution = raw_penalty * effective_weight if active else 0
+        contributions.append(
+            {
+                "term_id": term_id,
+                "label": definition.get("label", term_id),
+                "group": definition.get("group", ""),
+                "source": definition.get("source", "objective"),
+                "enabled": enabled,
+                "active": active,
+                "configured_weight": configured_weight,
+                "effective_weight": effective_weight,
+                "raw_penalty": raw_penalty,
+                "weighted_contribution": weighted_contribution,
+                "applies_to": list(definition.get("applies_to", [])),
+                "parent_term_id": definition.get("parent_term_id"),
+                "notes": notes_by_term.get(term_id, ""),
+            }
+        )
+    return contributions
+
+
+def _objective_term_enabled(objective_weights: dict[str, int], term_id: str) -> bool:
+    return int(objective_weights.get(term_id, 0) or 0) > 0
+
+
+def _objective_modeling_gates(
+    objective_terms_used_payload: dict[str, dict[str, int | bool]],
+    *,
+    modeled_terms: set[str],
+    reason_overrides: dict[str, str] | None = None,
+    effective_weight_overrides: dict[str, int] | None = None,
+) -> dict[str, dict[str, Any]]:
+    reason_overrides = reason_overrides or {}
+    effective_weight_overrides = effective_weight_overrides or {}
+    gates: dict[str, dict[str, Any]] = {}
+    for term_id in DEFAULT_OBJECTIVE_TERM_WEIGHTS:
+        term_payload = objective_terms_used_payload.get(term_id, {})
+        requested_enabled = bool(term_payload.get("enabled", False))
+        requested_weight = int(term_payload.get("weight", DEFAULT_OBJECTIVE_TERM_WEIGHTS[term_id]) or 0)
+        effective_weight = int(
+            effective_weight_overrides.get(
+                term_id,
+                int(term_payload.get("effective_weight", 0) or 0),
+            )
+        )
+        modeling_enabled = term_id in modeled_terms
+        if modeling_enabled:
+            status = "enabled"
+            reason = reason_overrides.get(term_id, "objective term enabled")
+        elif not requested_enabled or effective_weight <= 0:
+            status = "not_enabled"
+            reason = reason_overrides.get(term_id, "effective weight is 0")
+        else:
+            status = "not_evaluated"
+            reason = reason_overrides.get(term_id, "not evaluated by this solve path")
+        gates[term_id] = {
+            "term_id": term_id,
+            "requested_enabled": requested_enabled,
+            "requested_weight": requested_weight,
+            "effective_weight": effective_weight,
+            "modeling_enabled": modeling_enabled,
+            "status": status,
+            "reason": reason,
+        }
+    return gates
+
+
+def _empty_control_buffer_terms() -> dict[str, Any]:
+    return {"terms": [], "risk_by_task": {}, "profiles": {}}
 
 
 def _default_scheduler_search_workers() -> int:
@@ -343,7 +433,7 @@ def _precedence_violated(predecessor: ScheduledTask, successor: ScheduledTask, l
 
 
 def _configure_solver(solver: Any, time_limit_seconds: float) -> None:
-    # Temporarily ignore the configured time limit so long-running quality checks can finish.
+    solver.parameters.max_time_in_seconds = max(0.1, float(time_limit_seconds or 10.0))
     solver.parameters.num_search_workers = _scheduler_search_workers()
     solver.parameters.random_seed = SCHEDULER_RANDOM_SEED
     solver.parameters.randomize_search = False
@@ -361,7 +451,7 @@ def _solver_timing_stats(
         "elapsed_seconds": elapsed,
         "wall_time_seconds": elapsed,
         "cp_sat_wall_time_seconds": solver.WallTime(),
-        "solver_time_limit_enabled": False,
+        "solver_time_limit_enabled": True,
         "configured_time_limit_seconds": configured_time_limit_seconds,
     }
     if model_built_at is not None:
@@ -392,11 +482,19 @@ def _add_schedule_hints(
             hinted = True
         assigned_resource_by_task_id[task.id] = task.assigned_resource_id
 
+    hinted_assignments: dict[int, int] = {}
     for (task_id, resource_id), assignment in assignment_vars.items():
         assigned_resource_id = assigned_resource_by_task_id.get(task_id)
         if assigned_resource_id is None:
             continue
-        model.AddHint(assignment, 1 if assigned_resource_id == resource_id else 0)
+        hint_value = 1 if assigned_resource_id == resource_id else 0
+        hint_key = assignment.Index() if hasattr(assignment, "Index") else id(assignment)
+        if hint_key in hinted_assignments:
+            if hinted_assignments[hint_key] != hint_value:
+                continue
+            continue
+        hinted_assignments[hint_key] = hint_value
+        model.AddHint(assignment, hint_value)
         hinted = True
     return hinted
 
@@ -427,6 +525,115 @@ def _solve_task_parallelism(candidate_count: int) -> int:
 
 def _uses_control_priority_strategy(schedule_input: ScheduleInput) -> bool:
     return schedule_input.schedule_strategy.strategy in {"control_priority", "balanced_normal", "comprehensive"}
+
+
+def _build_named_resource_assignment_model(
+    model: Any,
+    *,
+    starts: dict[str, Any],
+    ends: dict[str, Any],
+    tasks: list[Task],
+    enabled_resources: list[Resource],
+    resource_candidates: dict[str, list[Resource]],
+    horizon: int,
+    assignment_prefix: str = "assign",
+    interval_prefix: str = "interval",
+) -> tuple[dict[tuple[str, str], Any], dict[str, list[Any]]]:
+    assignment_vars: dict[tuple[str, str], Any] = {}
+    resource_intervals: dict[str, list[Any]] = defaultdict(list)
+    resources_by_id = {resource.id: resource for resource in enabled_resources}
+    limits_by_group_key = _resource_path_parallel_limits_by_group(enabled_resources)
+    fallback_tasks: list[Task] = []
+    grouped_tasks: dict[tuple[tuple[str, str, str, str], tuple[str, ...], int], list[Task]] = defaultdict(list)
+
+    def add_task_resource_interval(task: Task, resource: Resource, assignment: Any) -> None:
+        assignment_vars[(task.id, resource.id)] = assignment
+        interval = model.NewOptionalIntervalVar(
+            starts[task.id],
+            task.duration_days,
+            ends[task.id],
+            assignment,
+            f"{interval_prefix}_{_safe(task.id)}_{_safe(resource.id)}",
+        )
+        resource_intervals[resource.id].append(interval)
+
+    for task in tasks:
+        candidates = resource_candidates.get(task.id, [])
+        candidate_group_keys = {_resource_parallel_group_key(resource) for resource in candidates}
+        if len(candidate_group_keys) == 1:
+            group_key = next(iter(candidate_group_keys))
+            limit = limits_by_group_key.get(group_key)
+            if limit is not None and limit > 0:
+                resource_ids = tuple(resource.id for resource in sorted(candidates, key=_resource_sort_key))
+                grouped_tasks[(_same_structure_resource_rule_key(task, group_key), resource_ids, int(limit))].append(task)
+                continue
+        fallback_tasks.append(task)
+
+    for task in fallback_tasks:
+        choices = []
+        for resource in resource_candidates.get(task.id, []):
+            assigned = model.NewBoolVar(f"{assignment_prefix}_{_safe(task.id)}_{_safe(resource.id)}")
+            choices.append(assigned)
+            add_task_resource_interval(task, resource, assigned)
+        if choices:
+            model.AddExactlyOne(choices)
+
+    for group_index, ((_, resource_ids, limit), group_tasks) in enumerate(grouped_tasks.items()):
+        resources = [resources_by_id[resource_id] for resource_id in resource_ids if resource_id in resources_by_id]
+        if not resources:
+            continue
+        ordered_tasks = sorted(group_tasks, key=lambda item: (item.sequence_order, item.id))
+        slot_count = min(max(1, int(limit)), len(ordered_tasks), len(resources))
+        if slot_count <= 1:
+            resource_choices = {
+                resource.id: model.NewBoolVar(
+                    f"{assignment_prefix}_same_structure_{group_index}_{_safe(resource.id)}"
+                )
+                for resource in resources
+            }
+            model.AddExactlyOne(resource_choices.values())
+            for task in ordered_tasks:
+                for resource in resources:
+                    add_task_resource_interval(task, resource, resource_choices[resource.id])
+            continue
+
+        task_slots = _balanced_same_structure_task_slots(ordered_tasks, slot_count)
+        slot_resource_choices: list[dict[str, Any]] = []
+        for slot_index, slot_tasks in enumerate(task_slots):
+            if not slot_tasks:
+                continue
+            choices = {
+                resource.id: model.NewBoolVar(
+                    f"{assignment_prefix}_same_structure_slot_{group_index}_{slot_index}_{_safe(resource.id)}"
+                )
+                for resource in resources
+            }
+            model.AddExactlyOne(choices.values())
+            slot_resource_choices.append(choices)
+            for task in slot_tasks:
+                for resource in resources:
+                    add_task_resource_interval(task, resource, choices[resource.id])
+
+        for resource in resources:
+            resource_slot_choices = [
+                choices[resource.id]
+                for choices in slot_resource_choices
+                if resource.id in choices
+            ]
+            if len(resource_slot_choices) > 1:
+                model.Add(sum(resource_slot_choices) <= 1)
+
+    return assignment_vars, resource_intervals
+
+
+def _balanced_same_structure_task_slots(tasks: list[Task], slot_count: int) -> list[list[Task]]:
+    slots: list[list[Task]] = [[] for _ in range(slot_count)]
+    workloads = [0 for _ in range(slot_count)]
+    for task in sorted(tasks, key=lambda item: (-item.duration_days, item.sequence_order, item.id)):
+        slot_index = min(range(slot_count), key=lambda index: (workloads[index], len(slots[index]), index))
+        slots[slot_index].append(task)
+        workloads[slot_index] += task.duration_days
+    return [sorted(slot_tasks, key=lambda item: (item.sequence_order, item.id)) for slot_tasks in slots]
 
 
 def solve_schedule(schedule_input: ScheduleInput, *, enforce_hard_milestones: bool = False) -> ScheduleResult:
@@ -476,21 +683,15 @@ def solve_schedule(schedule_input: ScheduleInput, *, enforce_hard_milestones: bo
         ends[task.id] = model.NewIntVar(0, horizon, f"end_{_safe(task.id)}")
         model.Add(ends[task.id] == starts[task.id] + task.duration_days)
 
-        choices = []
-        for resource in resource_candidates[task.id]:
-            assigned = model.NewBoolVar(f"assign_{_safe(task.id)}_{_safe(resource.id)}")
-            interval = model.NewOptionalIntervalVar(
-                starts[task.id],
-                task.duration_days,
-                ends[task.id],
-                assigned,
-                f"interval_{_safe(task.id)}_{_safe(resource.id)}",
-            )
-            choices.append(assigned)
-            assignment_vars[(task.id, resource.id)] = assigned
-            resource_intervals[resource.id].append(interval)
-        if choices:
-            model.AddExactlyOne(choices)
+    assignment_vars, resource_intervals = _build_named_resource_assignment_model(
+        model,
+        starts=starts,
+        ends=ends,
+        tasks=schedule_input.tasks,
+        enabled_resources=enabled_resources,
+        resource_candidates=resource_candidates,
+        horizon=horizon,
+    )
 
     for link in schedule_input.precedence_links:
         predecessor = task_by_id.get(link.predecessor_id)
@@ -757,6 +958,16 @@ def solve_control_priority_schedule(
     config = schedule_input.schedule_strategy
     objective_weights = _objective_weights_for_config(config)
     objective_terms_used_payload = _objective_terms_used_for_config(config, objective_weights)
+    control_node_late_enabled = _objective_term_enabled(objective_weights, "control_node_late")
+    control_buffer_risk_enabled = _objective_term_enabled(objective_weights, "control_buffer_risk")
+    risk_related_control_wait_enabled = _objective_term_enabled(objective_weights, "risk_related_control_wait")
+    resource_idle_enabled = _objective_term_enabled(objective_weights, "resource_idle")
+    resource_path_continuity_enabled = _objective_term_enabled(objective_weights, "resource_path_continuity")
+    resource_slot_balance_enabled = resource_path_continuity_enabled and _objective_term_enabled(
+        objective_weights,
+        "resource_slot_balance",
+    )
+    makespan_objective_enabled = _objective_term_enabled(objective_weights, "makespan_and_soft_milestone")
     control_chain_task_ids = _control_chain_task_ids(schedule_input)
     normal_tasks = _normal_balance_tasks(schedule_input.tasks, control_chain_task_ids)
     normal_resource_groups = _split_normal_tasks_by_resource_configuration(normal_tasks, resource_candidates)
@@ -766,21 +977,15 @@ def solve_control_priority_schedule(
         ends[task.id] = model.NewIntVar(0, horizon, f"end_{_safe(task.id)}")
         model.Add(ends[task.id] == starts[task.id] + task.duration_days)
 
-        choices = []
-        for resource in resource_candidates[task.id]:
-            assigned = model.NewBoolVar(f"assign_{_safe(task.id)}_{_safe(resource.id)}")
-            interval = model.NewOptionalIntervalVar(
-                starts[task.id],
-                task.duration_days,
-                ends[task.id],
-                assigned,
-                f"interval_{_safe(task.id)}_{_safe(resource.id)}",
-            )
-            choices.append(assigned)
-            assignment_vars[(task.id, resource.id)] = assigned
-            resource_intervals[resource.id].append(interval)
-        if choices:
-            model.AddExactlyOne(choices)
+    assignment_vars, resource_intervals = _build_named_resource_assignment_model(
+        model,
+        starts=starts,
+        ends=ends,
+        tasks=schedule_input.tasks,
+        enabled_resources=enabled_resources,
+        resource_candidates=resource_candidates,
+        horizon=horizon,
+    )
 
     for link in schedule_input.precedence_links:
         predecessor = task_by_id.get(link.predecessor_id)
@@ -871,9 +1076,13 @@ def solve_control_priority_schedule(
                 model.Add(event_var <= target_offset)
         else:
             lateness_upper = max(horizon - target_offset, horizon) + 365
-            lateness_var = model.NewIntVar(0, lateness_upper, f"late_{_safe(milestone.id)}")
-            model.Add(lateness_var >= event_var - target_offset)
-            soft_lateness_vars[milestone.id] = lateness_var
+            is_control_soft_milestone = _is_soft_control_milestone(milestone)
+            if (is_control_soft_milestone and control_node_late_enabled) or (
+                not is_control_soft_milestone and makespan_objective_enabled
+            ):
+                lateness_var = model.NewIntVar(0, lateness_upper, f"late_{_safe(milestone.id)}")
+                model.Add(lateness_var >= event_var - target_offset)
+                soft_lateness_vars[milestone.id] = lateness_var
 
     soft_control_milestone_ids = {
         milestone_id
@@ -885,28 +1094,42 @@ def solve_control_priority_schedule(
         for milestone_id, late_var in soft_lateness_vars.items()
         if milestone_id in soft_control_milestone_ids
     ]
-    control_buffer_terms = _build_control_buffer_terms(
-        model,
-        ends,
-        schedule_input=schedule_input,
-        control_chain_task_ids=control_chain_task_ids,
-        horizon=horizon,
-        fallback_deadline_days=baseline_result.objective_days,
+    control_buffer_support_needed = control_buffer_risk_enabled or risk_related_control_wait_enabled
+    control_buffer_terms = (
+        _build_control_buffer_terms(
+            model,
+            ends,
+            schedule_input=schedule_input,
+            control_chain_task_ids=control_chain_task_ids,
+            horizon=horizon,
+            fallback_deadline_days=baseline_result.objective_days,
+            include_penalty_terms=control_buffer_risk_enabled,
+        )
+        if control_buffer_support_needed
+        else _empty_control_buffer_terms()
     )
-    control_wait_details = _build_control_wait_term_details(
-        model,
-        starts,
-        ends,
-        schedule_input.precedence_links,
-        task_by_id,
-        control_chain_task_ids,
-        horizon,
+    control_wait_details = (
+        _build_control_wait_term_details(
+            model,
+            starts,
+            ends,
+            schedule_input.precedence_links,
+            task_by_id,
+            control_chain_task_ids,
+            horizon,
+        )
+        if risk_related_control_wait_enabled
+        else []
     )
-    risk_related_control_wait_terms = _risk_related_control_wait_terms(
-        model,
-        control_wait_details,
-        control_buffer_terms["risk_by_task"],
-        horizon,
+    risk_related_control_wait_terms = (
+        _risk_related_control_wait_terms(
+            model,
+            control_wait_details,
+            control_buffer_terms["risk_by_task"],
+            horizon,
+        )
+        if risk_related_control_wait_enabled
+        else []
     )
     resource_organization_terms = _build_resource_organization_terms(
         model,
@@ -917,27 +1140,60 @@ def solve_control_priority_schedule(
         resource_candidates,
         assignment_vars,
         horizon,
-    )
-    unconfigured_normal_balance_terms = _build_unconfigured_normal_balance_terms(
-        model,
-        starts,
-        normal_resource_groups["unconfigured"],
-        config,
-        horizon,
+        include_workload_balance=False,
+        include_idle=resource_idle_enabled,
+        include_path_continuity=resource_path_continuity_enabled,
+        include_slot_balance=resource_slot_balance_enabled,
     )
     target_relaxation_terms = list(relaxed_hard_lateness_vars.values())
     if fixed_duration_overrun_var is not None:
         target_relaxation_terms.append(fixed_duration_overrun_var)
+    target_relaxation_enabled = relax_target_constraints and bool(target_relaxation_terms)
+    target_relaxation_weight = (
+        int(objective_weights.get("target_relaxation", 0) or 0)
+        if _objective_term_enabled(objective_weights, "target_relaxation")
+        else DEFAULT_OBJECTIVE_TERM_WEIGHTS["target_relaxation"]
+    )
+    modeled_terms = {
+        term_id
+        for term_id, enabled in {
+            "control_node_late": control_node_late_enabled and bool(control_lateness_terms),
+            "control_buffer_risk": control_buffer_risk_enabled and bool(control_buffer_terms["terms"]),
+            "risk_related_control_wait": risk_related_control_wait_enabled and bool(risk_related_control_wait_terms),
+            "makespan_and_soft_milestone": makespan_objective_enabled,
+            "resource_idle": resource_idle_enabled and bool(resource_organization_terms["idle_terms"]),
+            "resource_path_continuity": resource_path_continuity_enabled
+            and bool(resource_organization_terms["path_terms"]),
+            "resource_slot_balance": resource_slot_balance_enabled
+            and bool(resource_organization_terms["slot_balance_terms"]),
+            "target_relaxation": target_relaxation_enabled,
+        }.items()
+        if enabled
+    }
+    objective_modeling_gates = _objective_modeling_gates(
+        objective_terms_used_payload,
+        modeled_terms=modeled_terms,
+        reason_overrides={
+            "target_relaxation": "best_effort_refinement" if target_relaxation_enabled else "effective weight is 0",
+        },
+        effective_weight_overrides={"target_relaxation": target_relaxation_weight}
+        if target_relaxation_enabled
+        else None,
+    )
+    resource_path_transition_terms = (
+        resource_organization_terms["same_side_gap_terms"]
+        + resource_organization_terms["side_switch_terms"]
+    )
 
     model.Minimize(
-        (sum(control_lateness_terms) + sum(target_relaxation_terms)) * objective_weights["control_node_late"]
+        sum(control_lateness_terms) * objective_weights["control_node_late"]
+        + sum(target_relaxation_terms) * target_relaxation_weight
         + sum(control_buffer_terms["terms"]) * objective_weights["control_buffer_risk"]
         + sum(risk_related_control_wait_terms) * objective_weights["risk_related_control_wait"]
-        + sum(resource_organization_terms["workload_balance_terms"]) * objective_weights["resource_workload_balance"]
         + sum(resource_organization_terms["idle_terms"]) * objective_weights["resource_idle"]
-        + sum(resource_organization_terms["path_terms"]) * objective_weights["resource_path_continuity"]
-        + makespan * objective_weights["makespan_and_soft_milestone"]
-        + sum(unconfigured_normal_balance_terms["terms"]) * UNCONFIGURED_NORMAL_BALANCE_WEIGHT
+        + sum(resource_path_transition_terms) * objective_weights["resource_path_continuity"]
+        + sum(resource_organization_terms["slot_balance_terms"]) * objective_weights["resource_slot_balance"]
+        + makespan * (objective_weights["makespan_and_soft_milestone"] if makespan_objective_enabled else 0)
     )
     warm_start_used = _add_schedule_hints(
         model,
@@ -969,6 +1225,7 @@ def solve_control_priority_schedule(
         "baseline_objective_days": baseline_result.objective_days,
         "warm_start_used": warm_start_used,
         "relax_target_constraints": relax_target_constraints,
+        "objective_modeling_gates": objective_modeling_gates,
     }
     if max_makespan_days is not None:
         stats["max_makespan_days"] = max_makespan_days
@@ -990,6 +1247,11 @@ def solve_control_priority_schedule(
                 )
             ],
             stats=stats,
+            objective_breakdown={
+                "objective_weights": objective_weights,
+                "objective_terms_used": objective_terms_used_payload,
+                "objective_modeling_gates": objective_modeling_gates,
+            },
         )
 
     resource_by_id = {resource.id: resource for resource in enabled_resources}
@@ -1064,35 +1326,39 @@ def solve_control_priority_schedule(
         for result in milestone_results
         if result.id in soft_control_milestone_ids
     )
+    reported_control_lateness_days = control_lateness_days if control_node_late_enabled else 0
+    reported_soft_control_lateness_penalty = (
+        soft_control_lateness_penalty if control_node_late_enabled else 0
+    )
     control_buffer_risk_penalty = sum(solver.Value(term) for term in control_buffer_terms["terms"])
     risk_related_control_wait_penalty = sum(solver.Value(term) for term in risk_related_control_wait_terms)
-    resource_workload_balance_penalty = sum(solver.Value(term) for term in resource_organization_terms["workload_balance_terms"])
     resource_idle_penalty = sum(solver.Value(term) for term in resource_organization_terms["idle_terms"])
-    resource_path_continuity_penalty = sum(solver.Value(term) for term in resource_organization_terms["path_terms"])
+    resource_path_continuity_penalty = sum(solver.Value(term) for term in resource_path_transition_terms)
     resource_slot_balance_penalty = sum(solver.Value(term) for term in resource_organization_terms["slot_balance_terms"])
-    unconfigured_normal_balance_penalty = sum(
-        solver.Value(term) for term in unconfigured_normal_balance_terms["terms"]
-    )
     normal_balance_metrics = _build_normal_balance_metrics(
         scheduled_tasks,
         config,
         normal_task_ids={task.id for task in normal_tasks},
         configured_resource_task_ids={task.id for task in normal_resource_groups["configured"]},
         unconfigured_resource_task_ids={task.id for task in normal_resource_groups["unconfigured"]},
-        bucket_definitions=unconfigured_normal_balance_terms["bucket_definitions"],
-        balance_penalty=unconfigured_normal_balance_penalty,
-        balance_weight=UNCONFIGURED_NORMAL_BALANCE_WEIGHT,
     )
     resource_organization_analysis = _build_resource_organization_analysis(
         scheduled_tasks,
         enabled_resources,
         objective_days=objective_days,
         continuity_metrics=continuity_metrics,
+        workload_balance_enabled=False,
+        idle_enabled=resource_idle_enabled,
+        path_continuity_enabled=resource_path_continuity_enabled,
     )
-    control_buffer_risks = _control_buffer_risk_details(
-        schedule_input=schedule_input,
-        scheduled_tasks=scheduled_tasks,
-        profiles=control_buffer_terms["profiles"],
+    control_buffer_risks = (
+        _control_buffer_risk_details(
+            schedule_input=schedule_input,
+            scheduled_tasks=scheduled_tasks,
+            profiles=control_buffer_terms["profiles"],
+        )
+        if control_buffer_risk_enabled
+        else []
     )
     control_priority_analysis = _build_control_priority_analysis(
         schedule_input=schedule_input,
@@ -1105,42 +1371,66 @@ def solve_control_priority_schedule(
         continuity_metrics=continuity_metrics,
         normal_balance_metrics=normal_balance_metrics,
         resource_organization_analysis=resource_organization_analysis,
+        control_buffer_enabled=control_buffer_risk_enabled,
+        resource_path_continuity_enabled=resource_path_continuity_enabled,
     )
     stats["continuity_metrics"] = continuity_metrics
     stats["continuity_objective"] = {
         "primary_weight": CONTINUITY_PRIMARY_WEIGHT,
         "resource_path_continuity_weight": objective_weights["resource_path_continuity"],
         "resource_path_continuity_penalty": resource_path_continuity_penalty,
+        "resource_path_transition_penalty": resource_path_continuity_penalty,
+        "resource_slot_balance_weight": objective_weights["resource_slot_balance"],
         "resource_slot_balance_penalty": resource_slot_balance_penalty,
+        "resource_path_status": "enabled" if resource_path_continuity_enabled else "not_evaluated",
         **resource_organization_terms["path_metadata"],
     }
     stats["normal_balance_metrics"] = normal_balance_metrics
     stats["resource_organization_analysis"] = resource_organization_analysis
     stats["control_priority_analysis"] = control_priority_analysis
+    stats["objective_modeling_gates"] = objective_modeling_gates
     if relax_target_constraints:
         stats["target_relaxation"] = {
             "relaxed_hard_milestone_lateness_days": relaxed_hard_milestone_lateness_days,
             "fixed_duration_overrun_days": fixed_duration_overrun_days,
             "target_relaxation_penalty": target_relaxation_penalty,
-            "target_relaxation_weight": objective_weights["control_node_late"],
+            "target_relaxation_weight": target_relaxation_weight,
         }
-    weighted_objective = (
-        (control_lateness_days + target_relaxation_penalty) * objective_weights["control_node_late"]
-        + control_buffer_risk_penalty * objective_weights["control_buffer_risk"]
-        + risk_related_control_wait_penalty * objective_weights["risk_related_control_wait"]
-        + resource_workload_balance_penalty * objective_weights["resource_workload_balance"]
-        + resource_idle_penalty * objective_weights["resource_idle"]
-        + resource_path_continuity_penalty * objective_weights["resource_path_continuity"]
-        + objective_days * objective_weights["makespan_and_soft_milestone"]
-        + unconfigured_normal_balance_penalty * UNCONFIGURED_NORMAL_BALANCE_WEIGHT
+    objective_contributions = _objective_contributions_for_result(
+        objective_terms_used_payload=objective_terms_used_payload,
+        raw_penalties={
+            "control_node_late": reported_control_lateness_days,
+            "control_buffer_risk": control_buffer_risk_penalty,
+            "risk_related_control_wait": risk_related_control_wait_penalty,
+            "makespan_and_soft_milestone": objective_days if makespan_objective_enabled else 0,
+            "resource_path_continuity": resource_path_continuity_penalty,
+            "resource_slot_balance": resource_slot_balance_penalty,
+            "resource_idle": resource_idle_penalty,
+            "target_relaxation": target_relaxation_penalty,
+        },
+        active_terms={
+            term_id: term_id in modeled_terms for term_id in DEFAULT_OBJECTIVE_TERM_WEIGHTS
+        },
+        effective_weight_overrides={
+            "target_relaxation": target_relaxation_weight,
+        } if target_relaxation_enabled else None,
+        notes_by_term={
+            "target_relaxation": (
+                "仅在最佳努力精排分支参与目标函数。"
+                if not relax_target_constraints
+                else "强制节点或固定工期目标被放松时参与目标函数。"
+            ),
+            "resource_slot_balance": "从资源路径连续性中拆出的并行槽位均衡贡献。",
+        },
     )
+    weighted_objective = sum(item["weighted_contribution"] for item in objective_contributions)
     validation.append(
         ValidationMessage(
             level="info",
             message=(
                 f"控制性工程优先策略已完成：控制链工作项 {len(control_chain_task_ids)} 个，"
                 f"控制缓冲状态 {control_priority_analysis['control_buffer_status']}，"
-                f"未配置资源普通工程均衡评分 {normal_balance_metrics['balance_score']}。"
+                f"普通工程分布评分 {normal_balance_metrics['balance_score']}。"
             ),
         )
     )
@@ -1183,26 +1473,23 @@ def solve_control_priority_schedule(
             "resource_guarantee": config.resource_guarantee,
             "makespan_days": objective_days,
             "baseline_makespan_days": baseline_result.objective_days,
-            "control_lateness_days": control_lateness_days,
+            "control_lateness_days": reported_control_lateness_days,
             "relaxed_hard_milestone_lateness_days": relaxed_hard_milestone_lateness_days,
             "fixed_duration_overrun_days": fixed_duration_overrun_days,
             "target_relaxation_penalty": target_relaxation_penalty,
-            "target_relaxation_weight": objective_weights["control_node_late"],
-            "target_relaxation_weighted_penalty": target_relaxation_penalty * objective_weights["control_node_late"],
-            "soft_control_lateness_penalty": soft_control_lateness_penalty,
+            "target_relaxation_weight": target_relaxation_weight,
+            "target_relaxation_weighted_penalty": target_relaxation_penalty * target_relaxation_weight,
+            "soft_control_lateness_penalty": reported_soft_control_lateness_penalty,
             "control_buffer_risk_penalty": control_buffer_risk_penalty,
             "risk_related_control_wait_penalty": risk_related_control_wait_penalty,
             "control_resource_wait_penalty": risk_related_control_wait_penalty,
-            "resource_workload_balance_penalty": resource_workload_balance_penalty,
             "resource_idle_penalty": resource_idle_penalty,
             "resource_path_continuity_penalty": resource_path_continuity_penalty,
+            "resource_path_transition_penalty": resource_path_continuity_penalty,
             "resource_slot_balance_penalty": resource_slot_balance_penalty,
-            "resource_balance_weight": objective_weights["resource_workload_balance"],
+            "resource_path_continuity_weight": objective_weights["resource_path_continuity"],
+            "resource_slot_balance_weight": objective_weights["resource_slot_balance"],
             "resource_idle_weight": objective_weights["resource_idle"],
-            "unconfigured_normal_balance_penalty": unconfigured_normal_balance_penalty,
-            "unconfigured_normal_balance_weight": UNCONFIGURED_NORMAL_BALANCE_WEIGHT,
-            "unconfigured_normal_balance_score": normal_balance_metrics["balance_score"],
-            "normal_balance_penalty": unconfigured_normal_balance_penalty,
             "soft_milestone_penalty": soft_milestone_penalty,
             "continuity_score": continuity_metrics["continuity_score"],
             "normal_balance_score": normal_balance_metrics["balance_score"],
@@ -1212,6 +1499,8 @@ def solve_control_priority_schedule(
             "relax_target_constraints": relax_target_constraints,
             "objective_weights": objective_weights,
             "objective_terms_used": objective_terms_used_payload,
+            "objective_modeling_gates": objective_modeling_gates,
+            "objective_contributions": objective_contributions,
             "control_priority_analysis": control_priority_analysis,
             "normal_balance_metrics": normal_balance_metrics,
         },
@@ -1306,63 +1595,6 @@ def _normal_balance_bucket_definitions(config: Any, horizon: int) -> list[dict[s
         }
         for bucket_index in range(bucket_count)
     ]
-
-
-def _build_unconfigured_normal_balance_terms(
-    model: Any,
-    starts: dict[str, Any],
-    unconfigured_normal_tasks: list[Task],
-    config: Any,
-    horizon: int,
-) -> dict[str, Any]:
-    bucket_definitions = _normal_balance_bucket_definitions(config, horizon)
-    active_tasks = [task for task in unconfigured_normal_tasks if task.duration_days > 0]
-    if len(active_tasks) < 2 or len(bucket_definitions) <= 1:
-        return {
-            "terms": [],
-            "bucket_definitions": bucket_definitions,
-            "ideal_workload_floor_days": 0,
-            "ideal_workload_ceiling_days": 0,
-        }
-
-    total_workload = sum(task.duration_days for task in active_tasks)
-    ideal_floor = total_workload // len(bucket_definitions)
-    ideal_ceiling = math.ceil(total_workload / len(bucket_definitions))
-    bucket_task_flags: dict[int, list[tuple[Task, Any]]] = defaultdict(list)
-
-    for task in active_tasks:
-        task_bucket_flags = []
-        for bucket in bucket_definitions:
-            bucket_index = bucket["bucket_index"]
-            in_bucket = model.NewBoolVar(f"unconfigured_normal_bucket_{_safe(task.id)}_{bucket_index}")
-            model.Add(starts[task.id] >= bucket["start_offset"]).OnlyEnforceIf(in_bucket)
-            model.Add(starts[task.id] <= bucket["finish_offset"] - 1).OnlyEnforceIf(in_bucket)
-            task_bucket_flags.append(in_bucket)
-            bucket_task_flags[bucket_index].append((task, in_bucket))
-        model.AddExactlyOne(task_bucket_flags)
-
-    terms: list[Any] = []
-    for bucket in bucket_definitions:
-        bucket_index = bucket["bucket_index"]
-        bucket_load = model.NewIntVar(0, total_workload, f"unconfigured_normal_load_{bucket_index}")
-        model.Add(
-            bucket_load == sum(
-                task.duration_days * in_bucket
-                for task, in_bucket in bucket_task_flags.get(bucket_index, [])
-            )
-        )
-        over_target = model.NewIntVar(0, total_workload, f"unconfigured_normal_over_{bucket_index}")
-        under_target = model.NewIntVar(0, total_workload, f"unconfigured_normal_under_{bucket_index}")
-        model.Add(over_target >= bucket_load - ideal_ceiling)
-        model.Add(under_target >= ideal_floor - bucket_load)
-        terms.extend([over_target, under_target])
-
-    return {
-        "terms": terms,
-        "bucket_definitions": bucket_definitions,
-        "ideal_workload_floor_days": ideal_floor,
-        "ideal_workload_ceiling_days": ideal_ceiling,
-    }
 
 
 def _add_normal_time_window_constraints(
@@ -1496,6 +1728,7 @@ def _build_control_buffer_terms(
     control_chain_task_ids: set[str],
     horizon: int,
     fallback_deadline_days: int | None,
+    include_penalty_terms: bool = True,
 ) -> dict[str, Any]:
     profiles = _control_buffer_profiles(
         schedule_input,
@@ -1514,7 +1747,8 @@ def _build_control_buffer_terms(
         )
         safe_boundary = profile["latest_safe_finish_offset"] - profile["necessary_buffer_days"]
         model.Add(risk >= ends[task_id] - safe_boundary)
-        terms.append(risk)
+        if include_penalty_terms:
+            terms.append(risk)
         risk_by_task[task_id] = risk
     return {"terms": terms, "risk_by_task": risk_by_task, "profiles": profiles}
 
@@ -2039,6 +2273,11 @@ def _build_resource_organization_terms(
     resource_candidates: dict[str, list[Resource]],
     assignment_vars: dict[tuple[str, str], Any],
     horizon: int,
+    *,
+    include_workload_balance: bool = True,
+    include_idle: bool = True,
+    include_path_continuity: bool = True,
+    include_slot_balance: bool = True,
 ) -> dict[str, list[Any]]:
     assignments_by_resource: dict[str, list[tuple[Task, Any]]] = defaultdict(list)
     for task in tasks:
@@ -2047,6 +2286,20 @@ def _build_resource_organization_terms(
             if assignment is not None:
                 assignments_by_resource[resource.id].append((task, assignment))
 
+    empty_path_terms = _empty_resource_path_terms(assignments_by_resource)
+    if not (include_workload_balance or include_idle or include_path_continuity or include_slot_balance):
+        return {
+            "workload_balance_terms": [],
+            "idle_terms": [],
+            "path_terms": [],
+            "slot_balance_terms": [],
+            "path_group_terms": [],
+            "spatial_gap_terms": [],
+            "same_side_gap_terms": [],
+            "side_switch_terms": [],
+            "path_metadata": empty_path_terms["path_metadata"],
+        }
+
     resources_with_assignments = [
         resource for resource in sorted(enabled_resources, key=_resource_sort_key) if assignments_by_resource.get(resource.id)
     ]
@@ -2054,63 +2307,76 @@ def _build_resource_organization_terms(
     workload_by_resource: dict[str, Any] = {}
     used_by_resource: dict[str, Any] = {}
     idle_terms: list[Any] = []
+    needs_workload = include_workload_balance or include_idle
+    needs_used = include_idle or include_path_continuity or include_slot_balance
 
     for resource in resources_with_assignments:
         task_assignments = assignments_by_resource[resource.id]
         assignment_bools = [assignment for _, assignment in task_assignments]
         total_work = sum(task.duration_days for task, _ in task_assignments)
-        workload = model.NewIntVar(0, total_work, f"resource_workload_{_safe(resource.id)}")
-        model.Add(workload == sum(task.duration_days * assignment for task, assignment in task_assignments))
+        workload = None
+        if needs_workload:
+            workload = model.NewIntVar(0, total_work, f"resource_workload_{_safe(resource.id)}")
+            model.Add(workload == sum(task.duration_days * assignment for task, assignment in task_assignments))
+            workload_by_resource[resource.id] = workload
+            if include_workload_balance:
+                resources_by_type[resource.type].append(resource)
 
-        used = model.NewBoolVar(f"resource_used_{_safe(resource.id)}")
-        for assignment in assignment_bools:
-            model.Add(assignment <= used)
-        model.Add(sum(assignment_bools) >= used)
+        used = None
+        if needs_used:
+            used = model.NewBoolVar(f"resource_used_{_safe(resource.id)}")
+            for assignment in assignment_bools:
+                model.Add(assignment <= used)
+            model.Add(sum(assignment_bools) >= used)
+            used_by_resource[resource.id] = used
 
-        first_start = model.NewIntVar(0, horizon, f"resource_first_start_{_safe(resource.id)}")
-        last_end = model.NewIntVar(0, horizon, f"resource_last_end_{_safe(resource.id)}")
-        active_span = model.NewIntVar(0, horizon, f"resource_active_span_{_safe(resource.id)}")
-        idle_days = model.NewIntVar(0, horizon, f"resource_idle_days_{_safe(resource.id)}")
-        for task, assignment in task_assignments:
-            model.Add(first_start <= starts[task.id]).OnlyEnforceIf(assignment)
-            model.Add(last_end >= ends[task.id]).OnlyEnforceIf(assignment)
-        model.Add(first_start == 0).OnlyEnforceIf(used.Not())
-        model.Add(last_end == 0).OnlyEnforceIf(used.Not())
-        model.Add(last_end >= first_start)
-        model.Add(active_span == last_end - first_start)
-        model.Add(idle_days == active_span - workload)
-
-        resources_by_type[resource.type].append(resource)
-        workload_by_resource[resource.id] = workload
-        used_by_resource[resource.id] = used
-        idle_terms.append(idle_days)
+        if include_idle and workload is not None and used is not None:
+            first_start = model.NewIntVar(0, horizon, f"resource_first_start_{_safe(resource.id)}")
+            last_end = model.NewIntVar(0, horizon, f"resource_last_end_{_safe(resource.id)}")
+            active_span = model.NewIntVar(0, horizon, f"resource_active_span_{_safe(resource.id)}")
+            idle_days = model.NewIntVar(0, horizon, f"resource_idle_days_{_safe(resource.id)}")
+            for task, assignment in task_assignments:
+                model.Add(first_start <= starts[task.id]).OnlyEnforceIf(assignment)
+                model.Add(last_end >= ends[task.id]).OnlyEnforceIf(assignment)
+            model.Add(first_start == 0).OnlyEnforceIf(used.Not())
+            model.Add(last_end == 0).OnlyEnforceIf(used.Not())
+            model.Add(last_end >= first_start)
+            model.Add(active_span == last_end - first_start)
+            model.Add(idle_days == active_span - workload)
+            idle_terms.append(idle_days)
 
     workload_balance_terms: list[Any] = []
-    for resource_type, resources in resources_by_type.items():
-        workloads = [workload_by_resource[resource.id] for resource in resources if resource.id in workload_by_resource]
-        if len(workloads) <= 1:
-            continue
-        total_work = sum(
-            task.duration_days
-            for task in tasks
-            if any(resource.type == resource_type for resource in resource_candidates.get(task.id, []))
-        )
-        max_workload = model.NewIntVar(0, total_work, f"resource_max_workload_{_safe(resource_type)}")
-        min_workload = model.NewIntVar(0, total_work, f"resource_min_workload_{_safe(resource_type)}")
-        workload_range = model.NewIntVar(0, total_work, f"resource_workload_range_{_safe(resource_type)}")
-        model.AddMaxEquality(max_workload, workloads)
-        model.AddMinEquality(min_workload, workloads)
-        model.Add(workload_range == max_workload - min_workload)
-        workload_balance_terms.append(workload_range)
+    if include_workload_balance:
+        for resource_type, resources in resources_by_type.items():
+            workloads = [workload_by_resource[resource.id] for resource in resources if resource.id in workload_by_resource]
+            if len(workloads) <= 1:
+                continue
+            total_work = sum(
+                task.duration_days
+                for task in tasks
+                if any(resource.type == resource_type for resource in resource_candidates.get(task.id, []))
+            )
+            max_workload = model.NewIntVar(0, total_work, f"resource_max_workload_{_safe(resource_type)}")
+            min_workload = model.NewIntVar(0, total_work, f"resource_min_workload_{_safe(resource_type)}")
+            workload_range = model.NewIntVar(0, total_work, f"resource_workload_range_{_safe(resource_type)}")
+            model.AddMaxEquality(max_workload, workloads)
+            model.AddMinEquality(min_workload, workloads)
+            model.Add(workload_range == max_workload - min_workload)
+            workload_balance_terms.append(workload_range)
 
-    path_terms = _build_resource_path_continuity_terms(
-        model,
-        assignments_by_resource,
-        enabled_resources,
-        used_by_resource,
-        starts,
-        ends,
-        horizon,
+    path_terms = (
+        _build_resource_path_continuity_terms(
+            model,
+            assignments_by_resource,
+            enabled_resources,
+            used_by_resource,
+            starts,
+            ends,
+            horizon,
+            include_slot_balance=include_slot_balance,
+        )
+        if include_path_continuity
+        else empty_path_terms
     )
 
     return {
@@ -2120,7 +2386,34 @@ def _build_resource_organization_terms(
         "slot_balance_terms": path_terms["slot_balance_terms"],
         "path_group_terms": path_terms["path_group_terms"],
         "spatial_gap_terms": path_terms["spatial_gap_terms"],
+        "same_side_gap_terms": path_terms["same_side_gap_terms"],
+        "side_switch_terms": path_terms["side_switch_terms"],
         "path_metadata": path_terms["path_metadata"],
+    }
+
+
+def _empty_resource_path_terms(
+    assignments_by_resource: dict[str, list[tuple[Task, Any]]] | None = None,
+) -> dict[str, Any]:
+    assignments_by_resource = assignments_by_resource or {}
+    return {
+        "path_terms": [],
+        "path_group_terms": [],
+        "spatial_gap_terms": [],
+        "same_side_gap_terms": [],
+        "side_switch_terms": [],
+        "slot_balance_terms": [],
+        "path_metadata": {
+            "resource_path_granularity_counts": {
+                "task": 0,
+                "same_structure": 0,
+                "same_structure_slot": 0,
+            },
+            "resource_path_node_count": 0,
+            "resource_path_transition_arc_count": 0,
+            "resource_path_task_candidate_count": sum(len(items) for items in assignments_by_resource.values()),
+            "resource_slot_balance_term_count": 0,
+        },
     }
 
 
@@ -2132,6 +2425,8 @@ def _build_resource_path_continuity_terms(
     starts: dict[str, Any],
     ends: dict[str, Any],
     horizon: int,
+    *,
+    include_slot_balance: bool = True,
 ) -> dict[str, Any]:
     same_side_gap_terms: list[Any] = []
     side_switch_terms: list[Any] = []
@@ -2199,11 +2494,15 @@ def _build_resource_path_continuity_terms(
 
         model.AddCircuit(arcs)
 
-    slot_balance_terms = _build_same_structure_slot_balance_terms(
-        model,
-        assignments_by_resource,
-        resources_by_id,
-        limits_by_group_key,
+    slot_balance_terms = (
+        _build_same_structure_slot_balance_terms(
+            model,
+            assignments_by_resource,
+            resources_by_id,
+            limits_by_group_key,
+        )
+        if include_slot_balance
+        else []
     )
     metadata["resource_slot_balance_term_count"] = len(slot_balance_terms)
 
@@ -2437,7 +2736,7 @@ def _build_normal_balance_metrics(
     configured_resource_task_ids: set[str] | None = None,
     unconfigured_resource_task_ids: set[str] | None = None,
     bucket_definitions: list[dict[str, int]] | None = None,
-    balance_penalty: int = 0,
+    balance_penalty: int | None = None,
     balance_weight: int = 0,
 ) -> dict[str, Any]:
     normal_tasks = [
@@ -2472,6 +2771,7 @@ def _build_normal_balance_metrics(
         ]
         count = len(bucket_tasks)
         duration_days = sum(task.duration_days for task in bucket_tasks)
+        deviation_days = max(0, duration_days - ideal_ceiling, ideal_floor - duration_days)
         task_counts.append(count)
         duration_loads.append(duration_days)
         bucket_loads.append(
@@ -2483,7 +2783,7 @@ def _build_normal_balance_metrics(
                 "duration_days": duration_days,
                 "ideal_workload_floor_days": ideal_floor,
                 "ideal_workload_ceiling_days": ideal_ceiling,
-                "deviation_days": max(0, duration_days - ideal_ceiling, ideal_floor - duration_days),
+                "deviation_days": deviation_days,
                 "task_ids": [task.id for task in sorted(bucket_tasks, key=lambda item: (item.start_offset, item.id))],
                 "resource_types": sorted({task.assigned_resource_type or "" for task in bucket_tasks if task.assigned_resource_type}),
             }
@@ -2493,7 +2793,12 @@ def _build_normal_balance_metrics(
     min_task_count = min(task_counts, default=0)
     peak_duration = max(duration_loads, default=0)
     min_duration = min(duration_loads, default=0)
-    score = 100 if not unconfigured_tasks else max(0, 100 - int(balance_penalty) * 10)
+    diagnostic_balance_penalty = (
+        sum(int(bucket["deviation_days"]) for bucket in bucket_loads)
+        if balance_penalty is None
+        else int(balance_penalty)
+    )
+    score = 100 if not unconfigured_tasks else max(0, 100 - diagnostic_balance_penalty * 10)
     return {
         "bucket": config.normal_balance_bucket,
         "bucket_size_days": bucket_size,
@@ -2508,7 +2813,7 @@ def _build_normal_balance_metrics(
         "total_unconfigured_workload_days": total_workload,
         "ideal_workload_floor_days": ideal_floor,
         "ideal_workload_ceiling_days": ideal_ceiling,
-        "balance_penalty": balance_penalty,
+        "balance_penalty": diagnostic_balance_penalty,
         "balance_weight": balance_weight,
         "balance_score": score,
         "metric_scope": "unconfigured_resource_normal_work",
@@ -2521,6 +2826,9 @@ def _build_resource_organization_analysis(
     *,
     objective_days: int | None,
     continuity_metrics: dict[str, Any],
+    workload_balance_enabled: bool = True,
+    idle_enabled: bool = True,
+    path_continuity_enabled: bool = True,
 ) -> dict[str, Any]:
     tasks_by_resource: dict[str, list[ScheduledTask]] = defaultdict(list)
     for task in scheduled_tasks:
@@ -2593,13 +2901,17 @@ def _build_resource_organization_analysis(
             for item in resources
             if item.get("same_structure_parallel_limit") is not None
         ]
-        balance_status = _resource_workload_balance_status(
-            resource_count=len(resources),
-            used_resource_count=len(used),
-            average_workload=average_workload,
-            workload_range=workload_range,
+        balance_status = (
+            _resource_workload_balance_status(
+                resource_count=len(resources),
+                used_resource_count=len(used),
+                average_workload=average_workload,
+                workload_range=workload_range,
+            )
+            if workload_balance_enabled
+            else "not_evaluated"
         )
-        idle_status = _resource_idle_status(resources)
+        idle_status = _resource_idle_status(resources) if idle_enabled else "not_evaluated"
         balance_statuses.append(balance_status)
         idle_statuses.append(idle_status)
         type_items.append(
@@ -2623,9 +2935,11 @@ def _build_resource_organization_analysis(
                 "workload_range_days": workload_range,
                 "idle_days": sum(int(item["idle_days"]) for item in resources),
                 "max_idle_gap_days": max((int(item["max_idle_gap_days"]) for item in resources), default=0),
-                "jump_pier_count": sum(int(item["jump_pier_count"]) for item in resources),
-                "side_switch_count": sum(int(item["side_switch_count"]) for item in resources),
-                "path_group_switch_count": sum(int(item["path_group_switch_count"]) for item in resources),
+                "jump_pier_count": sum(int(item["jump_pier_count"]) for item in resources) if path_continuity_enabled else 0,
+                "side_switch_count": sum(int(item["side_switch_count"]) for item in resources) if path_continuity_enabled else 0,
+                "path_group_switch_count": sum(int(item["path_group_switch_count"]) for item in resources)
+                if path_continuity_enabled
+                else 0,
                 "balance_status": balance_status,
                 "idle_status": idle_status,
             }
@@ -2634,8 +2948,12 @@ def _build_resource_organization_analysis(
     return {
         "resource_count": len(resource_items),
         "used_resource_count": sum(1 for item in resource_items if int(item["active_days"]) > 0),
-        "resource_balance_status": _worst_resource_status(balance_statuses),
-        "resource_idle_status": _worst_resource_status(idle_statuses),
+        "resource_balance_status": _worst_resource_status(balance_statuses) if workload_balance_enabled else "not_evaluated",
+        "resource_idle_status": _worst_resource_status(idle_statuses) if idle_enabled else "not_evaluated",
+        "resource_path_status": _resource_path_status(continuity_metrics) if path_continuity_enabled else "not_evaluated",
+        "workload_balance_enabled": workload_balance_enabled,
+        "idle_enabled": idle_enabled,
+        "path_continuity_enabled": path_continuity_enabled,
         "resources": resource_items,
         "resource_types": type_items,
     }
@@ -2707,6 +3025,8 @@ def _build_control_priority_analysis(
     continuity_metrics: dict[str, Any],
     normal_balance_metrics: dict[str, Any],
     resource_organization_analysis: dict[str, Any],
+    control_buffer_enabled: bool = True,
+    resource_path_continuity_enabled: bool = True,
 ) -> dict[str, Any]:
     baseline_by_id = {task.id: task for task in baseline_result.tasks}
     scheduled_by_id = {task.id: task for task in scheduled_tasks}
@@ -2818,11 +3138,12 @@ def _build_control_priority_analysis(
                 key=lambda item: (item.start_offset, item.id),
             )
         ],
-        "control_buffer_risks": control_buffer_risks[:50],
-        "control_buffer_status": _control_buffer_status(control_buffer_risks),
+        "control_buffer_risks": control_buffer_risks[:50] if control_buffer_enabled else [],
+        "control_buffer_status": _control_buffer_status(control_buffer_risks) if control_buffer_enabled else "not_evaluated",
         "normal_balance_status": _normal_balance_status(normal_balance_metrics),
-        "unconfigured_normal_balance_status": _normal_balance_status(normal_balance_metrics),
-        "resource_path_status": _resource_path_status(continuity_metrics),
+        "resource_path_status": _resource_path_status(continuity_metrics)
+        if resource_path_continuity_enabled
+        else "not_evaluated",
         "resource_balance_status": resource_organization_analysis.get("resource_balance_status", "not_evaluated"),
         "resource_idle_status": resource_organization_analysis.get("resource_idle_status", "not_evaluated"),
         "resource_organization_analysis": resource_organization_analysis,
@@ -3882,22 +4203,17 @@ def _solve_resource_model(
         ends[task.id] = model.NewIntVar(0, horizon, f"end_{_safe(task.id)}")
         model.Add(ends[task.id] == starts[task.id] + task.duration_days)
 
-        choices = []
-        for resource in resource_candidates.get(task.id, []):
-            assigned = model.NewBoolVar(f"assign_{_safe(task.id)}_{_safe(resource.id)}")
-            interval = model.NewOptionalIntervalVar(
-                starts[task.id],
-                task.duration_days,
-                ends[task.id],
-                assigned,
-                f"interval_{_safe(task.id)}_{_safe(resource.id)}",
-            )
-            choices.append(assigned)
-            assignment_vars[(task.id, resource.id)] = assigned
-            assignments_by_resource[resource.id].append(assigned)
-            resource_intervals[resource.id].append(interval)
-        if choices:
-            model.AddExactlyOne(choices)
+    assignment_vars, resource_intervals = _build_named_resource_assignment_model(
+        model,
+        starts=starts,
+        ends=ends,
+        tasks=schedule_input.tasks,
+        enabled_resources=enabled_resources,
+        resource_candidates=resource_candidates,
+        horizon=horizon,
+    )
+    for (_, resource_id), assignment in assignment_vars.items():
+        assignments_by_resource[resource_id].append(assignment)
 
     for resource in enabled_resources:
         used = model.NewBoolVar(f"used_{_safe(resource.id)}")

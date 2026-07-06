@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT))
 
 import app.scenario as scenario_module  # noqa: E402
 import app.solver as solver_module  # noqa: E402
-from app.models import ComponentModel, MilestoneConstraint, PrecedenceLink, ProcessTemplate, ProductivityOption, ProjectBridge, ProjectModel, Resource, ResourceCostSolveRequest, ResourcePool, ScheduleInput, ScheduleStrategyConfig, ScenarioCompareRequest, ScenarioInput, ScheduledTask, StructureModel, Task, TaskOverride, UpperStructureComponent, UpperStructureLogicRule, ValidationMessage, WorkSection  # noqa: E402
+from app.models import ComponentModel, MilestoneConstraint, OBJECTIVE_METRIC_DEFINITIONS, PrecedenceLink, ProcessTemplate, ProductivityOption, ProjectBridge, ProjectModel, Resource, ResourceCostSolveRequest, ResourcePool, ScheduleInput, ScheduleStrategyConfig, ScenarioCompareRequest, ScenarioInput, ScheduledTask, StructureModel, Task, TaskOverride, UpperStructureComponent, UpperStructureLogicRule, ValidationMessage, WorkSection  # noqa: E402
 from app.models import MilestoneResult, ScheduleResult  # noqa: E402
 from app.process_library_defaults import upgrade_process_library  # noqa: E402
 from app.sample_data import (  # noqa: E402
@@ -37,13 +37,46 @@ def test_schedule_strategy_merges_objective_term_defaults_and_ignores_legacy_bal
         "control_node_late",
         "control_buffer_risk",
         "risk_related_control_wait",
-        "resource_workload_balance",
         "resource_idle",
         "resource_path_continuity",
+        "resource_slot_balance",
         "makespan_and_soft_milestone",
+        "target_relaxation",
     }
+    assert set(OBJECTIVE_METRIC_DEFINITIONS) == set(config.objective_terms)
     assert config.enable_balance_objective is False
     assert config.objective_terms["control_node_late"].weight == 1_000_000_000
+    assert config.objective_terms["control_buffer_risk"].weight == 100_000
+    assert config.objective_terms["risk_related_control_wait"].weight == 100_000
+    assert config.objective_terms["makespan_and_soft_milestone"].weight == 5_000_000
+    assert config.objective_terms["resource_idle"].weight == 100_000
+    assert config.objective_terms["target_relaxation"].weight == 1_000_000_000
+    assert config.objective_terms["resource_slot_balance"].weight == 3_000
+    assert {
+        term_id
+        for term_id, term_config in config.objective_terms.items()
+        if term_config.enabled
+    } == {
+        "control_node_late",
+        "control_buffer_risk",
+        "risk_related_control_wait",
+        "makespan_and_soft_milestone",
+        "resource_idle",
+    }
+    assert "resource_workload_balance" not in config.objective_terms
+    assert "unconfigured_normal_balance" not in config.objective_terms
+    assert "unconfigured_normal_balance" not in OBJECTIVE_METRIC_DEFINITIONS
+
+    inherited_config = ScheduleStrategyConfig(
+        objective_terms={
+            "control_node_late": {"enabled": False, "weight": 123},
+            "resource_path_continuity": {"enabled": False, "weight": 456},
+        }
+    )
+    assert inherited_config.objective_terms["target_relaxation"].enabled is False
+    assert inherited_config.objective_terms["target_relaxation"].weight == 123
+    assert inherited_config.objective_terms["resource_slot_balance"].enabled is False
+    assert inherited_config.objective_terms["resource_slot_balance"].weight == 456
 
     legacy_config = ScheduleStrategyConfig(
         enable_balance_objective=True,
@@ -52,6 +85,18 @@ def test_schedule_strategy_merges_objective_term_defaults_and_ignores_legacy_bal
 
     assert legacy_config.enable_balance_objective is False
     assert "normal_balance" not in legacy_config.objective_terms
+
+    deprecated_workload_balance = ScheduleStrategyConfig(
+        objective_terms={"resource_workload_balance": {"enabled": True, "weight": 100}}
+    )
+    assert "resource_workload_balance" not in deprecated_workload_balance.objective_terms
+    assert deprecated_workload_balance.objective_terms["resource_idle"].enabled is True
+
+    deprecated_unconfigured_normal_balance = ScheduleStrategyConfig(
+        objective_terms={"unconfigured_normal_balance": {"enabled": True, "weight": 10}}
+    )
+    assert "unconfigured_normal_balance" not in deprecated_unconfigured_normal_balance.objective_terms
+    assert deprecated_unconfigured_normal_balance.objective_terms["resource_idle"].enabled is True
 
     disabled_zero_weight = ScheduleStrategyConfig(objective_terms={"resource_idle": {"enabled": False, "weight": 0}})
     assert disabled_zero_weight.objective_terms["resource_idle"].weight == 0
@@ -81,10 +126,41 @@ def test_schedule_strategy_rejects_invalid_objective_term_config() -> None:
                 "control_node_late": {"enabled": False, "weight": 1},
                 "control_buffer_risk": {"enabled": False, "weight": 1},
                 "risk_related_control_wait": {"enabled": False, "weight": 1},
-                "resource_workload_balance": {"enabled": False, "weight": 1},
                 "resource_idle": {"enabled": False, "weight": 1},
                 "resource_path_continuity": {"enabled": False, "weight": 1},
+                "resource_slot_balance": {"enabled": False, "weight": 1},
                 "makespan_and_soft_milestone": {"enabled": False, "weight": 1},
+                "target_relaxation": {"enabled": False, "weight": 1},
+            }
+        )
+
+    with pytest.raises(ValidationError, match="at least one objective term must be enabled"):
+        ScheduleStrategyConfig(
+            objective_terms={
+                "control_node_late": {"enabled": False, "weight": 1},
+                "control_buffer_risk": {"enabled": False, "weight": 1},
+                "risk_related_control_wait": {"enabled": False, "weight": 1},
+                "resource_idle": {"enabled": False, "weight": 1},
+                "resource_path_continuity": {"enabled": False, "weight": 1},
+                "resource_slot_balance": {"enabled": False, "weight": 1},
+                "makespan_and_soft_milestone": {"enabled": False, "weight": 1},
+                "target_relaxation": {"enabled": False, "weight": 1},
+                "resource_workload_balance": {"enabled": True, "weight": 100},
+            }
+        )
+
+    with pytest.raises(ValidationError, match="at least one objective term must be enabled"):
+        ScheduleStrategyConfig(
+            objective_terms={
+                "control_node_late": {"enabled": False, "weight": 1},
+                "control_buffer_risk": {"enabled": False, "weight": 1},
+                "risk_related_control_wait": {"enabled": False, "weight": 1},
+                "resource_idle": {"enabled": False, "weight": 1},
+                "resource_path_continuity": {"enabled": False, "weight": 1},
+                "resource_slot_balance": {"enabled": False, "weight": 1},
+                "makespan_and_soft_milestone": {"enabled": False, "weight": 1},
+                "target_relaxation": {"enabled": False, "weight": 1},
+                "unconfigured_normal_balance": {"enabled": True, "weight": 10},
             }
         )
 
@@ -96,8 +172,9 @@ def _objective_terms_with_only(enabled_term: str, weight: int) -> dict[str, dict
         "risk_related_control_wait",
         "makespan_and_soft_milestone",
         "resource_path_continuity",
+        "resource_slot_balance",
         "resource_idle",
-        "resource_workload_balance",
+        "target_relaxation",
     ]
     return {
         term_id: {"enabled": term_id == enabled_term, "weight": weight if term_id == enabled_term else 1}
@@ -1235,14 +1312,24 @@ def test_fixed_resource_minimum_candidate_reruns_refinement_before_display(
 
     monkeypatch.setattr(scenario_module, "solve_control_priority_schedule", tracking_refinement)
 
-    solved = solve_scenario(_parallel_fixed_resource_scenario(target_days=5, current_resources=1, max_resources=3))
+    scenario = _parallel_fixed_resource_scenario(target_days=5, current_resources=1, max_resources=3)
+    scenario.schedule_strategy = ScheduleStrategyConfig(
+        strategy="comprehensive",
+        objective_terms=_objective_terms_with_only("control_node_late", 1_000_000_000),
+    )
+
+    solved = solve_scenario(scenario)
 
     assert refinement_calls
     assert any(call.get("baseline_result") is not None and call.get("warm_start_result") is not None for call in refinement_calls)
     alternative = solved.alternative_results[0]
+    gates = alternative.result.objective_breakdown["objective_modeling_gates"]
+
     assert alternative.result.status in {"OPTIMAL", "FEASIBLE"}
     assert alternative.result.stats["schedule_source"] == "minimum_resources_control_priority_balanced"
     assert alternative.result.objective_breakdown["minimum_resource_refinement_status"] in {"OPTIMAL", "FEASIBLE"}
+    assert gates["resource_path_continuity"]["modeling_enabled"] is False
+    assert alternative.result.stats["continuity_objective"]["resource_path_node_count"] == 0
 
 
 def test_fixed_resource_minimum_candidate_keeps_verified_schedule_when_refinement_fails(
@@ -1899,7 +1986,13 @@ def test_resource_path_continuity_uses_structure_slots_and_balances_limit_two() 
                 )
                 for index in range(1, 4)
             ],
-            schedule_strategy=ScheduleStrategyConfig(strategy="comprehensive"),
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms={
+                    **_objective_terms_with_only("resource_path_continuity", 3_000),
+                    "resource_slot_balance": {"enabled": True, "weight": 3_000},
+                },
+            ),
             time_limit_seconds=5,
         )
     )
@@ -2011,7 +2104,7 @@ def test_default_pile_resource_parallel_rules_are_configuration_fields() -> None
     assert manual.same_structure_parallel_limit is None
 
 
-def test_control_priority_balances_workload_across_fixed_rotary_resources() -> None:
+def test_control_priority_keeps_workload_diagnostics_without_workload_balance_objective() -> None:
     pytest.importorskip("ortools")
     tasks = [
         Task(
@@ -2046,7 +2139,7 @@ def test_control_priority_balances_workload_across_fixed_rotary_resources() -> N
             ],
             schedule_strategy=ScheduleStrategyConfig(
                 strategy="comprehensive",
-                objective_terms=_objective_terms_with_only("resource_workload_balance", 100),
+                objective_terms=_objective_terms_with_only("resource_idle", 1_000),
             ),
             time_limit_seconds=5,
         )
@@ -2059,10 +2152,24 @@ def test_control_priority_balances_workload_across_fixed_rotary_resources() -> N
         if item["resource_type"] == "rotary_drill"
     ]
     workloads = [item["active_days"] for item in rotary_resources]
+    resource_types = result.stats["resource_organization_analysis"]["resource_types"]
+    rotary_type = next(item for item in resource_types if item["resource_type"] == "rotary_drill")
+    contribution_ids = {
+        item["term_id"]
+        for item in result.objective_breakdown["objective_contributions"]
+    }
+
     assert len(rotary_resources) == 6
-    assert all(workload > 0 for workload in workloads)
-    assert max(workloads) - min(workloads) <= 3
-    assert result.objective_breakdown["resource_workload_balance_penalty"] <= 3
+    assert max(workloads) >= min(workloads)
+    assert rotary_type["workload_range_days"] == max(workloads) - min(workloads)
+    assert result.stats["resource_organization_analysis"]["workload_balance_enabled"] is False
+    assert result.stats["resource_organization_analysis"]["resource_balance_status"] == "not_evaluated"
+    assert "resource_workload_balance" not in result.objective_breakdown["objective_weights"]
+    assert "resource_workload_balance" not in result.objective_breakdown["objective_terms_used"]
+    assert "resource_workload_balance" not in result.objective_breakdown["objective_modeling_gates"]
+    assert "resource_workload_balance" not in contribution_ids
+    assert "resource_workload_balance_penalty" not in result.objective_breakdown
+    assert "resource_balance_weight" not in result.objective_breakdown
 
 
 def test_control_priority_reports_resource_idle_penalty_for_forced_gap() -> None:
@@ -2287,12 +2394,12 @@ def test_configured_resource_normal_work_uses_resource_continuity_not_unconfigur
     assert metrics["normal_task_count"] == 3
     assert metrics["configured_resource_normal_task_count"] == 3
     assert metrics["unconfigured_resource_normal_task_count"] == 0
-    assert result.objective_breakdown["unconfigured_normal_balance_penalty"] == 0
-    assert result.objective_breakdown["normal_balance_penalty"] == 0
+    assert "unconfigured_normal_balance_penalty" not in result.objective_breakdown
+    assert "normal_balance_penalty" not in result.objective_breakdown
     assert result.objective_breakdown["resource_path_continuity_penalty"] >= 1
 
 
-def test_unconfigured_resource_normal_work_balances_weekly_workload_without_extending_critical_path() -> None:
+def test_unconfigured_resource_normal_work_reports_weekly_diagnostics_without_objective() -> None:
     pytest.importorskip("ortools")
 
     control = _solver_task("Z-control", "控制墩盖梁", 30, "critical_team").model_copy(
@@ -2340,9 +2447,12 @@ def test_unconfigured_resource_normal_work_balances_weekly_workload_without_exte
     assert metrics["normal_task_count"] == 6
     assert metrics["configured_resource_normal_task_count"] == 0
     assert metrics["unconfigured_resource_normal_task_count"] == 6
-    assert bucket_workloads == [4, 4, 4]
-    assert result.objective_breakdown["unconfigured_normal_balance_penalty"] == 0
-    assert result.objective_breakdown["unconfigured_normal_balance_weight"] == 10
+    assert sum(bucket_workloads) == 12
+    assert metrics["balance_weight"] == 0
+    assert metrics["balance_penalty"] == sum(bucket["deviation_days"] for bucket in metrics["bucket_loads"])
+    assert "unconfigured_normal_balance" not in result.objective_breakdown["objective_weights"]
+    assert "unconfigured_normal_balance_penalty" not in result.objective_breakdown
+    assert "unconfigured_normal_balance_weight" not in result.objective_breakdown
 
 
 def test_control_chain_normal_predecessor_is_excluded_from_unconfigured_balance() -> None:
@@ -2437,6 +2547,7 @@ def test_control_priority_reports_configured_objective_terms_used() -> None:
                     "resource_idle": {"enabled": False, "weight": 1234},
                     "makespan_and_soft_milestone": {"enabled": True, "weight": 333},
                     "normal_balance": {"enabled": False, "weight": 55},
+                    "unconfigured_normal_balance": {"enabled": True, "weight": 10},
                 },
             ),
             time_limit_seconds=5,
@@ -2449,13 +2560,219 @@ def test_control_priority_reports_configured_objective_terms_used() -> None:
     assert result.status in {"OPTIMAL", "FEASIBLE"}
     assert weights["resource_idle"] == 0
     assert weights["makespan_and_soft_milestone"] == 333
+    assert weights["target_relaxation"] == 0
+    assert weights["resource_slot_balance"] == 0
     assert "normal_balance" not in weights
+    assert "unconfigured_normal_balance" not in weights
     assert "same_structure_craft_split" not in weights
     assert "same_structure_craft_split" not in terms_used
     assert "normal_balance" not in terms_used
+    assert "unconfigured_normal_balance" not in terms_used
     assert "same_structure_craft_split_penalty" not in result.objective_breakdown
+    assert "unconfigured_normal_balance_penalty" not in result.objective_breakdown
     assert terms_used["resource_idle"] == {"enabled": False, "weight": 1234, "effective_weight": 0}
-    assert result.objective_breakdown["normal_balance_penalty"] == 0
+    assert terms_used["target_relaxation"] == {
+        "enabled": False,
+        "weight": 1_000_000_000,
+        "effective_weight": 0,
+    }
+    assert "normal_balance_penalty" not in result.objective_breakdown
+    contributions = result.objective_breakdown["objective_contributions"]
+    contribution_by_id = {item["term_id"]: item for item in contributions}
+    assert set(contribution_by_id) == set(weights)
+    assert "unconfigured_normal_balance" not in contribution_by_id
+    assert contribution_by_id["resource_idle"]["enabled"] is False
+    assert contribution_by_id["resource_idle"]["weighted_contribution"] == 0
+    assert contribution_by_id["target_relaxation"]["active"] is False
+    assert sum(item["weighted_contribution"] for item in contributions) == result.objective_breakdown["weighted_objective"]
+
+
+def test_control_priority_disabled_resource_objectives_skip_resource_path_modeling() -> None:
+    pytest.importorskip("ortools")
+    tasks = _multi_pier_pile_tasks("rotary_drill", pier_count=3, piles_per_pier=2)
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="disabled-resource-objective-gates",
+            start_date=date(2026, 1, 1),
+            tasks=tasks,
+            precedence_links=[],
+            resources=[Resource(id="rotary_1", name="Rotary 1", type="rotary_drill")],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("control_node_late", 1_000_000_000),
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    objective = result.stats["continuity_objective"]
+    gates = result.objective_breakdown["objective_modeling_gates"]
+    analysis = result.stats["resource_organization_analysis"]
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert objective["resource_path_node_count"] == 0
+    assert objective["resource_path_transition_arc_count"] == 0
+    assert gates["resource_path_continuity"]["modeling_enabled"] is False
+    assert gates["resource_path_continuity"]["status"] == "not_enabled"
+    assert analysis["resource_balance_status"] == "not_evaluated"
+    assert analysis["resource_idle_status"] == "not_evaluated"
+
+
+def test_control_priority_disabled_resource_objectives_keep_named_resource_no_overlap() -> None:
+    pytest.importorskip("ortools")
+    first = _solver_task("A-first", "first", 3, "team")
+    second = _solver_task("B-second", "second", 3, "team")
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="disabled-resource-objectives-hard-resource-constraints",
+            start_date=date(2026, 1, 1),
+            tasks=[first, second],
+            precedence_links=[],
+            resources=[Resource(id="team_1", name="Team 1", type="team")],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("control_node_late", 1_000_000_000),
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    ordered = sorted(result.tasks, key=lambda task: task.start_offset)
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert ordered[0].end_offset <= ordered[1].start_offset
+    assert {task.assigned_resource_id for task in result.tasks} == {"team_1"}
+
+
+def test_control_priority_risk_wait_can_use_buffer_support_without_buffer_objective() -> None:
+    pytest.importorskip("ortools")
+    start = date(2026, 1, 1)
+    predecessor = _solver_task("A-normal", "Normal predecessor", 2, "team").model_copy(
+        update={"control_level": "normal"}
+    )
+    control = _solver_task("B-control", "Control successor", 2, "team").model_copy(
+        update={"control_level": "control"}
+    )
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="risk-wait-with-buffer-support",
+            start_date=start,
+            tasks=[predecessor, control],
+            precedence_links=[
+                PrecedenceLink(
+                    id="A-to-B",
+                    predecessor_id=predecessor.id,
+                    successor_id=control.id,
+                    relationship="FS",
+                    lag_days=0,
+                    source_rule_id="manual",
+                )
+            ],
+            resources=[Resource(id="team_1", name="Team 1", type="team")],
+            milestones=[
+                MilestoneConstraint(
+                    id="M-control",
+                    name="Control finish",
+                    level="control",
+                    mode="soft",
+                    scope_type="project",
+                    target_event="finish",
+                    target_date=start + timedelta(days=3),
+                    penalty_per_day=1,
+                )
+            ],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms={
+                    **_objective_terms_with_only("risk_related_control_wait", 1_000_000),
+                    "control_buffer_risk": {"enabled": False, "weight": 5_000_000},
+                },
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    gates = result.objective_breakdown["objective_modeling_gates"]
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert gates["risk_related_control_wait"]["modeling_enabled"] is True
+    assert gates["control_buffer_risk"]["modeling_enabled"] is False
+    assert gates["control_buffer_risk"]["status"] == "not_enabled"
+    assert result.objective_breakdown["control_buffer_risk_penalty"] == 0
+    assert result.stats["control_priority_analysis"]["control_buffer_status"] == "not_evaluated"
+
+
+def test_control_priority_disabled_makespan_objective_keeps_finish_metrics_without_contribution() -> None:
+    pytest.importorskip("ortools")
+    task = _solver_task("T-main", "Main task", 4, "team")
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="disabled-makespan-objective",
+            start_date=date(2026, 1, 1),
+            tasks=[task],
+            precedence_links=[],
+            resources=[Resource(id="team_1", name="Team 1", type="team")],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("control_node_late", 1_000_000_000),
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    contribution_by_id = {
+        item["term_id"]: item
+        for item in result.objective_breakdown["objective_contributions"]
+    }
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.objective_days == 4
+    assert result.plan_finish_date is not None
+    assert result.objective_breakdown["makespan_days"] == 4
+    assert result.objective_breakdown["objective_modeling_gates"]["makespan_and_soft_milestone"]["status"] == "not_enabled"
+    assert contribution_by_id["makespan_and_soft_milestone"]["weighted_contribution"] == 0
+
+
+def test_control_priority_reports_new_objective_term_weights() -> None:
+    pytest.importorskip("ortools")
+    first = _solver_task("A-first", "first", 2, "team")
+    second = _solver_task("B-second", "second", 2, "team")
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="new-objective-term-config",
+            start_date=date(2026, 1, 1),
+            tasks=[first, second],
+            precedence_links=[],
+            resources=[Resource(id="team_1", name="Team 1", type="team")],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms={
+                    "target_relaxation": {"enabled": True, "weight": 99},
+                    "resource_slot_balance": {"enabled": True, "weight": 88},
+                },
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    terms_used = result.objective_breakdown["objective_terms_used"]
+    contribution_by_id = {
+        item["term_id"]: item
+        for item in result.objective_breakdown["objective_contributions"]
+    }
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert terms_used["target_relaxation"] == {"enabled": True, "weight": 99, "effective_weight": 99}
+    assert terms_used["resource_slot_balance"] == {"enabled": True, "weight": 88, "effective_weight": 88}
+    assert "unconfigured_normal_balance" not in terms_used
+    assert contribution_by_id["target_relaxation"]["active"] is False
+    assert contribution_by_id["resource_slot_balance"]["effective_weight"] == 88
+    assert "unconfigured_normal_balance" not in contribution_by_id
 
 
 def test_control_priority_enforces_hard_milestone_without_explicit_flag() -> None:
@@ -2537,6 +2854,12 @@ def test_control_priority_best_effort_relaxes_hard_milestone_and_keeps_same_stru
     assert result.milestone_results[0].lateness_days > 0
     assert result.stats["relax_target_constraints"] is True
     assert result.objective_breakdown["relaxed_hard_milestone_lateness_days"] == result.milestone_results[0].lateness_days
+    contribution_by_id = {
+        item["term_id"]: item
+        for item in result.objective_breakdown["objective_contributions"]
+    }
+    assert contribution_by_id["target_relaxation"]["active"] is True
+    assert contribution_by_id["target_relaxation"]["raw_penalty"] == result.milestone_results[0].lateness_days
 
 
 def test_control_priority_best_effort_relaxes_fixed_duration_target() -> None:
@@ -2567,6 +2890,12 @@ def test_control_priority_best_effort_relaxes_fixed_duration_target() -> None:
     assert relaxed.objective_days == 10
     assert relaxed.objective_breakdown["fixed_duration_overrun_days"] == 5
     assert relaxed.stats["target_relaxation"]["fixed_duration_overrun_days"] == 5
+    contribution_by_id = {
+        item["term_id"]: item
+        for item in relaxed.objective_breakdown["objective_contributions"]
+    }
+    assert contribution_by_id["target_relaxation"]["active"] is True
+    assert contribution_by_id["target_relaxation"]["raw_penalty"] == 5
 
 
 def test_control_priority_hard_milestone_is_not_control_lateness_objective() -> None:
@@ -3004,7 +3333,7 @@ def test_control_priority_applies_normal_windows_and_workface_limit() -> None:
         assert current.start_offset >= previous.end_offset
     assert result.stats["normal_balance_metrics"]["normal_task_count"] == 3
     assert "normal_balance" not in result.objective_breakdown["objective_weights"]
-    assert result.objective_breakdown["normal_balance_penalty"] == 0
+    assert "normal_balance_penalty" not in result.objective_breakdown
     assert result.objective_breakdown["normal_balance_score"] >= 0
 
 

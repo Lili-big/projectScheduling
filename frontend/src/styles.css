@@ -2850,6 +2850,13 @@ tbody tr:hover {
   font-weight: 400;
 }
 
+.summary-footnote {
+  margin: 10px 2px 0;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .business-explanation {
   margin: 0 14px 14px;
   padding: 10px 12px;

@@ -34,8 +34,9 @@ export type ObjectiveTermId =
   | "risk_related_control_wait"
   | "makespan_and_soft_milestone"
   | "resource_path_continuity"
+  | "resource_slot_balance"
   | "resource_idle"
-  | "resource_workload_balance";
+  | "target_relaxation";
 export type TabKey = "process" | "logic" | "resources" | "milestones" | "tasks" | "results" | "resultsMvp";
 export type GanttMode = "by_time" | "by_structure" | "by_process";
 export type TaskViewMode = "by_structure" | "by_process";
@@ -82,6 +83,50 @@ export type ScheduleStrategyConfig = {
 export type ObjectiveTermConfig = {
   enabled: boolean;
   weight: number;
+};
+
+export type ObjectiveContribution = {
+  term_id: ObjectiveTermId | string;
+  label: string;
+  group?: string;
+  source: "objective" | "derived_objective" | "diagnostic" | string;
+  enabled: boolean;
+  active: boolean;
+  configured_weight: number;
+  effective_weight: number;
+  raw_penalty: number;
+  weighted_contribution: number;
+  applies_to: string[];
+  parent_term_id?: ObjectiveTermId | string | null;
+  notes?: string;
+};
+
+export type ObjectiveEvaluationStatus =
+  | "enabled"
+  | "not_enabled"
+  | "not_evaluated"
+  | "ok"
+  | "warning"
+  | "danger"
+  | string;
+
+export type ObjectiveModelingGate = {
+  term_id: ObjectiveTermId | string;
+  requested_enabled: boolean;
+  requested_weight: number;
+  effective_weight: number;
+  modeling_enabled: boolean;
+  status: ObjectiveEvaluationStatus;
+  reason: string;
+};
+
+export type DiagnosticMetric = {
+  metric_id: string;
+  label: string;
+  value: number | string;
+  unit?: string;
+  source_path: string;
+  read_only: boolean;
 };
 
 export type UpperStructureModel = {
@@ -758,6 +803,10 @@ export type ResourceOrganizationAnalysis = {
   used_resource_count: number;
   resource_balance_status: string;
   resource_idle_status: string;
+  resource_path_status?: string;
+  workload_balance_enabled?: boolean;
+  idle_enabled?: boolean;
+  path_continuity_enabled?: boolean;
   resources: ResourceOrganizationResource[];
   resource_types: ResourceOrganizationType[];
 };
@@ -804,7 +853,6 @@ export type ControlPriorityAnalysis = {
   control_buffer_risks: ControlBufferRisk[];
   control_buffer_status: string;
   normal_balance_status: string;
-  unconfigured_normal_balance_status?: string;
   resource_path_status: string;
   resource_balance_status?: string;
   resource_idle_status?: string;

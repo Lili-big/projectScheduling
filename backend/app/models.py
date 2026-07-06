@@ -84,22 +84,132 @@ ObjectiveTermId = Literal[
     "risk_related_control_wait",
     "makespan_and_soft_milestone",
     "resource_path_continuity",
+    "resource_slot_balance",
     "resource_idle",
-    "resource_workload_balance",
+    "target_relaxation",
 ]
 
 OBJECTIVE_TERM_MAX_WEIGHT = 1_000_000_000
-DEPRECATED_OBJECTIVE_TERM_IDS = {"spatial_resource_assignment", "same_structure_craft_split", "normal_balance"}
+DEPRECATED_OBJECTIVE_TERM_IDS = {
+    "spatial_resource_assignment",
+    "same_structure_craft_split",
+    "normal_balance",
+    "resource_workload_balance",
+    "unconfigured_normal_balance",
+}
 DEFAULT_OBJECTIVE_TERM_WEIGHTS: dict[ObjectiveTermId, int] = {
     "control_node_late": 1_000_000_000,
-    "control_buffer_risk": 5_000_000,
-    "risk_related_control_wait": 1_000_000,
-    "makespan_and_soft_milestone": 10_000,
+    "control_buffer_risk": 100_000,
+    "risk_related_control_wait": 100_000,
+    "makespan_and_soft_milestone": 5_000_000,
     "resource_path_continuity": 3_000,
-    "resource_idle": 1_000,
-    "resource_workload_balance": 100,
+    "resource_slot_balance": 3_000,
+    "resource_idle": 100_000,
+    "target_relaxation": 1_000_000_000,
+}
+DEFAULT_OBJECTIVE_TERM_ENABLED: dict[ObjectiveTermId, bool] = {
+    "control_node_late": True,
+    "control_buffer_risk": True,
+    "risk_related_control_wait": True,
+    "makespan_and_soft_milestone": True,
+    "resource_path_continuity": False,
+    "resource_slot_balance": False,
+    "resource_idle": True,
+    "target_relaxation": False,
 }
 OBJECTIVE_TERM_IDS = tuple(DEFAULT_OBJECTIVE_TERM_WEIGHTS.keys())
+OBJECTIVE_TERM_INHERIT_CONFIG_FROM: dict[ObjectiveTermId, ObjectiveTermId] = {
+    "target_relaxation": "control_node_late",
+    "resource_slot_balance": "resource_path_continuity",
+}
+OBJECTIVE_METRIC_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "control_node_late": {
+        "label": "软控制节点迟延",
+        "group": "控制优先",
+        "description": "控制软节点晚于目标日期的天数；权重越高，模型越优先压低控制节点迟延。",
+        "default_weight": DEFAULT_OBJECTIVE_TERM_WEIGHTS["control_node_late"],
+        "configurable": True,
+        "source": "objective",
+        "applies_to": ["control_priority", "balanced_normal", "comprehensive"],
+        "legacy_fields": ["control_lateness_days", "soft_control_lateness_penalty"],
+    },
+    "control_buffer_risk": {
+        "label": "控制链总时差不足风险",
+        "group": "控制优先",
+        "description": "控制链任务距离安全完成时间的余量风险；权重越高，模型越优先保留控制缓冲。",
+        "default_weight": DEFAULT_OBJECTIVE_TERM_WEIGHTS["control_buffer_risk"],
+        "configurable": True,
+        "source": "objective",
+        "applies_to": ["control_priority", "balanced_normal", "comprehensive"],
+        "legacy_fields": ["control_buffer_risk_penalty"],
+    },
+    "risk_related_control_wait": {
+        "label": "控制链衔接空档风险",
+        "group": "控制优先",
+        "description": "已存在风险的控制链前后任务空档；权重越高，模型越优先压缩风险链条等待。",
+        "default_weight": DEFAULT_OBJECTIVE_TERM_WEIGHTS["risk_related_control_wait"],
+        "configurable": True,
+        "source": "objective",
+        "applies_to": ["control_priority", "balanced_normal", "comprehensive"],
+        "legacy_fields": ["risk_related_control_wait_penalty", "control_resource_wait_penalty"],
+    },
+    "makespan_and_soft_milestone": {
+        "label": "总工期",
+        "group": "工期",
+        "description": "项目整体完工跨度；权重越高，模型越倾向缩短总工期。",
+        "default_weight": DEFAULT_OBJECTIVE_TERM_WEIGHTS["makespan_and_soft_milestone"],
+        "configurable": True,
+        "source": "objective",
+        "applies_to": ["control_priority", "balanced_normal", "comprehensive"],
+        "legacy_fields": ["makespan_days"],
+    },
+    "resource_path_continuity": {
+        "label": "资源路径连续性",
+        "group": "资源组织",
+        "description": "同一资源相邻任务的同幅邻近推进程度；权重越高，模型越倾向减少空间跳跃和幅别切换。",
+        "default_weight": DEFAULT_OBJECTIVE_TERM_WEIGHTS["resource_path_continuity"],
+        "configurable": True,
+        "source": "objective",
+        "applies_to": ["control_priority", "balanced_normal", "comprehensive"],
+        "legacy_fields": ["resource_path_continuity_penalty"],
+    },
+    "resource_slot_balance": {
+        "label": "资源槽位均衡",
+        "group": "资源组织",
+        "description": "同结构并行槽位的资源分配均衡程度；权重越高，模型越倾向均衡使用并行槽位。",
+        "default_weight": DEFAULT_OBJECTIVE_TERM_WEIGHTS["resource_slot_balance"],
+        "configurable": True,
+        "source": "derived_objective",
+        "applies_to": ["control_priority", "balanced_normal", "comprehensive"],
+        "legacy_fields": ["resource_slot_balance_penalty"],
+        "parent_term_id": "resource_path_continuity",
+    },
+    "resource_idle": {
+        "label": "资源空闲",
+        "group": "资源组织",
+        "description": "单个资源两次任务之间的中途停等；权重越高，模型越倾向压缩资源空档。",
+        "default_weight": DEFAULT_OBJECTIVE_TERM_WEIGHTS["resource_idle"],
+        "configurable": True,
+        "source": "objective",
+        "applies_to": ["control_priority", "balanced_normal", "comprehensive"],
+        "legacy_fields": ["resource_idle_penalty"],
+    },
+    "target_relaxation": {
+        "label": "目标放松迟延",
+        "group": "最佳努力",
+        "description": "最佳努力精排中强制节点迟延和固定工期超期；权重越高，模型越优先减少被放松目标的迟延。",
+        "default_weight": DEFAULT_OBJECTIVE_TERM_WEIGHTS["target_relaxation"],
+        "configurable": True,
+        "source": "derived_objective",
+        "applies_to": ["best_effort_refinement"],
+        "legacy_fields": [
+            "target_relaxation_penalty",
+            "relaxed_hard_milestone_lateness_days",
+            "fixed_duration_overrun_days",
+        ],
+        "parent_term_id": "control_node_late",
+    },
+}
 
 
 class ObjectiveTermConfig(BaseModel):
@@ -109,7 +219,7 @@ class ObjectiveTermConfig(BaseModel):
 
 def default_objective_terms() -> dict[ObjectiveTermId, ObjectiveTermConfig]:
     return {
-        term_id: ObjectiveTermConfig(enabled=True, weight=weight)
+        term_id: ObjectiveTermConfig(enabled=DEFAULT_OBJECTIVE_TERM_ENABLED[term_id], weight=weight)
         for term_id, weight in DEFAULT_OBJECTIVE_TERM_WEIGHTS.items()
     }
 
@@ -169,14 +279,19 @@ class ScheduleStrategyConfig(BaseModel):
 
         merged: dict[str, dict[str, Any]] = {}
         for term_id, default_weight in DEFAULT_OBJECTIVE_TERM_WEIGHTS.items():
-            raw_config = raw_terms.get(term_id, {})
+            raw_config = raw_terms.get(term_id)
+            inherited_from = OBJECTIVE_TERM_INHERIT_CONFIG_FROM.get(term_id)
+            if raw_config is None and inherited_from is not None:
+                raw_config = raw_terms.get(inherited_from)
+            if raw_config is None:
+                raw_config = {}
             if isinstance(raw_config, ObjectiveTermConfig):
                 raw_config = raw_config.model_dump()
             if not isinstance(raw_config, Mapping):
                 raise ValueError(f"objective_terms.{term_id} must be an object")
 
             merged[term_id] = {
-                "enabled": raw_config.get("enabled", True),
+                "enabled": raw_config.get("enabled", DEFAULT_OBJECTIVE_TERM_ENABLED[term_id]),
                 "weight": raw_config.get("weight", default_weight),
             }
 

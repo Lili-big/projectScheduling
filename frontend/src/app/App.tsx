@@ -45,6 +45,8 @@ import type {
   ResourceCostType,
   ControlLevel,
   ObjectiveTermConfig,
+  ObjectiveContribution,
+  ObjectiveModelingGate,
   ObjectiveTermId,
   ScheduleStrategy,
   ScheduleStrategyConfig,
@@ -181,6 +183,16 @@ type ObjectiveTermDefinition = {
   group: string;
   description: string;
   defaultWeight: number;
+  defaultEnabled?: boolean;
+  appliesTo: string;
+  source?: "objective" | "derived_objective";
+  parentTermId?: ObjectiveTermId;
+};
+
+type ObjectiveContributionSummary = {
+  items: ObjectiveContribution[];
+  total: number;
+  isLegacy: boolean;
 };
 
 const objectiveTermDefinitions: ObjectiveTermDefinition[] = [
@@ -190,27 +202,31 @@ const objectiveTermDefinitions: ObjectiveTermDefinition[] = [
     group: "控制优先",
     description: "看软控制节点晚于目标日期的天数；每晚 1 天按最高权重计罚，优先压低控制节点迟延。",
     defaultWeight: 1_000_000_000,
+    appliesTo: "控制优先、综合精排",
   },
   {
     id: "control_buffer_risk",
     label: "控制链总时差不足风险",
     group: "控制优先",
     description: "检查控制链任务距离最晚安全完成时间还剩多少余量；余量越少，越容易影响目标节点，风险越高。",
-    defaultWeight: 5_000_000,
+    defaultWeight: 100_000,
+    appliesTo: "控制优先、综合精排",
   },
   {
     id: "risk_related_control_wait",
     label: "控制链衔接空档风险",
     group: "控制优先",
     description: "检查已经存在风险的控制链中，前后置任务之间是否还有可压缩空档；空档越长，越需要优化衔接。",
-    defaultWeight: 1_000_000,
+    defaultWeight: 100_000,
+    appliesTo: "控制优先、综合精排",
   },
   {
     id: "makespan_and_soft_milestone",
     label: "总工期",
     group: "工期",
     description: "看项目整体完工跨度；总工期越长，罚分越高。",
-    defaultWeight: 10_000,
+    defaultWeight: 5_000_000,
+    appliesTo: "控制优先、综合精排",
   },
   {
     id: "resource_path_continuity",
@@ -218,26 +234,47 @@ const objectiveTermDefinitions: ObjectiveTermDefinition[] = [
     group: "资源组织",
     description: "看同一资源相邻任务是否同幅邻近推进；同幅墩号间隔越大、左右幅切换越多，罚分越高。",
     defaultWeight: 3_000,
+    defaultEnabled: false,
+    appliesTo: "控制优先、综合精排",
+  },
+  {
+    id: "resource_slot_balance",
+    label: "资源槽位均衡",
+    group: "资源组织",
+    description: "看同结构并行槽位上的资源分配是否均衡；槽位工作量差距越大，罚分越高。",
+    defaultWeight: 3_000,
+    defaultEnabled: false,
+    appliesTo: "控制优先、综合精排",
+    source: "derived_objective",
+    parentTermId: "resource_path_continuity",
   },
   {
     id: "resource_idle",
     label: "资源空闲",
     group: "资源组织",
     description: "看单个资源两次任务之间是否长时间停等；中途空闲天数越多，罚分越高。",
-    defaultWeight: 1_000,
+    defaultWeight: 100_000,
+    appliesTo: "控制优先、综合精排",
   },
   {
-    id: "resource_workload_balance",
-    label: "同类资源工作量均衡",
-    group: "资源组织",
-    description: "看同类型资源的活跃工作天数是否接近；忙闲差距越大，罚分越高。",
-    defaultWeight: 100,
+    id: "target_relaxation",
+    label: "目标放松迟延",
+    group: "最佳努力",
+    description: "只在最佳努力精排中计罚强制节点迟延和固定工期超期；严格精排不会因此放松目标。",
+    defaultWeight: 1_000_000_000,
+    defaultEnabled: false,
+    appliesTo: "最佳努力精排",
+    source: "derived_objective",
+    parentTermId: "control_node_late",
   },
 ];
 
 function defaultObjectiveTermsConfig(): Record<ObjectiveTermId, ObjectiveTermConfig> {
   return Object.fromEntries(
-    objectiveTermDefinitions.map((term) => [term.id, { enabled: true, weight: term.defaultWeight }]),
+    objectiveTermDefinitions.map((term) => [
+      term.id,
+      { enabled: term.defaultEnabled ?? true, weight: term.defaultWeight },
+    ]),
   ) as Record<ObjectiveTermId, ObjectiveTermConfig>;
 }
 
@@ -292,6 +329,7 @@ const controlBufferStatusLabels: Record<string, string> = {
   near_risk: "接近风险",
   buffer_insufficient: "缓冲不足",
   affected_node: "已影响节点",
+  not_enabled: "未启用",
   not_evaluated: "未评价",
 };
 
@@ -299,6 +337,7 @@ const resourcePathStatusLabels: Record<string, string> = {
   smooth: "顺畅",
   reasonable_jump: "有合理跨越",
   abnormal_jump: "有异常跳转",
+  not_enabled: "未启用",
   not_evaluated: "未评价",
 };
 
@@ -307,6 +346,7 @@ const resourceBalanceStatusLabels: Record<string, string> = {
   slightly_unbalanced: "轻微不均",
   under_used: "部分资源低利用",
   unbalanced: "分配不均",
+  not_enabled: "未启用",
   not_evaluated: "未评价",
 };
 
@@ -314,6 +354,7 @@ const resourceIdleStatusLabels: Record<string, string> = {
   continuous: "施工连续",
   minor_idle: "存在短空档",
   idle_risk: "存在窝工风险",
+  not_enabled: "未启用",
   not_evaluated: "未评价",
 };
 
@@ -1625,6 +1666,7 @@ function ResultsTab({
   const showResourceRecommendationDiagnostic = shouldShowResourceRecommendationDiagnostic(resourceRecommendationStatus, resourceRecommendationMessage);
   const resourceCostSummary = resourceCostSummaryFromResult(result);
   const continuityMetrics = continuityMetricsFromResult(result);
+  const objectiveContributionSummary = objectiveContributionSummaryFromResult(result);
   const refinementSummary = refinementSummaryFromResult(result);
   const controlPriorityAnalysis = controlPriorityAnalysisFromResult(result);
   const controlPlanDisplayByTaskId = useMemo(
@@ -1919,6 +1961,7 @@ function ResultsTab({
                           <td>
                             <strong>{term.label}</strong>
                             <span>{term.group}</span>
+                            <span>{term.appliesTo}</span>
                           </td>
                           <td className="objective-description">{term.description}</td>
                           <td>
@@ -2039,6 +2082,49 @@ function ResultsTab({
           {refinementSummary.bestEffortMessage && (
             <p>{refinementSummary.bestEffortMessage}</p>
           )}
+        </section>
+      )}
+
+      {!isMvp && objectiveContributionSummary && (
+        <section className="panel full">
+          <PanelTitle
+            title="目标函数贡献"
+            subtitle={objectiveContributionSummary.isLegacy ? "旧字段汇总，部分派生项可能只展示已有结果字段" : "后端返回的目标项原始罚分、有效权重和加权贡献"}
+          />
+          <div className="table-wrap short">
+            <table>
+              <thead>
+                <tr>
+                  <th>指标</th>
+                  <th>状态</th>
+                  <th>原始罚分</th>
+                  <th>有效权重</th>
+                  <th>加权贡献</th>
+                </tr>
+              </thead>
+              <tbody>
+                {objectiveContributionSummary.items.map((item) => (
+                  <tr key={item.term_id}>
+                    <td>
+                      <strong>{item.label || item.term_id}</strong>
+                      <span className="muted-cell">
+                        {item.group || objectiveTermDefinitionById(item.term_id)?.group || item.source}
+                        {item.parent_term_id ? ` / 继承 ${objectiveTermDefinitionById(item.parent_term_id)?.label ?? item.parent_term_id}` : ""}
+                      </span>
+                      {item.notes && <span className="muted-cell">{item.notes}</span>}
+                    </td>
+                    <td>{objectiveContributionStatus(item)}</td>
+                    <td>{formatObjectiveNumber(item.raw_penalty)}</td>
+                    <td>{formatObjectiveNumber(item.effective_weight)}</td>
+                    <td>{formatObjectiveNumber(item.weighted_contribution)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="summary-footnote">
+            目标函数合计：{formatObjectiveNumber(objectiveContributionSummary.total)}
+          </div>
         </section>
       )}
 
@@ -4233,6 +4319,36 @@ type BestEffortRefinement = {
   fixedDurationOverrunDays: number;
 };
 
+function objectiveModelingGateFromResult(
+  result: ScheduleResult | null,
+  termId: ObjectiveTermId,
+): ObjectiveModelingGate | null {
+  const raw = result?.stats?.objective_modeling_gates ?? result?.objective_breakdown?.objective_modeling_gates;
+  if (!isRecord(raw)) return null;
+  const gate = raw[termId];
+  if (!isRecord(gate)) return null;
+  return {
+    term_id: String(gate.term_id ?? termId),
+    requested_enabled: Boolean(gate.requested_enabled),
+    requested_weight: Number(gate.requested_weight ?? 0),
+    effective_weight: Number(gate.effective_weight ?? 0),
+    modeling_enabled: Boolean(gate.modeling_enabled),
+    status: String(gate.status ?? "not_evaluated"),
+    reason: String(gate.reason ?? ""),
+  };
+}
+
+function statusWithObjectiveGate(
+  result: ScheduleResult | null,
+  termId: ObjectiveTermId,
+  fallback: string,
+): string {
+  const gate = objectiveModelingGateFromResult(result, termId);
+  if (gate?.status === "not_enabled") return "not_enabled";
+  if (gate?.status === "not_evaluated" && fallback === "not_evaluated") return "not_evaluated";
+  return fallback;
+}
+
 function recommendedResourceCountsFromResult(result: ScheduleResult | null): RecommendedResourceCount[] {
   const raw = result?.stats?.recommended_resource_counts ?? result?.objective_breakdown?.recommended_resource_counts;
   if (!Array.isArray(raw)) return [];
@@ -4362,7 +4478,19 @@ function resourceOrganizationFromResult(result: ScheduleResult | null): Resource
     resource_count: Number(raw.resource_count ?? resources.length),
     used_resource_count: Number(raw.used_resource_count ?? resources.filter((item) => item.active_days > 0).length),
     resource_balance_status: String(raw.resource_balance_status ?? "not_evaluated"),
-    resource_idle_status: String(raw.resource_idle_status ?? "not_evaluated"),
+    resource_idle_status: statusWithObjectiveGate(
+      result,
+      "resource_idle",
+      String(raw.resource_idle_status ?? "not_evaluated"),
+    ),
+    resource_path_status: statusWithObjectiveGate(
+      result,
+      "resource_path_continuity",
+      String(raw.resource_path_status ?? "not_evaluated"),
+    ),
+    workload_balance_enabled: Boolean(raw.workload_balance_enabled),
+    idle_enabled: Boolean(raw.idle_enabled),
+    path_continuity_enabled: Boolean(raw.path_continuity_enabled),
     resources,
     resource_types: resourceTypes,
   };
@@ -4461,14 +4589,23 @@ function controlPriorityAnalysisFromResult(result: ScheduleResult | null): Contr
     control_chain_predecessors: controlChainPredecessors,
     control_targets: controlTargets,
     control_buffer_risks: bufferRisks,
-    control_buffer_status: String(raw.control_buffer_status ?? "not_evaluated"),
-    normal_balance_status: String(raw.normal_balance_status ?? "not_evaluated"),
-    unconfigured_normal_balance_status: String(
-      raw.unconfigured_normal_balance_status ?? raw.normal_balance_status ?? "not_evaluated",
+    control_buffer_status: statusWithObjectiveGate(
+      result,
+      "control_buffer_risk",
+      String(raw.control_buffer_status ?? "not_evaluated"),
     ),
-    resource_path_status: String(raw.resource_path_status ?? "not_evaluated"),
+    normal_balance_status: String(raw.normal_balance_status ?? "not_evaluated"),
+    resource_path_status: statusWithObjectiveGate(
+      result,
+      "resource_path_continuity",
+      String(raw.resource_path_status ?? resourceOrganization?.resource_path_status ?? "not_evaluated"),
+    ),
     resource_balance_status: String(raw.resource_balance_status ?? resourceOrganization?.resource_balance_status ?? "not_evaluated"),
-    resource_idle_status: String(raw.resource_idle_status ?? resourceOrganization?.resource_idle_status ?? "not_evaluated"),
+    resource_idle_status: statusWithObjectiveGate(
+      result,
+      "resource_idle",
+      String(raw.resource_idle_status ?? resourceOrganization?.resource_idle_status ?? "not_evaluated"),
+    ),
     resource_organization_analysis: resourceOrganization ?? undefined,
     path_group_diagnostics: pathGroups,
     fallback_reason: typeof raw.fallback_reason === "string" ? raw.fallback_reason : undefined,
@@ -4642,13 +4779,24 @@ function normalizeObjectiveWeight(value: string | number): number {
   return Math.min(1_000_000_000, Math.max(1, Math.round(parsed)));
 }
 
+function inheritedObjectiveTermConfig(
+  term: ObjectiveTermDefinition,
+  incomingTerms: Partial<Record<ObjectiveTermId, ObjectiveTermConfig>>,
+): ObjectiveTermConfig | undefined {
+  const direct = incomingTerms[term.id];
+  if (direct) return direct;
+  if (term.id === "target_relaxation") return incomingTerms.control_node_late;
+  if (term.id === "resource_slot_balance") return incomingTerms.resource_path_continuity;
+  return undefined;
+}
+
 function withDefaultScheduleStrategy(config?: ScheduleStrategyConfig | null): ScheduleStrategyConfig {
   const defaultTerms = defaultObjectiveTermsConfig();
   const incomingTerms: Partial<Record<ObjectiveTermId, ObjectiveTermConfig>> = config?.objective_terms ?? {};
   const objectiveTerms = objectiveTermDefinitions.reduce<Record<ObjectiveTermId, ObjectiveTermConfig>>((next, term) => {
-    const incoming = incomingTerms[term.id];
+    const incoming = inheritedObjectiveTermConfig(term, incomingTerms);
     next[term.id] = {
-      enabled: incoming?.enabled ?? true,
+      enabled: incoming?.enabled ?? term.defaultEnabled ?? true,
       weight: normalizeObjectiveWeight(incoming?.weight ?? term.defaultWeight),
     };
     return next;
@@ -4660,6 +4808,111 @@ function withDefaultScheduleStrategy(config?: ScheduleStrategyConfig | null): Sc
     objective_terms: objectiveTerms,
     enable_balance_objective: false,
   };
+}
+
+function objectiveTermDefinitionById(termId: string | undefined | null): ObjectiveTermDefinition | undefined {
+  return objectiveTermDefinitions.find((term) => term.id === termId);
+}
+
+function objectiveContributionSummaryFromResult(result: ScheduleResult | null): ObjectiveContributionSummary | null {
+  if (!result) return null;
+  const breakdown = result.objective_breakdown ?? {};
+  const rawContributions = breakdown.objective_contributions;
+  if (Array.isArray(rawContributions)) {
+    const items = rawContributions
+      .filter(isRecord)
+      .map(objectiveContributionFromRecord)
+      .filter((item): item is ObjectiveContribution => Boolean(item));
+    if (!items.length) return null;
+    return {
+      items,
+      total: numberFromUnknown(breakdown.weighted_objective) ?? items.reduce((sum, item) => sum + item.weighted_contribution, 0),
+      isLegacy: false,
+    };
+  }
+
+  const legacyItems = legacyObjectiveContributionsFromBreakdown(breakdown);
+  if (!legacyItems.length) return null;
+  return {
+    items: legacyItems,
+    total: numberFromUnknown(breakdown.weighted_objective) ?? legacyItems.reduce((sum, item) => sum + item.weighted_contribution, 0),
+    isLegacy: true,
+  };
+}
+
+function objectiveContributionFromRecord(item: Record<string, unknown>): ObjectiveContribution | null {
+  const termId = stringFromUnknown(item.term_id);
+  if (!termId) return null;
+  const definition = objectiveTermDefinitionById(termId);
+  const effectiveWeight = numberFromUnknown(item.effective_weight) ?? 0;
+  return {
+    term_id: termId,
+    label: stringFromUnknown(item.label) || definition?.label || termId,
+    group: stringFromUnknown(item.group) || definition?.group,
+    source: stringFromUnknown(item.source) || definition?.source || "objective",
+    enabled: Boolean(item.enabled),
+    active: Boolean(item.active),
+    configured_weight: numberFromUnknown(item.configured_weight) ?? effectiveWeight,
+    effective_weight: effectiveWeight,
+    raw_penalty: numberFromUnknown(item.raw_penalty) ?? 0,
+    weighted_contribution: numberFromUnknown(item.weighted_contribution) ?? 0,
+    applies_to: Array.isArray(item.applies_to) ? item.applies_to.map(String) : [],
+    parent_term_id: stringFromUnknown(item.parent_term_id) || definition?.parentTermId,
+    notes: stringFromUnknown(item.notes),
+  };
+}
+
+function legacyObjectiveContributionsFromBreakdown(breakdown: Record<string, unknown>): ObjectiveContribution[] {
+  const weights = isRecord(breakdown.objective_weights) ? breakdown.objective_weights : {};
+  const termsUsed = isRecord(breakdown.objective_terms_used) ? breakdown.objective_terms_used : {};
+  const rawPenaltyByTerm: Partial<Record<ObjectiveTermId, number>> = {
+    control_node_late: numberFromUnknown(breakdown.control_lateness_days) ?? 0,
+    control_buffer_risk: numberFromUnknown(breakdown.control_buffer_risk_penalty) ?? 0,
+    risk_related_control_wait: numberFromUnknown(breakdown.risk_related_control_wait_penalty ?? breakdown.control_resource_wait_penalty) ?? 0,
+    makespan_and_soft_milestone: numberFromUnknown(breakdown.makespan_days) ?? 0,
+    resource_path_continuity: numberFromUnknown(breakdown.resource_path_continuity_penalty) ?? 0,
+    resource_slot_balance: numberFromUnknown(breakdown.resource_slot_balance_penalty) ?? 0,
+    resource_idle: numberFromUnknown(breakdown.resource_idle_penalty) ?? 0,
+    target_relaxation: numberFromUnknown(breakdown.target_relaxation_penalty) ?? 0,
+  };
+
+  return objectiveTermDefinitions.map((definition) => {
+    const rawTermUsed = termsUsed[definition.id];
+    const termUsed: Record<string, unknown> = isRecord(rawTermUsed) ? rawTermUsed : {};
+    const effectiveWeight = numberFromUnknown(termUsed.effective_weight ?? weights[definition.id]) ?? 0;
+    const configuredWeight = numberFromUnknown(termUsed.weight) ?? definition.defaultWeight;
+    const rawPenalty = rawPenaltyByTerm[definition.id] ?? 0;
+    const enabled = typeof termUsed.enabled === "boolean" ? termUsed.enabled : effectiveWeight > 0;
+    const targetNotApplicable = definition.id === "target_relaxation" && !Boolean(breakdown.relax_target_constraints);
+    const active = effectiveWeight > 0 && !targetNotApplicable;
+    return {
+      term_id: definition.id,
+      label: definition.label,
+      group: definition.group,
+      source: definition.source ?? "objective",
+      enabled,
+      active,
+      configured_weight: configuredWeight,
+      effective_weight: effectiveWeight,
+      raw_penalty: rawPenalty,
+      weighted_contribution: active ? rawPenalty * effectiveWeight : 0,
+      applies_to: [definition.appliesTo],
+      parent_term_id: definition.parentTermId,
+      notes: targetNotApplicable ? "旧字段汇总：本次不是最佳努力精排分支。" : "旧字段汇总。",
+    };
+  });
+}
+
+function objectiveContributionStatus(item: ObjectiveContribution): string {
+  if (!item.enabled || item.effective_weight <= 0) return "未启用";
+  if (!item.active) return "本分支不适用";
+  if (item.raw_penalty === 0) return "已参与，无罚分";
+  return "已参与";
+}
+
+function formatObjectiveNumber(value: number): string {
+  if (!Number.isFinite(value)) return "-";
+  return Math.round(value).toLocaleString("zh-CN");
 }
 
 type SelectedResourceCost = {

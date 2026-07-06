@@ -2490,7 +2490,7 @@ def _apply_request_timing(result: ScheduleResult, started_at: float) -> None:
     timing = {
         "total_elapsed_seconds": elapsed,
         "request_elapsed_seconds": elapsed,
-        "solver_time_limit_enabled": False,
+        "solver_time_limit_enabled": result.stats.get("solver_time_limit_enabled", True),
     }
     result.stats.update(timing)
     result.objective_breakdown.update(timing)
