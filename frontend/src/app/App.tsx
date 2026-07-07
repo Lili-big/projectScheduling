@@ -279,6 +279,13 @@ const scheduleSourceLabels: Record<string, string> = {
   capacity_model_verified_schedule: "容量模型校验排程",
 };
 
+const drillGroupRefinementStatusLabels: Record<string, string> = {
+  not_applicable: "未触发两阶段",
+  coarse_only: "第一阶段粗排结果",
+  stage2_refined: "第二阶段细排结果",
+  stage2_fallback: "第一阶段粗排结果",
+};
+
 const resourcePathStatusLabels: Record<string, string> = {
   smooth: "顺畅",
   reasonable_jump: "有合理跨越",
@@ -1985,10 +1992,17 @@ function ResultsTab({
               <strong>{refinementSummary.scheduleSource}</strong>
             </div>
             <div>
+              <span>采用阶段</span>
+              <strong>{refinementSummary.stageLabel}</strong>
+            </div>
+            <div>
               <span>资源路径状态</span>
               <strong>{refinementSummary.resourcePathStatus}</strong>
             </div>
           </div>
+          {refinementSummary.stageDescription && (
+            <p>{refinementSummary.stageDescription}</p>
+          )}
           {refinementSummary.fallbackReason && (
             <p>{refinementSummary.source.startsWith("minimum_resources_") ? "最少资源候选精排未作为主结果展示，当前保留已验证的候选排程：" : "命名资源精排未作为主结果展示，当前已回退到固定资源参考排程："}{refinementSummary.fallbackReason}</p>
           )}
@@ -2342,7 +2356,7 @@ function ResultsTab({
                 </thead>
                 <tbody>
                   <tr>
-                    <td>{drillGroupRefinement.status}</td>
+                    <td>{drillGroupRefinementStatusLabels[drillGroupRefinement.status] ?? drillGroupRefinement.status}</td>
                     <td>{drillGroupRefinement.coarse_group_count}</td>
                     <td>{drillGroupRefinement.stage2_node_count}</td>
                     <td>{drillGroupRefinement.stage2_arc_count}</td>
@@ -4249,6 +4263,8 @@ type RefinementSummary = {
   baselineDays: string;
   hardMilestoneStatus: string;
   scheduleSource: string;
+  stageLabel: string;
+  stageDescription: string;
   resourcePathStatus: string;
   fallbackReason: string;
   bestEffortMessage: string;
@@ -4557,6 +4573,7 @@ function refinementSummaryFromResult(result: ScheduleResult | null): RefinementS
   const source = stringFromUnknown(result.objective_breakdown?.schedule_source ?? result.stats?.schedule_source);
   if (!analysis && !source) return null;
   const bestEffort = bestEffortRefinementFromResult(result);
+  const stageSummary = refinementStageSummaryFromResult(result, source);
   const isBestEffort = Boolean(bestEffort?.enabled)
     || source === "current_resources_best_effort_refinement"
     || source === "minimum_resources_best_effort_refinement";
@@ -4587,9 +4604,66 @@ function refinementSummaryFromResult(result: ScheduleResult | null): RefinementS
       ? (hardLateCount > 0 ? `不满足 ${hardLateCount} 个` : "全部满足")
       : "未配置",
     scheduleSource: scheduleSourceLabels[source] ?? (source || "-"),
+    stageLabel: stageSummary.label,
+    stageDescription: stageSummary.description,
     resourcePathStatus: resourcePathStatusLabels[resourcePathStatus] ?? resourcePathStatus,
     fallbackReason,
     bestEffortMessage: bestEffortMessage(bestEffort),
+  };
+}
+
+function refinementStageSummaryFromResult(result: ScheduleResult, source: string): { label: string; description: string } {
+  if (source === "current_resources_refinement_failed") {
+    return {
+      label: "第一阶段精排失败",
+      description: "当前资源未得到可用的命名资源第一阶段精排结果，主流程已进入资源建议。",
+    };
+  }
+  if (source === "current_resources_capacity_shortest_fallback") {
+    return {
+      label: "固定资源参考排程",
+      description: "当前展示的是固定资源参考排程，不是桩基钻机两阶段精排结果。",
+    };
+  }
+
+  const drillGroup = drillGroupRefinementFromResult(result);
+  if (drillGroup && drillGroup.coarse_group_count > 0) {
+    if (drillGroup.status === "stage2_refined") {
+      return {
+        label: "第二阶段细排结果",
+        description: "系统先完成第一阶段墩组到桩机分配，再采用第二阶段路径细排结果作为当前主排程。",
+      };
+    }
+    if (drillGroup.status === "stage2_fallback") {
+      return {
+        label: "第一阶段粗排结果",
+        description: drillGroup.fallback_reason
+          ? `第二阶段路径细排未作为主结果展示，当前回退第一阶段粗排展开结果：${drillGroup.fallback_reason}。`
+          : "第二阶段路径细排未作为主结果展示，当前回退第一阶段粗排展开结果。",
+      };
+    }
+    if (drillGroup.status === "coarse_only") {
+      return {
+        label: "第一阶段粗排结果",
+        description: "本次只采用第一阶段墩组资源分配和粗排结果，未进入第二阶段路径细排。",
+      };
+    }
+    return {
+      label: drillGroupRefinementStatusLabels[drillGroup.status] ?? drillGroup.status,
+      description: "本次存在桩基钻机墩组精排诊断，请结合下方“桩基墩组精排”表复核阶段状态。",
+    };
+  }
+
+  if (source === "current_resources_control_priority_balanced") {
+    return {
+      label: "常规命名资源精排",
+      description: "本次没有触发桩基钻机两阶段精排，当前主结果来自常规命名资源精排。",
+    };
+  }
+
+  return {
+    label: scheduleSourceLabels[source] ?? (source || "-"),
+    description: "",
   };
 }
 

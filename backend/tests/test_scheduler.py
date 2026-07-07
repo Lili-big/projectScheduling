@@ -2102,7 +2102,7 @@ def test_drill_group_two_stage_reduces_path_arcs_to_actual_assignments() -> None
     assert result.stats["continuity_objective"]["resource_path_transition_arc_count"] == diagnostic["stage2_arc_count"]
 
 
-def test_drill_group_stage2_sparse_arcs_use_same_and_opposite_side_two_pier_window() -> None:
+def test_drill_group_stage2_sparse_arcs_use_same_side_two_and_cross_side_one_visible_window() -> None:
     pytest.importorskip("ortools")
 
     def pile_task(side: str, pier_no: int) -> Task:
@@ -2149,9 +2149,95 @@ def test_drill_group_stage2_sparse_arcs_use_same_and_opposite_side_two_pier_wind
     assert diagnostic["status"] == "stage2_refined"
     assert diagnostic["coarse_group_count"] == 12
     assert diagnostic["baseline_candidate_arc_count"] == 12 * 11
-    assert diagnostic["stage2_arc_count"] == 84
-    assert objective["resource_path_transition_arc_count"] == 84
+    assert diagnostic["stage2_arc_count"] == 68
+    assert objective["resource_path_transition_arc_count"] == 68
     assert objective["resource_path_sparse_support_window"] == 2
+    assert objective["resource_path_sparse_same_side_window"] == 2
+    assert objective["resource_path_sparse_cross_side_window"] == 1
+
+
+def test_drill_group_stage2_sparse_arcs_use_visible_support_distance_when_middle_piers_absent() -> None:
+    def pile_task(side: str, pier_no: int) -> Task:
+        return _solver_task(
+            f"P{side}{pier_no:02d}-VISIBLE-PILE-01",
+            f"{side}{pier_no} visible pile",
+            5,
+            "rotary_drill",
+        ).model_copy(
+            update={
+                "bridge_id": "B1",
+                "work_section_id": f"WS-{side}",
+                "sequence_order": pier_no * 100 + (0 if side == "L" else 1),
+                "structure_id": f"B1-{side}-P{pier_no:02d}",
+                "structure_name": f"{pier_no}# pier",
+                "structure_type": "pier",
+                "component_type": "pile",
+                "process_name": "pile",
+                "quantity_label": "1",
+            }
+        )
+
+    resource = Resource(id="rotary_1", name="Rotary 1", type="rotary_drill")
+    same_side_sparse_nodes = [
+        (1, {"representative_task": pile_task("R", 1)}),
+        (2, {"representative_task": pile_task("R", 4)}),
+    ]
+    same_side_sparse_context = solver_module._resource_path_visible_support_context(
+        same_side_sparse_nodes
+    )
+
+    assert solver_module._resource_path_transition_candidate_allowed(
+        resource,
+        same_side_sparse_nodes[0][1],
+        same_side_sparse_nodes[1][1],
+        same_side_sparse_context,
+    )
+
+    cross_side_sparse_nodes = [
+        (1, {"representative_task": pile_task("R", 1)}),
+        (2, {"representative_task": pile_task("L", 4)}),
+    ]
+    cross_side_sparse_context = solver_module._resource_path_visible_support_context(
+        cross_side_sparse_nodes
+    )
+
+    assert solver_module._resource_path_transition_candidate_allowed(
+        resource,
+        cross_side_sparse_nodes[0][1],
+        cross_side_sparse_nodes[1][1],
+        cross_side_sparse_context,
+    )
+
+    same_side_dense_nodes = [
+        (index, {"representative_task": pile_task("R", pier_no)})
+        for index, pier_no in enumerate([1, 2, 3, 4], start=1)
+    ]
+    same_side_dense_context = solver_module._resource_path_visible_support_context(
+        same_side_dense_nodes
+    )
+
+    assert not solver_module._resource_path_transition_candidate_allowed(
+        resource,
+        same_side_dense_nodes[0][1],
+        same_side_dense_nodes[3][1],
+        same_side_dense_context,
+    )
+
+    cross_side_dense_nodes = [
+        (1, {"representative_task": pile_task("R", 1)}),
+        (2, {"representative_task": pile_task("L", 2)}),
+        (3, {"representative_task": pile_task("L", 4)}),
+    ]
+    cross_side_dense_context = solver_module._resource_path_visible_support_context(
+        cross_side_dense_nodes
+    )
+
+    assert not solver_module._resource_path_transition_candidate_allowed(
+        resource,
+        cross_side_dense_nodes[0][1],
+        cross_side_dense_nodes[2][1],
+        cross_side_dense_context,
+    )
 
 
 def test_manual_pile_team_does_not_enter_drill_group_refinement() -> None:
@@ -2311,6 +2397,127 @@ def test_drill_group_external_precedence_lifts_to_group_boundary() -> None:
     assert min(by_task[task.id].start_offset for task in group_tasks) >= by_task[predecessor.id].end_offset
 
 
+def test_drill_group_stage2_accepts_longer_refined_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("ortools")
+    original_refinement = solver_module.solve_control_priority_schedule
+
+    def longer_refined_stage(schedule_input: ScheduleInput, **kwargs: object) -> ScheduleResult:
+        if kwargs.get("_drill_group_stage") == "refined":
+            assert "_hard_max_makespan_days" not in kwargs
+            coarse_result = kwargs["warm_start_result"]
+            assert isinstance(coarse_result, ScheduleResult)
+            assert coarse_result.objective_days is not None
+            refined = coarse_result.model_copy(deep=True)
+            refined.status = "FEASIBLE"
+            refined.objective_days = coarse_result.objective_days + 3
+            refined.plan_finish_date = schedule_input.start_date + timedelta(days=refined.objective_days - 1)
+            payload = dict(refined.stats.get("drill_group_refinement") or {})
+            payload["status"] = "stage2_refined"
+            refined.stats["drill_group_refinement"] = payload
+            refined.objective_breakdown["drill_group_refinement"] = payload
+            refined.objective_breakdown["drill_group_refinement_status"] = "stage2_refined"
+            return refined
+        return original_refinement(schedule_input, **kwargs)
+
+    monkeypatch.setattr(solver_module, "solve_control_priority_schedule", longer_refined_stage)
+    tasks = _multi_pier_pile_tasks("rotary_drill", pier_count=3, piles_per_pier=2)
+
+    result = original_refinement(
+        ScheduleInput(
+            project_name="accept longer stage2",
+            start_date=date(2026, 1, 1),
+            tasks=tasks,
+            precedence_links=[],
+            resources=[Resource(id="rotary_1", name="Rotary 1", type="rotary_drill")],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("resource_path_continuity", 3_000),
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    diagnostic = result.stats["drill_group_refinement"]
+    contribution_ids = {
+        item["term_id"]
+        for item in result.objective_breakdown["objective_contributions"]
+    }
+
+    assert result.status == "FEASIBLE"
+    assert diagnostic["status"] == "stage2_refined"
+    assert diagnostic["stage2_makespan_days"] == diagnostic["stage1_makespan_days"] + 3
+    assert diagnostic["stage2_makespan_delta_days"] == 3
+    assert result.objective_days == diagnostic["stage2_makespan_days"]
+    assert "stage2_makespan_delta_days" not in contribution_ids
+
+
+def test_drill_group_stage2_rejects_late_hard_milestone(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("ortools")
+    original_refinement = solver_module.solve_control_priority_schedule
+
+    def late_hard_refined_stage(schedule_input: ScheduleInput, **kwargs: object) -> ScheduleResult:
+        if kwargs.get("_drill_group_stage") == "refined":
+            coarse_result = kwargs["warm_start_result"]
+            assert isinstance(coarse_result, ScheduleResult)
+            milestone = schedule_input.milestones[0]
+            refined = coarse_result.model_copy(deep=True)
+            refined.status = "FEASIBLE"
+            refined.objective_days = (coarse_result.objective_days or 0) + 1
+            refined.milestone_results = [
+                MilestoneResult(
+                    **milestone.model_dump(),
+                    actual_date=milestone.target_date + timedelta(days=1),
+                    actual_offset=91,
+                    lateness_days=1,
+                    status="late",
+                )
+            ]
+            payload = dict(refined.stats.get("drill_group_refinement") or {})
+            payload["status"] = "stage2_refined"
+            refined.stats["drill_group_refinement"] = payload
+            refined.objective_breakdown["drill_group_refinement"] = payload
+            refined.objective_breakdown["drill_group_refinement_status"] = "stage2_refined"
+            return refined
+        return original_refinement(schedule_input, **kwargs)
+
+    monkeypatch.setattr(solver_module, "solve_control_priority_schedule", late_hard_refined_stage)
+    start = date(2026, 1, 1)
+    tasks = _multi_pier_pile_tasks("rotary_drill", pier_count=3, piles_per_pier=2)
+
+    result = original_refinement(
+        ScheduleInput(
+            project_name="reject late hard stage2",
+            start_date=start,
+            tasks=tasks,
+            precedence_links=[],
+            resources=[Resource(id="rotary_1", name="Rotary 1", type="rotary_drill")],
+            milestones=[
+                MilestoneConstraint(
+                    id="M-hard",
+                    name="Hard finish",
+                    level="contract",
+                    mode="hard",
+                    scope_type="project",
+                    target_event="finish",
+                    target_date=start + timedelta(days=90),
+                )
+            ],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("resource_path_continuity", 3_000),
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    diagnostic = result.stats["drill_group_refinement"]
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert diagnostic["status"] == "stage2_fallback"
+    assert diagnostic["fallback_reason"] == "stage2_hard_milestone_late"
+    assert all(milestone.lateness_days == 0 for milestone in result.milestone_results)
+
+
 def test_drill_group_stage2_failure_returns_coarse_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     pytest.importorskip("ortools")
     original_refinement = solver_module.solve_control_priority_schedule
@@ -2347,7 +2554,57 @@ def test_drill_group_stage2_failure_returns_coarse_fallback(monkeypatch: pytest.
     assert result.status in {"OPTIMAL", "FEASIBLE"}
     assert diagnostic["status"] == "stage2_fallback"
     assert diagnostic["fallback_reason"] == "stage2_infeasible"
+    assert diagnostic["stage2_node_count"] == 3
+    assert diagnostic["stage2_arc_count"] == 6
+    path_diagnostics = diagnostic["stage2_path_diagnostics_by_resource"]
+    assert len(path_diagnostics) == 1
+    assert path_diagnostics[0]["resource_id"] == "rotary_1"
+    assert path_diagnostics[0]["path_node_count"] == 3
+    assert path_diagnostics[0]["candidate_transition_arc_count"] == 6
+    assert path_diagnostics[0]["coarse_order_violation_count"] == 0
     assert {task.id for task in result.tasks} == {task.id for task in tasks}
+
+
+def test_drill_group_stage2_path_diagnostics_count_coarse_order_violations() -> None:
+    tasks = _multi_pier_pile_tasks("rotary_drill", pier_count=4, piles_per_pier=1)
+    resources = [Resource(id="rotary_1", name="Rotary 1", type="rotary_drill")]
+    candidates = solver_module._resource_candidates_by_task(tasks, resources)
+    groups = solver_module._build_drill_group_nodes(tasks, candidates, resources)
+    task_by_structure = {task.structure_id: task for task in tasks}
+    coarse_order = [
+        task_by_structure["B1-L-P01"],
+        task_by_structure["B1-L-P04"],
+        task_by_structure["B1-L-P02"],
+        task_by_structure["B1-L-P03"],
+    ]
+    scheduled = [
+        ScheduledTask(
+            **task.model_dump(),
+            start_offset=index * task.duration_days,
+            end_offset=(index + 1) * task.duration_days,
+            start_date=date(2026, 1, 1) + timedelta(days=index * task.duration_days),
+            finish_date=date(2026, 1, 1) + timedelta(days=(index + 1) * task.duration_days - 1),
+            assigned_resource_id="rotary_1",
+            assigned_resource_name="Rotary 1",
+            assigned_resource_type="rotary_drill",
+        )
+        for index, task in enumerate(coarse_order)
+    ]
+
+    diagnostics = solver_module._drill_group_stage2_path_diagnostics_by_resource(
+        groups,
+        scheduled,
+        resources,
+    )
+
+    assert len(diagnostics) == 1
+    assert diagnostics[0]["path_node_count"] == 4
+    assert diagnostics[0]["all_directed_transition_pair_count"] == 12
+    assert diagnostics[0]["candidate_transition_arc_count"] == 10
+    assert diagnostics[0]["coarse_order_transition_count"] == 3
+    assert diagnostics[0]["coarse_order_violation_count"] == 1
+    assert diagnostics[0]["coarse_order_violation_examples"][0]["from_structure_id"] == "B1-L-P01"
+    assert diagnostics[0]["coarse_order_violation_examples"][0]["to_structure_id"] == "B1-L-P04"
 
 
 def test_drill_group_jump_penalties_use_existing_sparse_sequence_only() -> None:

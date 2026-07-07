@@ -45,6 +45,7 @@ DEFAULT_CONTINUOUS_CLOSURE_FINISH_GAP_DAYS = 7
 MINIMUM_RESOURCES_BEST_EFFORT_SOURCE = "minimum_resources_best_effort_refinement"
 MECHANICAL_DRILL_RESOURCE_TYPES = frozenset({"rotary_drill", "circulation_drill", "impact_drill"})
 MECHANICAL_DRILL_PATH_SUPPORT_WINDOW = 2
+MECHANICAL_DRILL_CROSS_SIDE_SUPPORT_WINDOW = 1
 
 
 @dataclass(frozen=True)
@@ -628,12 +629,113 @@ def _drill_group_baseline_candidate_arc_count(groups: list[_DrillGroupNode]) -> 
     return sum(len(group_ids) * (len(group_ids) - 1) for group_ids in group_ids_by_resource.values())
 
 
+def _drill_group_stage2_path_diagnostics_by_resource(
+    groups: list[_DrillGroupNode],
+    scheduled_tasks: list[ScheduledTask],
+    enabled_resources: list[Resource],
+) -> list[dict[str, Any]]:
+    scheduled_by_id = {task.id: task for task in scheduled_tasks}
+    resource_by_id = {
+        resource.id: resource
+        for resource in enabled_resources
+        if resource.type in MECHANICAL_DRILL_RESOURCE_TYPES
+    }
+    groups_by_resource: dict[str, list[tuple[_DrillGroupNode, int, int]]] = defaultdict(list)
+    for group in groups:
+        resource_ids = {
+            scheduled_by_id[task_id].assigned_resource_id
+            for task_id in group.child_task_ids
+            if task_id in scheduled_by_id and scheduled_by_id[task_id].assigned_resource_id
+        }
+        if len(resource_ids) != 1:
+            continue
+        resource_id = next(iter(resource_ids))
+        if resource_id not in resource_by_id:
+            continue
+        starts = [
+            scheduled_by_id[task_id].start_offset
+            for task_id in group.child_task_ids
+            if task_id in scheduled_by_id
+        ]
+        ends = [
+            scheduled_by_id[task_id].end_offset
+            for task_id in group.child_task_ids
+            if task_id in scheduled_by_id
+        ]
+        groups_by_resource[resource_id].append((group, min(starts or [0]), max(ends or [0])))
+
+    diagnostics: list[dict[str, Any]] = []
+    for resource in sorted(resource_by_id.values(), key=_resource_sort_key):
+        assigned_groups = sorted(
+            groups_by_resource.get(resource.id, []),
+            key=lambda item: (item[1], item[2], item[0].group_id),
+        )
+        path_nodes = [
+            {
+                "representative_task": group.representative_task,
+                "group": group,
+                "start_offset": start_offset,
+                "end_offset": end_offset,
+            }
+            for group, start_offset, end_offset in assigned_groups
+        ]
+        indexed_nodes = list(enumerate(path_nodes, start=1))
+        node_count = len(indexed_nodes)
+        allowed_pairs = (
+            _resource_path_allowed_transition_pairs(resource, indexed_nodes)
+            if node_count > 1
+            else set()
+        )
+        coarse_order_transition_count = max(0, node_count - 1)
+        coarse_order_allowed_count = 0
+        violation_examples: list[dict[str, Any]] = []
+        for (previous_index, previous_node), (current_index, current_node) in zip(
+            indexed_nodes,
+            indexed_nodes[1:],
+        ):
+            if (previous_index, current_index) in allowed_pairs:
+                coarse_order_allowed_count += 1
+                continue
+            if len(violation_examples) < 5:
+                previous_group = previous_node["group"]
+                current_group = current_node["group"]
+                violation_examples.append(
+                    {
+                        "from_group_id": previous_group.group_id,
+                        "to_group_id": current_group.group_id,
+                        "from_structure_id": previous_group.structure_id,
+                        "to_structure_id": current_group.structure_id,
+                        "from_start_offset": previous_node["start_offset"],
+                        "to_start_offset": current_node["start_offset"],
+                    }
+                )
+
+        child_task_count = sum(len(group.child_task_ids) for group, _, _ in assigned_groups)
+        diagnostics.append(
+            {
+                "resource_id": resource.id,
+                "resource_name": resource.name,
+                "resource_type": resource.type,
+                "path_node_count": node_count,
+                "assigned_child_task_count": child_task_count,
+                "all_directed_transition_pair_count": node_count * (node_count - 1),
+                "candidate_transition_arc_count": len(allowed_pairs),
+                "coarse_order_transition_count": coarse_order_transition_count,
+                "coarse_order_allowed_transition_count": coarse_order_allowed_count,
+                "coarse_order_violation_count": coarse_order_transition_count - coarse_order_allowed_count,
+                "coarse_order_violation_examples": violation_examples,
+            }
+        )
+    return diagnostics
+
+
 def _drill_group_refinement_payload(
     *,
     status: str,
     groups: list[_DrillGroupNode],
     scheduled_tasks: list[ScheduledTask],
     path_metadata: dict[str, Any] | None = None,
+    stage2_path_diagnostics_by_resource: list[dict[str, Any]] | None = None,
     fallback_reason: str | None = None,
     makespan_tolerance: int = 0,
 ) -> dict[str, Any]:
@@ -641,17 +743,26 @@ def _drill_group_refinement_payload(
     assignment_by_group = _drill_group_assignment_by_group(groups, scheduled_tasks)
     penalties = _drill_group_assignment_penalties(groups, assignment_by_group)
     baseline_arc_count = _drill_group_baseline_candidate_arc_count(groups)
-    stage2_arc_count = int(path_metadata.get("resource_path_transition_arc_count") or 0)
+    diagnostic_node_count = sum(
+        int(item.get("path_node_count") or 0)
+        for item in stage2_path_diagnostics_by_resource or []
+    )
+    diagnostic_arc_count = sum(
+        int(item.get("candidate_transition_arc_count") or 0)
+        for item in stage2_path_diagnostics_by_resource or []
+    )
+    stage2_node_count = int(path_metadata.get("resource_path_node_count") or diagnostic_node_count)
+    stage2_arc_count = int(path_metadata.get("resource_path_transition_arc_count") or diagnostic_arc_count)
     arc_reduction_ratio = (
         round((baseline_arc_count - stage2_arc_count) / baseline_arc_count, 4)
         if baseline_arc_count > 0
         else 0.0
     )
-    return {
+    payload = {
         "status": status,
         "coarse_group_count": len(groups),
         "coarse_child_task_count": len(_drill_group_task_ids(groups)),
-        "stage2_node_count": int(path_metadata.get("resource_path_node_count") or 0),
+        "stage2_node_count": stage2_node_count,
         "stage2_arc_count": stage2_arc_count,
         "baseline_candidate_arc_count": baseline_arc_count,
         "arc_reduction_ratio": arc_reduction_ratio,
@@ -660,6 +771,9 @@ def _drill_group_refinement_payload(
         "makespan_tolerance": makespan_tolerance,
         "fallback_reason": fallback_reason,
     }
+    if stage2_path_diagnostics_by_resource is not None:
+        payload["stage2_path_diagnostics_by_resource"] = stage2_path_diagnostics_by_resource
+    return payload
 
 
 def _attach_drill_group_refinement_metadata(
@@ -669,6 +783,33 @@ def _attach_drill_group_refinement_metadata(
     result.stats["drill_group_refinement"] = payload
     result.objective_breakdown["drill_group_refinement"] = payload
     result.objective_breakdown["drill_group_refinement_status"] = payload.get("status")
+    return result
+
+
+def _has_late_hard_milestone(result: ScheduleResult) -> bool:
+    return any(
+        milestone.mode == "hard" and milestone.lateness_days > 0
+        for milestone in result.milestone_results
+    )
+
+
+def _attach_stage2_makespan_delta(
+    result: ScheduleResult,
+    *,
+    stage1_makespan_days: int | None,
+    stage2_makespan_days: int | None,
+) -> ScheduleResult:
+    if stage1_makespan_days is None or stage2_makespan_days is None:
+        return result
+    delta_payload = {
+        "stage1_makespan_days": int(stage1_makespan_days),
+        "stage2_makespan_days": int(stage2_makespan_days),
+        "stage2_makespan_delta_days": int(stage2_makespan_days) - int(stage1_makespan_days),
+    }
+    for container in (result.stats, result.objective_breakdown):
+        payload = container.get("drill_group_refinement")
+        if isinstance(payload, dict):
+            payload.update(delta_payload)
     return result
 
 
@@ -1302,7 +1443,6 @@ def solve_control_priority_schedule(
     _fixed_resource_by_task_id: dict[str, str] | None = None,
     _path_task_filter_by_resource: dict[str, set[str]] | None = None,
     _path_filter_task_ids: set[str] | None = None,
-    _hard_max_makespan_days: int | None = None,
 ) -> ScheduleResult:
     started_at = time.perf_counter()
     if baseline_result is None:
@@ -1350,12 +1490,18 @@ def solve_control_priority_schedule(
             return coarse_result
 
         fixed_resource_by_task_id = _fixed_resources_from_drill_groups(drill_groups, coarse_result.tasks)
+        stage2_path_diagnostics_by_resource = _drill_group_stage2_path_diagnostics_by_resource(
+            drill_groups,
+            coarse_result.tasks,
+            enabled_resources,
+        )
         if not fixed_resource_by_task_id:
             fallback_payload = _drill_group_refinement_payload(
                 status="stage2_fallback",
                 groups=drill_groups,
                 scheduled_tasks=coarse_result.tasks,
                 path_metadata=(coarse_result.stats.get("continuity_objective") or {}),
+                stage2_path_diagnostics_by_resource=stage2_path_diagnostics_by_resource,
                 fallback_reason="coarse_group_assignment_missing",
             )
             return _attach_drill_group_refinement_metadata(coarse_result, fallback_payload)
@@ -1371,29 +1517,31 @@ def solve_control_priority_schedule(
             _fixed_resource_by_task_id=fixed_resource_by_task_id,
             _path_task_filter_by_resource=_drill_group_path_filter_by_resource(drill_groups, fixed_resource_by_task_id),
             _path_filter_task_ids=_drill_group_task_ids(drill_groups),
-            _hard_max_makespan_days=coarse_result.objective_days,
         )
         if (
             refined_result.status in {"OPTIMAL", "FEASIBLE"}
-            and refined_result.objective_days is not None
-            and coarse_result.objective_days is not None
-            and refined_result.objective_days <= coarse_result.objective_days
+            and (relax_target_constraints or not _has_late_hard_milestone(refined_result))
         ):
-            return refined_result
+            return _attach_stage2_makespan_delta(
+                refined_result,
+                stage1_makespan_days=coarse_result.objective_days,
+                stage2_makespan_days=refined_result.objective_days,
+            )
 
         fallback = coarse_result.model_copy(deep=True)
         fallback_reason = f"stage2_{refined_result.status.lower()}"
         if (
-            refined_result.objective_days is not None
-            and coarse_result.objective_days is not None
-            and refined_result.objective_days > coarse_result.objective_days
+            not relax_target_constraints
+            and refined_result.status in {"OPTIMAL", "FEASIBLE"}
+            and _has_late_hard_milestone(refined_result)
         ):
-            fallback_reason = "stage2_makespan_exceeded"
+            fallback_reason = "stage2_hard_milestone_late"
         fallback_payload = _drill_group_refinement_payload(
             status="stage2_fallback",
             groups=drill_groups,
             scheduled_tasks=fallback.tasks,
             path_metadata=(fallback.stats.get("continuity_objective") or {}),
+            stage2_path_diagnostics_by_resource=stage2_path_diagnostics_by_resource,
             fallback_reason=fallback_reason,
         )
         fallback.validation.append(
@@ -1527,8 +1675,6 @@ def solve_control_priority_schedule(
             model.Add(fixed_duration_overrun_var >= makespan - max_makespan_days)
         else:
             model.Add(makespan <= max_makespan_days)
-    if _hard_max_makespan_days is not None:
-        model.Add(makespan <= int(_hard_max_makespan_days))
 
     for milestone in schedule_input.milestones:
         scoped_task_ids = _task_ids_for_milestone(milestone, schedule_input.tasks)
@@ -1696,11 +1842,34 @@ def solve_control_priority_schedule(
     }
     if max_makespan_days is not None:
         stats["max_makespan_days"] = max_makespan_days
-    if _hard_max_makespan_days is not None:
-        stats["hard_max_makespan_days"] = int(_hard_max_makespan_days)
     if relax_target_constraints:
         stats["relaxed_target_constraint_count"] = len(relaxed_hard_lateness_vars) + (
             1 if fixed_duration_overrun_var is not None else 0
+        )
+    stage2_path_diagnostics_by_resource: list[dict[str, Any]] | None = None
+    if (
+        _drill_group_stage == "refined"
+        and drill_groups
+        and warm_start_result is not None
+        and warm_start_result.status in {"OPTIMAL", "FEASIBLE"}
+    ):
+        stage2_path_diagnostics_by_resource = _drill_group_stage2_path_diagnostics_by_resource(
+            drill_groups,
+            warm_start_result.tasks,
+            enabled_resources,
+        )
+        stats["stage2_path_diagnostics_by_resource"] = stage2_path_diagnostics_by_resource
+        stats["stage2_path_node_count"] = sum(
+            int(item.get("path_node_count") or 0)
+            for item in stage2_path_diagnostics_by_resource
+        )
+        stats["stage2_path_candidate_arc_count"] = sum(
+            int(item.get("candidate_transition_arc_count") or 0)
+            for item in stage2_path_diagnostics_by_resource
+        )
+        stats["stage2_coarse_order_violation_count"] = sum(
+            int(item.get("coarse_order_violation_count") or 0)
+            for item in stage2_path_diagnostics_by_resource
         )
 
     if status not in {"OPTIMAL", "FEASIBLE"}:
@@ -1859,6 +2028,7 @@ def solve_control_priority_schedule(
         groups=drill_groups,
         scheduled_tasks=scheduled_tasks,
         path_metadata=stats["continuity_objective"],
+        stage2_path_diagnostics_by_resource=stage2_path_diagnostics_by_resource,
     )
     stats["drill_group_refinement"] = drill_group_payload
     stats["normal_balance_metrics"] = normal_balance_metrics
@@ -2879,6 +3049,8 @@ def _empty_resource_path_terms(
             "resource_path_task_candidate_count": sum(len(items) for items in assignments_by_resource.values()),
             "resource_slot_balance_term_count": 0,
             "resource_path_sparse_support_window": MECHANICAL_DRILL_PATH_SUPPORT_WINDOW,
+            "resource_path_sparse_same_side_window": MECHANICAL_DRILL_PATH_SUPPORT_WINDOW,
+            "resource_path_sparse_cross_side_window": MECHANICAL_DRILL_CROSS_SIDE_SUPPORT_WINDOW,
         },
     }
 
@@ -2909,6 +3081,8 @@ def _build_resource_path_continuity_terms(
         "resource_path_transition_arc_count": 0,
         "resource_path_task_candidate_count": sum(len(items) for items in assignments_by_resource.values()),
         "resource_path_sparse_support_window": MECHANICAL_DRILL_PATH_SUPPORT_WINDOW,
+        "resource_path_sparse_same_side_window": MECHANICAL_DRILL_PATH_SUPPORT_WINDOW,
+        "resource_path_sparse_cross_side_window": MECHANICAL_DRILL_CROSS_SIDE_SUPPORT_WINDOW,
     }
 
     for resource_id, task_assignments in assignments_by_resource.items():
@@ -3179,6 +3353,7 @@ def _resource_path_allowed_transition_pairs(
         return all_pairs
 
     node_by_index = {node_index: node for node_index, node in indexed_nodes}
+    visible_support_context = _resource_path_visible_support_context(indexed_nodes)
     allowed_pairs = {
         (previous_index, current_index)
         for previous_index, current_index in all_pairs
@@ -3186,6 +3361,7 @@ def _resource_path_allowed_transition_pairs(
             resource,
             node_by_index[previous_index],
             node_by_index[current_index],
+            visible_support_context,
         )
     }
     outgoing = {previous_index for previous_index, _ in allowed_pairs}
@@ -3196,10 +3372,56 @@ def _resource_path_allowed_transition_pairs(
     return allowed_pairs
 
 
+def _resource_path_visible_support_context(
+    indexed_nodes: list[tuple[int, dict[str, Any]]],
+) -> dict[str, dict[tuple[Any, ...], dict[int, int]]]:
+    same_side_supports: dict[tuple[Any, ...], set[int]] = defaultdict(set)
+    cross_side_supports: dict[tuple[Any, ...], set[int]] = defaultdict(set)
+    for _, node in indexed_nodes:
+        task = node["representative_task"]
+        location = _task_location(task)
+        support_index = location["support_index"]
+        if location["structure_type"] != "pier" or support_index is None:
+            continue
+        side = location["side"] or "N"
+        base_key = (task.bridge_id or "", task.component_type, task.process_name)
+        same_side_supports[(*base_key, side)].add(support_index)
+        if side in {"L", "R"}:
+            cross_side_supports[base_key].add(support_index)
+
+    return {
+        "same_side": {
+            key: {support_index: position for position, support_index in enumerate(sorted(supports))}
+            for key, supports in same_side_supports.items()
+        },
+        "cross_side": {
+            key: {support_index: position for position, support_index in enumerate(sorted(supports))}
+            for key, supports in cross_side_supports.items()
+        },
+    }
+
+
+def _visible_support_distance(
+    positions_by_key: dict[tuple[Any, ...], dict[int, int]],
+    key: tuple[Any, ...],
+    previous_support_index: int,
+    current_support_index: int,
+) -> int:
+    positions = positions_by_key.get(key)
+    if not positions:
+        return abs(current_support_index - previous_support_index)
+    previous_position = positions.get(previous_support_index)
+    current_position = positions.get(current_support_index)
+    if previous_position is None or current_position is None:
+        return abs(current_support_index - previous_support_index)
+    return abs(current_position - previous_position)
+
+
 def _resource_path_transition_candidate_allowed(
     resource: Resource,
     previous_node: dict[str, Any],
     current_node: dict[str, Any],
+    visible_support_context: dict[str, dict[tuple[Any, ...], dict[int, int]]],
 ) -> bool:
     previous_task = previous_node["representative_task"]
     current_task = current_node["representative_task"]
@@ -3219,15 +3441,28 @@ def _resource_path_transition_candidate_allowed(
     if previous_task.process_name != current_task.process_name:
         return False
 
-    support_gap = abs(current_location["support_index"] - previous_location["support_index"])
-    if support_gap > MECHANICAL_DRILL_PATH_SUPPORT_WINDOW:
-        return False
-
     previous_side = previous_location["side"] or "N"
     current_side = current_location["side"] or "N"
+    previous_support_index = previous_location["support_index"]
+    current_support_index = current_location["support_index"]
+    base_key = (previous_task.bridge_id or "", previous_task.component_type, previous_task.process_name)
     if previous_side == current_side:
-        return support_gap > 0
-    return previous_side in {"L", "R"} and current_side in {"L", "R"}
+        same_side_distance = _visible_support_distance(
+            visible_support_context["same_side"],
+            (*base_key, previous_side),
+            previous_support_index,
+            current_support_index,
+        )
+        return 0 < same_side_distance <= MECHANICAL_DRILL_PATH_SUPPORT_WINDOW
+    if previous_side in {"L", "R"} and current_side in {"L", "R"}:
+        cross_side_distance = _visible_support_distance(
+            visible_support_context["cross_side"],
+            base_key,
+            previous_support_index,
+            current_support_index,
+        )
+        return cross_side_distance <= MECHANICAL_DRILL_CROSS_SIDE_SUPPORT_WINDOW
+    return False
 
 
 def _resource_path_transition_penalties(previous_task: Task, current_task: Task) -> tuple[int, int]:
