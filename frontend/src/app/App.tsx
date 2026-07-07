@@ -4195,6 +4195,8 @@ function filterScheduledTasksByWindow(tasks: ScheduledTask[], startDate: string,
 function sortScheduledTasksForPlan(tasks: ScheduledTask[], mode: PlanListSortMode): ScheduledTask[] {
   return [...tasks].sort((left, right) => {
     if (mode === "by_structure") {
+      const continuousGroupCompare = compareContinuousBeamPlanOrder(left, right);
+      if (continuousGroupCompare !== null) return continuousGroupCompare;
       return (
         compareStructureIds(left.structure_id, right.structure_id)
         || componentSortIndex(left.component_type) - componentSortIndex(right.component_type)
@@ -4221,6 +4223,26 @@ function sortScheduledTasksForPlan(tasks: ScheduledTask[], mode: PlanListSortMod
       || left.name.localeCompare(right.name)
     );
   });
+}
+
+function compareContinuousBeamPlanOrder(left: ScheduledTask, right: ScheduledTask): number | null {
+  const leftGroupKey = continuousPlanGroupKey(left);
+  const rightGroupKey = continuousPlanGroupKey(right);
+  if (!leftGroupKey || !rightGroupKey || leftGroupKey !== rightGroupKey) return null;
+  return (
+    left.sequence_order - right.sequence_order
+    || compareStructureIds(left.structure_id, right.structure_id)
+    || componentSortIndex(left.component_type) - componentSortIndex(right.component_type)
+    || left.start_offset - right.start_offset
+    || left.name.localeCompare(right.name)
+  );
+}
+
+function continuousPlanGroupKey(task: ScheduledTask): string | null {
+  if (task.component_type !== "cast_in_place_continuous_beam") return null;
+  const groupIndex = continuousTaskGroupIndex(task.structure_id);
+  if (groupIndex === null) return null;
+  return `${task.bridge_id ?? "-"}:${task.work_section_id ?? "-"}:${groupIndex}`;
 }
 
 function filterRecommendedResourceCountsByUsedResources(
