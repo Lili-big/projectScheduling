@@ -35,8 +35,8 @@ DEFAULT_RESOURCE_MAX_QUANTITIES: dict[str, int] = {
     "pier_body_team": 10,
     "cap_beam_team": 10,
 }
-PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION = "设备型桩基资源：同一墩同一工艺默认最多由 1 台设备承担；设置为 0 表示不额外限制。"
-MANUAL_PILE_PARALLEL_RULE_DESCRIPTION = "人工挖孔班组：同一墩内不设置最多参与设备数，默认仅受班组数量约束。"
+PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION = "机械桩基资源：按同桥同幅同墩同工艺形成墩组，组内由同一台设备负责；不再配置并行上限。"
+MANUAL_PILE_PARALLEL_RULE_DESCRIPTION = "人工挖孔班组：不进入机械钻机墩组规则，按班组数量和资源互斥排程。"
 BRIDGE_COMPLETION_MILESTONE_NAME = "下部及现浇结构施工完成"
 
 
@@ -167,7 +167,7 @@ def default_scenario() -> ScenarioInput:
         resource_calendars=default_resource_calendars(),
         resource_pools=default_resource_pools(),
         milestones=default_milestones(),
-        time_limit_seconds=10,
+        time_limit_seconds=20,
     )
     sync_bridge_completion_milestones(scenario)
     apply_resource_max_quantity_defaults(scenario)
@@ -399,7 +399,6 @@ def default_resource_pools() -> list[ResourcePool]:
             incremental_unit_cost=180000,
             billing_period_days=30,
             same_structure_resource_binding=False,
-            same_structure_parallel_limit=1,
             parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
         ),
         ResourcePool(
@@ -409,7 +408,6 @@ def default_resource_pools() -> list[ResourcePool]:
             quantity=1,
             max_quantity=10,
             same_structure_resource_binding=False,
-            same_structure_parallel_limit=1,
             parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
         ),
         ResourcePool(
@@ -419,7 +417,6 @@ def default_resource_pools() -> list[ResourcePool]:
             quantity=1,
             max_quantity=10,
             same_structure_resource_binding=False,
-            same_structure_parallel_limit=1,
             parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
         ),
         ResourcePool(

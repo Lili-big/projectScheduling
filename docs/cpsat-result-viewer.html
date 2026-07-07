@@ -1,0 +1,1903 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:," />
+  <title>CP-SAT 排程结果可视化</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --surface: #ffffff;
+      --surface-2: #f8fafc;
+      --text: #172033;
+      --muted: #64748b;
+      --line: #dbe4ef;
+      --line-soft: #edf2f7;
+      --blue: #2563eb;
+      --blue-soft: #eff6ff;
+      --teal: #0f766e;
+      --teal-soft: #e6fffb;
+      --green: #15803d;
+      --green-soft: #ecfdf3;
+      --amber: #a16207;
+      --amber-soft: #fff7ed;
+      --red: #b91c1c;
+      --red-soft: #fef2f2;
+      --indigo: #4f46e5;
+      --shadow: 0 16px 42px rgba(15, 23, 42, 0.08);
+      --radius: 8px;
+      --timeline-width: 1160px;
+      font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      background: var(--bg);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .app {
+      width: min(1480px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 20px 0 32px;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: end;
+      gap: 18px;
+      margin-bottom: 16px;
+      padding: 18px 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .title-block {
+      min-width: 0;
+    }
+
+    .title-block h1 {
+      margin: 0 0 6px;
+      font-size: 22px;
+      font-weight: 760;
+      letter-spacing: 0;
+    }
+
+    .title-block p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .source-tools {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    .file-button,
+    .text-button {
+      min-height: 34px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: #0f2742;
+      background: #fff;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+
+    .file-button:hover,
+    .text-button:hover {
+      border-color: #93c5fd;
+      color: #1d4ed8;
+    }
+
+    .file-button input {
+      display: none;
+    }
+
+    .status-line {
+      min-height: 26px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: #334155;
+      border: 1px solid #e2e8f0;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .pill.ok {
+      color: var(--green);
+      border-color: #bbf7d0;
+      background: var(--green-soft);
+    }
+
+    .pill.warn {
+      color: var(--amber);
+      border-color: #fed7aa;
+      background: var(--amber-soft);
+    }
+
+    .pill.danger {
+      color: var(--red);
+      border-color: #fecaca;
+      background: var(--red-soft);
+    }
+
+    .pill.info {
+      color: #1d4ed8;
+      border-color: #bfdbfe;
+      background: var(--blue-soft);
+    }
+
+    .summary-band {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .metric {
+      min-height: 96px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+
+    .metric span {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .metric strong {
+      display: block;
+      color: #0f172a;
+      font-size: 24px;
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    .metric small {
+      display: block;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .panel {
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      min-height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line-soft);
+      background: #fff;
+    }
+
+    .panel-title {
+      min-width: 0;
+    }
+
+    .panel-title h2 {
+      margin: 0;
+      color: #0f172a;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+
+    .panel-title p {
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .panel-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .segmented {
+      display: inline-flex;
+      min-height: 34px;
+      padding: 3px;
+      gap: 3px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--surface-2);
+    }
+
+    .segmented button {
+      min-width: 72px;
+      border: 0;
+      border-radius: 5px;
+      padding: 0 10px;
+      color: #334155;
+      background: transparent;
+      font-weight: 700;
+    }
+
+    .segmented button.active {
+      color: #0f766e;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line-soft);
+      background: var(--surface-2);
+    }
+
+    .toolbar label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .toolbar input,
+    .toolbar select {
+      height: 32px;
+      width: 260px;
+      min-width: 0;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: #0f172a;
+    }
+
+    .conclusion {
+      display: grid;
+      grid-template-columns: minmax(260px, 0.95fr) minmax(0, 2.2fr);
+      gap: 12px;
+      padding: 14px;
+    }
+
+    .conclusion-main {
+      padding: 14px;
+      border: 1px solid #bfdbfe;
+      border-radius: var(--radius);
+      background: var(--blue-soft);
+    }
+
+    .conclusion-main span {
+      color: #1e40af;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .conclusion-main strong {
+      display: block;
+      margin-top: 5px;
+      font-size: 20px;
+      color: #0f172a;
+      letter-spacing: 0;
+    }
+
+    .conclusion-main p {
+      margin: 10px 0 0;
+      color: #334155;
+      font-size: 13px;
+    }
+
+    .fact-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .fact {
+      min-height: 74px;
+      padding: 10px 12px;
+      border: 1px solid var(--line-soft);
+      border-radius: 7px;
+      background: #fff;
+    }
+
+    .fact span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .fact strong {
+      display: block;
+      margin-top: 5px;
+      color: #0f172a;
+      font-size: 16px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .timeline-shell,
+    .lane-shell {
+      overflow: auto;
+      padding: 0 14px 14px;
+    }
+
+    .timeline {
+      min-width: calc(280px + var(--timeline-width));
+      display: grid;
+      gap: 5px;
+      padding-top: 12px;
+    }
+
+    .timeline-head,
+    .timeline-row,
+    .lane-row {
+      display: grid;
+      grid-template-columns: 270px var(--timeline-width);
+      gap: 10px;
+      align-items: center;
+    }
+
+    .timeline-head {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      min-height: 34px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .timeline-axis,
+    .timeline-track,
+    .lane-track {
+      position: relative;
+      min-height: 28px;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      background:
+        repeating-linear-gradient(
+          to right,
+          #f8fafc,
+          #f8fafc 39px,
+          #e2e8f0 40px
+        );
+    }
+
+    .timeline-axis {
+      min-height: 30px;
+      background: #f8fafc;
+    }
+
+    .tick {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      border-left: 1px solid #cbd5e1;
+    }
+
+    .tick span {
+      position: absolute;
+      top: 6px;
+      left: 5px;
+      white-space: nowrap;
+      color: #475569;
+      font-size: 11px;
+    }
+
+    .timeline-label,
+    .lane-label {
+      min-width: 0;
+      color: #334155;
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .timeline-label strong,
+    .lane-label strong {
+      display: inline-block;
+      max-width: 190px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      vertical-align: bottom;
+      white-space: nowrap;
+    }
+
+    .timeline-label span,
+    .lane-label span {
+      margin-left: 6px;
+      color: var(--muted);
+    }
+
+    .bar,
+    .lane-bar {
+      position: absolute;
+      top: 4px;
+      min-width: 4px;
+      height: 18px;
+      border-radius: 5px;
+      color: #fff;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 11px;
+      line-height: 18px;
+      padding: 0 5px;
+    }
+
+    .lane-bar {
+      padding: 0;
+      background: #475569;
+    }
+
+    .bar.foundation { background: #2563eb; }
+    .bar.pile { background: #0f766e; }
+    .bar.cap { background: #16a34a; }
+    .bar.pier { background: #9333ea; }
+    .bar.beam { background: #c2410c; }
+    .bar.abutment { background: #4f46e5; }
+    .bar.closure { background: #be123c; }
+    .bar.other { background: #475569; }
+
+    .lane-row {
+      min-height: 34px;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+
+    .lane-row:hover .lane-track,
+    .lane-row.selected .lane-track {
+      border-color: #14b8a6;
+      box-shadow: inset 0 0 0 1px rgba(20, 184, 166, 0.16);
+    }
+
+    .lane-row.selected .lane-label {
+      color: var(--teal);
+      font-weight: 700;
+    }
+
+    .table-wrap {
+      overflow: auto;
+      max-height: 560px;
+    }
+
+    table {
+      width: 100%;
+      min-width: 920px;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th,
+    td {
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--line-soft);
+      text-align: left;
+      white-space: nowrap;
+      vertical-align: top;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      color: #475569;
+      background: var(--surface-2);
+      font-weight: 760;
+    }
+
+    tbody tr:hover {
+      background: #f8fbfe;
+    }
+
+    td.wrap {
+      max-width: 380px;
+      white-space: normal;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .empty,
+    .load-error {
+      padding: 22px;
+      color: var(--muted);
+      background: var(--surface);
+    }
+
+    .load-error {
+      border: 1px solid #fed7aa;
+      border-radius: var(--radius);
+      background: var(--amber-soft);
+      color: #7c2d12;
+    }
+
+    .diagnostic-list {
+      display: grid;
+      gap: 8px;
+      padding: 14px;
+    }
+
+    .diagnostic {
+      display: grid;
+      grid-template-columns: 88px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      padding: 9px 11px;
+      border: 1px solid var(--line-soft);
+      border-radius: 7px;
+      background: #fff;
+    }
+
+    .diagnostic strong {
+      color: #334155;
+    }
+
+    .diagnostic span {
+      min-width: 0;
+      color: #475569;
+      word-break: break-word;
+    }
+
+    .diagnostic.error {
+      border-color: #fecaca;
+      background: var(--red-soft);
+    }
+
+    .diagnostic.warning {
+      border-color: #fed7aa;
+      background: var(--amber-soft);
+    }
+
+    .diagnostic.info {
+      border-color: #bfdbfe;
+      background: var(--blue-soft);
+    }
+
+    .diagnostic.success {
+      border-color: #bbf7d0;
+      background: var(--green-soft);
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      padding: 14px;
+    }
+
+    .subpanel {
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .subpanel h3 {
+      margin: 0;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line-soft);
+      color: #0f172a;
+      background: var(--surface-2);
+      font-size: 14px;
+    }
+
+    .subpanel table {
+      min-width: 640px;
+    }
+
+    .resource-detail {
+      margin: 0 14px 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line-soft);
+    }
+
+    .resource-detail-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 8px;
+      color: #334155;
+    }
+
+    .resource-detail-header strong {
+      font-size: 14px;
+    }
+
+    .resource-detail-header span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .tabs-body > section {
+      display: none;
+    }
+
+    .tabs-body > section.active {
+      display: block;
+    }
+
+    @media (max-width: 1100px) {
+      .summary-band,
+      .fact-grid,
+      .two-col {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .conclusion {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .app {
+        width: calc(100vw - 20px);
+        padding-top: 10px;
+      }
+
+      .topbar {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+      }
+
+      .source-tools,
+      .panel-header,
+      .toolbar {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .summary-band,
+      .fact-grid,
+      .two-col {
+        grid-template-columns: 1fr;
+      }
+
+      .toolbar input,
+      .toolbar select {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div class="title-block">
+        <h1>CP-SAT 排程结果可视化</h1>
+        <div class="status-line" id="sourceLine">正在读取 JSON 数据...</div>
+        <p>展示由结构物参数调用 CP-SAT 后返回的排程结果，页面数据只从 JSON 读取。</p>
+      </div>
+      <div class="source-tools">
+        <label class="file-button">
+          选择 JSON
+          <input id="jsonFile" type="file" accept=".json,application/json" />
+        </label>
+        <button class="text-button" id="reloadButton" type="button">重新读取</button>
+      </div>
+    </header>
+
+    <div id="loadState"></div>
+    <section class="summary-band" id="summaryBand" aria-label="排程结果摘要"></section>
+
+    <section class="panel" id="conclusionPanel">
+      <div class="panel-header">
+        <div class="panel-title">
+          <h2>结果概览</h2>
+          <p>对齐模拟求解 MVP 的核心输出：工期、状态、里程碑、资源和诊断</p>
+        </div>
+      </div>
+      <div class="conclusion" id="conclusion"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <div class="panel-title">
+          <h2>排程计划</h2>
+          <p id="planSubtitle">甘特、任务清单和资源泳道</p>
+        </div>
+        <div class="segmented" id="viewTabs" aria-label="排程视图">
+          <button class="active" type="button" data-tab="gantt">甘特图</button>
+          <button type="button" data-tab="tasks">任务清单</button>
+          <button type="button" data-tab="resources">资源泳道</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <label>
+          筛选
+          <input id="searchBox" type="search" placeholder="输入任务、资源或前置任务" />
+        </label>
+        <label>
+          排序
+          <select id="sortSelect">
+            <option value="time">按开始时间</option>
+            <option value="resource">按资源</option>
+            <option value="component">按构件/工序</option>
+          </select>
+        </label>
+      </div>
+      <div class="tabs-body">
+        <section id="tab-gantt" class="active">
+          <div class="timeline-shell">
+            <div class="timeline" id="gantt"></div>
+          </div>
+        </section>
+        <section id="tab-tasks">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>任务</th>
+                  <th>开始</th>
+                  <th>完成</th>
+                  <th>工期</th>
+                  <th>资源</th>
+                  <th>前置</th>
+                  <th>排程属性</th>
+                </tr>
+              </thead>
+              <tbody id="taskRows"></tbody>
+            </table>
+          </div>
+        </section>
+        <section id="tab-resources">
+          <div class="lane-shell">
+            <div class="timeline" id="resourceLanes"></div>
+          </div>
+          <div class="resource-detail" id="resourceDetail"></div>
+        </section>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <div class="panel-title">
+          <h2>里程碑与诊断</h2>
+          <p>节点完成、求解诊断、连续性和资源组织指标</p>
+        </div>
+      </div>
+      <div class="two-col">
+        <div class="subpanel">
+          <h3>里程碑结果</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>节点</th>
+                  <th>目标</th>
+                  <th>实际</th>
+                  <th>迟延</th>
+                  <th>状态</th>
+                </tr>
+              </thead>
+              <tbody id="milestoneRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="subpanel">
+          <h3>求解诊断</h3>
+          <div class="diagnostic-list" id="diagnosticList"></div>
+        </div>
+      </div>
+      <div class="two-col">
+        <div class="subpanel">
+          <h3>资源组织</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>资源/类型</th>
+                  <th>任务数</th>
+                  <th>工作天</th>
+                  <th>空闲</th>
+                  <th>状态</th>
+                </tr>
+              </thead>
+              <tbody id="resourceOrgRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="subpanel">
+          <h3>连续性指标</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>指标</th>
+                  <th>数值</th>
+                  <th>说明</th>
+                </tr>
+              </thead>
+              <tbody id="continuityRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <div class="panel-title">
+          <h2>专项结果</h2>
+          <p>连续梁、合拢段和班组数量对比等补充结果</p>
+        </div>
+      </div>
+      <div class="two-col" id="extraResults"></div>
+    </section>
+  </main>
+
+  <script>
+    const DEFAULT_JSON_URL = new URLSearchParams(window.location.search).get("data") || "cpsat-result-third-version.json";
+
+    const state = {
+      sourceName: DEFAULT_JSON_URL,
+      raw: null,
+      data: null,
+      summary: null,
+      tasks: [],
+      allocations: [],
+      milestones: [],
+      diagnostics: [],
+      selectedTab: "gantt",
+      selectedResourceKey: "",
+      searchText: "",
+      sortMode: "time",
+    };
+
+    const el = {
+      sourceLine: document.getElementById("sourceLine"),
+      loadState: document.getElementById("loadState"),
+      summaryBand: document.getElementById("summaryBand"),
+      conclusion: document.getElementById("conclusion"),
+      planSubtitle: document.getElementById("planSubtitle"),
+      gantt: document.getElementById("gantt"),
+      taskRows: document.getElementById("taskRows"),
+      resourceLanes: document.getElementById("resourceLanes"),
+      resourceDetail: document.getElementById("resourceDetail"),
+      milestoneRows: document.getElementById("milestoneRows"),
+      diagnosticList: document.getElementById("diagnosticList"),
+      resourceOrgRows: document.getElementById("resourceOrgRows"),
+      continuityRows: document.getElementById("continuityRows"),
+      extraResults: document.getElementById("extraResults"),
+      searchBox: document.getElementById("searchBox"),
+      sortSelect: document.getElementById("sortSelect"),
+      reloadButton: document.getElementById("reloadButton"),
+      jsonFile: document.getElementById("jsonFile"),
+      viewTabs: document.getElementById("viewTabs"),
+    };
+
+    document.addEventListener("DOMContentLoaded", () => {
+      wireEvents();
+      loadDefaultJson();
+    });
+
+    function wireEvents() {
+      el.reloadButton.addEventListener("click", loadDefaultJson);
+      el.jsonFile.addEventListener("change", async (event) => {
+        const file = event.target.files && event.target.files[0];
+        if (!file) return;
+        try {
+          const text = await file.text();
+          loadJson(JSON.parse(text), file.name);
+        } catch (error) {
+          showLoadError(`无法解析所选 JSON：${error.message || error}`);
+        }
+      });
+
+      el.searchBox.addEventListener("input", (event) => {
+        state.searchText = event.target.value.trim().toLowerCase();
+        renderPlanViews();
+      });
+
+      el.sortSelect.addEventListener("change", (event) => {
+        state.sortMode = event.target.value;
+        renderPlanViews();
+      });
+
+      el.viewTabs.addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-tab]");
+        if (!button) return;
+        state.selectedTab = button.dataset.tab;
+        for (const item of el.viewTabs.querySelectorAll("button")) {
+          item.classList.toggle("active", item === button);
+        }
+        for (const section of document.querySelectorAll(".tabs-body > section")) {
+          section.classList.toggle("active", section.id === `tab-${state.selectedTab}`);
+        }
+      });
+    }
+
+    async function loadDefaultJson() {
+      showLoading();
+      try {
+        const response = await fetch(DEFAULT_JSON_URL, { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const json = await response.json();
+        loadJson(json, DEFAULT_JSON_URL);
+      } catch (error) {
+        showLoadError(`默认 JSON 未能自动读取。若你是直接双击打开 HTML，请用右上角“选择 JSON”加载数据；若通过本地服务访问，请确认 ${DEFAULT_JSON_URL} 与 HTML 放在同一目录。错误：${error.message || error}`);
+      }
+    }
+
+    function showLoading() {
+      el.loadState.innerHTML = "";
+      el.sourceLine.textContent = "正在读取 JSON 数据...";
+    }
+
+    function showLoadError(message) {
+      el.sourceLine.textContent = "未加载数据";
+      el.loadState.innerHTML = `<div class="load-error">${escapeHtml(message)}</div>`;
+      el.summaryBand.innerHTML = "";
+      el.conclusion.innerHTML = "";
+      el.gantt.innerHTML = "";
+      el.taskRows.innerHTML = "";
+      el.resourceLanes.innerHTML = "";
+      el.resourceDetail.innerHTML = "";
+      el.milestoneRows.innerHTML = "";
+      el.diagnosticList.innerHTML = "";
+      el.resourceOrgRows.innerHTML = "";
+      el.continuityRows.innerHTML = "";
+      el.extraResults.innerHTML = "";
+    }
+
+    function loadJson(json, sourceName) {
+      const normalized = normalizePayload(json);
+      state.raw = json;
+      state.data = normalized.data;
+      state.sourceName = sourceName;
+      state.summary = normalized.summary;
+      state.tasks = normalized.tasks;
+      state.allocations = normalized.allocations;
+      state.milestones = normalized.milestones;
+      state.diagnostics = normalized.diagnostics;
+      state.selectedResourceKey = "";
+      el.loadState.innerHTML = "";
+      render();
+    }
+
+    function normalizePayload(json) {
+      const extracted = extractScheduleData(json);
+      const data = extracted.data;
+      const resultSummary = extracted.resultSummary;
+      const runMeta = extracted.runMeta;
+      const tasks = toArray(data.tasks).map(normalizeTask).filter(Boolean);
+      tasks.sort((a, b) => a.startOffset - b.startOffset || a.endOffset - b.endOffset || a.name.localeCompare(b.name, "zh-CN"));
+
+      const planStartDate = asString(resultSummary.plan_start_date || resultSummary.planStartDate || data.planStartDate || data.plan_start_date)
+        || minDate(tasks.map((task) => task.startDate))
+        || offsetBaseDate(tasks)
+        || "";
+      const planFinishDate = asString(resultSummary.plan_finish_date || resultSummary.planFinishDate || data.planFinishDate || data.plan_finish_date)
+        || maxDate(tasks.map((task) => task.endDate))
+        || "";
+      const objectiveDays = numberOrNull(resultSummary.objective_days ?? resultSummary.objectiveDays ?? data.objectiveDays ?? data.objective_days)
+        ?? Math.max(0, ...tasks.map((task) => task.endOffset));
+
+      const allocations = toArray(data.resourceAllocations || data.resource_allocations)
+        .map((item) => normalizeAllocation(item, planStartDate, tasks))
+        .filter(Boolean)
+        .sort((a, b) => a.startOffset - b.startOffset || a.resourceLabel.localeCompare(b.resourceLabel, "zh-CN"));
+
+      const milestones = toArray(data.milestones || data.milestone_results).map(normalizeMilestone).filter(Boolean);
+      const diagnostics = normalizeDiagnostics(extracted.diagnostics || data.diagnostics || data.validation);
+      const resourceLabels = new Set(allocations.map((item) => item.resourceKey));
+      const resourceCount = numberOrNull(resultSummary.metrics?.resource_count ?? data.metrics?.resource_count ?? data.stats?.resource_count)
+        ?? resourceLabels.size;
+
+      return {
+        data,
+        tasks,
+        allocations,
+        milestones,
+        diagnostics,
+        summary: {
+          solveStatus: asString(resultSummary.status || data.solveStatus || data.status || data.solve_status) || "-",
+          objectiveDays,
+          planStartDate,
+          planFinishDate,
+          taskCount: tasks.length,
+          resourceCount,
+          allocationCount: allocations.length,
+          milestoneCount: milestones.length,
+          diagnosticCount: diagnostics.length,
+          scheduleSource: asString(resultSummary.schedule_source || resultSummary.scheduleSource || data.scheduleSource || data.schedule_source || data.stats?.schedule_source) || "-",
+          baselineObjectiveDays: numberOrNull(data.baselineObjectiveDays ?? data.baseline_objective_days ?? data.stats?.baseline_objective_days ?? data.stats?.baseline_makespan_days),
+          baselineFinishDate: dateValue(data.baselineFinishDate || data.baseline_finish_date || data.stats?.baseline_finish_date),
+          elapsedSeconds: numberOrNull(runMeta.solve_elapsed_seconds ?? runMeta.elapsed_seconds ?? resultSummary.metrics?.total_elapsed_seconds ?? data.stats?.elapsed_seconds),
+        },
+      };
+    }
+
+    function extractScheduleData(json) {
+      if (isRecord(json?.scenario_solve_result?.result)) {
+        const solveResult = json.scenario_solve_result;
+        return {
+          data: {
+            ...solveResult.result,
+            diagnostics: solveResult.diagnostics || solveResult.result.validation,
+            metrics: solveResult.metrics,
+          },
+          diagnostics: solveResult.diagnostics || solveResult.result.validation,
+          resultSummary: isRecord(json.result_summary) ? json.result_summary : {},
+          runMeta: isRecord(json.run_meta) ? json.run_meta : {},
+        };
+      }
+      if (isRecord(json?.data)) {
+        return {
+          data: json.data,
+          diagnostics: json.data.diagnostics,
+          resultSummary: isRecord(json.result_summary) ? json.result_summary : {},
+          runMeta: isRecord(json.run_meta) ? json.run_meta : {},
+        };
+      }
+      return {
+        data: json || {},
+        diagnostics: json?.diagnostics,
+        resultSummary: isRecord(json?.result_summary) ? json.result_summary : {},
+        runMeta: isRecord(json?.run_meta) ? json.run_meta : {},
+      };
+    }
+
+    function normalizeTask(item) {
+      if (!isRecord(item)) return null;
+      const id = asString(item.taskId || item.id || item.task_id);
+      const name = asString(item.taskName || item.name || item.task_name) || id;
+      const startOffset = numberOrNull(item.startOffsetDays ?? item.start_offset_days ?? item.start_offset) ?? 0;
+      const endOffset = numberOrNull(item.endOffsetDays ?? item.end_offset_days ?? item.end_offset) ?? startOffset;
+      const startDate = dateValue(item.startDate || item.start_date);
+      const endDate = dateValue(item.endDate || item.end_date || item.finish_date);
+      const predecessors = toArray(item.predecessors).map((pred) => ({
+        id: asString(pred.predecessorTaskId || pred.predecessor_id || pred.taskId || pred.id),
+        name: asString(pred.predecessorTaskName || pred.predecessor_name || pred.taskName || pred.name),
+        relationship: asString(pred.relationship) || "FS",
+        lagDays: numberOrNull(pred.lagDays ?? pred.lag_days) ?? 0,
+      }));
+      const predecessorIds = toArray(item.predecessor_ids).map((predecessorId) => ({
+        id: asString(predecessorId),
+        name: asString(predecessorId),
+        relationship: "FS",
+        lagDays: 0,
+      }));
+      const allPredecessors = predecessors.length ? predecessors : predecessorIds;
+      return {
+        id,
+        name,
+        startOffset,
+        endOffset,
+        startDate,
+        endDate,
+        durationDays: numberOrNull(item.durationDays ?? item.duration_days) ?? Math.max(0, endOffset - startOffset),
+        resourceLabel: cleanDash(asString(item.assignedResourceLabel || item.assigned_resource_name || item.resourceLabel || item.resource_label)),
+        unconstrained: Boolean(item.unconstrained),
+        predecessorCount: numberOrNull(item.predecessorCount ?? item.predecessor_count) ?? allPredecessors.length,
+        predecessors: allPredecessors,
+        component: inferComponent(`${name} ${asString(item.component_type)} ${asString(item.process_name)}`),
+      };
+    }
+
+    function normalizeAllocation(item, planStartDate, tasks) {
+      if (!isRecord(item)) return null;
+      const resourceId = asString(item.resourceId || item.resource_id) || asString(item.resourceLabel || item.resource_label) || "resource";
+      const resourceLabel = asString(item.resourceLabel || item.resource_label || item.resourceName || item.resource_name) || resourceId;
+      const taskId = asString(item.taskId || item.task_id);
+      const linkedTask = tasks.find((task) => task.id === taskId);
+      const startOffset = numberOrNull(item.startOffsetDays ?? item.start_offset_days ?? item.start_offset) ?? linkedTask?.startOffset ?? 0;
+      const endOffset = numberOrNull(item.endOffsetDays ?? item.end_offset_days ?? item.end_offset) ?? linkedTask?.endOffset ?? startOffset;
+      const taskName = asString(item.taskName || item.task_name) || linkedTask?.name || taskId || "-";
+      const startDate = linkedTask?.startDate || offsetToDate(planStartDate, startOffset);
+      const endDate = linkedTask?.endDate || dateValue(item.finishDate || item.finish_date) || offsetToDate(planStartDate, endOffset);
+      return {
+        resourceKey: `${resourceId}::${resourceLabel}`,
+        resourceId,
+        resourceLabel,
+        taskId,
+        taskName,
+        startOffset,
+        endOffset,
+        startDate,
+        endDate,
+        occupationType: asString(item.occupationType || item.occupation_type) || "task",
+        pierNum: numberOrNull(item.pierNum ?? item.pier_num),
+      };
+    }
+
+    function normalizeMilestone(item) {
+      if (!isRecord(item)) return null;
+      const id = asString(item.milestoneId || item.id || item.milestone_id) || asString(item.name);
+      const name = asString(item.name) || id;
+      return {
+        id,
+        name,
+        targetDate: dateValue(item.targetDate || item.target_date),
+        actualDate: dateValue(item.actualFinishDate || item.actualDate || item.actual_date),
+        delayDays: numberOrNull(item.delayDays ?? item.lateness_days ?? item.delay_days) ?? 0,
+        status: asString(item.status) || "-",
+      };
+    }
+
+    function normalizeDiagnostics(value) {
+      return toArray(value).map((item, index) => {
+        if (typeof item === "string") {
+          return {
+            key: `${index}-${item}`,
+            level: diagnosticLevelFromText(item),
+            title: diagnosticTitleFromText(item),
+            message: item,
+          };
+        }
+        if (!isRecord(item)) return null;
+        const message = asString(item.message || item.detail || item.text) || JSON.stringify(item);
+        return {
+          key: asString(item.id || item.subject_id) || `${index}-${message}`,
+          level: asString(item.level) || diagnosticLevelFromText(message),
+          title: diagnosticTitleFromText(message),
+          message,
+        };
+      }).filter(Boolean);
+    }
+
+    function render() {
+      renderSourceLine();
+      renderSummaryBand();
+      renderConclusion();
+      renderPlanViews();
+      renderMilestones();
+      renderDiagnostics();
+      renderResourceOrganization();
+      renderContinuity();
+      renderExtras();
+    }
+
+    function renderSourceLine() {
+      const summary = state.summary;
+      const tone = statusTone(summary.solveStatus);
+      el.sourceLine.innerHTML = [
+        `<span class="pill ${tone}">${escapeHtml(statusLabel(summary.solveStatus))}</span>`,
+        `<span>数据源：${escapeHtml(state.sourceName)}</span>`,
+        `<span>任务 ${summary.taskCount} 项</span>`,
+        `<span>资源占用 ${summary.allocationCount} 条</span>`,
+      ].join("");
+    }
+
+    function renderSummaryBand() {
+      const summary = state.summary;
+      el.summaryBand.innerHTML = [
+        metricHtml("计划状态", statusLabel(summary.solveStatus), `来源：${summary.scheduleSource}`),
+        metricHtml("总工期", `${formatNumber(summary.objectiveDays)} 天`, `${summary.planStartDate || "-"} 至 ${summary.planFinishDate || "-"}`),
+        metricHtml("工作项", `${summary.taskCount}`, "来自 JSON tasks"),
+        metricHtml("资源 / 占用", `${summary.resourceCount} / ${summary.allocationCount}`, "命名资源与占用段"),
+        metricHtml("里程碑", `${summary.milestoneCount}`, `${summary.diagnosticCount} 条诊断`),
+      ].join("");
+    }
+
+    function renderConclusion() {
+      const data = state.data;
+      const summary = state.summary;
+      const control = firstRecord(
+        data.controlPriorityAnalysis,
+        data.control_priority_analysis,
+        data.stats?.control_priority_analysis,
+        data.objective_breakdown?.control_priority_analysis,
+      );
+      const continuity = firstRecord(
+        data.continuityMetrics,
+        data.continuity_metrics,
+        data.stats?.continuity_metrics,
+        data.objective_breakdown?.continuity_metrics,
+      );
+      const resourceOrg = firstRecord(
+        control.resourceOrganizationAnalysis,
+        control.resource_organization_analysis,
+        data.stats?.resource_organization_analysis,
+        data.objective_breakdown?.resource_organization_analysis,
+      );
+      const milestoneState = summarizeMilestones(state.milestones);
+      const headline = summary.solveStatus === "FEASIBLE"
+        ? "本次排程返回可行方案"
+        : `本次排程状态：${statusLabel(summary.solveStatus)}`;
+      const baseline = summary.baselineObjectiveDays
+        ? `${formatNumber(summary.baselineObjectiveDays)} 天${summary.baselineFinishDate ? ` / ${summary.baselineFinishDate}` : ""}`
+        : "-";
+
+      el.conclusion.innerHTML = `
+        <div class="conclusion-main">
+          <span>主结论</span>
+          <strong>${escapeHtml(headline)}</strong>
+          <p>计划完成日期 ${escapeHtml(summary.planFinishDate || "-")}，排程来源 ${escapeHtml(summary.scheduleSource)}。${escapeHtml(milestoneState)}</p>
+        </div>
+        <div class="fact-grid">
+          ${factHtml("基准工期", baseline)}
+          ${factHtml("控制任务", formatNumber(numberOrNull(control.controlTaskCount ?? control.control_task_count) ?? 0))}
+          ${factHtml("控制链总时差", statusText(control.controlBufferStatus ?? control.control_buffer_status))}
+          ${factHtml("资源路径", statusText(control.resourcePathStatus ?? control.resource_path_status))}
+          ${factHtml("资源均衡", statusText(control.resourceBalanceStatus ?? control.resource_balance_status ?? resourceOrg.resourceBalanceStatus ?? resourceOrg.resource_balance_status))}
+          ${factHtml("资源空闲", statusText(control.resourceIdleStatus ?? control.resource_idle_status ?? resourceOrg.resourceIdleStatus ?? resourceOrg.resource_idle_status))}
+          ${factHtml("连续性评分", formatNumber(numberOrNull(continuity.continuityScore ?? continuity.continuity_score) ?? 0))}
+          ${factHtml("路径组切换", `${formatNumber(numberOrNull(continuity.pathGroupSwitchCount ?? continuity.path_group_switch_count) ?? 0)} 次`)}
+        </div>
+      `;
+    }
+
+    function renderPlanViews() {
+      const tasks = filteredTasks();
+      const makespan = Math.max(1, state.summary.objectiveDays || maxEndOffset(state.tasks));
+      el.planSubtitle.textContent = `${state.summary.planStartDate || "-"} 至 ${state.summary.planFinishDate || "-"}，当前显示 ${tasks.length} / ${state.tasks.length} 项`;
+      renderGantt(tasks, makespan);
+      renderTaskTable(tasks);
+      renderResourceLanes(makespan);
+    }
+
+    function renderGantt(tasks, makespan) {
+      const ticks = timelineTicks(state.summary.planStartDate, state.summary.planFinishDate, makespan);
+      const rows = tasks.map((task) => {
+        const left = pct(task.startOffset, makespan);
+        const width = pct(Math.max(1, task.endOffset - task.startOffset), makespan);
+        const title = `${task.name}：${task.startDate || task.startOffset} 至 ${task.endDate || task.endOffset}，${task.durationDays} 天`;
+        return `
+          <div class="timeline-row">
+            <div class="timeline-label" title="${escapeAttr(task.name)}">
+              <strong>${escapeHtml(task.name)}</strong><span>${escapeHtml(task.resourceLabel || "未分配")}</span>
+            </div>
+            <div class="timeline-track">
+              <div class="bar ${task.component}" style="left:${left}%;width:${width}%;" title="${escapeAttr(title)}">${escapeHtml(shortLabel(task.name))}</div>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      el.gantt.innerHTML = `
+        <div class="timeline-head">
+          <div>任务</div>
+          <div class="timeline-axis">${ticks}</div>
+        </div>
+        ${rows || `<div class="empty">没有匹配的任务</div>`}
+      `;
+    }
+
+    function renderTaskTable(tasks) {
+      el.taskRows.innerHTML = tasks.map((task) => {
+        const predecessorTitle = task.predecessors.map((pred) => `${pred.name || pred.id} ${pred.relationship}+${pred.lagDays}天`).join("；");
+        const property = task.unconstrained ? "无受限资源" : "资源约束";
+        return `
+          <tr>
+            <td class="wrap"><strong>${escapeHtml(task.name)}</strong><div class="muted">${escapeHtml(task.id)}</div></td>
+            <td>${escapeHtml(task.startDate || String(task.startOffset))}</td>
+            <td>${escapeHtml(task.endDate || String(task.endOffset))}</td>
+            <td>${formatNumber(task.durationDays)} 天</td>
+            <td>${escapeHtml(task.resourceLabel || "-")}</td>
+            <td title="${escapeAttr(predecessorTitle || "-")}">${formatNumber(task.predecessorCount)} 个</td>
+            <td><span class="pill ${task.unconstrained ? "warn" : "info"}">${escapeHtml(property)}</span></td>
+          </tr>
+        `;
+      }).join("") || `<tr><td colspan="7">没有匹配的任务</td></tr>`;
+    }
+
+    function renderResourceLanes(makespan) {
+      const allocations = filteredAllocations();
+      const groups = groupAllocations(allocations);
+      if (!state.selectedResourceKey && groups.length) {
+        state.selectedResourceKey = groups[0].key;
+      }
+      const ticks = timelineTicks(state.summary.planStartDate, state.summary.planFinishDate, makespan);
+      const rows = groups.map((group) => {
+        const bars = group.items.map((item) => {
+          const left = pct(item.startOffset, makespan);
+          const width = pct(Math.max(1, item.endOffset - item.startOffset), makespan);
+          const title = `${item.taskName}：${item.startDate || item.startOffset} 至 ${item.endDate || item.endOffset}`;
+          return `<div class="lane-bar" style="left:${left}%;width:${width}%;" title="${escapeAttr(title)}"></div>`;
+        }).join("");
+        return `
+          <div class="lane-row ${group.key === state.selectedResourceKey ? "selected" : ""}" data-resource-key="${escapeAttr(group.key)}" tabindex="0">
+            <div class="lane-label" title="${escapeAttr(group.label)}"><strong>${escapeHtml(group.label)}</strong><span>${group.items.length} 段</span></div>
+            <div class="lane-track">${bars}</div>
+          </div>
+        `;
+      }).join("");
+
+      el.resourceLanes.innerHTML = `
+        <div class="timeline-head">
+          <div>资源</div>
+          <div class="timeline-axis">${ticks}</div>
+        </div>
+        ${rows || `<div class="empty">没有匹配的资源占用</div>`}
+      `;
+
+      for (const row of el.resourceLanes.querySelectorAll(".lane-row")) {
+        row.addEventListener("click", () => {
+          state.selectedResourceKey = row.dataset.resourceKey;
+          renderResourceLanes(makespan);
+        });
+        row.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            state.selectedResourceKey = row.dataset.resourceKey;
+            renderResourceLanes(makespan);
+          }
+        });
+      }
+      renderResourceDetail(groups);
+    }
+
+    function renderResourceDetail(groups) {
+      const selected = groups.find((group) => group.key === state.selectedResourceKey) || groups[0];
+      if (!selected) {
+        el.resourceDetail.innerHTML = `<div class="empty">请选择资源查看占用明细</div>`;
+        return;
+      }
+      const activeDays = selected.items.reduce((sum, item) => sum + Math.max(0, item.endOffset - item.startOffset), 0);
+      const rows = selected.items.map((item) => `
+        <tr>
+          <td class="wrap">${escapeHtml(item.taskName)}</td>
+          <td>${escapeHtml(item.startDate || String(item.startOffset))}</td>
+          <td>${escapeHtml(item.endDate || String(item.endOffset))}</td>
+          <td>${formatNumber(Math.max(0, item.endOffset - item.startOffset))} 天</td>
+          <td>${escapeHtml(item.occupationType)}</td>
+        </tr>
+      `).join("");
+      el.resourceDetail.innerHTML = `
+        <div class="resource-detail-header">
+          <strong>${escapeHtml(selected.label)}</strong>
+          <span>${selected.items.length} 段占用，累计 ${formatNumber(activeDays)} 天</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>任务/施工包</th>
+                <th>开始</th>
+                <th>完成</th>
+                <th>占用</th>
+                <th>类型</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function renderMilestones() {
+      el.milestoneRows.innerHTML = state.milestones.map((milestone) => `
+        <tr>
+          <td class="wrap">${escapeHtml(milestone.name)}</td>
+          <td>${escapeHtml(milestone.targetDate || "-")}</td>
+          <td>${escapeHtml(milestone.actualDate || "-")}</td>
+          <td>${formatNumber(milestone.delayDays)} 天</td>
+          <td><span class="pill ${milestoneTone(milestone)}">${escapeHtml(milestoneStatusLabel(milestone.status))}</span></td>
+        </tr>
+      `).join("") || `<tr><td colspan="5">暂无里程碑结果</td></tr>`;
+    }
+
+    function renderDiagnostics() {
+      el.diagnosticList.innerHTML = state.diagnostics.map((item) => `
+        <div class="diagnostic ${diagnosticCss(item.level)}">
+          <strong>${escapeHtml(item.title)}</strong>
+          <span>${escapeHtml(item.message)}</span>
+        </div>
+      `).join("") || `<div class="empty">暂无诊断信息</div>`;
+    }
+
+    function renderResourceOrganization() {
+      const control = firstRecord(
+        state.data.controlPriorityAnalysis,
+        state.data.control_priority_analysis,
+        state.data.stats?.control_priority_analysis,
+        state.data.objective_breakdown?.control_priority_analysis,
+      );
+      const raw = firstRecord(
+        control.resourceOrganizationAnalysis,
+        control.resource_organization_analysis,
+        state.data.resourceOrganizationAnalysis,
+        state.data.resource_organization_analysis,
+        state.data.stats?.resource_organization_analysis,
+        state.data.objective_breakdown?.resource_organization_analysis,
+      );
+      const resources = toArray(raw.resources);
+      const resourceTypes = toArray(raw.resourceTypes || raw.resource_types);
+      const rows = [];
+
+      for (const item of resourceTypes) {
+        if (!isRecord(item)) continue;
+        rows.push(`
+          <tr>
+            <td class="wrap"><strong>${escapeHtml(asString(item.resourceType || item.resource_type) || "-")}</strong><div class="muted">资源类型</div></td>
+            <td>${formatNumber(numberOrNull(item.taskCount ?? item.task_count) ?? 0)}</td>
+            <td>${formatNumber(numberOrNull(item.activeDays ?? item.active_days) ?? 0)} 天</td>
+            <td>${formatNumber(numberOrNull(item.idleDays ?? item.idle_days) ?? 0)} 天</td>
+            <td>${escapeHtml(statusText(item.balanceStatus || item.balance_status || item.idleStatus || item.idle_status))}</td>
+          </tr>
+        `);
+      }
+
+      for (const item of resources) {
+        if (!isRecord(item)) continue;
+        rows.push(`
+          <tr>
+            <td class="wrap"><strong>${escapeHtml(asString(item.resourceLabel || item.resourceName || item.resource_name || item.resourceId || item.resource_id) || "-")}</strong><div class="muted">${escapeHtml(asString(item.resourceType || item.resource_type) || "")}</div></td>
+            <td>${formatNumber(numberOrNull(item.taskCount ?? item.task_count) ?? 0)}</td>
+            <td>${formatNumber(numberOrNull(item.activeDays ?? item.active_days) ?? 0)} 天</td>
+            <td>${formatNumber(numberOrNull(item.idleDays ?? item.idle_days) ?? 0)} 天</td>
+            <td>${escapeHtml(statusText(item.status || item.idleStatus || item.idle_status || ""))}</td>
+          </tr>
+        `);
+      }
+
+      if (!rows.length) {
+        const groups = groupAllocations(state.allocations);
+        for (const group of groups.slice(0, 8)) {
+          const activeDays = group.items.reduce((sum, item) => sum + Math.max(0, item.endOffset - item.startOffset), 0);
+          rows.push(`
+            <tr>
+              <td class="wrap"><strong>${escapeHtml(group.label)}</strong><div class="muted">由资源占用汇总</div></td>
+              <td>${formatNumber(group.items.length)}</td>
+              <td>${formatNumber(activeDays)} 天</td>
+              <td>-</td>
+              <td>-</td>
+            </tr>
+          `);
+        }
+      }
+      el.resourceOrgRows.innerHTML = rows.join("") || `<tr><td colspan="5">暂无资源组织数据</td></tr>`;
+    }
+
+    function renderContinuity() {
+      const metrics = firstRecord(
+        state.data.continuityMetrics,
+        state.data.continuity_metrics,
+        state.data.stats?.continuity_metrics,
+        state.data.objective_breakdown?.continuity_metrics,
+      );
+      const rows = [
+        ["连续性评分", metrics.continuityScore ?? metrics.continuity_score, "越高表示路径越需要复核"],
+        ["同结构同工艺拆分", metrics.sameStructureCraftSplitCount ?? metrics.same_structure_craft_split_count, "同一结构同一工艺被多个资源拆分的次数"],
+        ["跳墩次数", metrics.jumpPierCount ?? metrics.jump_pier_count, "同一资源相邻任务跨墩跳跃"],
+        ["最大跳墩距离", metrics.maxJumpDistance ?? metrics.max_jump_distance, "同一资源相邻任务最大墩号跨度"],
+        ["路径组切换", metrics.pathGroupSwitchCount ?? metrics.path_group_switch_count, "资源跨业务路径组切换次数"],
+        ["资源路径数量", metrics.resourcePathCount ?? metrics.resource_path_count, "参与路径复核的资源数量"],
+      ];
+      el.continuityRows.innerHTML = rows.map(([name, value, note]) => `
+        <tr>
+          <td>${escapeHtml(name)}</td>
+          <td>${formatNumber(numberOrNull(value) ?? 0)}</td>
+          <td class="wrap">${escapeHtml(note)}</td>
+        </tr>
+      `).join("");
+    }
+
+    function renderExtras() {
+      const raw = state.raw || {};
+      const extras = [
+        {
+          title: "目标函数贡献",
+          items: toArray(state.data.objective_breakdown?.objective_contributions),
+        },
+        {
+          title: "导入质量检查",
+          items: toArray(raw.import?.quality_checks),
+        },
+        {
+          title: "导入告警",
+          items: toArray(raw.import?.warnings),
+        },
+        {
+          title: "连续梁结果",
+          items: toArray(state.data.continuousBeamResults),
+        },
+        {
+          title: "合拢诊断",
+          items: toArray(state.data.closureDiagnostics),
+        },
+        {
+          title: "班组数量对比",
+          items: toArray(state.data.crewQuantityComparisons),
+        },
+        {
+          title: "资源建议",
+          items: toArray(state.data.resourceRecommendations),
+        },
+      ];
+      el.extraResults.innerHTML = extras.map((extra) => genericSubpanel(extra.title, extra.items)).join("");
+    }
+
+    function genericSubpanel(title, items) {
+      if (!items.length) {
+        return `<div class="subpanel"><h3>${escapeHtml(title)}</h3><div class="empty">暂无数据</div></div>`;
+      }
+      const records = items.filter(isRecord);
+      if (!records.length) {
+        return `<div class="subpanel"><h3>${escapeHtml(title)}</h3><div class="empty">${escapeHtml(items.join("；"))}</div></div>`;
+      }
+      const keys = Array.from(records.reduce((set, item) => {
+        Object.keys(item).slice(0, 8).forEach((key) => set.add(key));
+        return set;
+      }, new Set())).slice(0, 6);
+      const head = keys.map((key) => `<th>${escapeHtml(labelizeKey(key))}</th>`).join("");
+      const rows = records.slice(0, 8).map((item) => `
+        <tr>${keys.map((key) => `<td class="wrap">${escapeHtml(formatUnknown(item[key]))}</td>`).join("")}</tr>
+      `).join("");
+      return `
+        <div class="subpanel">
+          <h3>${escapeHtml(title)}</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr>${head}</tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    function filteredTasks() {
+      const search = state.searchText;
+      let tasks = search ? state.tasks.filter((task) => {
+        const haystack = [
+          task.name,
+          task.resourceLabel,
+          task.predecessors.map((pred) => pred.name).join(" "),
+          task.id,
+        ].join(" ").toLowerCase();
+        return haystack.includes(search);
+      }) : [...state.tasks];
+
+      if (state.sortMode === "resource") {
+        tasks.sort((a, b) => (a.resourceLabel || "").localeCompare(b.resourceLabel || "", "zh-CN") || a.startOffset - b.startOffset);
+      } else if (state.sortMode === "component") {
+        tasks.sort((a, b) => a.component.localeCompare(b.component) || a.startOffset - b.startOffset);
+      } else {
+        tasks.sort((a, b) => a.startOffset - b.startOffset || a.endOffset - b.endOffset);
+      }
+      return tasks;
+    }
+
+    function filteredAllocations() {
+      const search = state.searchText;
+      if (!search) return [...state.allocations];
+      return state.allocations.filter((item) => [
+        item.resourceLabel,
+        item.taskName,
+        item.occupationType,
+        item.resourceId,
+      ].join(" ").toLowerCase().includes(search));
+    }
+
+    function groupAllocations(allocations) {
+      const map = new Map();
+      for (const item of allocations) {
+        const current = map.get(item.resourceKey) || { key: item.resourceKey, label: item.resourceLabel, items: [] };
+        current.items.push(item);
+        map.set(item.resourceKey, current);
+      }
+      return Array.from(map.values()).map((group) => ({
+        ...group,
+        items: group.items.sort((a, b) => a.startOffset - b.startOffset || a.endOffset - b.endOffset),
+      })).sort((a, b) => {
+        const aStart = a.items[0]?.startOffset ?? 0;
+        const bStart = b.items[0]?.startOffset ?? 0;
+        return aStart - bStart || a.label.localeCompare(b.label, "zh-CN");
+      });
+    }
+
+    function timelineTicks(start, finish, makespan) {
+      if (!start || !finish) {
+        return `<div class="tick" style="left:0%"><span>0</span></div><div class="tick" style="left:100%"><span>${formatNumber(makespan)}天</span></div>`;
+      }
+      const startDate = parseDate(start);
+      const finishDate = parseDate(finish);
+      if (!startDate || !finishDate) return "";
+      const ticks = [];
+      const cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+      if (cursor < startDate) cursor.setMonth(cursor.getMonth() + 1);
+      while (cursor <= finishDate) {
+        const offset = diffDays(startDate, cursor);
+        ticks.push(`<div class="tick" style="left:${pct(offset, makespan)}%"><span>${cursor.getFullYear()}-${pad2(cursor.getMonth() + 1)}</span></div>`);
+        cursor.setMonth(cursor.getMonth() + 1);
+      }
+      return ticks.join("");
+    }
+
+    function inferComponent(name) {
+      if (/合拢|边跨|中跨/.test(name)) return "closure";
+      if (/连续梁|T构|标准段|0号块|箱梁/.test(name)) return "beam";
+      if (/桩/.test(name)) return "pile";
+      if (/承台/.test(name)) return "cap";
+      if (/墩柱|墩身/.test(name)) return "pier";
+      if (/盖梁/.test(name)) return "cap";
+      if (/桥台/.test(name)) return "abutment";
+      if (/扩大基础|基础/.test(name)) return "foundation";
+      return "other";
+    }
+
+    function summarizeMilestones(milestones) {
+      if (!milestones.length) return "未配置里程碑结果。";
+      const delayed = milestones.filter((item) => item.delayDays > 0).length;
+      return delayed ? `存在 ${delayed} 个里程碑迟延。` : "里程碑全部满足。";
+    }
+
+    function metricHtml(label, value, hint) {
+      return `<div class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(hint || "")}</small></div>`;
+    }
+
+    function factHtml(label, value) {
+      return `<div class="fact"><span>${escapeHtml(label)}</span><strong title="${escapeAttr(value)}">${escapeHtml(value)}</strong></div>`;
+    }
+
+    function pct(value, total) {
+      if (!Number.isFinite(value) || !Number.isFinite(total) || total <= 0) return 0;
+      return Math.max(0, Math.min(100, (value / total) * 100));
+    }
+
+    function maxEndOffset(tasks) {
+      return Math.max(1, ...tasks.map((task) => task.endOffset));
+    }
+
+    function offsetBaseDate(tasks) {
+      const dated = tasks.find((task) => task.startDate && task.startOffset === 0);
+      if (dated) return dated.startDate;
+      return minDate(tasks.map((task) => task.startDate));
+    }
+
+    function offsetToDate(base, offset) {
+      const date = parseDate(base);
+      if (!date || !Number.isFinite(offset)) return "";
+      date.setDate(date.getDate() + offset);
+      return formatDate(date);
+    }
+
+    function parseDate(value) {
+      if (!value || typeof value !== "string") return null;
+      const match = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+      if (!match) return null;
+      const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    function diffDays(start, finish) {
+      return Math.round((finish.getTime() - start.getTime()) / 86400000);
+    }
+
+    function minDate(values) {
+      return values.filter(Boolean).sort()[0] || "";
+    }
+
+    function maxDate(values) {
+      return values.filter(Boolean).sort().slice(-1)[0] || "";
+    }
+
+    function formatDate(date) {
+      return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+    }
+
+    function pad2(value) {
+      return String(value).padStart(2, "0");
+    }
+
+    function statusLabel(value) {
+      const key = asString(value).toUpperCase();
+      const labels = {
+        FEASIBLE: "可行",
+        OPTIMAL: "最优",
+        INFEASIBLE: "不可行",
+        UNKNOWN: "未知",
+      };
+      return labels[key] || value || "-";
+    }
+
+    function statusTone(value) {
+      const key = asString(value).toUpperCase();
+      if (key === "FEASIBLE" || key === "OPTIMAL") return "ok";
+      if (key === "INFEASIBLE") return "danger";
+      return "warn";
+    }
+
+    function milestoneStatusLabel(value) {
+      const labels = {
+        satisfied: "已满足",
+        met: "已满足",
+        delayed: "迟延",
+        missing: "未匹配",
+      };
+      return labels[value] || value || "-";
+    }
+
+    function milestoneTone(milestone) {
+      if (milestone.delayDays > 0 || milestone.status === "delayed") return "danger";
+      if (milestone.status === "satisfied") return "ok";
+      return "warn";
+    }
+
+    function statusText(value) {
+      const labels = {
+        normal: "正常",
+        satisfied: "已满足",
+        concentrated: "集中",
+        reasonable_jump: "可接受跳转",
+        abnormal_jump: "异常跳转",
+        unbalanced: "不均衡",
+        idle_risk: "有空闲风险",
+        not_evaluated: "未评估",
+        current_resources_control_priority_balanced: "命名资源精排",
+        direct_named_refinement: "命名资源直接精排",
+        fixed_resources_shortest_control_balanced: "固定资源最短工期",
+        not_needed: "无需增加资源",
+      };
+      const key = asString(value);
+      return labels[key] || key || "-";
+    }
+
+    function diagnosticLevelFromText(text) {
+      if (/不可行|错误|失败|未满足/.test(text)) return "error";
+      if (/存在|风险|警告|回退|无受限/.test(text)) return "warning";
+      if (/满足|无需|已应用|success/.test(text)) return "success";
+      return "info";
+    }
+
+    function diagnosticTitleFromText(text) {
+      if (/schedule_source=/.test(text)) return "方案来源";
+      if (/resource_recommendation_status=/.test(text)) return "资源建议";
+      if (/NoOverlap/.test(text)) return "资源互斥";
+      if (/工艺逻辑/.test(text)) return "工艺逻辑";
+      if (/无受限资源/.test(text)) return "资源覆盖";
+      return "诊断";
+    }
+
+    function diagnosticCss(level) {
+      const normalized = asString(level).toLowerCase();
+      if (normalized === "error" || normalized === "danger") return "error";
+      if (normalized === "warning" || normalized === "warn") return "warning";
+      if (normalized === "success" || normalized === "ok") return "success";
+      return "info";
+    }
+
+    function labelizeKey(key) {
+      const labels = {
+        crewQuantity: "班组数量",
+        continuousBeamFinishOffsetDays: "连续梁完成偏移",
+        taskName: "任务",
+        name: "名称",
+        status: "状态",
+        reason: "原因",
+        message: "说明",
+        finishOffsetDays: "完成偏移",
+        targetDate: "目标日期",
+        actualFinishDate: "实际完成",
+      };
+      return labels[key] || key.replace(/[A-Z]/g, (match) => ` ${match}`).trim();
+    }
+
+    function shortLabel(value) {
+      const text = asString(value);
+      return text.length > 16 ? `${text.slice(0, 15)}...` : text;
+    }
+
+    function cleanDash(value) {
+      const text = asString(value).trim();
+      return text === "—" || text === "-" ? "" : text;
+    }
+
+    function formatUnknown(value) {
+      if (Array.isArray(value)) return value.map(formatUnknown).join("、");
+      if (isRecord(value)) return Object.entries(value).slice(0, 4).map(([key, item]) => `${labelizeKey(key)}:${formatUnknown(item)}`).join("；");
+      if (value === null || value === undefined || value === "") return "-";
+      if (typeof value === "number") return formatNumber(value);
+      return String(value);
+    }
+
+    function formatNumber(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "-";
+      return Number.isInteger(number) ? number.toLocaleString("zh-CN") : number.toFixed(2);
+    }
+
+    function numberOrNull(value) {
+      if (value === null || value === undefined || value === "") return null;
+      const number = Number(value);
+      return Number.isFinite(number) ? number : null;
+    }
+
+    function dateValue(value) {
+      if (Array.isArray(value)) {
+        if (value.length >= 3) return `${value[0]}-${pad2(value[1])}-${pad2(value[2])}`;
+        return value.join("-");
+      }
+      return asString(value);
+    }
+
+    function asString(value) {
+      if (value === null || value === undefined) return "";
+      return String(value);
+    }
+
+    function toArray(value) {
+      return Array.isArray(value) ? value : [];
+    }
+
+    function firstRecord(...values) {
+      return values.find(isRecord) || {};
+    }
+
+    function isRecord(value) {
+      return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+    }
+
+    function escapeHtml(value) {
+      return asString(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function escapeAttr(value) {
+      return escapeHtml(value).replaceAll("\n", " ");
+    }
+  </script>
+</body>
+</html>

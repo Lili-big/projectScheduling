@@ -102,9 +102,9 @@ DEFAULT_OBJECTIVE_TERM_WEIGHTS: dict[ObjectiveTermId, int] = {
     "control_buffer_risk": 100_000,
     "risk_related_control_wait": 100_000,
     "makespan_and_soft_milestone": 5_000_000,
-    "resource_path_continuity": 3_000,
-    "resource_slot_balance": 3_000,
-    "resource_idle": 100_000,
+    "resource_path_continuity": 50_000,
+    "resource_slot_balance": 50_000,
+    "resource_idle": 50_000,
     "target_relaxation": 1_000_000_000,
 }
 DEFAULT_OBJECTIVE_TERM_ENABLED: dict[ObjectiveTermId, bool] = {
@@ -112,7 +112,7 @@ DEFAULT_OBJECTIVE_TERM_ENABLED: dict[ObjectiveTermId, bool] = {
     "control_buffer_risk": True,
     "risk_related_control_wait": True,
     "makespan_and_soft_milestone": True,
-    "resource_path_continuity": False,
+    "resource_path_continuity": True,
     "resource_slot_balance": False,
     "resource_idle": True,
     "target_relaxation": False,
@@ -120,7 +120,6 @@ DEFAULT_OBJECTIVE_TERM_ENABLED: dict[ObjectiveTermId, bool] = {
 OBJECTIVE_TERM_IDS = tuple(DEFAULT_OBJECTIVE_TERM_WEIGHTS.keys())
 OBJECTIVE_TERM_INHERIT_CONFIG_FROM: dict[ObjectiveTermId, ObjectiveTermId] = {
     "target_relaxation": "control_node_late",
-    "resource_slot_balance": "resource_path_continuity",
 }
 OBJECTIVE_METRIC_DEFINITIONS: dict[str, dict[str, Any]] = {
     "control_node_late": {
@@ -250,8 +249,8 @@ def objective_terms_used(
 
 
 class ScheduleStrategyConfig(BaseModel):
-    strategy: ScheduleStrategy = "comprehensive"
-    resource_guarantee: ResourceGuaranteeMode = "priority"
+    strategy: ScheduleStrategy = Field(default="comprehensive", exclude=True)
+    resource_guarantee: ResourceGuaranteeMode = Field(default="priority", exclude=True)
     normal_balance_bucket: BalanceBucket = "month"
     normal_earliest_start_offset: int = Field(default=0, ge=0)
     normal_latest_finish_offset: int | None = Field(default=None, ge=1)
@@ -422,7 +421,6 @@ class Resource(BaseModel):
     enabled: bool = True
     calendar_id: str = "continuous"
     same_structure_resource_binding: bool = False
-    same_structure_parallel_limit: int | None = Field(default=None, ge=0)
     parallel_rule_description: str = ""
 
 
@@ -618,7 +616,6 @@ class ResourcePool(BaseModel):
     incremental_unit_cost: int = Field(default=0, ge=0)
     billing_period_days: int = Field(default=30, ge=1)
     same_structure_resource_binding: bool = False
-    same_structure_parallel_limit: int | None = Field(default=None, ge=0)
     parallel_rule_description: str = ""
 
     @model_validator(mode="after")
@@ -677,7 +674,7 @@ class ScenarioInput(BaseModel):
     resource_pools: list[ResourcePool]
     milestones: list[MilestoneConstraint] = []
     schedule_strategy: ScheduleStrategyConfig = Field(default_factory=ScheduleStrategyConfig)
-    time_limit_seconds: float = Field(default=10.0, gt=0)
+    time_limit_seconds: float = Field(default=20.0, gt=0)
 
 
 class AiParameterUploadedMaterialSummary(BaseModel):
@@ -890,7 +887,7 @@ class ScheduleInput(BaseModel):
     resources: list[Resource]
     milestones: list[MilestoneConstraint] = []
     schedule_strategy: ScheduleStrategyConfig = Field(default_factory=ScheduleStrategyConfig)
-    time_limit_seconds: float = Field(default=10.0, gt=0)
+    time_limit_seconds: float = Field(default=20.0, gt=0)
 
 
 class ScheduledTask(Task):

@@ -26,7 +26,7 @@ from app.sample_data import (  # noqa: E402
 from app.scenario import compare_scenarios, generate_schedule_input_from_scenario, solve_resource_cost_scenario, solve_scenario  # noqa: E402
 from app.scenario_data import apply_resource_max_quantity_defaults, default_scenario  # noqa: E402
 from app.services.bridge_import_service import import_local_bridge_params  # noqa: E402
-from app.solver import _resource_path_metrics, _task_ids_for_milestone, solve_capacity_shortest_schedule, solve_min_resources_schedule, solve_resource_cost_schedule, solve_schedule  # noqa: E402
+from app.solver import _resource_path_metrics, _task_ids_for_milestone, solve_capacity_shortest_schedule, solve_min_resources_schedule, solve_resource_cost_schedule, solve_schedule, solve_shortest_duration_schedule  # noqa: E402
 from app.wbs import calculate_duration, generate_wbs  # noqa: E402
 
 
@@ -49,9 +49,10 @@ def test_schedule_strategy_merges_objective_term_defaults_and_ignores_legacy_bal
     assert config.objective_terms["control_buffer_risk"].weight == 100_000
     assert config.objective_terms["risk_related_control_wait"].weight == 100_000
     assert config.objective_terms["makespan_and_soft_milestone"].weight == 5_000_000
-    assert config.objective_terms["resource_idle"].weight == 100_000
+    assert config.objective_terms["resource_path_continuity"].weight == 50_000
+    assert config.objective_terms["resource_idle"].weight == 50_000
     assert config.objective_terms["target_relaxation"].weight == 1_000_000_000
-    assert config.objective_terms["resource_slot_balance"].weight == 3_000
+    assert config.objective_terms["resource_slot_balance"].weight == 50_000
     assert {
         term_id
         for term_id, term_config in config.objective_terms.items()
@@ -61,11 +62,17 @@ def test_schedule_strategy_merges_objective_term_defaults_and_ignores_legacy_bal
         "control_buffer_risk",
         "risk_related_control_wait",
         "makespan_and_soft_milestone",
+        "resource_path_continuity",
         "resource_idle",
     }
     assert "resource_workload_balance" not in config.objective_terms
     assert "unconfigured_normal_balance" not in config.objective_terms
     assert "unconfigured_normal_balance" not in OBJECTIVE_METRIC_DEFINITIONS
+    legacy_controls = ScheduleStrategyConfig(strategy="shortest_duration", resource_guarantee="strict")
+    assert legacy_controls.strategy == "shortest_duration"
+    assert legacy_controls.resource_guarantee == "strict"
+    assert "strategy" not in legacy_controls.model_dump()
+    assert "resource_guarantee" not in legacy_controls.model_dump()
 
     inherited_config = ScheduleStrategyConfig(
         objective_terms={
@@ -76,7 +83,7 @@ def test_schedule_strategy_merges_objective_term_defaults_and_ignores_legacy_bal
     assert inherited_config.objective_terms["target_relaxation"].enabled is False
     assert inherited_config.objective_terms["target_relaxation"].weight == 123
     assert inherited_config.objective_terms["resource_slot_balance"].enabled is False
-    assert inherited_config.objective_terms["resource_slot_balance"].weight == 456
+    assert inherited_config.objective_terms["resource_slot_balance"].weight == 50_000
 
     legacy_config = ScheduleStrategyConfig(
         enable_balance_objective=True,
@@ -111,6 +118,17 @@ def test_schedule_strategy_merges_objective_term_defaults_and_ignores_legacy_bal
         objective_terms={"same_structure_craft_split": {"enabled": False, "weight": 1}}
     )
     assert "same_structure_craft_split" not in deprecated_same_structure.objective_terms
+
+
+def test_default_solve_time_limit_is_twenty_seconds() -> None:
+    assert default_scenario().time_limit_seconds == 20
+    assert ScheduleInput(
+        project_name="default-time-limit",
+        start_date=date(2026, 1, 1),
+        tasks=[],
+        precedence_links=[],
+        resources=[],
+    ).time_limit_seconds == 20
 
 
 def test_schedule_strategy_rejects_invalid_objective_term_config() -> None:
@@ -408,14 +426,13 @@ def test_solver_uses_configured_search_workers_in_stats(monkeypatch: pytest.Monk
     pytest.importorskip("ortools")
     monkeypatch.setenv("SCHEDULER_SEARCH_WORKERS", "2")
 
-    result = solve_schedule(
+    result = solve_shortest_duration_schedule(
         ScheduleInput(
             project_name="configured-workers",
             start_date=date(2026, 1, 1),
             tasks=[_solver_task("T1", "Task 1", 1, "crew")],
             precedence_links=[],
             resources=[Resource(id="crew_1", name="Crew 1", type="crew")],
-            schedule_strategy=ScheduleStrategyConfig(strategy="shortest_duration"),
             time_limit_seconds=5,
         )
     )
@@ -426,11 +443,9 @@ def test_solver_uses_configured_search_workers_in_stats(monkeypatch: pytest.Monk
 
 def test_capacity_shortest_matches_named_resource_shortest_on_simple_parallel_case() -> None:
     pytest.importorskip("ortools")
-    schedule_input = _min_resource_test_input(max_resources=2).model_copy(
-        update={"schedule_strategy": ScheduleStrategyConfig(strategy="shortest_duration")}
-    )
+    schedule_input = _min_resource_test_input(max_resources=2)
 
-    named = solve_schedule(schedule_input)
+    named = solve_shortest_duration_schedule(schedule_input)
     capacity = solve_capacity_shortest_schedule(schedule_input)
 
     assert named.status in {"OPTIMAL", "FEASIBLE"}
@@ -782,11 +797,9 @@ def test_continuous_beam_left_and_right_standard_segments_solve_synchronously() 
     pytest.importorskip("ortools")
     scenario = _scenario_with_continuous_beam(main_pier_count=2, standard_cycles=1)
     generated = generate_schedule_input_from_scenario(scenario, use_max_resources=True)
-    schedule_input = generated.schedule_input.model_copy(
-        update={"schedule_strategy": ScheduleStrategyConfig(strategy="shortest_duration")}
-    )
+    schedule_input = generated.schedule_input
 
-    result = solve_schedule(schedule_input)
+    result = solve_shortest_duration_schedule(schedule_input)
     by_name = {task.name: task for task in result.tasks}
     left_standard = by_name["左幅连续梁1#墩T构-左侧标准段1块"]
     right_standard = by_name["左幅连续梁1#墩T构-右侧标准段1块"]
@@ -836,7 +849,6 @@ def test_continuous_beam_closure_predecessor_finish_gap_is_limited() -> None:
             ],
             resources=[],
             milestones=[],
-            schedule_strategy=ScheduleStrategyConfig(strategy="shortest_duration"),
             time_limit_seconds=5,
         )
     )
@@ -1241,12 +1253,11 @@ def test_fixed_resource_shortest_marks_hard_milestone_lateness_infeasible_but_ke
     solved = solve_scenario(scenario)
 
     assert solved.result.status == "INFEASIBLE"
-    assert solved.result.tasks
-    assert solved.result.resource_allocations
-    assert solved.milestone_results[0].lateness_days > 0
-    assert any(message.level == "error" and "强制里程碑目标" in message.message for message in solved.result.validation)
     assert solved.result.objective_breakdown["solve_mode"] == "fixed_resources_shortest_control_balanced"
+    assert solved.result.objective_breakdown["schedule_source"] == "current_resources_refinement_failed"
+    assert solved.result.objective_breakdown["capacity_precheck_status"] == "not_run"
     assert solved.result.objective_breakdown["resource_recommendation_status"] == "critical_path_infeasible"
+    assert solved.result.tasks == []
 
 
 def test_fixed_resource_shortest_returns_resource_increment_recommendation_when_resources_can_meet_target() -> None:
@@ -1254,16 +1265,16 @@ def test_fixed_resource_shortest_returns_resource_increment_recommendation_when_
     solved = solve_scenario(_parallel_fixed_resource_scenario(target_days=5, current_resources=1, max_resources=3))
 
     assert solved.result.status == "INFEASIBLE"
-    assert solved.result.tasks
     assert solved.result.objective_breakdown["resource_recommendation_status"] == "recommended_resources_verified"
     recommended = solved.result.objective_breakdown["recommended_resource_counts"][0]
     assert recommended["current_quantity"] == 1
     assert recommended["recommended_quantity"] == 2
     assert recommended["added_quantity"] == 1
     assert recommended["max_quantity"] == 3
-    assert solved.result.objective_breakdown["schedule_source"] == "current_resources_capacity_shortest"
-    assert solved.result.objective_breakdown["performance_path"] == "capacity_fast_path_resource_recommendation"
-    assert solved.result.objective_breakdown["skipped_named_refinement_reason"] == "current_resources_late_hard_milestone"
+    assert solved.result.objective_breakdown["schedule_source"] == "current_resources_refinement_failed"
+    assert solved.result.objective_breakdown["performance_path"] == "direct_named_refinement_failed_resource_recommendation"
+    assert solved.result.objective_breakdown["capacity_precheck_status"] == "not_run"
+    assert solved.result.objective_breakdown["skipped_named_refinement_reason"] == "control_priority_infeasible"
     assert "control_priority_analysis" not in solved.result.stats
     assert len(solved.alternative_results) == 1
     alternative = solved.alternative_results[0]
@@ -1362,12 +1373,13 @@ def test_fixed_resource_minimum_candidate_keeps_verified_schedule_when_refinemen
     assert alternative.result.stats["recommended_resource_counts"][0]["added_quantity"] == 1
 
 
-def test_fixed_resource_strict_refinement_failure_returns_best_effort(
+def test_fixed_resource_strict_refinement_failure_returns_failure_and_recommendation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pytest.importorskip("ortools")
     scenario = _parallel_fixed_resource_scenario(target_days=10, current_resources=1, max_resources=2)
     calls: list[bool] = []
+    recommendation_calls: list[str] = []
 
     def fake_control_priority(
         schedule_input: ScheduleInput,
@@ -1381,42 +1393,41 @@ def test_fixed_resource_strict_refinement_failure_returns_best_effort(
                 status="UNKNOWN",
                 plan_start_date=schedule_input.start_date,
                 validation=[ValidationMessage(level="warning", message="strict refinement timed out")],
-                stats={"wall_time_seconds": 5.0, "warm_start_used": True},
+                stats={"wall_time_seconds": 5.0, "warm_start_used": True, "solver_call_count": 1},
             )
 
-        milestone = schedule_input.milestones[0]
-        return ScheduleResult(
-            status="FEASIBLE",
-            objective_days=10,
-            plan_start_date=schedule_input.start_date,
-            plan_finish_date=schedule_input.start_date + timedelta(days=9),
-            milestone_results=[
-                MilestoneResult(
-                    **milestone.model_dump(),
-                    actual_date=schedule_input.start_date + timedelta(days=9),
-                    actual_offset=10,
-                    lateness_days=0,
-                    status="met",
-                )
-            ],
-            validation=[ValidationMessage(level="info", message="best effort refinement")],
-            stats={"wall_time_seconds": 1.0, "warm_start_used": True, "relax_target_constraints": True},
-            objective_breakdown={"weighted_objective": 123, "best_effort_score": 123},
-        )
+        raise AssertionError("current-resource best-effort refinement should not be called")
+
+    def fake_recommendation(
+        scenario_input: ScenarioInput,
+        current_schedule_input: ScheduleInput,
+        *,
+        critical_path: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        recommendation_calls.append(current_schedule_input.project_name)
+        return {
+            "metadata": {
+                "resource_recommendation_status": "resource_recommendation_unresolved",
+                "resource_recommendation_message": "recommendation unavailable",
+                "recommended_resource_counts": [],
+            },
+            "validation": [ValidationMessage(level="warning", message="recommendation attempted")],
+        }
 
     monkeypatch.setattr(scenario_module, "solve_control_priority_schedule", fake_control_priority)
+    monkeypatch.setattr(scenario_module, "_fixed_resource_recommendation", fake_recommendation)
 
     solved = solve_scenario(scenario)
 
-    assert calls == [False, True]
-    assert solved.result.status == "FEASIBLE"
-    assert solved.result.stats["schedule_source"] == "current_resources_best_effort_refinement"
-    assert solved.result.objective_breakdown["performance_path"] == "capacity_fast_path_best_effort_refinement"
-    best_effort = solved.result.stats["best_effort_refinement"]
-    assert best_effort["enabled"] is True
-    assert best_effort["strict_refinement_status"] == "UNKNOWN"
-    assert best_effort["strict_refinement_failure_reason"] == "control_priority_unknown"
-    assert best_effort["best_effort_score"] == 123
+    assert calls == [False]
+    assert recommendation_calls == [solved.generated.schedule_input.project_name]
+    assert solved.result.status == "UNKNOWN"
+    assert solved.result.stats["schedule_source"] == "current_resources_refinement_failed"
+    assert solved.result.objective_breakdown["performance_path"] == "direct_named_refinement_failed_resource_recommendation"
+    assert solved.result.objective_breakdown["capacity_precheck_status"] == "not_run"
+    assert solved.result.objective_breakdown["skipped_named_refinement_reason"] == "control_priority_unknown"
+    assert solved.result.objective_breakdown["resource_recommendation_status"] == "resource_recommendation_unresolved"
+    assert "best_effort_refinement" not in solved.result.stats
 
 
 def test_minimum_resource_candidate_returns_best_effort_when_strict_refinement_fails(
@@ -1499,7 +1510,7 @@ def test_minimum_resource_candidate_returns_best_effort_when_strict_refinement_f
     assert best_effort["relaxed_constraints"][0]["type"] == "hard_milestone"
 
 
-def test_fixed_resource_late_current_skips_control_refinement_but_keeps_recommendation(
+def test_fixed_resource_late_current_runs_direct_refinement_and_keeps_recommendation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     scenario = _parallel_fixed_resource_scenario(target_days=5, current_resources=1, max_resources=3)
@@ -1560,9 +1571,9 @@ def test_fixed_resource_late_current_skips_control_refinement_but_keeps_recommen
 
     solve_scenario(scenario)
 
-    assert ("capacity", 5) in call_limits
+    assert ("control", 5) in call_limits
     assert ("min_resources", 5) in call_limits
-    assert not any(label == "control" for label, _ in call_limits)
+    assert not any(label == "capacity" for label, _ in call_limits)
     assert all(limit == 5 for _, limit in call_limits)
 
 
@@ -1612,14 +1623,57 @@ def test_fixed_resource_shortest_outputs_control_balanced_result_when_hard_miles
     assert solved.result.objective_breakdown["solve_mode"] == "fixed_resources_shortest_control_balanced"
     assert solved.result.objective_breakdown["hard_milestone_feasible"] is True
     assert solved.result.objective_breakdown["schedule_source"] == "current_resources_control_priority_balanced"
-    assert solved.result.objective_breakdown["performance_path"] == "capacity_fast_path_named_refinement"
-    assert solved.result.objective_breakdown["warm_start_used"] is True
-    assert solved.result.stats["warm_start_used"] is True
+    assert solved.result.objective_breakdown["performance_path"] == "direct_named_refinement"
+    assert solved.result.objective_breakdown["capacity_precheck_status"] == "not_run"
+    assert solved.result.objective_breakdown["warm_start_used"] is False
+    assert solved.result.stats["warm_start_used"] is False
     assert "best_effort_refinement" not in solved.result.stats
     assert "control_priority_analysis" in solved.result.stats
     assert "normal_balance_metrics" in solved.result.stats
     assert solved.alternative_results == []
     assert all(milestone.lateness_days == 0 for milestone in solved.result.milestone_results if milestone.mode == "hard")
+
+
+def test_fixed_resource_success_uses_direct_refinement_without_capacity_precheck(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario = _parallel_fixed_resource_scenario(target_days=10, current_resources=1, max_resources=2)
+    control_calls: list[dict[str, object]] = []
+
+    def fail_capacity_precheck(schedule_input: ScheduleInput) -> ScheduleResult:
+        raise AssertionError("capacity shortest precheck should not run before fixed-resource refinement")
+
+    def fake_control_priority(schedule_input: ScheduleInput, **kwargs: object) -> ScheduleResult:
+        control_calls.append(kwargs)
+        milestone = schedule_input.milestones[0]
+        return ScheduleResult(
+            status="FEASIBLE",
+            objective_days=5,
+            plan_start_date=schedule_input.start_date,
+            plan_finish_date=schedule_input.start_date + timedelta(days=4),
+            milestone_results=[
+                MilestoneResult(
+                    **milestone.model_dump(),
+                    actual_date=schedule_input.start_date + timedelta(days=4),
+                    actual_offset=5,
+                    lateness_days=0,
+                    status="met",
+                )
+            ],
+            stats={"solver_call_count": 1, "warm_start_used": False},
+        )
+
+    monkeypatch.setattr(scenario_module, "solve_capacity_shortest_schedule", fail_capacity_precheck)
+    monkeypatch.setattr(scenario_module, "solve_control_priority_schedule", fake_control_priority)
+
+    solved = solve_scenario(scenario)
+
+    assert len(control_calls) == 1
+    assert "baseline_result" not in control_calls[0]
+    assert "warm_start_result" not in control_calls[0]
+    assert solved.result.status == "FEASIBLE"
+    assert solved.result.objective_breakdown["performance_path"] == "direct_named_refinement"
+    assert solved.result.objective_breakdown["capacity_precheck_status"] == "not_run"
 
 
 def test_soft_milestone_returns_lateness_and_penalty() -> None:
@@ -1793,7 +1847,7 @@ def test_solver_reports_same_structure_split_as_diagnostic_only() -> None:
     assert "same_structure_craft_split_weight" not in result.stats["continuity_objective"]
 
 
-def test_same_structure_drill_parallel_rule_comes_from_resource_config() -> None:
+def test_mechanical_drill_same_structure_rule_is_default_without_resource_limit() -> None:
     pytest.importorskip("ortools")
     tasks = _same_pier_pile_tasks("rotary_drill")
     start = date(2026, 1, 1)
@@ -1819,71 +1873,77 @@ def test_same_structure_drill_parallel_rule_comes_from_resource_config() -> None
             tasks=tasks,
             precedence_links=[],
             resources=[
-                Resource(
-                    id="rotary_1",
-                    name="旋挖钻1",
-                    type="rotary_drill",
-                    same_structure_resource_binding=False,
-                    same_structure_parallel_limit=1,
-                ),
-                Resource(
-                    id="rotary_2",
-                    name="旋挖钻2",
-                    type="rotary_drill",
-                    same_structure_resource_binding=False,
-                    same_structure_parallel_limit=1,
-                ),
+                Resource(id="rotary_1", name="旋挖钻1", type="rotary_drill", same_structure_resource_binding=False),
+                Resource(id="rotary_2", name="旋挖钻2", type="rotary_drill", same_structure_resource_binding=False),
             ],
             time_limit_seconds=5,
         )
     )
 
     assert unconfigured_result.status in {"OPTIMAL", "FEASIBLE"}
-    assert unconfigured_result.objective_days == 5
-    assert len({task.assigned_resource_id for task in unconfigured_result.tasks}) == 2
+    assert unconfigured_result.objective_days == 10
+    assert len({task.assigned_resource_id for task in unconfigured_result.tasks}) == 1
 
     assert configured_result.status in {"OPTIMAL", "FEASIBLE"}
     assert configured_result.objective_days == 10
     assert len({task.assigned_resource_id for task in configured_result.tasks}) == 1
 
 
-def test_same_structure_parallel_limit_caps_total_participating_resources() -> None:
+def test_legacy_same_structure_parallel_limit_is_ignored_for_generic_resources() -> None:
     pytest.importorskip("ortools")
+    legacy_resources = [
+        Resource.model_validate(
+            {
+                "id": f"team_{index}",
+                "name": f"Team {index}",
+                "type": "team",
+                "same_structure_parallel_limit": 2,
+            }
+        )
+        for index in range(1, 9)
+    ]
+    plain_resources = [
+        Resource(id=f"team_{index}", name=f"Team {index}", type="team")
+        for index in range(1, 9)
+    ]
     result = solve_schedule(
         ScheduleInput(
-            project_name="same pier at most two participating resources",
+            project_name="legacy same pier limit ignored",
             start_date=date(2026, 1, 1),
-            tasks=_same_pier_pile_tasks("rotary_drill", count=6),
+            tasks=_same_pier_pile_tasks("team", count=6),
             precedence_links=[],
-            resources=[
-                Resource(
-                    id=f"rotary_{index}",
-                    name=f"旋挖钻{index}",
-                    type="rotary_drill",
-                    same_structure_parallel_limit=2,
-                )
-                for index in range(1, 9)
-            ],
+            resources=legacy_resources,
+            time_limit_seconds=5,
+        )
+    )
+    baseline = solve_schedule(
+        ScheduleInput(
+            project_name="plain same pier resources",
+            start_date=date(2026, 1, 1),
+            tasks=_same_pier_pile_tasks("team", count=6),
+            precedence_links=[],
+            resources=plain_resources,
             time_limit_seconds=5,
         )
     )
 
+    assert not hasattr(legacy_resources[0], "same_structure_parallel_limit")
     assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert result.objective_days == 15
-    assert len({task.assigned_resource_id for task in result.tasks}) <= 2
+    assert baseline.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.objective_days == baseline.objective_days
 
 
-def test_same_structure_parallel_limit_zero_means_unlimited() -> None:
+def test_generic_same_structure_tasks_are_unlimited_without_binding() -> None:
     pytest.importorskip("ortools")
     result = solve_schedule(
         ScheduleInput(
-            project_name="same pier explicit unlimited",
+            project_name="generic same pier explicit unlimited",
             start_date=date(2026, 1, 1),
-            tasks=_same_pier_pile_tasks("rotary_drill"),
+            tasks=_same_pier_pile_tasks("team"),
             precedence_links=[],
             resources=[
-                Resource(id="rotary_1", name="旋挖钻1", type="rotary_drill", same_structure_parallel_limit=0),
-                Resource(id="rotary_2", name="旋挖钻2", type="rotary_drill", same_structure_parallel_limit=0),
+                Resource(id="team_1", name="Team 1", type="team"),
+                Resource(id="team_2", name="Team 2", type="team"),
             ],
             time_limit_seconds=5,
         )
@@ -1894,14 +1954,13 @@ def test_same_structure_parallel_limit_zero_means_unlimited() -> None:
     assert len({task.assigned_resource_id for task in result.tasks}) == 2
 
 
-@pytest.mark.parametrize("parallel_limit", [None, 0])
-def test_resource_path_continuity_uses_task_nodes_when_parallel_limit_unset_or_zero(parallel_limit) -> None:
+def test_resource_path_continuity_groups_mechanical_drill_nodes_without_limit_config() -> None:
     pytest.importorskip("ortools")
     tasks = _multi_pier_pile_tasks("rotary_drill", pier_count=3, piles_per_pier=2)
 
     result = solve_schedule(
         ScheduleInput(
-            project_name="task-level resource path continuity",
+            project_name="mechanical drill group resource path continuity",
             start_date=date(2026, 1, 1),
             tasks=tasks,
             precedence_links=[],
@@ -1910,7 +1969,6 @@ def test_resource_path_continuity_uses_task_nodes_when_parallel_limit_unset_or_z
                     id="rotary_1",
                     name="Rotary 1",
                     type="rotary_drill",
-                    same_structure_parallel_limit=parallel_limit,
                 )
             ],
             schedule_strategy=ScheduleStrategyConfig(
@@ -1922,16 +1980,20 @@ def test_resource_path_continuity_uses_task_nodes_when_parallel_limit_unset_or_z
     )
 
     objective = result.stats["continuity_objective"]
+    diagnostic = result.stats["drill_group_refinement"]
 
     assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert objective["resource_path_node_count"] == len(tasks)
-    assert objective["resource_path_transition_arc_count"] == len(tasks) * (len(tasks) - 1)
-    assert objective["resource_path_granularity_counts"]["task"] == len(tasks)
-    assert objective["resource_path_granularity_counts"]["same_structure"] == 0
+    assert diagnostic["status"] == "stage2_refined"
+    assert diagnostic["coarse_group_count"] == 3
+    assert diagnostic["coarse_child_task_count"] == len(tasks)
+    assert objective["resource_path_node_count"] == 3
+    assert objective["resource_path_transition_arc_count"] == 6
+    assert objective["resource_path_granularity_counts"]["task"] == 0
+    assert objective["resource_path_granularity_counts"]["same_structure"] == 3
     assert objective["resource_path_granularity_counts"]["same_structure_slot"] == 0
 
 
-def test_resource_path_continuity_groups_nodes_by_structure_when_parallel_limit_one() -> None:
+def test_resource_path_continuity_groups_mechanical_nodes_by_structure() -> None:
     pytest.importorskip("ortools")
     tasks = _multi_pier_pile_tasks("rotary_drill", pier_count=3, piles_per_pier=2)
 
@@ -1946,7 +2008,6 @@ def test_resource_path_continuity_groups_nodes_by_structure_when_parallel_limit_
                     id="rotary_1",
                     name="Rotary 1",
                     type="rotary_drill",
-                    same_structure_parallel_limit=1,
                 )
             ],
             schedule_strategy=ScheduleStrategyConfig(
@@ -1967,13 +2028,14 @@ def test_resource_path_continuity_groups_nodes_by_structure_when_parallel_limit_
     assert objective["resource_path_granularity_counts"]["same_structure_slot"] == 0
 
 
-def test_resource_path_continuity_uses_structure_slots_and_balances_limit_two() -> None:
+def test_drill_group_two_stage_keeps_original_task_grain_and_ids() -> None:
     pytest.importorskip("ortools")
-    tasks = _same_pier_pile_tasks("rotary_drill", count=4)
+    tasks = _multi_pier_pile_tasks("rotary_drill", pier_count=6, piles_per_pier=2)
+    original_task_ids = {task.id for task in tasks}
 
     result = solve_schedule(
         ScheduleInput(
-            project_name="same-structure slot continuity",
+            project_name="drill group output grain",
             start_date=date(2026, 1, 1),
             tasks=tasks,
             precedence_links=[],
@@ -1982,35 +2044,345 @@ def test_resource_path_continuity_uses_structure_slots_and_balances_limit_two() 
                     id=f"rotary_{index}",
                     name=f"Rotary {index}",
                     type="rotary_drill",
-                    same_structure_parallel_limit=2,
                 )
                 for index in range(1, 4)
             ],
             schedule_strategy=ScheduleStrategyConfig(
                 strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("resource_path_continuity", 3_000),
+            ),
+            time_limit_seconds=10,
+        )
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert {task.id for task in result.tasks} == original_task_ids
+    assert all(not task.id.startswith("drill_group:") for task in result.tasks)
+    by_structure: dict[str, set[str | None]] = defaultdict(set)
+    for task in result.tasks:
+        by_structure[task.structure_id].add(task.assigned_resource_id)
+    assert all(len(resource_ids) == 1 for resource_ids in by_structure.values())
+    assert result.stats["drill_group_refinement"]["status"] == "stage2_refined"
+
+
+def test_drill_group_two_stage_reduces_path_arcs_to_actual_assignments() -> None:
+    pytest.importorskip("ortools")
+    tasks = _multi_pier_pile_tasks("rotary_drill", pier_count=30, piles_per_pier=2)
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="drill group path arc reduction",
+            start_date=date(2026, 1, 1),
+            tasks=tasks,
+            precedence_links=[],
+            resources=[
+                Resource(
+                    id=f"rotary_{index}",
+                    name=f"Rotary {index}",
+                    type="rotary_drill",
+                )
+                for index in range(1, 4)
+            ],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("resource_path_continuity", 3_000),
+            ),
+            time_limit_seconds=15,
+        )
+    )
+
+    diagnostic = result.stats["drill_group_refinement"]
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert diagnostic["status"] == "stage2_refined"
+    assert diagnostic["coarse_group_count"] == 30
+    assert diagnostic["coarse_child_task_count"] == 60
+    assert diagnostic["baseline_candidate_arc_count"] == 3 * 30 * 29
+    assert diagnostic["stage2_arc_count"] <= 120
+    assert diagnostic["arc_reduction_ratio"] >= 0.95
+    assert result.stats["continuity_objective"]["resource_path_transition_arc_count"] == diagnostic["stage2_arc_count"]
+
+
+def test_drill_group_stage2_sparse_arcs_use_same_and_opposite_side_two_pier_window() -> None:
+    pytest.importorskip("ortools")
+
+    def pile_task(side: str, pier_no: int) -> Task:
+        return _solver_task(
+            f"P{side}{pier_no:02d}-PILE-01",
+            f"{side}{pier_no} pile",
+            5,
+            "rotary_drill",
+        ).model_copy(
+            update={
+                "bridge_id": "B1",
+                "work_section_id": f"WS-{side}",
+                "sequence_order": pier_no * 100 + (0 if side == "L" else 1),
+                "structure_id": f"B1-{side}-P{pier_no:02d}",
+                "structure_name": f"{pier_no}# pier",
+                "structure_type": "pier",
+                "component_type": "pile",
+                "process_name": "pile",
+                "quantity_label": "1",
+            }
+        )
+
+    tasks = [pile_task(side, pier_no) for pier_no in range(1, 7) for side in ("L", "R")]
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="drill group sparse side window",
+            start_date=date(2026, 1, 1),
+            tasks=tasks,
+            precedence_links=[],
+            resources=[Resource(id="rotary_1", name="Rotary 1", type="rotary_drill")],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("resource_path_continuity", 3_000),
+            ),
+            time_limit_seconds=10,
+        )
+    )
+
+    diagnostic = result.stats["drill_group_refinement"]
+    objective = result.stats["continuity_objective"]
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert diagnostic["status"] == "stage2_refined"
+    assert diagnostic["coarse_group_count"] == 12
+    assert diagnostic["baseline_candidate_arc_count"] == 12 * 11
+    assert diagnostic["stage2_arc_count"] == 84
+    assert objective["resource_path_transition_arc_count"] == 84
+    assert objective["resource_path_sparse_support_window"] == 2
+
+
+def test_manual_pile_team_does_not_enter_drill_group_refinement() -> None:
+    pytest.importorskip("ortools")
+    tasks = _same_pier_pile_tasks("manual_pile_team")
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="manual pile no drill group",
+            start_date=date(2026, 1, 1),
+            tasks=tasks,
+            precedence_links=[],
+            resources=[
+                Resource(id="manual_1", name="Manual 1", type="manual_pile_team"),
+                Resource(id="manual_2", name="Manual 2", type="manual_pile_team"),
+            ],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
                 objective_terms={
-                    **_objective_terms_with_only("resource_path_continuity", 3_000),
-                    "resource_slot_balance": {"enabled": True, "weight": 3_000},
+                    **_objective_terms_with_only("makespan_and_soft_milestone", 5_000_000),
+                    "resource_path_continuity": {"enabled": True, "weight": 3_000},
                 },
             ),
             time_limit_seconds=5,
         )
     )
 
-    objective = result.stats["continuity_objective"]
-    workload_by_resource: dict[str, int] = defaultdict(int)
-    for task in result.tasks:
-        workload_by_resource[task.assigned_resource_id or ""] += task.duration_days
-    participating_workloads = sorted(value for value in workload_by_resource.values() if value > 0)
+    diagnostic = result.stats["drill_group_refinement"]
 
     assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert len(participating_workloads) == 2
-    assert participating_workloads == [10, 10]
-    assert objective["resource_path_node_count"] == 3
+    assert result.objective_days == 5
+    assert len({task.assigned_resource_id for task in result.tasks}) == 2
+    assert diagnostic["status"] == "not_applicable"
+    assert diagnostic["coarse_group_count"] == 0
+    assert result.stats["continuity_objective"]["resource_path_node_count"] == len(tasks) * 2
+
+
+def test_drill_group_path_objective_disabled_skips_two_stage_path_modeling() -> None:
+    pytest.importorskip("ortools")
+    tasks = _multi_pier_pile_tasks("rotary_drill", pier_count=3, piles_per_pier=2)
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="drill group path disabled",
+            start_date=date(2026, 1, 1),
+            tasks=tasks,
+            precedence_links=[],
+            resources=[Resource(id="rotary_1", name="Rotary 1", type="rotary_drill")],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("control_node_late", 1_000_000_000),
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    objective = result.stats["continuity_objective"]
+    diagnostic = result.stats["drill_group_refinement"]
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert objective["resource_path_node_count"] == 0
     assert objective["resource_path_transition_arc_count"] == 0
-    assert objective["resource_path_granularity_counts"]["same_structure_slot"] == 3
-    assert objective["resource_slot_balance_term_count"] == 3
-    assert objective["resource_slot_balance_penalty"] == 0
+    assert diagnostic["status"] == "coarse_only"
+    assert diagnostic["coarse_group_count"] == 3
+
+
+def test_drill_group_path_objective_disabled_still_lifts_precedence_to_group_boundary() -> None:
+    pytest.importorskip("ortools")
+    predecessor = _solver_task("A-READY", "ready work", 5, "prep_team").model_copy(
+        update={
+            "component_type": "cap",
+            "process_name": "ready",
+            "structure_id": "B1-L-P09",
+            "structure_name": "9# pier",
+        }
+    )
+    group_tasks = _same_pier_pile_tasks("rotary_drill", count=2)
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="drill group path disabled external precedence",
+            start_date=date(2026, 1, 1),
+            tasks=[predecessor, *group_tasks],
+            precedence_links=[
+                PrecedenceLink(
+                    id="ready-before-second-pile",
+                    predecessor_id=predecessor.id,
+                    successor_id=group_tasks[1].id,
+                    relationship="FS",
+                    lag_days=0,
+                    source_rule_id="test",
+                )
+            ],
+            resources=[
+                Resource(id="prep_1", name="Prep 1", type="prep_team"),
+                Resource(id="rotary_1", name="Rotary 1", type="rotary_drill"),
+            ],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("makespan_and_soft_milestone", 5_000_000),
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    by_task = {task.id: task for task in result.tasks}
+    diagnostic = result.stats["drill_group_refinement"]
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert diagnostic["status"] == "coarse_only"
+    assert result.stats["continuity_objective"]["resource_path_node_count"] == 0
+    assert min(by_task[task.id].start_offset for task in group_tasks) >= by_task[predecessor.id].end_offset
+
+
+def test_drill_group_external_precedence_lifts_to_group_boundary() -> None:
+    pytest.importorskip("ortools")
+    predecessor = _solver_task("A-READY", "ready work", 5, "prep_team").model_copy(
+        update={
+            "component_type": "cap",
+            "process_name": "ready",
+            "structure_id": "B1-L-P09",
+            "structure_name": "9# pier",
+        }
+    )
+    group_tasks = _same_pier_pile_tasks("rotary_drill", count=2)
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="drill group external precedence",
+            start_date=date(2026, 1, 1),
+            tasks=[predecessor, *group_tasks],
+            precedence_links=[
+                PrecedenceLink(
+                    id="ready-before-second-pile",
+                    predecessor_id=predecessor.id,
+                    successor_id=group_tasks[1].id,
+                    relationship="FS",
+                    lag_days=0,
+                    source_rule_id="test",
+                )
+            ],
+            resources=[
+                Resource(id="prep_1", name="Prep 1", type="prep_team"),
+                Resource(id="rotary_1", name="Rotary 1", type="rotary_drill"),
+            ],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("resource_path_continuity", 3_000),
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    by_task = {task.id: task for task in result.tasks}
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert min(by_task[task.id].start_offset for task in group_tasks) >= by_task[predecessor.id].end_offset
+
+
+def test_drill_group_stage2_failure_returns_coarse_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("ortools")
+    original_refinement = solver_module.solve_control_priority_schedule
+
+    def fail_refined_stage(schedule_input: ScheduleInput, **kwargs: object) -> ScheduleResult:
+        if kwargs.get("_drill_group_stage") == "refined":
+            return ScheduleResult(
+                status="INFEASIBLE",
+                plan_start_date=schedule_input.start_date,
+                stats={"reason": "forced_stage2_failure"},
+            )
+        return original_refinement(schedule_input, **kwargs)
+
+    monkeypatch.setattr(solver_module, "solve_control_priority_schedule", fail_refined_stage)
+    tasks = _multi_pier_pile_tasks("rotary_drill", pier_count=3, piles_per_pier=2)
+
+    result = original_refinement(
+        ScheduleInput(
+            project_name="forced drill group fallback",
+            start_date=date(2026, 1, 1),
+            tasks=tasks,
+            precedence_links=[],
+            resources=[Resource(id="rotary_1", name="Rotary 1", type="rotary_drill")],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("resource_path_continuity", 3_000),
+            ),
+            time_limit_seconds=5,
+        )
+    )
+
+    diagnostic = result.stats["drill_group_refinement"]
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert diagnostic["status"] == "stage2_fallback"
+    assert diagnostic["fallback_reason"] == "stage2_infeasible"
+    assert {task.id for task in result.tasks} == {task.id for task in tasks}
+
+
+def test_drill_group_jump_penalties_use_existing_sparse_sequence_only() -> None:
+    tasks = _multi_pier_pile_tasks("rotary_drill", pier_count=3, piles_per_pier=1)
+    tasks[0] = tasks[0].model_copy(update={"structure_id": "B1-L-P01", "structure_name": "1# pier"})
+    tasks[1] = tasks[1].model_copy(update={"structure_id": "B1-L-P03", "structure_name": "3# pier"})
+    tasks[2] = tasks[2].model_copy(update={"structure_id": "B1-L-P05", "structure_name": "5# pier"})
+    resources = [
+        Resource(id="rotary_1", name="Rotary 1", type="rotary_drill"),
+        Resource(id="rotary_2", name="Rotary 2", type="rotary_drill"),
+    ]
+    candidates = solver_module._resource_candidates_by_task(tasks, resources)
+    groups = solver_module._build_drill_group_nodes(tasks, candidates, resources)
+    scheduled = [
+        ScheduledTask(
+            **task.model_dump(),
+            start_offset=index,
+            end_offset=index + 1,
+            start_date=date(2026, 1, 1) + timedelta(days=index),
+            finish_date=date(2026, 1, 1) + timedelta(days=index),
+            assigned_resource_id=resource_id,
+            assigned_resource_name=resource_id,
+            assigned_resource_type="rotary_drill",
+        )
+        for index, (task, resource_id) in enumerate(
+            zip(tasks, ["rotary_1", "rotary_2", "rotary_1"])
+        )
+    ]
+    assignments = solver_module._drill_group_assignment_by_group(groups, scheduled)
+    penalties = solver_module._drill_group_assignment_penalties(groups, assignments)
+
+    assert len(groups) == 3
+    assert penalties["adjacent_resource_switch_penalty"] == 2
+    assert penalties["hole_jump_penalty"] == 1
 
 
 def test_legacy_same_structure_binding_without_limit_is_limit_one() -> None:
@@ -2055,31 +2427,56 @@ def test_manual_pile_team_allows_same_structure_parallel_without_extra_limit() -
     assert len({task.assigned_resource_id for task in result.tasks}) == 2
 
 
-def test_capacity_model_enforces_configured_same_structure_parallel_limit() -> None:
+def test_capacity_model_ignores_legacy_same_structure_parallel_limit() -> None:
     pytest.importorskip("ortools")
+    legacy_resources = [
+        Resource.model_validate(
+            {
+                "id": f"team_{index}",
+                "name": f"旋挖钻{index}",
+                "type": "team",
+                "pool_id": "pool-team",
+                "pool_label": "旋挖钻",
+                "same_structure_parallel_limit": 2,
+            }
+        )
+        for index in range(1, 9)
+    ]
+    plain_resources = [
+        Resource(
+            id=f"team_{index}",
+            name=f"旋挖钻{index}",
+            type="team",
+            pool_id="pool-team",
+            pool_label="旋挖钻",
+        )
+        for index in range(1, 9)
+    ]
     result = solve_capacity_shortest_schedule(
         ScheduleInput(
-            project_name="capacity same pier parallel limit",
+            project_name="capacity ignores legacy same pier parallel limit",
             start_date=date(2026, 1, 1),
-            tasks=_same_pier_pile_tasks("rotary_drill", count=6),
+            tasks=_same_pier_pile_tasks("team", count=6),
             precedence_links=[],
-            resources=[
-                Resource(
-                    id=f"rotary_{index}",
-                    name=f"旋挖钻{index}",
-                    type="rotary_drill",
-                    pool_id="pool-rotary",
-                    pool_label="旋挖钻",
-                    same_structure_parallel_limit=2,
-                )
-                for index in range(1, 9)
-            ],
+            resources=legacy_resources,
+            time_limit_seconds=5,
+        )
+    )
+    baseline = solve_capacity_shortest_schedule(
+        ScheduleInput(
+            project_name="capacity plain resources",
+            start_date=date(2026, 1, 1),
+            tasks=_same_pier_pile_tasks("team", count=6),
+            precedence_links=[],
+            resources=plain_resources,
             time_limit_seconds=5,
         )
     )
 
+    assert not hasattr(legacy_resources[0], "same_structure_parallel_limit")
     assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert result.objective_days == 15
+    assert baseline.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.objective_days == baseline.objective_days
 
 
 def test_default_pile_resource_parallel_rules_are_configuration_fields() -> None:
@@ -2088,10 +2485,8 @@ def test_default_pile_resource_parallel_rules_are_configuration_fields() -> None
 
     for resource_type in {"rotary_drill", "circulation_drill", "impact_drill"}:
         assert pool_by_type[resource_type].same_structure_resource_binding is False
-        assert pool_by_type[resource_type].same_structure_parallel_limit == 1
         assert pool_by_type[resource_type].parallel_rule_description
     assert pool_by_type["manual_pile_team"].same_structure_resource_binding is False
-    assert pool_by_type["manual_pile_team"].same_structure_parallel_limit is None
     assert pool_by_type["manual_pile_team"].parallel_rule_description
 
     resources, validation = scenario_module.expand_resource_pools(scenario.resource_pools)
@@ -2099,9 +2494,7 @@ def test_default_pile_resource_parallel_rules_are_configuration_fields() -> None
     rotary = next(resource for resource in resources if resource.type == "rotary_drill")
     manual = next(resource for resource in resources if resource.type == "manual_pile_team")
     assert rotary.same_structure_resource_binding is False
-    assert rotary.same_structure_parallel_limit == 1
     assert manual.same_structure_resource_binding is False
-    assert manual.same_structure_parallel_limit is None
 
 
 def test_control_priority_keeps_workload_diagnostics_without_workload_balance_objective() -> None:
@@ -2823,13 +3216,11 @@ def test_control_priority_best_effort_relaxes_hard_milestone_and_keeps_same_stru
                     id="rotary_1",
                     name="旋挖钻1",
                     type="rotary_drill",
-                    same_structure_parallel_limit=1,
                 ),
                 Resource(
                     id="rotary_2",
                     name="旋挖钻2",
                     type="rotary_drill",
-                    same_structure_parallel_limit=1,
                 ),
             ],
             milestones=[
@@ -3677,7 +4068,7 @@ def test_min_resource_solver_reoptimizes_with_control_priority() -> None:
     recommended = result.stats["recommended_resource_counts"][0]
     assert result.status in {"OPTIMAL", "FEASIBLE"}
     assert result.stats["schedule_source"] == "control_priority_balanced_reoptimization"
-    assert result.objective_breakdown["resource_guarantee"] == "priority"
+    assert "resource_guarantee" not in result.objective_breakdown
     assert result.stats["control_priority_analysis"]["control_task_count"] == 1
     assert recommended["recommended_quantity"] == 1
     assert by_task["Z-control"].start_offset == 0

@@ -70,13 +70,16 @@ export function resourcePoolBillingPeriodDays(pool: ResourcePool): number {
   return Number.isFinite(Number(pool.billing_period_days)) ? Math.max(1, Number(pool.billing_period_days)) : 30;
 }
 
-export function resourcePoolSameStructureParallelLimit(pool: ResourcePool): number | null {
-  if (pool.same_structure_parallel_limit === null || pool.same_structure_parallel_limit === undefined) {
-    return pool.same_structure_resource_binding ? 1 : null;
+const mechanicalPileResourceTypes = new Set(["rotary_drill", "circulation_drill", "impact_drill"]);
+
+function normalizedParallelRuleDescription(pool: ResourcePool): string {
+  if (mechanicalPileResourceTypes.has(pool.type)) {
+    return "机械桩基资源：按同桥同幅同墩同工艺形成墩组，组内由同一台设备负责；不再配置并行上限。";
   }
-  const value = Number(pool.same_structure_parallel_limit);
-  if (!Number.isFinite(value)) return null;
-  return Math.max(0, Math.floor(value));
+  if (pool.type === "manual_pile_team") {
+    return "人工挖孔班组：不进入机械钻机墩组规则，按班组数量和资源互斥排程。";
+  }
+  return String(pool.parallel_rule_description ?? "");
 }
 
 export function normalizeLimitedResourcePool(pool: ResourcePool): ResourcePool {
@@ -91,8 +94,7 @@ export function normalizeLimitedResourcePool(pool: ResourcePool): ResourcePool {
     max_quantity: Math.max(quantity, rawMaxQuantity),
     calendar_id: pool.calendar_id || "continuous",
     same_structure_resource_binding: Boolean(pool.same_structure_resource_binding),
-    same_structure_parallel_limit: resourcePoolSameStructureParallelLimit(pool),
-    parallel_rule_description: String(pool.parallel_rule_description ?? ""),
+    parallel_rule_description: normalizedParallelRuleDescription(pool),
   };
 }
 

@@ -18,15 +18,7 @@ export type WorkPointType = "road" | "bridge" | "tunnel";
 export type WorkSectionSide = "left" | "right" | "none";
 export type ResourceMode = "LIMITED" | "UNLIMITED";
 export type ResourceCostType = "none" | "monthly_rental" | "one_time_purchase";
-export type ScheduleStrategy =
-  | "shortest_duration"
-  | "min_resource"
-  | "resource_cost"
-  | "control_priority"
-  | "balanced_normal"
-  | "comprehensive";
 export type ControlLevel = "control" | "key" | "normal" | "rough";
-export type ResourceGuaranteeMode = "strict" | "priority" | "off";
 export type BalanceBucket = "week" | "month";
 export type ObjectiveTermId =
   | "control_node_late"
@@ -69,8 +61,6 @@ export type ComponentModel = {
 };
 
 export type ScheduleStrategyConfig = {
-  strategy: ScheduleStrategy;
-  resource_guarantee: ResourceGuaranteeMode;
   normal_balance_bucket: BalanceBucket;
   normal_earliest_start_offset: number;
   normal_latest_finish_offset?: number | null;
@@ -253,7 +243,6 @@ export type ResourcePool = {
   incremental_unit_cost?: number;
   billing_period_days?: number;
   same_structure_resource_binding?: boolean;
-  same_structure_parallel_limit?: number | null;
   parallel_rule_description?: string;
 };
 
@@ -491,7 +480,6 @@ export type Resource = {
   enabled: boolean;
   calendar_id: string;
   same_structure_resource_binding?: boolean;
-  same_structure_parallel_limit?: number | null;
   parallel_rule_description?: string;
 };
 
@@ -664,6 +652,27 @@ export type ResourcePath = {
   path: ResourcePathStep[];
 };
 
+export type DrillGroupRefinementStatus =
+  | "not_applicable"
+  | "coarse_only"
+  | "stage2_refined"
+  | "stage2_fallback"
+  | string;
+
+export type DrillGroupRefinementDiagnostics = {
+  status: DrillGroupRefinementStatus;
+  coarse_group_count: number;
+  coarse_child_task_count: number;
+  stage2_node_count: number;
+  stage2_arc_count: number;
+  baseline_candidate_arc_count: number;
+  arc_reduction_ratio: number;
+  adjacent_resource_switch_penalty: number;
+  hole_jump_penalty: number;
+  makespan_tolerance: number;
+  fallback_reason?: string | null;
+};
+
 export type ContinuityMetrics = {
   continuity_score: number;
   same_structure_craft_split_count: number;
@@ -758,7 +767,6 @@ export type ResourceOrganizationResource = {
   resource_name: string;
   resource_type: string;
   same_structure_resource_binding?: boolean;
-  same_structure_parallel_limit?: number | null;
   parallel_rule_description?: string;
   task_count: number;
   active_days: number;
@@ -781,7 +789,6 @@ export type ResourceOrganizationType = {
   resource_count: number;
   used_resource_count: number;
   same_structure_resource_binding?: boolean;
-  same_structure_parallel_limit?: number | null;
   parallel_rule_description?: string;
   task_count: number;
   active_days: number;

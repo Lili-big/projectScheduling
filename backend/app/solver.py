@@ -5,6 +5,7 @@ import os
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, get_args
 
@@ -44,6 +45,23 @@ CONTINUOUS_BEAM_CLOSURE_RULE_IDS = {
 }
 DEFAULT_CONTINUOUS_CLOSURE_FINISH_GAP_DAYS = 7
 MINIMUM_RESOURCES_BEST_EFFORT_SOURCE = "minimum_resources_best_effort_refinement"
+MECHANICAL_DRILL_RESOURCE_TYPES = frozenset({"rotary_drill", "circulation_drill", "impact_drill"})
+MECHANICAL_DRILL_PATH_SUPPORT_WINDOW = 2
+
+
+@dataclass(frozen=True)
+class _DrillGroupNode:
+    group_id: str
+    group_key: tuple[str, str, str, str]
+    resource_group_key: str
+    structure_id: str
+    component_type: str
+    process_name: str
+    child_task_ids: tuple[str, ...]
+    duration_days: int
+    sequence_order: int
+    eligible_resource_ids: tuple[str, ...]
+    representative_task: Task
 
 
 def _objective_weights_for_config(config: Any) -> dict[str, int]:
@@ -264,6 +282,398 @@ def _same_structure_resource_rule_key(task: Task, resource_group_key: str) -> tu
     )
 
 
+def _drill_group_id(rule_key: tuple[str, str, str, str]) -> str:
+    return "drill_group:" + ":".join(str(part) for part in rule_key)
+
+
+def _drill_group_child_sort_key(task: Task) -> tuple[Any, ...]:
+    return (task.sequence_order, _component_rank(task.component_type), task.id)
+
+
+def _build_drill_group_nodes(
+    tasks: list[Task],
+    resource_candidates: dict[str, list[Resource]],
+    enabled_resources: list[Resource],
+) -> list[_DrillGroupNode]:
+    resources_by_group_key: dict[str, list[Resource]] = defaultdict(list)
+    for resource in enabled_resources:
+        resources_by_group_key[_resource_parallel_group_key(resource)].append(resource)
+
+    eligible_group_keys = {
+        group_key
+        for group_key, resources in resources_by_group_key.items()
+        if resources
+        and all(resource.type in MECHANICAL_DRILL_RESOURCE_TYPES for resource in resources)
+    }
+    if not eligible_group_keys:
+        return []
+
+    grouped: dict[tuple[str, str, str, str], list[Task]] = defaultdict(list)
+    for task in tasks:
+        if task.component_type != "pile":
+            continue
+        candidates = resource_candidates.get(task.id, [])
+        if not candidates or not all(resource.type in MECHANICAL_DRILL_RESOURCE_TYPES for resource in candidates):
+            continue
+        candidate_group_keys = {_resource_parallel_group_key(resource) for resource in candidates}
+        if len(candidate_group_keys) != 1:
+            continue
+        resource_group_key = next(iter(candidate_group_keys))
+        if resource_group_key not in eligible_group_keys:
+            continue
+        grouped[_same_structure_resource_rule_key(task, resource_group_key)].append(task)
+
+    nodes: list[_DrillGroupNode] = []
+    for rule_key, group_tasks in grouped.items():
+        ordered_tasks = sorted(group_tasks, key=_drill_group_child_sort_key)
+        if not ordered_tasks:
+            continue
+        candidate_sets = [
+            {resource.id for resource in resource_candidates.get(task.id, [])}
+            for task in ordered_tasks
+        ]
+        eligible_resource_ids = set.intersection(*candidate_sets) if candidate_sets else set()
+        if not eligible_resource_ids:
+            continue
+        representative_task = ordered_tasks[0]
+        nodes.append(
+            _DrillGroupNode(
+                group_id=_drill_group_id(rule_key),
+                group_key=rule_key,
+                resource_group_key=rule_key[0],
+                structure_id=rule_key[1],
+                component_type=rule_key[2],
+                process_name=rule_key[3],
+                child_task_ids=tuple(task.id for task in ordered_tasks),
+                duration_days=sum(task.duration_days for task in ordered_tasks),
+                sequence_order=min(task.sequence_order for task in ordered_tasks),
+                eligible_resource_ids=tuple(sorted(eligible_resource_ids)),
+                representative_task=representative_task,
+            )
+        )
+    return sorted(nodes, key=lambda node: (node.sequence_order, node.group_id))
+
+
+def _drill_group_task_ids(groups: list[_DrillGroupNode]) -> set[str]:
+    return {task_id for group in groups for task_id in group.child_task_ids}
+
+
+def _expand_drill_group_scope(task_ids: list[str], groups: list[_DrillGroupNode]) -> list[str]:
+    scoped = set(task_ids)
+    if not scoped:
+        return task_ids
+    for group in groups:
+        if scoped.intersection(group.child_task_ids):
+            scoped.update(group.child_task_ids)
+    return sorted(scoped)
+
+
+def _add_drill_group_contiguity_constraints(
+    model: Any,
+    starts: dict[str, Any],
+    ends: dict[str, Any],
+    groups: list[_DrillGroupNode],
+) -> None:
+    for group in groups:
+        child_ids = [task_id for task_id in group.child_task_ids if task_id in starts and task_id in ends]
+        for previous_id, current_id in zip(child_ids, child_ids[1:]):
+            model.Add(starts[current_id] == ends[previous_id])
+
+
+def _add_drill_group_boundary_precedence_constraints(
+    model: Any,
+    starts: dict[str, Any],
+    ends: dict[str, Any],
+    groups: list[_DrillGroupNode],
+    precedence_links: list[PrecedenceLink],
+) -> None:
+    group_by_task_id = {
+        task_id: group
+        for group in groups
+        for task_id in group.child_task_ids
+    }
+
+    def boundary_ids(task_id: str) -> tuple[str, str]:
+        group = group_by_task_id.get(task_id)
+        if group is None:
+            return task_id, task_id
+        return group.child_task_ids[0], group.child_task_ids[-1]
+
+    for link in precedence_links:
+        predecessor_group = group_by_task_id.get(link.predecessor_id)
+        successor_group = group_by_task_id.get(link.successor_id)
+        if predecessor_group is None and successor_group is None:
+            continue
+        if predecessor_group is not None and predecessor_group == successor_group:
+            continue
+        predecessor_start_id, predecessor_end_id = boundary_ids(link.predecessor_id)
+        successor_start_id, successor_end_id = boundary_ids(link.successor_id)
+        if (
+            predecessor_start_id not in starts
+            or predecessor_end_id not in ends
+            or successor_start_id not in starts
+            or successor_end_id not in ends
+        ):
+            continue
+        if link.relationship == "SS":
+            model.Add(starts[successor_start_id] >= starts[predecessor_start_id] + link.lag_days)
+        elif link.relationship == "FF":
+            model.Add(ends[successor_end_id] >= ends[predecessor_end_id] + link.lag_days)
+        elif link.relationship == "SF":
+            model.Add(ends[successor_end_id] >= starts[predecessor_start_id] + link.lag_days)
+        else:
+            model.Add(starts[successor_start_id] >= ends[predecessor_end_id] + link.lag_days)
+
+
+def _add_fixed_task_resource_constraints(
+    model: Any,
+    resource_candidates: dict[str, list[Resource]],
+    assignment_vars: dict[tuple[str, str], Any],
+    fixed_resource_by_task_id: dict[str, str],
+) -> None:
+    for task_id, fixed_resource_id in fixed_resource_by_task_id.items():
+        for resource in resource_candidates.get(task_id, []):
+            assignment = assignment_vars.get((task_id, resource.id))
+            if assignment is None:
+                continue
+            model.Add(assignment == (1 if resource.id == fixed_resource_id else 0))
+
+
+def _drill_line_sequences(groups: list[_DrillGroupNode]) -> list[list[_DrillGroupNode]]:
+    buckets: dict[tuple[Any, ...], list[_DrillGroupNode]] = defaultdict(list)
+    for group in groups:
+        task = group.representative_task
+        location = _task_location(task)
+        sequence_key = (
+            task.bridge_id or "",
+            task.work_section_id or "",
+            location["side"] or "N",
+            group.resource_group_key,
+            group.component_type,
+            group.process_name,
+        )
+        buckets[sequence_key].append(group)
+    return [
+        sorted(items, key=lambda group: (_task_spatial_sort_key(group.representative_task), group.group_id))
+        for _, items in sorted(buckets.items(), key=lambda item: item[0])
+        if items
+    ]
+
+
+def _bool_and_var(model: Any, name: str, literals: list[Any]) -> Any:
+    both = model.NewBoolVar(name)
+    for literal in literals:
+        model.Add(both <= literal)
+    model.Add(both >= sum(literals) - (len(literals) - 1))
+    return both
+
+
+def _build_drill_group_coarse_jump_terms(
+    model: Any,
+    groups: list[_DrillGroupNode],
+    assignment_vars: dict[tuple[str, str], Any],
+) -> dict[str, list[Any]]:
+    adjacent_terms: list[Any] = []
+    hole_terms: list[Any] = []
+    if not groups:
+        return {"adjacent_terms": adjacent_terms, "hole_terms": hole_terms}
+
+    representative_task_id_by_group = {
+        group.group_id: group.child_task_ids[0]
+        for group in groups
+        if group.child_task_ids
+    }
+    for sequence_index, sequence in enumerate(_drill_line_sequences(groups)):
+        for pair_index, (left, right) in enumerate(zip(sequence, sequence[1:])):
+            left_task_id = representative_task_id_by_group.get(left.group_id)
+            right_task_id = representative_task_id_by_group.get(right.group_id)
+            if left_task_id is None or right_task_id is None:
+                continue
+            for left_resource_id in left.eligible_resource_ids:
+                left_assignment = assignment_vars.get((left_task_id, left_resource_id))
+                if left_assignment is None:
+                    continue
+                for right_resource_id in right.eligible_resource_ids:
+                    if left_resource_id == right_resource_id:
+                        continue
+                    right_assignment = assignment_vars.get((right_task_id, right_resource_id))
+                    if right_assignment is None:
+                        continue
+                    adjacent_terms.append(
+                        _bool_and_var(
+                            model,
+                            "drill_adjacent_switch_"
+                            f"{sequence_index}_{pair_index}_{_safe(left_resource_id)}_{_safe(right_resource_id)}",
+                            [left_assignment, right_assignment],
+                        )
+                    )
+
+        for triple_index, (left, middle, right) in enumerate(zip(sequence, sequence[1:], sequence[2:])):
+            left_task_id = representative_task_id_by_group.get(left.group_id)
+            middle_task_id = representative_task_id_by_group.get(middle.group_id)
+            right_task_id = representative_task_id_by_group.get(right.group_id)
+            if left_task_id is None or middle_task_id is None or right_task_id is None:
+                continue
+            shared_outer_resources = set(left.eligible_resource_ids).intersection(right.eligible_resource_ids)
+            for outer_resource_id in sorted(shared_outer_resources):
+                left_assignment = assignment_vars.get((left_task_id, outer_resource_id))
+                right_assignment = assignment_vars.get((right_task_id, outer_resource_id))
+                if left_assignment is None or right_assignment is None:
+                    continue
+                for middle_resource_id in middle.eligible_resource_ids:
+                    if middle_resource_id == outer_resource_id:
+                        continue
+                    middle_assignment = assignment_vars.get((middle_task_id, middle_resource_id))
+                    if middle_assignment is None:
+                        continue
+                    hole_terms.append(
+                        _bool_and_var(
+                            model,
+                            "drill_hole_jump_"
+                            f"{sequence_index}_{triple_index}_{_safe(outer_resource_id)}_{_safe(middle_resource_id)}",
+                            [left_assignment, middle_assignment, right_assignment],
+                        )
+                    )
+    return {"adjacent_terms": adjacent_terms, "hole_terms": hole_terms}
+
+
+def _drill_group_assignment_by_group(
+    groups: list[_DrillGroupNode],
+    scheduled_tasks: list[ScheduledTask],
+) -> dict[str, str]:
+    scheduled_by_id = {task.id: task for task in scheduled_tasks}
+    assignments: dict[str, str] = {}
+    for group in groups:
+        resource_ids = {
+            scheduled_by_id[task_id].assigned_resource_id
+            for task_id in group.child_task_ids
+            if task_id in scheduled_by_id and scheduled_by_id[task_id].assigned_resource_id
+        }
+        if len(resource_ids) == 1:
+            assignments[group.group_id] = next(iter(resource_ids))
+    return assignments
+
+
+def _fixed_resources_from_drill_groups(
+    groups: list[_DrillGroupNode],
+    scheduled_tasks: list[ScheduledTask],
+) -> dict[str, str]:
+    scheduled_by_id = {task.id: task for task in scheduled_tasks}
+    fixed: dict[str, str] = {}
+    for group in groups:
+        resource_ids = {
+            scheduled_by_id[task_id].assigned_resource_id
+            for task_id in group.child_task_ids
+            if task_id in scheduled_by_id and scheduled_by_id[task_id].assigned_resource_id
+        }
+        if len(resource_ids) != 1:
+            continue
+        resource_id = next(iter(resource_ids))
+        for task_id in group.child_task_ids:
+            fixed[task_id] = resource_id
+    return fixed
+
+
+def _drill_group_path_filter_by_resource(
+    groups: list[_DrillGroupNode],
+    fixed_resource_by_task_id: dict[str, str],
+) -> dict[str, set[str]]:
+    filter_by_resource: dict[str, set[str]] = defaultdict(set)
+    for group in groups:
+        resource_ids = {
+            fixed_resource_by_task_id.get(task_id)
+            for task_id in group.child_task_ids
+            if fixed_resource_by_task_id.get(task_id)
+        }
+        if len(resource_ids) != 1:
+            continue
+        resource_id = next(iter(resource_ids))
+        filter_by_resource[resource_id].update(group.child_task_ids)
+    return dict(filter_by_resource)
+
+
+def _drill_group_assignment_penalties(
+    groups: list[_DrillGroupNode],
+    assignment_by_group_id: dict[str, str],
+) -> dict[str, int]:
+    adjacent_switches = 0
+    hole_jumps = 0
+    for sequence in _drill_line_sequences(groups):
+        for left, right in zip(sequence, sequence[1:]):
+            left_resource = assignment_by_group_id.get(left.group_id)
+            right_resource = assignment_by_group_id.get(right.group_id)
+            if left_resource and right_resource and left_resource != right_resource:
+                adjacent_switches += 1
+        for left, middle, right in zip(sequence, sequence[1:], sequence[2:]):
+            left_resource = assignment_by_group_id.get(left.group_id)
+            middle_resource = assignment_by_group_id.get(middle.group_id)
+            right_resource = assignment_by_group_id.get(right.group_id)
+            if (
+                left_resource
+                and middle_resource
+                and right_resource
+                and left_resource == right_resource
+                and middle_resource != left_resource
+            ):
+                hole_jumps += 1
+    return {
+        "adjacent_resource_switch_penalty": adjacent_switches,
+        "hole_jump_penalty": hole_jumps,
+    }
+
+
+def _drill_group_baseline_candidate_arc_count(groups: list[_DrillGroupNode]) -> int:
+    group_ids_by_resource: dict[str, set[str]] = defaultdict(set)
+    for group in groups:
+        for resource_id in group.eligible_resource_ids:
+            group_ids_by_resource[resource_id].add(group.group_id)
+    return sum(len(group_ids) * (len(group_ids) - 1) for group_ids in group_ids_by_resource.values())
+
+
+def _drill_group_refinement_payload(
+    *,
+    status: str,
+    groups: list[_DrillGroupNode],
+    scheduled_tasks: list[ScheduledTask],
+    path_metadata: dict[str, Any] | None = None,
+    fallback_reason: str | None = None,
+    makespan_tolerance: int = 0,
+) -> dict[str, Any]:
+    path_metadata = path_metadata or {}
+    assignment_by_group = _drill_group_assignment_by_group(groups, scheduled_tasks)
+    penalties = _drill_group_assignment_penalties(groups, assignment_by_group)
+    baseline_arc_count = _drill_group_baseline_candidate_arc_count(groups)
+    stage2_arc_count = int(path_metadata.get("resource_path_transition_arc_count") or 0)
+    arc_reduction_ratio = (
+        round((baseline_arc_count - stage2_arc_count) / baseline_arc_count, 4)
+        if baseline_arc_count > 0
+        else 0.0
+    )
+    return {
+        "status": status,
+        "coarse_group_count": len(groups),
+        "coarse_child_task_count": len(_drill_group_task_ids(groups)),
+        "stage2_node_count": int(path_metadata.get("resource_path_node_count") or 0),
+        "stage2_arc_count": stage2_arc_count,
+        "baseline_candidate_arc_count": baseline_arc_count,
+        "arc_reduction_ratio": arc_reduction_ratio,
+        "adjacent_resource_switch_penalty": penalties["adjacent_resource_switch_penalty"],
+        "hole_jump_penalty": penalties["hole_jump_penalty"],
+        "makespan_tolerance": makespan_tolerance,
+        "fallback_reason": fallback_reason,
+    }
+
+
+def _attach_drill_group_refinement_metadata(
+    result: ScheduleResult,
+    payload: dict[str, Any],
+) -> ScheduleResult:
+    result.stats["drill_group_refinement"] = payload
+    result.objective_breakdown["drill_group_refinement"] = payload
+    result.objective_breakdown["drill_group_refinement_status"] = payload.get("status")
+    return result
+
+
 def _configured_parallel_limit(values: list[int | None]) -> int | None:
     configured = [int(value) for value in values if value is not None and int(value) > 0]
     if not configured:
@@ -271,14 +681,7 @@ def _configured_parallel_limit(values: list[int | None]) -> int | None:
     return min(configured)
 
 
-def _effective_same_structure_parallel_limit(resources: list[Resource]) -> int | None:
-    configured = _configured_parallel_limit(
-        [resource.same_structure_parallel_limit for resource in resources]
-    )
-    if configured is not None:
-        return configured
-    if any(resource.same_structure_parallel_limit == 0 for resource in resources):
-        return None
+def _effective_same_structure_resource_binding_limit(resources: list[Resource]) -> int | None:
     if any(resource.same_structure_resource_binding for resource in resources):
         return 1
     return None
@@ -299,7 +702,7 @@ def _add_named_same_structure_resource_rules(
     limit_by_group_key = {
         group_key: limit
         for group_key, resources_by_id in resources_by_group_key.items()
-        if (limit := _effective_same_structure_parallel_limit(list(resources_by_id.values()))) is not None
+        if (limit := _effective_same_structure_resource_binding_limit(list(resources_by_id.values()))) is not None
     }
     if not limit_by_group_key:
         return
@@ -375,7 +778,7 @@ def _add_capacity_same_structure_parallel_rules(
                 if group_key in seen_group_keys:
                     continue
                 seen_group_keys.add(group_key)
-                parallel_limit = group.get("same_structure_parallel_limit")
+                parallel_limit = 1 if group.get("same_structure_resource_binding") else None
                 if parallel_limit is None:
                     continue
                 assignment = assignment_vars.get((task.id, group_key))
@@ -433,7 +836,7 @@ def _precedence_violated(predecessor: ScheduledTask, successor: ScheduledTask, l
 
 
 def _configure_solver(solver: Any, time_limit_seconds: float) -> None:
-    solver.parameters.max_time_in_seconds = max(0.1, float(time_limit_seconds or 10.0))
+    solver.parameters.max_time_in_seconds = max(0.1, float(time_limit_seconds or 20.0))
     solver.parameters.num_search_workers = _scheduler_search_workers()
     solver.parameters.random_seed = SCHEDULER_RANDOM_SEED
     solver.parameters.randomize_search = False
@@ -521,10 +924,6 @@ def _solve_task_parallelism(candidate_count: int) -> int:
     cpu_budget = max(1, os.cpu_count() or 1)
     workers_per_solver = max(1, _scheduler_search_workers())
     return max(1, min(candidate_count, cpu_budget // workers_per_solver))
-
-
-def _uses_control_priority_strategy(schedule_input: ScheduleInput) -> bool:
-    return schedule_input.schedule_strategy.strategy in {"control_priority", "balanced_normal", "comprehensive"}
 
 
 def _build_named_resource_assignment_model(
@@ -636,11 +1035,12 @@ def _balanced_same_structure_task_slots(tasks: list[Task], slot_count: int) -> l
     return [sorted(slot_tasks, key=lambda item: (item.sequence_order, item.id)) for slot_tasks in slots]
 
 
-def solve_schedule(schedule_input: ScheduleInput, *, enforce_hard_milestones: bool = False) -> ScheduleResult:
+def solve_shortest_duration_schedule(
+    schedule_input: ScheduleInput,
+    *,
+    enforce_hard_milestones: bool = False,
+) -> ScheduleResult:
     started_at = time.perf_counter()
-    if _uses_control_priority_strategy(schedule_input):
-        return solve_control_priority_schedule(schedule_input, enforce_hard_milestones=enforce_hard_milestones)
-
     enabled_resources = [resource for resource in schedule_input.resources if resource.enabled]
     resource_candidates = _resource_candidates_by_task(schedule_input.tasks, enabled_resources)
     validation = _validate_resource_coverage(schedule_input.tasks, resource_candidates)
@@ -888,6 +1288,10 @@ def solve_schedule(schedule_input: ScheduleInput, *, enforce_hard_milestones: bo
     )
 
 
+def solve_schedule(schedule_input: ScheduleInput, *, enforce_hard_milestones: bool = False) -> ScheduleResult:
+    return solve_control_priority_schedule(schedule_input, enforce_hard_milestones=enforce_hard_milestones)
+
+
 def solve_control_priority_schedule(
     schedule_input: ScheduleInput,
     *,
@@ -896,17 +1300,15 @@ def solve_control_priority_schedule(
     max_makespan_days: int | None = None,
     warm_start_result: ScheduleResult | None = None,
     relax_target_constraints: bool = False,
+    _drill_group_stage: str = "auto",
+    _fixed_resource_by_task_id: dict[str, str] | None = None,
+    _path_task_filter_by_resource: dict[str, set[str]] | None = None,
+    _path_filter_task_ids: set[str] | None = None,
+    _hard_max_makespan_days: int | None = None,
 ) -> ScheduleResult:
     started_at = time.perf_counter()
     if baseline_result is None:
-        baseline_input = schedule_input.model_copy(
-            update={
-                "schedule_strategy": schedule_input.schedule_strategy.model_copy(
-                    update={"strategy": "shortest_duration"}
-                )
-            }
-        )
-        baseline_result = solve_schedule(baseline_input)
+        baseline_result = solve_shortest_duration_schedule(schedule_input)
     if baseline_result.status not in {"OPTIMAL", "FEASIBLE"}:
         baseline_result.objective_breakdown.setdefault("solve_mode", "control_priority_baseline_failed")
         baseline_result.validation.append(
@@ -927,6 +1329,82 @@ def solve_control_priority_schedule(
             validation=validation,
             stats={"reason": "missing_compatible_resource", "solve_mode": "control_priority"},
         )
+
+    config = schedule_input.schedule_strategy
+    objective_weights = _objective_weights_for_config(config)
+    objective_terms_used_payload = _objective_terms_used_for_config(config, objective_weights)
+    resource_path_continuity_enabled = _objective_term_enabled(objective_weights, "resource_path_continuity")
+    drill_groups = _build_drill_group_nodes(schedule_input.tasks, resource_candidates, enabled_resources)
+
+    if _drill_group_stage == "auto" and drill_groups:
+        coarse_result = solve_control_priority_schedule(
+            schedule_input,
+            enforce_hard_milestones=enforce_hard_milestones,
+            baseline_result=baseline_result,
+            max_makespan_days=max_makespan_days,
+            warm_start_result=warm_start_result,
+            relax_target_constraints=relax_target_constraints,
+            _drill_group_stage="coarse",
+        )
+        if coarse_result.status not in {"OPTIMAL", "FEASIBLE"}:
+            return coarse_result
+        if not resource_path_continuity_enabled:
+            return coarse_result
+
+        fixed_resource_by_task_id = _fixed_resources_from_drill_groups(drill_groups, coarse_result.tasks)
+        if not fixed_resource_by_task_id:
+            fallback_payload = _drill_group_refinement_payload(
+                status="stage2_fallback",
+                groups=drill_groups,
+                scheduled_tasks=coarse_result.tasks,
+                path_metadata=(coarse_result.stats.get("continuity_objective") or {}),
+                fallback_reason="coarse_group_assignment_missing",
+            )
+            return _attach_drill_group_refinement_metadata(coarse_result, fallback_payload)
+
+        refined_result = solve_control_priority_schedule(
+            schedule_input,
+            enforce_hard_milestones=enforce_hard_milestones,
+            baseline_result=baseline_result,
+            max_makespan_days=max_makespan_days,
+            warm_start_result=coarse_result,
+            relax_target_constraints=relax_target_constraints,
+            _drill_group_stage="refined",
+            _fixed_resource_by_task_id=fixed_resource_by_task_id,
+            _path_task_filter_by_resource=_drill_group_path_filter_by_resource(drill_groups, fixed_resource_by_task_id),
+            _path_filter_task_ids=_drill_group_task_ids(drill_groups),
+            _hard_max_makespan_days=coarse_result.objective_days,
+        )
+        if (
+            refined_result.status in {"OPTIMAL", "FEASIBLE"}
+            and refined_result.objective_days is not None
+            and coarse_result.objective_days is not None
+            and refined_result.objective_days <= coarse_result.objective_days
+        ):
+            return refined_result
+
+        fallback = coarse_result.model_copy(deep=True)
+        fallback_reason = f"stage2_{refined_result.status.lower()}"
+        if (
+            refined_result.objective_days is not None
+            and coarse_result.objective_days is not None
+            and refined_result.objective_days > coarse_result.objective_days
+        ):
+            fallback_reason = "stage2_makespan_exceeded"
+        fallback_payload = _drill_group_refinement_payload(
+            status="stage2_fallback",
+            groups=drill_groups,
+            scheduled_tasks=fallback.tasks,
+            path_metadata=(fallback.stats.get("continuity_objective") or {}),
+            fallback_reason=fallback_reason,
+        )
+        fallback.validation.append(
+            ValidationMessage(
+                level="warning",
+                message=f"Drill group path refinement fell back to coarse result: {fallback_reason}.",
+            )
+        )
+        return _attach_drill_group_refinement_metadata(fallback, fallback_payload)
 
     try:
         from ortools.sat.python import cp_model
@@ -967,6 +1445,8 @@ def solve_control_priority_schedule(
         objective_weights,
         "resource_slot_balance",
     )
+    drill_group_constraints_enabled = _drill_group_stage in {"coarse", "refined"} and bool(drill_groups)
+    drill_group_path_circuit_enabled = resource_path_continuity_enabled and _drill_group_stage != "coarse"
     makespan_objective_enabled = _objective_term_enabled(objective_weights, "makespan_and_soft_milestone")
     control_chain_task_ids = _control_chain_task_ids(schedule_input)
     normal_tasks = _normal_balance_tasks(schedule_input.tasks, control_chain_task_ids)
@@ -976,6 +1456,8 @@ def solve_control_priority_schedule(
         starts[task.id] = model.NewIntVar(0, horizon, f"start_{_safe(task.id)}")
         ends[task.id] = model.NewIntVar(0, horizon, f"end_{_safe(task.id)}")
         model.Add(ends[task.id] == starts[task.id] + task.duration_days)
+    if drill_group_constraints_enabled:
+        _add_drill_group_contiguity_constraints(model, starts, ends, drill_groups)
 
     assignment_vars, resource_intervals = _build_named_resource_assignment_model(
         model,
@@ -986,6 +1468,13 @@ def solve_control_priority_schedule(
         resource_candidates=resource_candidates,
         horizon=horizon,
     )
+    if _fixed_resource_by_task_id:
+        _add_fixed_task_resource_constraints(
+            model,
+            resource_candidates,
+            assignment_vars,
+            _fixed_resource_by_task_id,
+        )
 
     for link in schedule_input.precedence_links:
         predecessor = task_by_id.get(link.predecessor_id)
@@ -1000,6 +1489,14 @@ def solve_control_priority_schedule(
             )
             continue
         _add_precedence_constraint(model, starts, ends, link)
+    if drill_group_constraints_enabled:
+        _add_drill_group_boundary_precedence_constraints(
+            model,
+            starts,
+            ends,
+            drill_groups,
+            schedule_input.precedence_links,
+        )
 
     _add_continuous_beam_v18_constraints(
         model,
@@ -1015,8 +1512,6 @@ def solve_control_priority_schedule(
 
     _add_normal_time_window_constraints(model, starts, ends, normal_tasks, config, horizon)
     _add_normal_workface_constraints(model, starts, ends, normal_tasks, config)
-    if config.resource_guarantee == "strict":
-        _add_strict_control_resource_constraints(model, starts, ends, schedule_input.tasks, control_chain_task_ids)
 
     _add_named_same_structure_resource_rules(
         model,
@@ -1036,6 +1531,8 @@ def solve_control_priority_schedule(
             model.Add(fixed_duration_overrun_var >= makespan - max_makespan_days)
         else:
             model.Add(makespan <= max_makespan_days)
+    if _hard_max_makespan_days is not None:
+        model.Add(makespan <= int(_hard_max_makespan_days))
 
     for milestone in schedule_input.milestones:
         scoped_task_ids = _task_ids_for_milestone(milestone, schedule_input.tasks)
@@ -1046,6 +1543,8 @@ def solve_control_priority_schedule(
                 if task.structure_id in set(milestone.related_structure_ids)
             }
             scoped_task_ids = sorted(set(scoped_task_ids) | related_ids)
+        if drill_group_constraints_enabled and milestone.mode == "hard":
+            scoped_task_ids = _expand_drill_group_scope(scoped_task_ids, drill_groups)
         if not scoped_task_ids:
             validation.append(
                 ValidationMessage(
@@ -1142,8 +1641,15 @@ def solve_control_priority_schedule(
         horizon,
         include_workload_balance=False,
         include_idle=resource_idle_enabled,
-        include_path_continuity=resource_path_continuity_enabled,
+        include_path_continuity=drill_group_path_circuit_enabled,
         include_slot_balance=resource_slot_balance_enabled,
+        path_task_filter_by_resource=_path_task_filter_by_resource,
+        path_filter_task_ids=_path_filter_task_ids,
+    )
+    drill_group_jump_terms = (
+        _build_drill_group_coarse_jump_terms(model, drill_groups, assignment_vars)
+        if resource_path_continuity_enabled and drill_group_constraints_enabled and _drill_group_stage == "coarse"
+        else {"adjacent_terms": [], "hole_terms": []}
     )
     target_relaxation_terms = list(relaxed_hard_lateness_vars.values())
     if fixed_duration_overrun_var is not None:
@@ -1163,7 +1669,11 @@ def solve_control_priority_schedule(
             "makespan_and_soft_milestone": makespan_objective_enabled,
             "resource_idle": resource_idle_enabled and bool(resource_organization_terms["idle_terms"]),
             "resource_path_continuity": resource_path_continuity_enabled
-            and bool(resource_organization_terms["path_terms"]),
+            and bool(
+                resource_organization_terms["path_terms"]
+                or drill_group_jump_terms["adjacent_terms"]
+                or drill_group_jump_terms["hole_terms"]
+            ),
             "resource_slot_balance": resource_slot_balance_enabled
             and bool(resource_organization_terms["slot_balance_terms"]),
             "target_relaxation": target_relaxation_enabled,
@@ -1183,6 +1693,8 @@ def solve_control_priority_schedule(
     resource_path_transition_terms = (
         resource_organization_terms["same_side_gap_terms"]
         + resource_organization_terms["side_switch_terms"]
+        + drill_group_jump_terms["adjacent_terms"]
+        + drill_group_jump_terms["hole_terms"]
     )
 
     model.Minimize(
@@ -1229,6 +1741,8 @@ def solve_control_priority_schedule(
     }
     if max_makespan_days is not None:
         stats["max_makespan_days"] = max_makespan_days
+    if _hard_max_makespan_days is not None:
+        stats["hard_max_makespan_days"] = int(_hard_max_makespan_days)
     if relax_target_constraints:
         stats["relaxed_target_constraint_count"] = len(relaxed_hard_lateness_vars) + (
             1 if fixed_duration_overrun_var is not None else 0
@@ -1334,6 +1848,8 @@ def solve_control_priority_schedule(
     risk_related_control_wait_penalty = sum(solver.Value(term) for term in risk_related_control_wait_terms)
     resource_idle_penalty = sum(solver.Value(term) for term in resource_organization_terms["idle_terms"])
     resource_path_continuity_penalty = sum(solver.Value(term) for term in resource_path_transition_terms)
+    drill_group_adjacent_penalty = sum(solver.Value(term) for term in drill_group_jump_terms["adjacent_terms"])
+    drill_group_hole_penalty = sum(solver.Value(term) for term in drill_group_jump_terms["hole_terms"])
     resource_slot_balance_penalty = sum(solver.Value(term) for term in resource_organization_terms["slot_balance_terms"])
     normal_balance_metrics = _build_normal_balance_metrics(
         scheduled_tasks,
@@ -1349,7 +1865,7 @@ def solve_control_priority_schedule(
         continuity_metrics=continuity_metrics,
         workload_balance_enabled=False,
         idle_enabled=resource_idle_enabled,
-        path_continuity_enabled=resource_path_continuity_enabled,
+        path_continuity_enabled=drill_group_path_circuit_enabled,
     )
     control_buffer_risks = (
         _control_buffer_risk_details(
@@ -1372,7 +1888,7 @@ def solve_control_priority_schedule(
         normal_balance_metrics=normal_balance_metrics,
         resource_organization_analysis=resource_organization_analysis,
         control_buffer_enabled=control_buffer_risk_enabled,
-        resource_path_continuity_enabled=resource_path_continuity_enabled,
+        resource_path_continuity_enabled=drill_group_path_circuit_enabled,
     )
     stats["continuity_metrics"] = continuity_metrics
     stats["continuity_objective"] = {
@@ -1380,11 +1896,26 @@ def solve_control_priority_schedule(
         "resource_path_continuity_weight": objective_weights["resource_path_continuity"],
         "resource_path_continuity_penalty": resource_path_continuity_penalty,
         "resource_path_transition_penalty": resource_path_continuity_penalty,
+        "drill_group_adjacent_resource_switch_penalty": drill_group_adjacent_penalty,
+        "drill_group_hole_jump_penalty": drill_group_hole_penalty,
         "resource_slot_balance_weight": objective_weights["resource_slot_balance"],
         "resource_slot_balance_penalty": resource_slot_balance_penalty,
-        "resource_path_status": "enabled" if resource_path_continuity_enabled else "not_evaluated",
+        "resource_path_status": "enabled" if drill_group_path_circuit_enabled else "not_evaluated",
         **resource_organization_terms["path_metadata"],
     }
+    drill_group_status = "not_applicable"
+    if drill_groups:
+        if not resource_path_continuity_enabled or _drill_group_stage == "coarse":
+            drill_group_status = "coarse_only"
+        elif _drill_group_stage == "refined":
+            drill_group_status = "stage2_refined"
+    drill_group_payload = _drill_group_refinement_payload(
+        status=drill_group_status,
+        groups=drill_groups,
+        scheduled_tasks=scheduled_tasks,
+        path_metadata=stats["continuity_objective"],
+    )
+    stats["drill_group_refinement"] = drill_group_payload
     stats["normal_balance_metrics"] = normal_balance_metrics
     stats["resource_organization_analysis"] = resource_organization_analysis
     stats["control_priority_analysis"] = control_priority_analysis
@@ -1469,8 +2000,6 @@ def solve_control_priority_schedule(
         stats=stats,
         objective_breakdown={
             "solve_mode": "control_priority",
-            "strategy": config.strategy,
-            "resource_guarantee": config.resource_guarantee,
             "makespan_days": objective_days,
             "baseline_makespan_days": baseline_result.objective_days,
             "control_lateness_days": reported_control_lateness_days,
@@ -1486,6 +2015,8 @@ def solve_control_priority_schedule(
             "resource_idle_penalty": resource_idle_penalty,
             "resource_path_continuity_penalty": resource_path_continuity_penalty,
             "resource_path_transition_penalty": resource_path_continuity_penalty,
+            "drill_group_adjacent_resource_switch_penalty": drill_group_adjacent_penalty,
+            "drill_group_hole_jump_penalty": drill_group_hole_penalty,
             "resource_slot_balance_penalty": resource_slot_balance_penalty,
             "resource_path_continuity_weight": objective_weights["resource_path_continuity"],
             "resource_slot_balance_weight": objective_weights["resource_slot_balance"],
@@ -1503,6 +2034,8 @@ def solve_control_priority_schedule(
             "objective_contributions": objective_contributions,
             "control_priority_analysis": control_priority_analysis,
             "normal_balance_metrics": normal_balance_metrics,
+            "drill_group_refinement": drill_group_payload,
+            "drill_group_refinement_status": drill_group_payload["status"],
         },
     )
 
@@ -1642,25 +2175,6 @@ def _add_normal_workface_constraints(
             for task in group_tasks
         ]
         model.AddCumulative(intervals, [1] * len(intervals), config.max_parallel_normal_per_work_section)
-
-
-def _add_strict_control_resource_constraints(
-    model: Any,
-    starts: dict[str, Any],
-    ends: dict[str, Any],
-    tasks: list[Task],
-    control_chain_task_ids: set[str],
-) -> None:
-    control_tasks = [task for task in tasks if task.id in control_chain_task_ids]
-    normal_tasks = [task for task in tasks if task.id not in control_chain_task_ids and task.control_level == "normal"]
-    for control_task in control_tasks:
-        control_types = set(control_task.compatible_resource_types)
-        if not control_types:
-            continue
-        for normal_task in normal_tasks:
-            if not control_types.intersection(normal_task.compatible_resource_types):
-                continue
-            model.Add(starts[normal_task.id] >= ends[control_task.id])
 
 
 def _build_control_wait_terms(
@@ -2278,6 +2792,8 @@ def _build_resource_organization_terms(
     include_idle: bool = True,
     include_path_continuity: bool = True,
     include_slot_balance: bool = True,
+    path_task_filter_by_resource: dict[str, set[str]] | None = None,
+    path_filter_task_ids: set[str] | None = None,
 ) -> dict[str, list[Any]]:
     assignments_by_resource: dict[str, list[tuple[Task, Any]]] = defaultdict(list)
     for task in tasks:
@@ -2286,7 +2802,17 @@ def _build_resource_organization_terms(
             if assignment is not None:
                 assignments_by_resource[resource.id].append((task, assignment))
 
-    empty_path_terms = _empty_resource_path_terms(assignments_by_resource)
+    path_assignments_by_resource = assignments_by_resource
+    if path_task_filter_by_resource is not None and path_filter_task_ids:
+        filtered: dict[str, list[tuple[Task, Any]]] = defaultdict(list)
+        for resource_id, task_assignments in assignments_by_resource.items():
+            allowed_task_ids = path_task_filter_by_resource.get(resource_id, set())
+            for task, assignment in task_assignments:
+                if task.id not in path_filter_task_ids or task.id in allowed_task_ids:
+                    filtered[resource_id].append((task, assignment))
+        path_assignments_by_resource = filtered
+
+    empty_path_terms = _empty_resource_path_terms(path_assignments_by_resource)
     if not (include_workload_balance or include_idle or include_path_continuity or include_slot_balance):
         return {
             "workload_balance_terms": [],
@@ -2367,7 +2893,7 @@ def _build_resource_organization_terms(
     path_terms = (
         _build_resource_path_continuity_terms(
             model,
-            assignments_by_resource,
+            path_assignments_by_resource,
             enabled_resources,
             used_by_resource,
             starts,
@@ -2413,6 +2939,7 @@ def _empty_resource_path_terms(
             "resource_path_transition_arc_count": 0,
             "resource_path_task_candidate_count": sum(len(items) for items in assignments_by_resource.values()),
             "resource_slot_balance_term_count": 0,
+            "resource_path_sparse_support_window": MECHANICAL_DRILL_PATH_SUPPORT_WINDOW,
         },
     }
 
@@ -2442,6 +2969,7 @@ def _build_resource_path_continuity_terms(
         "resource_path_node_count": 0,
         "resource_path_transition_arc_count": 0,
         "resource_path_task_candidate_count": sum(len(items) for items in assignments_by_resource.values()),
+        "resource_path_sparse_support_window": MECHANICAL_DRILL_PATH_SUPPORT_WINDOW,
     }
 
     for resource_id, task_assignments in assignments_by_resource.items():
@@ -2472,9 +3000,10 @@ def _build_resource_path_continuity_terms(
             arcs.append((0, node_index, model.NewBoolVar(f"resource_path_start_{_safe(resource_id)}_{node_index}")))
             arcs.append((node_index, 0, model.NewBoolVar(f"resource_path_end_{_safe(resource_id)}_{node_index}")))
 
+        allowed_transition_pairs = _resource_path_allowed_transition_pairs(resource, indexed_assignments)
         for previous_index, previous_node in indexed_assignments:
             for current_index, current_node in indexed_assignments:
-                if previous_index == current_index:
+                if (previous_index, current_index) not in allowed_transition_pairs:
                     continue
                 transition = model.NewBoolVar(
                     f"resource_path_arc_{_safe(resource_id)}_{previous_index}_{current_index}"
@@ -2521,11 +3050,16 @@ def _resource_path_parallel_limits_by_group(resources: list[Resource]) -> dict[s
     resources_by_group: dict[str, list[Resource]] = defaultdict(list)
     for resource in resources:
         resources_by_group[_resource_parallel_group_key(resource)].append(resource)
-    return {
-        group_key: limit
-        for group_key, group_resources in resources_by_group.items()
-        if (limit := _effective_same_structure_parallel_limit(group_resources)) is not None
-    }
+    limits: dict[str, int] = {}
+    for group_key, group_resources in resources_by_group.items():
+        if group_resources and all(
+            resource.type in MECHANICAL_DRILL_RESOURCE_TYPES for resource in group_resources
+        ):
+            limits[group_key] = 1
+            continue
+        if (limit := _effective_same_structure_resource_binding_limit(group_resources)) is not None:
+            limits[group_key] = limit
+    return limits
 
 
 def _resource_path_granularity(resource: Resource, limits_by_group_key: dict[str, int]) -> tuple[str, int | None]:
@@ -2690,6 +3224,71 @@ def _build_same_structure_slot_balance_terms(
                 model.Add(active_difference == 0).OnlyEnforceIf(both_selected.Not())
                 terms.append(active_difference)
     return terms
+
+
+def _resource_path_allowed_transition_pairs(
+    resource: Resource,
+    indexed_nodes: list[tuple[int, dict[str, Any]]],
+) -> set[tuple[int, int]]:
+    all_pairs = {
+        (previous_index, current_index)
+        for previous_index, _ in indexed_nodes
+        for current_index, _ in indexed_nodes
+        if previous_index != current_index
+    }
+    if resource.type not in MECHANICAL_DRILL_RESOURCE_TYPES:
+        return all_pairs
+
+    node_by_index = {node_index: node for node_index, node in indexed_nodes}
+    allowed_pairs = {
+        (previous_index, current_index)
+        for previous_index, current_index in all_pairs
+        if _resource_path_transition_candidate_allowed(
+            resource,
+            node_by_index[previous_index],
+            node_by_index[current_index],
+        )
+    }
+    outgoing = {previous_index for previous_index, _ in allowed_pairs}
+    incoming = {current_index for _, current_index in allowed_pairs}
+    for previous_index, current_index in all_pairs:
+        if previous_index not in outgoing or current_index not in incoming:
+            allowed_pairs.add((previous_index, current_index))
+    return allowed_pairs
+
+
+def _resource_path_transition_candidate_allowed(
+    resource: Resource,
+    previous_node: dict[str, Any],
+    current_node: dict[str, Any],
+) -> bool:
+    previous_task = previous_node["representative_task"]
+    current_task = current_node["representative_task"]
+    previous_location = _task_location(previous_task)
+    current_location = _task_location(current_task)
+    if (
+        previous_location["structure_type"] != "pier"
+        or current_location["structure_type"] != "pier"
+        or previous_location["support_index"] is None
+        or current_location["support_index"] is None
+    ):
+        return True
+    if previous_task.bridge_id != current_task.bridge_id:
+        return False
+    if previous_task.component_type != current_task.component_type:
+        return False
+    if previous_task.process_name != current_task.process_name:
+        return False
+
+    support_gap = abs(current_location["support_index"] - previous_location["support_index"])
+    if support_gap > MECHANICAL_DRILL_PATH_SUPPORT_WINDOW:
+        return False
+
+    previous_side = previous_location["side"] or "N"
+    current_side = current_location["side"] or "N"
+    if previous_side == current_side:
+        return support_gap > 0
+    return previous_side in {"L", "R"} and current_side in {"L", "R"}
 
 
 def _resource_path_transition_penalties(previous_task: Task, current_task: Task) -> tuple[int, int]:
@@ -2865,7 +3464,6 @@ def _build_resource_organization_analysis(
             "resource_name": resource.name,
             "resource_type": resource.type,
             "same_structure_resource_binding": resource.same_structure_resource_binding,
-            "same_structure_parallel_limit": resource.same_structure_parallel_limit,
             "parallel_rule_description": resource.parallel_rule_description,
             "task_count": len(ordered),
             "active_days": active_days,
@@ -2896,11 +3494,6 @@ def _build_resource_organization_analysis(
         min_workload = min(workloads) if workloads else 0
         average_workload = total_workload / len(workloads) if workloads else 0
         workload_range = max_workload - min_workload
-        parallel_limits = [
-            int(item["same_structure_parallel_limit"])
-            for item in resources
-            if item.get("same_structure_parallel_limit") is not None
-        ]
         balance_status = (
             _resource_workload_balance_status(
                 resource_count=len(resources),
@@ -2922,7 +3515,6 @@ def _build_resource_organization_analysis(
                 "same_structure_resource_binding": any(
                     bool(item.get("same_structure_resource_binding")) for item in resources
                 ),
-                "same_structure_parallel_limit": min(parallel_limits) if parallel_limits else None,
                 "parallel_rule_description": next(
                     (str(item.get("parallel_rule_description")) for item in resources if item.get("parallel_rule_description")),
                     "",
@@ -3603,23 +4195,13 @@ def _min_resource_reoptimization_candidates(
     schedule_input: ScheduleInput,
     fixed_counts: dict[str, int],
 ) -> list[dict[str, Any]]:
-    resource_guarantee = schedule_input.schedule_strategy.resource_guarantee
-    if resource_guarantee == "off":
-        resource_guarantee = "priority"
     limited_resources = _apply_resource_limits(schedule_input.resources, fixed_counts)
-    base_strategy = schedule_input.schedule_strategy.model_copy(
-        update={
-            "strategy": "comprehensive",
-            "resource_guarantee": resource_guarantee,
-        }
-    )
     candidates = [
         {
             "source": "control_priority_balanced_reoptimization",
             "schedule_input": schedule_input.model_copy(
                 update={
                     "resources": limited_resources,
-                    "schedule_strategy": base_strategy,
                 }
             ),
         }
@@ -4526,8 +5108,6 @@ def _solve_capacity_model(
     normal_tasks = _normal_balance_tasks(schedule_input.tasks, control_chain_task_ids)
     _add_normal_time_window_constraints(model, starts, ends, normal_tasks, config, horizon)
     _add_normal_workface_constraints(model, starts, ends, normal_tasks, config)
-    if config.resource_guarantee == "strict":
-        _add_strict_control_resource_constraints(model, starts, ends, schedule_input.tasks, control_chain_task_ids)
 
     makespan = model.NewIntVar(0, horizon, "makespan")
     model.AddMaxEquality(makespan, [ends[task.id] for task in schedule_input.tasks])
@@ -5789,16 +6369,12 @@ def _resource_groups(resources: list[Resource]) -> list[dict[str, Any]]:
                 "max_quantity": 0,
                 "resources": [],
                 "same_structure_resource_binding": False,
-                "same_structure_parallel_limit": None,
                 "parallel_rule_description": "",
             }
         groups[key]["resources"].append(resource)
         groups[key]["max_quantity"] += 1
         groups[key]["same_structure_resource_binding"] = (
             groups[key]["same_structure_resource_binding"] or resource.same_structure_resource_binding
-        )
-        groups[key]["same_structure_parallel_limit"] = _configured_parallel_limit(
-            [groups[key]["same_structure_parallel_limit"], _effective_same_structure_parallel_limit([resource])]
         )
         if not groups[key]["parallel_rule_description"] and resource.parallel_rule_description:
             groups[key]["parallel_rule_description"] = resource.parallel_rule_description

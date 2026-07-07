@@ -48,9 +48,7 @@ import type {
   ObjectiveContribution,
   ObjectiveModelingGate,
   ObjectiveTermId,
-  ScheduleStrategy,
   ScheduleStrategyConfig,
-  ResourceGuaranteeMode,
   TabKey,
   GanttMode,
   TaskViewMode,
@@ -92,6 +90,7 @@ import type {
   ContinuityJumpDetail,
   ResourcePathStep,
   ResourcePath,
+  DrillGroupRefinementDiagnostics,
   ContinuityMetrics,
   ControlPriorityAnalysis,
   ResourceOrganizationAnalysis,
@@ -233,27 +232,15 @@ const objectiveTermDefinitions: ObjectiveTermDefinition[] = [
     label: "资源路径连续性",
     group: "资源组织",
     description: "看同一资源相邻任务是否同幅邻近推进；同幅墩号间隔越大、左右幅切换越多，罚分越高。",
-    defaultWeight: 3_000,
-    defaultEnabled: false,
+    defaultWeight: 50_000,
     appliesTo: "控制优先、综合精排",
-  },
-  {
-    id: "resource_slot_balance",
-    label: "资源槽位均衡",
-    group: "资源组织",
-    description: "看同结构并行槽位上的资源分配是否均衡；槽位工作量差距越大，罚分越高。",
-    defaultWeight: 3_000,
-    defaultEnabled: false,
-    appliesTo: "控制优先、综合精排",
-    source: "derived_objective",
-    parentTermId: "resource_path_continuity",
   },
   {
     id: "resource_idle",
     label: "资源空闲",
     group: "资源组织",
     description: "看单个资源两次任务之间是否长时间停等；中途空闲天数越多，罚分越高。",
-    defaultWeight: 100_000,
+    defaultWeight: 50_000,
     appliesTo: "控制优先、综合精排",
   },
   {
@@ -279,8 +266,6 @@ function defaultObjectiveTermsConfig(): Record<ObjectiveTermId, ObjectiveTermCon
 }
 
 const defaultScheduleStrategyConfig: ScheduleStrategyConfig = {
-  strategy: "comprehensive",
-  resource_guarantee: "priority",
   normal_balance_bucket: "month",
   normal_earliest_start_offset: 0,
   normal_latest_finish_offset: null,
@@ -288,21 +273,6 @@ const defaultScheduleStrategyConfig: ScheduleStrategyConfig = {
   max_parallel_normal_per_work_section: 5,
   enable_balance_objective: false,
   objective_terms: defaultObjectiveTermsConfig(),
-};
-
-const scheduleStrategyLabels: Record<ScheduleStrategy, string> = {
-  shortest_duration: "总工期最短",
-  min_resource: "资源投入最少",
-  resource_cost: "资源成本最低",
-  control_priority: "控制性工程优先",
-  balanced_normal: "控制优先精排（兼容）",
-  comprehensive: "控制优先 + 均衡推进",
-};
-
-const resourceGuaranteeLabels: Record<ResourceGuaranteeMode, string> = {
-  strict: "严格保障",
-  priority: "优先保障",
-  off: "不启用",
 };
 
 const controlLevelLabels: Record<ControlLevel, string> = {
@@ -315,6 +285,7 @@ const controlLevelLabels: Record<ControlLevel, string> = {
 const scheduleSourceLabels: Record<string, string> = {
   current_resources_control_priority_balanced: "命名资源精排",
   current_resources_best_effort_refinement: "最佳努力精排",
+  current_resources_refinement_failed: "当前资源精排失败",
   current_resources_capacity_shortest: "固定资源快排",
   current_resources_capacity_shortest_fallback: "固定资源回退",
   control_priority_balanced_reoptimization: "命名资源重排",
@@ -1666,6 +1637,7 @@ function ResultsTab({
   const showResourceRecommendationDiagnostic = shouldShowResourceRecommendationDiagnostic(resourceRecommendationStatus, resourceRecommendationMessage);
   const resourceCostSummary = resourceCostSummaryFromResult(result);
   const continuityMetrics = continuityMetricsFromResult(result);
+  const drillGroupRefinement = drillGroupRefinementFromResult(result);
   const objectiveContributionSummary = objectiveContributionSummaryFromResult(result);
   const refinementSummary = refinementSummaryFromResult(result);
   const controlPriorityAnalysis = controlPriorityAnalysisFromResult(result);
@@ -1895,28 +1867,6 @@ function ResultsTab({
                     value={scenario.time_limit_seconds}
                     onChange={(event) => onPatchScenario({ time_limit_seconds: Number(event.target.value) })}
                   />
-                </label>
-                <label>
-                  排程策略
-                  <select
-                    value={strategyConfig.strategy}
-                    onChange={(event) => updateStrategyConfig({ strategy: event.target.value as ScheduleStrategy })}
-                  >
-                    {Object.entries(scheduleStrategyLabels).map(([value, label]) => (
-                      <option value={value} key={value}>{label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  资源保障
-                  <select
-                    value={strategyConfig.resource_guarantee}
-                    onChange={(event) => updateStrategyConfig({ resource_guarantee: event.target.value as ResourceGuaranteeMode })}
-                  >
-                    {Object.entries(resourceGuaranteeLabels).map(([value, label]) => (
-                      <option value={value} key={value}>{label}</option>
-                    ))}
-                  </select>
                 </label>
               </>
             )}
@@ -2409,6 +2359,33 @@ function ResultsTab({
                       </td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {drillGroupRefinement && drillGroupRefinement.coarse_group_count > 0 && (
+            <div className="table-wrap short refinement-path-groups">
+              <div className="table-caption">桩基墩组精排</div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>状态</th>
+                    <th>粗排墩组</th>
+                    <th>细排节点</th>
+                    <th>细排弧</th>
+                    <th>弧减少</th>
+                    <th>回退原因</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>{drillGroupRefinement.status}</td>
+                    <td>{drillGroupRefinement.coarse_group_count}</td>
+                    <td>{drillGroupRefinement.stage2_node_count}</td>
+                    <td>{drillGroupRefinement.stage2_arc_count}</td>
+                    <td>{formatPercent(drillGroupRefinement.arc_reduction_ratio)}</td>
+                    <td>{drillGroupRefinement.fallback_reason || "-"}</td>
+                  </tr>
                 </tbody>
               </table>
             </div>
@@ -4631,18 +4608,20 @@ function refinementSummaryFromResult(result: ScheduleResult | null): RefinementS
   );
   const maxBufferRisk = Math.max(0, ...(analysis?.control_buffer_risks ?? []).map((item) => item.buffer_risk_days));
   const baselineDays = Number(result.objective_breakdown?.baseline_makespan_days ?? result.stats?.baseline_makespan_days);
-  const isFallback = !isBestEffort && (source === "current_resources_capacity_shortest_fallback" || Boolean(fallbackReason));
+  const isRefinementFailed = source === "current_resources_refinement_failed";
+  const isFallback = !isBestEffort && !isRefinementFailed && (source === "current_resources_capacity_shortest_fallback" || Boolean(fallbackReason));
   const tone = refinementTone({
     hardLateCount,
     controlBufferStatus,
     resourcePathStatus,
     isFallback,
     isBestEffort,
+    isRefinementFailed,
   });
   return {
     source,
     tone,
-    title: refinementTitle({ source, hardLateCount, controlBufferStatus, isFallback, isBestEffort }),
+    title: refinementTitle({ source, hardLateCount, controlBufferStatus, isFallback, isBestEffort, isRefinementFailed }),
     recommendedDays: result.objective_days == null ? "-" : `${result.objective_days} 天`,
     baselineDays: Number.isFinite(baselineDays) ? `${baselineDays} 天` : "-",
     hardMilestoneStatus: hardMilestones.length
@@ -4705,13 +4684,16 @@ function refinementTone({
   resourcePathStatus,
   isFallback,
   isBestEffort,
+  isRefinementFailed,
 }: {
   hardLateCount: number;
   controlBufferStatus: string;
   resourcePathStatus: string;
   isFallback: boolean;
   isBestEffort: boolean;
+  isRefinementFailed: boolean;
 }): MetricTone {
+  if (isRefinementFailed) return "danger";
   if (hardLateCount > 0 || controlBufferStatus === "affected_node") return "danger";
   if (
     isFallback
@@ -4731,13 +4713,16 @@ function refinementTitle({
   controlBufferStatus,
   isFallback,
   isBestEffort,
+  isRefinementFailed,
 }: {
   source: string;
   hardLateCount: number;
   controlBufferStatus: string;
   isFallback: boolean;
   isBestEffort: boolean;
+  isRefinementFailed: boolean;
 }): string {
+  if (isRefinementFailed) return "当前资源精排失败，已转资源建议";
   if (isBestEffort) return hardLateCount > 0 ? "最佳努力精排，目标未满足" : "最佳努力精排可用于复核";
   if (isFallback) return "已回退固定资源参考排程";
   if (hardLateCount > 0) return "强制节点未满足";
@@ -4786,13 +4771,20 @@ function inheritedObjectiveTermConfig(
   const direct = incomingTerms[term.id];
   if (direct) return direct;
   if (term.id === "target_relaxation") return incomingTerms.control_node_late;
-  if (term.id === "resource_slot_balance") return incomingTerms.resource_path_continuity;
   return undefined;
 }
 
 function withDefaultScheduleStrategy(config?: ScheduleStrategyConfig | null): ScheduleStrategyConfig {
   const defaultTerms = defaultObjectiveTermsConfig();
   const incomingTerms: Partial<Record<ObjectiveTermId, ObjectiveTermConfig>> = config?.objective_terms ?? {};
+  const {
+    strategy: _legacyStrategy,
+    resource_guarantee: _legacyResourceGuarantee,
+    ...configWithoutLegacyControls
+  } = (config ?? {}) as ScheduleStrategyConfig & {
+    strategy?: unknown;
+    resource_guarantee?: unknown;
+  };
   const objectiveTerms = objectiveTermDefinitions.reduce<Record<ObjectiveTermId, ObjectiveTermConfig>>((next, term) => {
     const incoming = inheritedObjectiveTermConfig(term, incomingTerms);
     next[term.id] = {
@@ -4804,7 +4796,7 @@ function withDefaultScheduleStrategy(config?: ScheduleStrategyConfig | null): Sc
 
   return {
     ...defaultScheduleStrategyConfig,
-    ...(config ?? {}),
+    ...configWithoutLegacyControls,
     objective_terms: objectiveTerms,
     enable_balance_objective: false,
   };
@@ -4843,6 +4835,7 @@ function objectiveContributionSummaryFromResult(result: ScheduleResult | null): 
 function objectiveContributionFromRecord(item: Record<string, unknown>): ObjectiveContribution | null {
   const termId = stringFromUnknown(item.term_id);
   if (!termId) return null;
+  if (termId === "resource_slot_balance") return null;
   const definition = objectiveTermDefinitionById(termId);
   const effectiveWeight = numberFromUnknown(item.effective_weight) ?? 0;
   return {
@@ -4871,7 +4864,6 @@ function legacyObjectiveContributionsFromBreakdown(breakdown: Record<string, unk
     risk_related_control_wait: numberFromUnknown(breakdown.risk_related_control_wait_penalty ?? breakdown.control_resource_wait_penalty) ?? 0,
     makespan_and_soft_milestone: numberFromUnknown(breakdown.makespan_days) ?? 0,
     resource_path_continuity: numberFromUnknown(breakdown.resource_path_continuity_penalty) ?? 0,
-    resource_slot_balance: numberFromUnknown(breakdown.resource_slot_balance_penalty) ?? 0,
     resource_idle: numberFromUnknown(breakdown.resource_idle_penalty) ?? 0,
     target_relaxation: numberFromUnknown(breakdown.target_relaxation_penalty) ?? 0,
   };
@@ -4970,6 +4962,24 @@ function resourceCostSummaryFromResult(result: ScheduleResult | null): ResourceC
 
 function resourceCostTypeFromUnknown(value: unknown): ResourceCostType {
   return typeof value === "string" && value in resourceCostTypeLabels ? value as ResourceCostType : "none";
+}
+
+function drillGroupRefinementFromResult(result: ScheduleResult | null): DrillGroupRefinementDiagnostics | null {
+  const raw = result?.stats?.drill_group_refinement ?? result?.objective_breakdown?.drill_group_refinement;
+  if (!isRecord(raw)) return null;
+  return {
+    status: typeof raw.status === "string" ? raw.status : "not_applicable",
+    coarse_group_count: Number(raw.coarse_group_count ?? 0),
+    coarse_child_task_count: Number(raw.coarse_child_task_count ?? 0),
+    stage2_node_count: Number(raw.stage2_node_count ?? 0),
+    stage2_arc_count: Number(raw.stage2_arc_count ?? 0),
+    baseline_candidate_arc_count: Number(raw.baseline_candidate_arc_count ?? 0),
+    arc_reduction_ratio: Number(raw.arc_reduction_ratio ?? 0),
+    adjacent_resource_switch_penalty: Number(raw.adjacent_resource_switch_penalty ?? 0),
+    hole_jump_penalty: Number(raw.hole_jump_penalty ?? 0),
+    makespan_tolerance: Number(raw.makespan_tolerance ?? 0),
+    fallback_reason: typeof raw.fallback_reason === "string" ? raw.fallback_reason : null,
+  };
 }
 
 function continuityMetricsFromResult(result: ScheduleResult | null): ContinuityMetrics | null {

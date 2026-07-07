@@ -12,8 +12,8 @@ from .models import (
 )
 from .process_library_defaults import historical_default_process_library
 
-PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION = "设备型桩基资源：同一墩同一工艺默认最多由 1 台设备承担；设置为 0 表示不额外限制。"
-MANUAL_PILE_PARALLEL_RULE_DESCRIPTION = "人工挖孔班组：同一墩内不设置最多参与设备数，默认仅受班组数量约束。"
+PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION = "机械桩基资源：按同桥同幅同墩同工艺形成墩组，组内由同一台设备负责；不再配置并行上限。"
+MANUAL_PILE_PARALLEL_RULE_DESCRIPTION = "人工挖孔班组：不进入机械钻机墩组规则，按班组数量和资源互斥排程。"
 
 
 def default_bridge() -> BridgeModel:
@@ -128,7 +128,6 @@ def default_resources() -> list[Resource]:
             name="旋挖钻1",
             type="rotary_drill",
             same_structure_resource_binding=False,
-            same_structure_parallel_limit=1,
             parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
         ),
         Resource(
@@ -136,7 +135,6 @@ def default_resources() -> list[Resource]:
             name="旋挖钻2",
             type="rotary_drill",
             same_structure_resource_binding=False,
-            same_structure_parallel_limit=1,
             parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
         ),
         Resource(
@@ -144,7 +142,6 @@ def default_resources() -> list[Resource]:
             name="旋挖钻3",
             type="rotary_drill",
             same_structure_resource_binding=False,
-            same_structure_parallel_limit=1,
             parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
         ),
         Resource(
@@ -152,7 +149,6 @@ def default_resources() -> list[Resource]:
             name="回旋钻1",
             type="circulation_drill",
             same_structure_resource_binding=False,
-            same_structure_parallel_limit=1,
             parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
         ),
         Resource(
@@ -160,7 +156,6 @@ def default_resources() -> list[Resource]:
             name="冲击钻1",
             type="impact_drill",
             same_structure_resource_binding=False,
-            same_structure_parallel_limit=1,
             parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
         ),
         Resource(
