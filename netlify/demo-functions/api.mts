@@ -146,8 +146,6 @@ type ResourceGuaranteeMode = "strict" | "priority" | "off";
 type BalanceBucket = "week" | "month";
 type ObjectiveTermId =
   | "control_node_late"
-  | "control_buffer_risk"
-  | "risk_related_control_wait"
   | "makespan_and_soft_milestone"
   | "resource_path_continuity"
   | "resource_idle"
@@ -308,8 +306,6 @@ const DEFAULT_RESOURCE_MAX_QUANTITIES: Record<string, number> = {
 };
 const DEFAULT_OBJECTIVE_TERM_WEIGHTS: Record<ObjectiveTermId, number> = {
   control_node_late: 1_000_000_000,
-  control_buffer_risk: 5_000_000,
-  risk_related_control_wait: 1_000_000,
   makespan_and_soft_milestone: 10_000,
   resource_path_continuity: 3_000,
   resource_idle: 1_000,

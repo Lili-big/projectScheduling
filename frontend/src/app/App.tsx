@@ -204,22 +204,6 @@ const objectiveTermDefinitions: ObjectiveTermDefinition[] = [
     appliesTo: "控制优先、综合精排",
   },
   {
-    id: "control_buffer_risk",
-    label: "控制链总时差不足风险",
-    group: "控制优先",
-    description: "检查控制链任务距离最晚安全完成时间还剩多少余量；余量越少，越容易影响目标节点，风险越高。",
-    defaultWeight: 100_000,
-    appliesTo: "控制优先、综合精排",
-  },
-  {
-    id: "risk_related_control_wait",
-    label: "控制链衔接空档风险",
-    group: "控制优先",
-    description: "检查已经存在风险的控制链中，前后置任务之间是否还有可压缩空档；空档越长，越需要优化衔接。",
-    defaultWeight: 100_000,
-    appliesTo: "控制优先、综合精排",
-  },
-  {
     id: "makespan_and_soft_milestone",
     label: "总工期",
     group: "工期",
@@ -295,15 +279,6 @@ const scheduleSourceLabels: Record<string, string> = {
   capacity_model_verified_schedule: "容量模型校验排程",
 };
 
-const controlBufferStatusLabels: Record<string, string> = {
-  normal: "正常",
-  near_risk: "接近风险",
-  buffer_insufficient: "缓冲不足",
-  affected_node: "已影响节点",
-  not_enabled: "未启用",
-  not_evaluated: "未评价",
-};
-
 const resourcePathStatusLabels: Record<string, string> = {
   smooth: "顺畅",
   reasonable_jump: "有合理跨越",
@@ -373,10 +348,6 @@ type ControlPlanTaskDisplay = {
   objectName: string;
   roleLabel: string;
   sourceLabel: string;
-  latestSafeFinishDate: string | null;
-  remainingBufferDays: number | null;
-  bufferRiskDays: number;
-  status: string;
 };
 
 function editableControlLevelValue(value: ControlLevel): ControlLevel {
@@ -2014,16 +1985,8 @@ function ResultsTab({
               <strong>{refinementSummary.scheduleSource}</strong>
             </div>
             <div>
-              <span>控制链总时差状态</span>
-              <strong>{refinementSummary.controlBufferStatus}</strong>
-            </div>
-            <div>
               <span>资源路径状态</span>
               <strong>{refinementSummary.resourcePathStatus}</strong>
-            </div>
-            <div>
-              <span>最大总时差不足</span>
-              <strong>{refinementSummary.maxBufferRiskDays}</strong>
             </div>
           </div>
           {refinementSummary.fallbackReason && (
@@ -2702,25 +2665,17 @@ function buildControlPlanDisplayByTaskId(analysis: ControlPriorityAnalysis | nul
   const displays = new Map<string, ControlPlanTaskDisplay>();
   if (!analysis) return displays;
 
-  const risksByTaskId = new Map(analysis.control_buffer_risks.map((risk) => [risk.task_id, risk]));
-
   for (const target of analysis.control_targets) {
-    const risk = risksByTaskId.get(target.task_id);
     displays.set(target.task_id, {
       taskId: target.task_id,
       level: target.control_level,
       objectName: "-",
       roleLabel: "控制目标",
       sourceLabel: controlTargetSourceLabels[target.source] ?? target.source,
-      latestSafeFinishDate: risk?.latest_safe_finish_date || null,
-      remainingBufferDays: risk?.remaining_buffer_days ?? null,
-      bufferRiskDays: risk?.buffer_risk_days ?? 0,
-      status: risk?.status ?? "not_evaluated",
     });
   }
 
   for (const item of analysis.control_object_tasks) {
-    const risk = risksByTaskId.get(item.task_id);
     const existing = displays.get(item.task_id);
     displays.set(item.task_id, {
       taskId: item.task_id,
@@ -2728,25 +2683,17 @@ function buildControlPlanDisplayByTaskId(analysis: ControlPriorityAnalysis | nul
       objectName: item.object_name || existing?.objectName || "-",
       roleLabel: controlTaskRoleLabels[item.task_role] ?? (item.task_role || existing?.roleLabel || "控制对象任务"),
       sourceLabel: item.source_label || existing?.sourceLabel || "-",
-      latestSafeFinishDate: risk?.latest_safe_finish_date || item.latest_safe_finish_date || existing?.latestSafeFinishDate || null,
-      remainingBufferDays: risk?.remaining_buffer_days ?? item.remaining_buffer_days ?? existing?.remainingBufferDays ?? null,
-      bufferRiskDays: risk?.buffer_risk_days ?? item.buffer_risk_days ?? existing?.bufferRiskDays ?? 0,
-      status: risk?.status ?? item.status ?? existing?.status ?? "not_evaluated",
     });
   }
 
-  for (const risk of analysis.control_buffer_risks) {
-    if (displays.has(risk.task_id)) continue;
-    displays.set(risk.task_id, {
-      taskId: risk.task_id,
-      level: risk.control_level,
-      objectName: "-",
-      roleLabel: "总时差不足",
-      sourceLabel: controlTargetSourceLabels[risk.target_source] ?? risk.target_source,
-      latestSafeFinishDate: risk.latest_safe_finish_date || null,
-      remainingBufferDays: risk.remaining_buffer_days,
-      bufferRiskDays: risk.buffer_risk_days,
-      status: risk.status,
+  for (const predecessor of analysis.control_chain_predecessors) {
+    if (displays.has(predecessor.task_id)) continue;
+    displays.set(predecessor.task_id, {
+      taskId: predecessor.task_id,
+      level: predecessor.control_level,
+      objectName: predecessor.impacted_control_objects.map((object) => object.name).join("、") || "-",
+      roleLabel: "前置影响任务",
+      sourceLabel: predecessor.source_label || controlTargetSourceLabels[predecessor.source] || predecessor.source,
     });
   }
 
@@ -2762,15 +2709,12 @@ function controlPlanDisplayFromTask(task: ScheduledTask): ControlPlanTaskDisplay
     objectName: task.structure_name,
     roleLabel: "任务控制属性",
     sourceLabel: "任务控制属性",
-    latestSafeFinishDate: null,
-    remainingBufferDays: null,
-    bufferRiskDays: 0,
-    status: "not_evaluated",
   };
 }
 
-function controlPlanDeadlineText(display: ControlPlanTaskDisplay | null): string {
-  return display?.latestSafeFinishDate ?? "-";
+function controlPlanRoleText(display: ControlPlanTaskDisplay | null): string {
+  if (!display) return "非控制";
+  return display.roleLabel || controlLevelLabels[display.level] || display.level;
 }
 
 function PlanWorkList({
@@ -2950,7 +2894,9 @@ function PlanTaskDetailTable({
                   <td>{task.start_date}</td>
                   <td>{task.finish_date}</td>
                   <td title={task.assigned_resource_name ?? "-"}>{task.assigned_resource_name ?? "-"}</td>
-                  <td className="control-plan-deadline-cell">{controlPlanDeadlineText(controlDisplay)}</td>
+                  <td className="control-plan-deadline-cell" title={controlDisplay?.sourceLabel ?? ""}>
+                    {controlPlanRoleText(controlDisplay)}
+                  </td>
                   <td className="predecessor-cell">
                     {details.length > 0 ? (
                       <button
@@ -4303,9 +4249,7 @@ type RefinementSummary = {
   baselineDays: string;
   hardMilestoneStatus: string;
   scheduleSource: string;
-  controlBufferStatus: string;
   resourcePathStatus: string;
-  maxBufferRiskDays: string;
   fallbackReason: string;
   bestEffortMessage: string;
 };
@@ -4588,11 +4532,7 @@ function controlPriorityAnalysisFromResult(result: ScheduleResult | null): Contr
     control_chain_predecessors: controlChainPredecessors,
     control_targets: controlTargets,
     control_buffer_risks: bufferRisks,
-    control_buffer_status: statusWithObjectiveGate(
-      result,
-      "control_buffer_risk",
-      String(raw.control_buffer_status ?? "not_evaluated"),
-    ),
+    control_buffer_status: String(raw.control_buffer_status ?? "not_evaluated"),
     normal_balance_status: String(raw.normal_balance_status ?? "not_evaluated"),
     resource_path_status: statusWithObjectiveGate(
       result,
@@ -4622,19 +4562,16 @@ function refinementSummaryFromResult(result: ScheduleResult | null): RefinementS
     || source === "minimum_resources_best_effort_refinement";
   const hardMilestones = result.milestone_results.filter((milestone) => milestone.mode === "hard");
   const hardLateCount = hardMilestones.filter((milestone) => milestone.lateness_days > 0).length;
-  const controlBufferStatus = analysis?.control_buffer_status ?? "not_evaluated";
   const resourcePathStatus = analysis?.resource_path_status ?? "not_evaluated";
   const fallbackReason = isBestEffort ? "" : (
     analysis?.fallback_reason
     ?? stringFromUnknown(result.objective_breakdown?.skipped_named_refinement_reason ?? result.stats?.skipped_named_refinement_reason)
   );
-  const maxBufferRisk = Math.max(0, ...(analysis?.control_buffer_risks ?? []).map((item) => item.buffer_risk_days));
   const baselineDays = Number(result.objective_breakdown?.baseline_makespan_days ?? result.stats?.baseline_makespan_days);
   const isRefinementFailed = source === "current_resources_refinement_failed";
   const isFallback = !isBestEffort && !isRefinementFailed && (source === "current_resources_capacity_shortest_fallback" || Boolean(fallbackReason));
   const tone = refinementTone({
     hardLateCount,
-    controlBufferStatus,
     resourcePathStatus,
     isFallback,
     isBestEffort,
@@ -4643,16 +4580,14 @@ function refinementSummaryFromResult(result: ScheduleResult | null): RefinementS
   return {
     source,
     tone,
-    title: refinementTitle({ source, hardLateCount, controlBufferStatus, isFallback, isBestEffort, isRefinementFailed }),
+    title: refinementTitle({ source, hardLateCount, isFallback, isBestEffort, isRefinementFailed }),
     recommendedDays: result.objective_days == null ? "-" : `${result.objective_days} 天`,
     baselineDays: Number.isFinite(baselineDays) ? `${baselineDays} 天` : "-",
     hardMilestoneStatus: hardMilestones.length
       ? (hardLateCount > 0 ? `不满足 ${hardLateCount} 个` : "全部满足")
       : "未配置",
     scheduleSource: scheduleSourceLabels[source] ?? (source || "-"),
-    controlBufferStatus: controlBufferStatusLabels[controlBufferStatus] ?? controlBufferStatus,
     resourcePathStatus: resourcePathStatusLabels[resourcePathStatus] ?? resourcePathStatus,
-    maxBufferRiskDays: `${maxBufferRisk} 天`,
     fallbackReason,
     bestEffortMessage: bestEffortMessage(bestEffort),
   };
@@ -4702,26 +4637,22 @@ function pathGroupDiagnosticFromRecord(item: Record<string, unknown>) {
 
 function refinementTone({
   hardLateCount,
-  controlBufferStatus,
   resourcePathStatus,
   isFallback,
   isBestEffort,
   isRefinementFailed,
 }: {
   hardLateCount: number;
-  controlBufferStatus: string;
   resourcePathStatus: string;
   isFallback: boolean;
   isBestEffort: boolean;
   isRefinementFailed: boolean;
 }): MetricTone {
   if (isRefinementFailed) return "danger";
-  if (hardLateCount > 0 || controlBufferStatus === "affected_node") return "danger";
+  if (hardLateCount > 0) return "danger";
   if (
     isFallback
     || isBestEffort
-    || controlBufferStatus === "buffer_insufficient"
-    || controlBufferStatus === "near_risk"
     || resourcePathStatus === "abnormal_jump"
   ) {
     return "warn";
@@ -4732,14 +4663,12 @@ function refinementTone({
 function refinementTitle({
   source,
   hardLateCount,
-  controlBufferStatus,
   isFallback,
   isBestEffort,
   isRefinementFailed,
 }: {
   source: string;
   hardLateCount: number;
-  controlBufferStatus: string;
   isFallback: boolean;
   isBestEffort: boolean;
   isRefinementFailed: boolean;
@@ -4748,7 +4677,6 @@ function refinementTitle({
   if (isBestEffort) return hardLateCount > 0 ? "最佳努力精排，目标未满足" : "最佳努力精排可用于复核";
   if (isFallback) return "已回退固定资源参考排程";
   if (hardLateCount > 0) return "强制节点未满足";
-  if (controlBufferStatus === "buffer_insufficient") return "控制链总时差不足，需复核关键链";
   if (source === "current_resources_control_priority_balanced") return "命名资源精排可用于复核";
   return scheduleSourceLabels[source] ?? "排程结果可用于复核";
 }
@@ -4882,8 +4810,6 @@ function legacyObjectiveContributionsFromBreakdown(breakdown: Record<string, unk
   const termsUsed = isRecord(breakdown.objective_terms_used) ? breakdown.objective_terms_used : {};
   const rawPenaltyByTerm: Partial<Record<ObjectiveTermId, number>> = {
     control_node_late: numberFromUnknown(breakdown.control_lateness_days) ?? 0,
-    control_buffer_risk: numberFromUnknown(breakdown.control_buffer_risk_penalty) ?? 0,
-    risk_related_control_wait: numberFromUnknown(breakdown.risk_related_control_wait_penalty ?? breakdown.control_resource_wait_penalty) ?? 0,
     makespan_and_soft_milestone: numberFromUnknown(breakdown.makespan_days) ?? 0,
     resource_path_continuity: numberFromUnknown(breakdown.resource_path_continuity_penalty) ?? 0,
     resource_idle: numberFromUnknown(breakdown.resource_idle_penalty) ?? 0,

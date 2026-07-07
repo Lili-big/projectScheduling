@@ -80,8 +80,6 @@ AiParameterApplicationStatus = Literal["pending", "partially_applied", "applied"
 
 ObjectiveTermId = Literal[
     "control_node_late",
-    "control_buffer_risk",
-    "risk_related_control_wait",
     "makespan_and_soft_milestone",
     "resource_path_continuity",
     "resource_slot_balance",
@@ -96,11 +94,11 @@ DEPRECATED_OBJECTIVE_TERM_IDS = {
     "normal_balance",
     "resource_workload_balance",
     "unconfigured_normal_balance",
+    "control_buffer_risk",
+    "risk_related_control_wait",
 }
 DEFAULT_OBJECTIVE_TERM_WEIGHTS: dict[ObjectiveTermId, int] = {
     "control_node_late": 1_000_000_000,
-    "control_buffer_risk": 100_000,
-    "risk_related_control_wait": 100_000,
     "makespan_and_soft_milestone": 5_000_000,
     "resource_path_continuity": 50_000,
     "resource_slot_balance": 50_000,
@@ -109,8 +107,6 @@ DEFAULT_OBJECTIVE_TERM_WEIGHTS: dict[ObjectiveTermId, int] = {
 }
 DEFAULT_OBJECTIVE_TERM_ENABLED: dict[ObjectiveTermId, bool] = {
     "control_node_late": True,
-    "control_buffer_risk": True,
-    "risk_related_control_wait": True,
     "makespan_and_soft_milestone": True,
     "resource_path_continuity": True,
     "resource_slot_balance": False,
@@ -131,26 +127,6 @@ OBJECTIVE_METRIC_DEFINITIONS: dict[str, dict[str, Any]] = {
         "source": "objective",
         "applies_to": ["control_priority", "balanced_normal", "comprehensive"],
         "legacy_fields": ["control_lateness_days", "soft_control_lateness_penalty"],
-    },
-    "control_buffer_risk": {
-        "label": "控制链总时差不足风险",
-        "group": "控制优先",
-        "description": "控制链任务距离安全完成时间的余量风险；权重越高，模型越优先保留控制缓冲。",
-        "default_weight": DEFAULT_OBJECTIVE_TERM_WEIGHTS["control_buffer_risk"],
-        "configurable": True,
-        "source": "objective",
-        "applies_to": ["control_priority", "balanced_normal", "comprehensive"],
-        "legacy_fields": ["control_buffer_risk_penalty"],
-    },
-    "risk_related_control_wait": {
-        "label": "控制链衔接空档风险",
-        "group": "控制优先",
-        "description": "已存在风险的控制链前后任务空档；权重越高，模型越优先压缩风险链条等待。",
-        "default_weight": DEFAULT_OBJECTIVE_TERM_WEIGHTS["risk_related_control_wait"],
-        "configurable": True,
-        "source": "objective",
-        "applies_to": ["control_priority", "balanced_normal", "comprehensive"],
-        "legacy_fields": ["risk_related_control_wait_penalty", "control_resource_wait_penalty"],
     },
     "makespan_and_soft_milestone": {
         "label": "总工期",

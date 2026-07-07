@@ -29,8 +29,6 @@ from .models import (
 
 CONTINUITY_PRIMARY_WEIGHT = 1_000_000
 CONTROL_NODE_LATE_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["control_node_late"]
-CONTROL_BUFFER_RISK_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["control_buffer_risk"]
-CONTROL_RESOURCE_WAIT_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["risk_related_control_wait"]
 RESOURCE_IDLE_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["resource_idle"]
 RESOURCE_PATH_CONTINUITY_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["resource_path_continuity"]
 CONTROL_MAKESPAN_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["makespan_and_soft_milestone"]
@@ -1437,8 +1435,6 @@ def solve_control_priority_schedule(
     objective_weights = _objective_weights_for_config(config)
     objective_terms_used_payload = _objective_terms_used_for_config(config, objective_weights)
     control_node_late_enabled = _objective_term_enabled(objective_weights, "control_node_late")
-    control_buffer_risk_enabled = _objective_term_enabled(objective_weights, "control_buffer_risk")
-    risk_related_control_wait_enabled = _objective_term_enabled(objective_weights, "risk_related_control_wait")
     resource_idle_enabled = _objective_term_enabled(objective_weights, "resource_idle")
     resource_path_continuity_enabled = _objective_term_enabled(objective_weights, "resource_path_continuity")
     resource_slot_balance_enabled = resource_path_continuity_enabled and _objective_term_enabled(
@@ -1593,43 +1589,6 @@ def solve_control_priority_schedule(
         for milestone_id, late_var in soft_lateness_vars.items()
         if milestone_id in soft_control_milestone_ids
     ]
-    control_buffer_support_needed = control_buffer_risk_enabled or risk_related_control_wait_enabled
-    control_buffer_terms = (
-        _build_control_buffer_terms(
-            model,
-            ends,
-            schedule_input=schedule_input,
-            control_chain_task_ids=control_chain_task_ids,
-            horizon=horizon,
-            fallback_deadline_days=baseline_result.objective_days,
-            include_penalty_terms=control_buffer_risk_enabled,
-        )
-        if control_buffer_support_needed
-        else _empty_control_buffer_terms()
-    )
-    control_wait_details = (
-        _build_control_wait_term_details(
-            model,
-            starts,
-            ends,
-            schedule_input.precedence_links,
-            task_by_id,
-            control_chain_task_ids,
-            horizon,
-        )
-        if risk_related_control_wait_enabled
-        else []
-    )
-    risk_related_control_wait_terms = (
-        _risk_related_control_wait_terms(
-            model,
-            control_wait_details,
-            control_buffer_terms["risk_by_task"],
-            horizon,
-        )
-        if risk_related_control_wait_enabled
-        else []
-    )
     resource_organization_terms = _build_resource_organization_terms(
         model,
         starts,
@@ -1664,8 +1623,6 @@ def solve_control_priority_schedule(
         term_id
         for term_id, enabled in {
             "control_node_late": control_node_late_enabled and bool(control_lateness_terms),
-            "control_buffer_risk": control_buffer_risk_enabled and bool(control_buffer_terms["terms"]),
-            "risk_related_control_wait": risk_related_control_wait_enabled and bool(risk_related_control_wait_terms),
             "makespan_and_soft_milestone": makespan_objective_enabled,
             "resource_idle": resource_idle_enabled and bool(resource_organization_terms["idle_terms"]),
             "resource_path_continuity": resource_path_continuity_enabled
@@ -1700,8 +1657,6 @@ def solve_control_priority_schedule(
     model.Minimize(
         sum(control_lateness_terms) * objective_weights["control_node_late"]
         + sum(target_relaxation_terms) * target_relaxation_weight
-        + sum(control_buffer_terms["terms"]) * objective_weights["control_buffer_risk"]
-        + sum(risk_related_control_wait_terms) * objective_weights["risk_related_control_wait"]
         + sum(resource_organization_terms["idle_terms"]) * objective_weights["resource_idle"]
         + sum(resource_path_transition_terms) * objective_weights["resource_path_continuity"]
         + sum(resource_organization_terms["slot_balance_terms"]) * objective_weights["resource_slot_balance"]
@@ -1844,8 +1799,6 @@ def solve_control_priority_schedule(
     reported_soft_control_lateness_penalty = (
         soft_control_lateness_penalty if control_node_late_enabled else 0
     )
-    control_buffer_risk_penalty = sum(solver.Value(term) for term in control_buffer_terms["terms"])
-    risk_related_control_wait_penalty = sum(solver.Value(term) for term in risk_related_control_wait_terms)
     resource_idle_penalty = sum(solver.Value(term) for term in resource_organization_terms["idle_terms"])
     resource_path_continuity_penalty = sum(solver.Value(term) for term in resource_path_transition_terms)
     drill_group_adjacent_penalty = sum(solver.Value(term) for term in drill_group_jump_terms["adjacent_terms"])
@@ -1867,15 +1820,7 @@ def solve_control_priority_schedule(
         idle_enabled=resource_idle_enabled,
         path_continuity_enabled=drill_group_path_circuit_enabled,
     )
-    control_buffer_risks = (
-        _control_buffer_risk_details(
-            schedule_input=schedule_input,
-            scheduled_tasks=scheduled_tasks,
-            profiles=control_buffer_terms["profiles"],
-        )
-        if control_buffer_risk_enabled
-        else []
-    )
+    control_buffer_risks: list[dict[str, Any]] = []
     control_priority_analysis = _build_control_priority_analysis(
         schedule_input=schedule_input,
         baseline_result=baseline_result,
@@ -1887,7 +1832,7 @@ def solve_control_priority_schedule(
         continuity_metrics=continuity_metrics,
         normal_balance_metrics=normal_balance_metrics,
         resource_organization_analysis=resource_organization_analysis,
-        control_buffer_enabled=control_buffer_risk_enabled,
+        control_buffer_enabled=False,
         resource_path_continuity_enabled=drill_group_path_circuit_enabled,
     )
     stats["continuity_metrics"] = continuity_metrics
@@ -1931,8 +1876,6 @@ def solve_control_priority_schedule(
         objective_terms_used_payload=objective_terms_used_payload,
         raw_penalties={
             "control_node_late": reported_control_lateness_days,
-            "control_buffer_risk": control_buffer_risk_penalty,
-            "risk_related_control_wait": risk_related_control_wait_penalty,
             "makespan_and_soft_milestone": objective_days if makespan_objective_enabled else 0,
             "resource_path_continuity": resource_path_continuity_penalty,
             "resource_slot_balance": resource_slot_balance_penalty,
@@ -1960,7 +1903,6 @@ def solve_control_priority_schedule(
             level="info",
             message=(
                 f"控制性工程优先策略已完成：控制链工作项 {len(control_chain_task_ids)} 个，"
-                f"控制缓冲状态 {control_priority_analysis['control_buffer_status']}，"
                 f"普通工程分布评分 {normal_balance_metrics['balance_score']}。"
             ),
         )
@@ -2009,9 +1951,6 @@ def solve_control_priority_schedule(
             "target_relaxation_weight": target_relaxation_weight,
             "target_relaxation_weighted_penalty": target_relaxation_penalty * target_relaxation_weight,
             "soft_control_lateness_penalty": reported_soft_control_lateness_penalty,
-            "control_buffer_risk_penalty": control_buffer_risk_penalty,
-            "risk_related_control_wait_penalty": risk_related_control_wait_penalty,
-            "control_resource_wait_penalty": risk_related_control_wait_penalty,
             "resource_idle_penalty": resource_idle_penalty,
             "resource_path_continuity_penalty": resource_path_continuity_penalty,
             "resource_path_transition_penalty": resource_path_continuity_penalty,

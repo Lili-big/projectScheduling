@@ -35,8 +35,6 @@ def test_schedule_strategy_merges_objective_term_defaults_and_ignores_legacy_bal
 
     assert set(config.objective_terms) == {
         "control_node_late",
-        "control_buffer_risk",
-        "risk_related_control_wait",
         "resource_idle",
         "resource_path_continuity",
         "resource_slot_balance",
@@ -46,8 +44,6 @@ def test_schedule_strategy_merges_objective_term_defaults_and_ignores_legacy_bal
     assert set(OBJECTIVE_METRIC_DEFINITIONS) == set(config.objective_terms)
     assert config.enable_balance_objective is False
     assert config.objective_terms["control_node_late"].weight == 1_000_000_000
-    assert config.objective_terms["control_buffer_risk"].weight == 100_000
-    assert config.objective_terms["risk_related_control_wait"].weight == 100_000
     assert config.objective_terms["makespan_and_soft_milestone"].weight == 5_000_000
     assert config.objective_terms["resource_path_continuity"].weight == 50_000
     assert config.objective_terms["resource_idle"].weight == 50_000
@@ -59,15 +55,17 @@ def test_schedule_strategy_merges_objective_term_defaults_and_ignores_legacy_bal
         if term_config.enabled
     } == {
         "control_node_late",
-        "control_buffer_risk",
-        "risk_related_control_wait",
         "makespan_and_soft_milestone",
         "resource_path_continuity",
         "resource_idle",
     }
     assert "resource_workload_balance" not in config.objective_terms
     assert "unconfigured_normal_balance" not in config.objective_terms
+    assert "control_buffer_risk" not in config.objective_terms
+    assert "risk_related_control_wait" not in config.objective_terms
     assert "unconfigured_normal_balance" not in OBJECTIVE_METRIC_DEFINITIONS
+    assert "control_buffer_risk" not in OBJECTIVE_METRIC_DEFINITIONS
+    assert "risk_related_control_wait" not in OBJECTIVE_METRIC_DEFINITIONS
     legacy_controls = ScheduleStrategyConfig(strategy="shortest_duration", resource_guarantee="strict")
     assert legacy_controls.strategy == "shortest_duration"
     assert legacy_controls.resource_guarantee == "strict"
@@ -104,6 +102,15 @@ def test_schedule_strategy_merges_objective_term_defaults_and_ignores_legacy_bal
     )
     assert "unconfigured_normal_balance" not in deprecated_unconfigured_normal_balance.objective_terms
     assert deprecated_unconfigured_normal_balance.objective_terms["resource_idle"].enabled is True
+
+    deprecated_control_risk_terms = ScheduleStrategyConfig(
+        objective_terms={
+            "control_buffer_risk": {"enabled": True, "weight": 100},
+            "risk_related_control_wait": {"enabled": True, "weight": 200},
+        }
+    )
+    assert "control_buffer_risk" not in deprecated_control_risk_terms.objective_terms
+    assert "risk_related_control_wait" not in deprecated_control_risk_terms.objective_terms
 
     disabled_zero_weight = ScheduleStrategyConfig(objective_terms={"resource_idle": {"enabled": False, "weight": 0}})
     assert disabled_zero_weight.objective_terms["resource_idle"].weight == 0
@@ -142,8 +149,6 @@ def test_schedule_strategy_rejects_invalid_objective_term_config() -> None:
         ScheduleStrategyConfig(
             objective_terms={
                 "control_node_late": {"enabled": False, "weight": 1},
-                "control_buffer_risk": {"enabled": False, "weight": 1},
-                "risk_related_control_wait": {"enabled": False, "weight": 1},
                 "resource_idle": {"enabled": False, "weight": 1},
                 "resource_path_continuity": {"enabled": False, "weight": 1},
                 "resource_slot_balance": {"enabled": False, "weight": 1},
@@ -156,8 +161,6 @@ def test_schedule_strategy_rejects_invalid_objective_term_config() -> None:
         ScheduleStrategyConfig(
             objective_terms={
                 "control_node_late": {"enabled": False, "weight": 1},
-                "control_buffer_risk": {"enabled": False, "weight": 1},
-                "risk_related_control_wait": {"enabled": False, "weight": 1},
                 "resource_idle": {"enabled": False, "weight": 1},
                 "resource_path_continuity": {"enabled": False, "weight": 1},
                 "resource_slot_balance": {"enabled": False, "weight": 1},
@@ -171,8 +174,6 @@ def test_schedule_strategy_rejects_invalid_objective_term_config() -> None:
         ScheduleStrategyConfig(
             objective_terms={
                 "control_node_late": {"enabled": False, "weight": 1},
-                "control_buffer_risk": {"enabled": False, "weight": 1},
-                "risk_related_control_wait": {"enabled": False, "weight": 1},
                 "resource_idle": {"enabled": False, "weight": 1},
                 "resource_path_continuity": {"enabled": False, "weight": 1},
                 "resource_slot_balance": {"enabled": False, "weight": 1},
@@ -186,8 +187,6 @@ def test_schedule_strategy_rejects_invalid_objective_term_config() -> None:
 def _objective_terms_with_only(enabled_term: str, weight: int) -> dict[str, dict[str, bool | int]]:
     term_ids = [
         "control_node_late",
-        "control_buffer_risk",
-        "risk_related_control_wait",
         "makespan_and_soft_milestone",
         "resource_path_continuity",
         "resource_slot_balance",
@@ -2957,12 +2956,19 @@ def test_control_priority_reports_configured_objective_terms_used() -> None:
     assert weights["resource_slot_balance"] == 0
     assert "normal_balance" not in weights
     assert "unconfigured_normal_balance" not in weights
+    assert "control_buffer_risk" not in weights
+    assert "risk_related_control_wait" not in weights
     assert "same_structure_craft_split" not in weights
     assert "same_structure_craft_split" not in terms_used
     assert "normal_balance" not in terms_used
     assert "unconfigured_normal_balance" not in terms_used
+    assert "control_buffer_risk" not in terms_used
+    assert "risk_related_control_wait" not in terms_used
     assert "same_structure_craft_split_penalty" not in result.objective_breakdown
     assert "unconfigured_normal_balance_penalty" not in result.objective_breakdown
+    assert "control_buffer_risk_penalty" not in result.objective_breakdown
+    assert "risk_related_control_wait_penalty" not in result.objective_breakdown
+    assert "control_resource_wait_penalty" not in result.objective_breakdown
     assert terms_used["resource_idle"] == {"enabled": False, "weight": 1234, "effective_weight": 0}
     assert terms_used["target_relaxation"] == {
         "enabled": False,
@@ -2974,6 +2980,8 @@ def test_control_priority_reports_configured_objective_terms_used() -> None:
     contribution_by_id = {item["term_id"]: item for item in contributions}
     assert set(contribution_by_id) == set(weights)
     assert "unconfigured_normal_balance" not in contribution_by_id
+    assert "control_buffer_risk" not in contribution_by_id
+    assert "risk_related_control_wait" not in contribution_by_id
     assert contribution_by_id["resource_idle"]["enabled"] is False
     assert contribution_by_id["resource_idle"]["weighted_contribution"] == 0
     assert contribution_by_id["target_relaxation"]["active"] is False
@@ -3037,65 +3045,6 @@ def test_control_priority_disabled_resource_objectives_keep_named_resource_no_ov
     assert result.status in {"OPTIMAL", "FEASIBLE"}
     assert ordered[0].end_offset <= ordered[1].start_offset
     assert {task.assigned_resource_id for task in result.tasks} == {"team_1"}
-
-
-def test_control_priority_risk_wait_can_use_buffer_support_without_buffer_objective() -> None:
-    pytest.importorskip("ortools")
-    start = date(2026, 1, 1)
-    predecessor = _solver_task("A-normal", "Normal predecessor", 2, "team").model_copy(
-        update={"control_level": "normal"}
-    )
-    control = _solver_task("B-control", "Control successor", 2, "team").model_copy(
-        update={"control_level": "control"}
-    )
-
-    result = solve_schedule(
-        ScheduleInput(
-            project_name="risk-wait-with-buffer-support",
-            start_date=start,
-            tasks=[predecessor, control],
-            precedence_links=[
-                PrecedenceLink(
-                    id="A-to-B",
-                    predecessor_id=predecessor.id,
-                    successor_id=control.id,
-                    relationship="FS",
-                    lag_days=0,
-                    source_rule_id="manual",
-                )
-            ],
-            resources=[Resource(id="team_1", name="Team 1", type="team")],
-            milestones=[
-                MilestoneConstraint(
-                    id="M-control",
-                    name="Control finish",
-                    level="control",
-                    mode="soft",
-                    scope_type="project",
-                    target_event="finish",
-                    target_date=start + timedelta(days=3),
-                    penalty_per_day=1,
-                )
-            ],
-            schedule_strategy=ScheduleStrategyConfig(
-                strategy="comprehensive",
-                objective_terms={
-                    **_objective_terms_with_only("risk_related_control_wait", 1_000_000),
-                    "control_buffer_risk": {"enabled": False, "weight": 5_000_000},
-                },
-            ),
-            time_limit_seconds=5,
-        )
-    )
-
-    gates = result.objective_breakdown["objective_modeling_gates"]
-
-    assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert gates["risk_related_control_wait"]["modeling_enabled"] is True
-    assert gates["control_buffer_risk"]["modeling_enabled"] is False
-    assert gates["control_buffer_risk"]["status"] == "not_enabled"
-    assert result.objective_breakdown["control_buffer_risk_penalty"] == 0
-    assert result.stats["control_priority_analysis"]["control_buffer_status"] == "not_evaluated"
 
 
 def test_control_priority_disabled_makespan_objective_keeps_finish_metrics_without_contribution() -> None:
@@ -3439,97 +3388,6 @@ def test_control_priority_keeps_control_task_ahead_of_competing_normal_task() ->
     assert by_task["A-normal"].start_offset >= by_task["Z-control"].end_offset
     assert result.objective_breakdown["solve_mode"] == "control_priority"
     assert result.stats["control_priority_analysis"]["bottleneck_resources"][0]["resource_type"] == "template"
-
-
-def test_control_buffer_risk_is_zero_when_required_buffer_remains() -> None:
-    pytest.importorskip("ortools")
-    start = date(2026, 1, 1)
-    normal = _solver_task("A-normal", "Normal pier", 5, "template").model_copy(
-        update={"structure_id": "S-normal", "control_level": "normal"}
-    )
-    control = _solver_task("Z-control", "Control pier", 5, "template").model_copy(
-        update={"structure_id": "S-control", "control_level": "control"}
-    )
-
-    result = solve_schedule(
-        ScheduleInput(
-            project_name="control-buffer-sufficient",
-            start_date=start,
-            tasks=[normal, control],
-            precedence_links=[],
-            resources=[
-                Resource(id="template-1", name="Template 1", type="template"),
-                Resource(id="template-2", name="Template 2", type="template"),
-            ],
-            milestones=[
-                MilestoneConstraint(
-                    id="M-control",
-                    name="Control finish",
-                    level="control",
-                    mode="hard",
-                    scope_type="structure",
-                    scope_id="S-control",
-                    target_event="finish",
-                    target_date=date(2026, 1, 20),
-                )
-            ],
-            schedule_strategy=ScheduleStrategyConfig(strategy="comprehensive", resource_guarantee="priority"),
-            time_limit_seconds=5,
-        )
-    )
-
-    risks = result.stats["control_priority_analysis"]["control_buffer_risks"]
-    control_risk = next(item for item in risks if item["task_id"] == "Z-control")
-
-    assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert control_risk["buffer_risk_days"] == 0
-    assert control_risk["status"] == "normal"
-    assert result.objective_breakdown["control_buffer_risk_penalty"] == 0
-
-
-def test_control_buffer_risk_is_reported_when_required_buffer_is_missing() -> None:
-    pytest.importorskip("ortools")
-    start = date(2026, 1, 1)
-    normal = _solver_task("A-normal", "Normal pier", 5, "template").model_copy(
-        update={"structure_id": "S-normal", "control_level": "normal"}
-    )
-    control = _solver_task("Z-control", "Control pier", 5, "template").model_copy(
-        update={"structure_id": "S-control", "control_level": "control"}
-    )
-
-    result = solve_schedule(
-        ScheduleInput(
-            project_name="control-buffer-insufficient",
-            start_date=start,
-            tasks=[normal, control],
-            precedence_links=[],
-            resources=[Resource(id="template-1", name="Template 1", type="template")],
-            milestones=[
-                MilestoneConstraint(
-                    id="M-control",
-                    name="Control finish",
-                    level="control",
-                    mode="hard",
-                    scope_type="structure",
-                    scope_id="S-control",
-                    target_event="finish",
-                    target_date=date(2026, 1, 8),
-                )
-            ],
-            schedule_strategy=ScheduleStrategyConfig(strategy="comprehensive", resource_guarantee="priority"),
-            time_limit_seconds=5,
-        )
-    )
-
-    risks = result.stats["control_priority_analysis"]["control_buffer_risks"]
-    control_risk = next(item for item in risks if item["task_id"] == "Z-control")
-
-    assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert control_risk["remaining_buffer_days"] == 3
-    assert control_risk["buffer_risk_days"] == 4
-    assert control_risk["status"] == "buffer_insufficient"
-    assert result.stats["control_priority_analysis"]["control_buffer_status"] == "buffer_insufficient"
-    assert result.objective_breakdown["control_buffer_risk_penalty"] >= 4
 
 
 def test_control_priority_analysis_separates_objects_tasks_and_predecessors() -> None:

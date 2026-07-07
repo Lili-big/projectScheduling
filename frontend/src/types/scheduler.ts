@@ -22,8 +22,6 @@ export type ControlLevel = "control" | "key" | "normal" | "rough";
 export type BalanceBucket = "week" | "month";
 export type ObjectiveTermId =
   | "control_node_late"
-  | "control_buffer_risk"
-  | "risk_related_control_wait"
   | "makespan_and_soft_milestone"
   | "resource_path_continuity"
   | "resource_slot_balance"
