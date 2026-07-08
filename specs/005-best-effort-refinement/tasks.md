@@ -4,6 +4,8 @@
 
 **前置条件**：用户确认 `spec.md`、`plan.md`、`tasks.md` 和分析结论后，才能进入实现
 
+**当前实现校正（2026-07-08）**：阶段 3 的当前资源最佳努力分支已被后续 `011` 和 `018` 替代。当前固定资源主链路返回 `current_resources_control_priority_balanced`、`current_resources_target_failed`、`target_unconfirmed` 或 `physical_infeasible`，不再要求实现或验证 `current_resources_best_effort_refinement`。阶段 4 的最少资源候选 `minimum_resources_best_effort_refinement` 仍是当前有效任务口径。
+
 ## 阶段 1：准备
 
 - [X] T001 阅读并标注当前严格精排和回退路径：`backend/app/scenario.py`、`backend/app/solver.py`
@@ -15,13 +17,13 @@
 - [X] T004 在 `backend/app/solver.py` 为命名资源精排增加“目标放松”求解入口或参数，继续复用既有物理硬约束
 - [X] T005 在 `backend/app/solver.py` 输出放松强制里程碑和固定工期的迟延项、目标分值和求解状态
 
-## 阶段 3：用户故事 1 - 固定资源最佳努力精排（P1）
+## 阶段 3：用户故事 1 - 固定资源最佳努力精排（历史任务，已替代）
 
-- [X] T006 [US1] 在 `backend/tests/` 增加严格精排失败后应返回 `current_resources_best_effort_refinement` 的测试
+- [X] T006 [US1] 历史任务：曾要求严格精排失败后返回 `current_resources_best_effort_refinement`；当前应由后续测试覆盖 `current_resources_target_failed`
 - [X] T007 [US1] 在 `backend/tests/` 增加严格精排成功时不得触发最佳努力分支的回归测试
 - [X] T008 [US1] 在 `backend/tests/` 增加最佳努力结果仍遵守资源互斥和同结构同工序绑定的测试
-- [X] T009 [US1] 在 `backend/app/scenario.py` 的固定资源链路中接入严格失败后的最佳努力精排尝试
-- [X] T010 [US1] 在 `backend/app/scenario.py` 保留最佳努力失败时的既有容量快排回退，并补充诊断
+- [X] T009 [US1] 历史任务：当前固定资源链路已改为直接目标函数排程，不再接入当前资源最佳努力精排尝试
+- [X] T010 [US1] 历史任务：当前固定资源目标失败不再保留容量快排作为主展示回退
 - [X] T011 [US1] 运行后端聚焦测试，确认固定资源最佳努力和既有回归通过
 
 ## 阶段 4：用户故事 2 - 最少资源候选最佳努力精排（P2）
@@ -41,7 +43,7 @@
 
 ## 阶段 6：文档与收尾
 
-- [X] T021 更新固定资源详细排程算法文档，说明严格失败后的最佳努力分支、来源和回退规则
-- [X] T022 更新精排目标函数算法文档，说明强制节点/固定工期在最佳努力分支中的软目标口径
+- [X] T021 历史任务：固定资源当前资源最佳努力分支说明已被后续统一目标达成文档替代
+- [X] T022 更新精排目标函数算法文档，说明最少资源候选最佳努力分支中的目标放松诊断口径
 - [X] T023 运行后端完整相关测试和前端构建，记录验证命令与结果
 - [X] T024 执行 `$speckit-converge`，确认规格、实现、测试和文档一致

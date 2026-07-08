@@ -7,7 +7,7 @@
 
 ## 后端返回契约
 
-### 当前资源最佳努力精排
+### 当前资源目标未满足结果（当前口径）
 
 ```json
 {
@@ -15,37 +15,20 @@
     "status": "FEASIBLE",
     "objective_days": 126,
     "stats": {
-      "schedule_source": "current_resources_best_effort_refinement",
-      "performance_path": "capacity_fast_path_best_effort_refinement",
-      "best_effort_refinement": {
-        "enabled": true,
-        "schedule_source": "current_resources_best_effort_refinement",
-        "fallback_from": "current_resources_control_priority_balanced",
-        "strict_refinement_status": "INFEASIBLE",
-        "strict_refinement_failure_reason": "hard_milestone_or_fixed_duration_not_satisfied",
-        "objective_status": "FEASIBLE",
+      "schedule_source": "current_resources_target_failed",
+      "performance_path": "current_resources_full_objective_target_failed_resource_recommendation",
+      "target_achievement": {
+        "target_status": "current_resources_target_failed",
+        "business_success": false,
         "target_lateness_days": 8,
-        "fixed_duration_overrun_days": 0,
-        "best_effort_score": 12345,
-        "relaxed_constraints": [
-          {
-            "type": "hard_milestone",
-            "id": "bridge_completion",
-            "name": "桥梁完成",
-            "target": "2026-10-01",
-            "actual": "2026-10-09",
-            "lateness_days": 8,
-            "scope": "左11#墩"
-          }
-        ]
+        "fixed_duration_overrun_days": 0
       }
     },
     "objective_breakdown": {
-      "schedule_source": "current_resources_best_effort_refinement",
-      "best_effort_refinement": {
-        "enabled": true,
-        "target_lateness_days": 8,
-        "fixed_duration_overrun_days": 0
+      "schedule_source": "current_resources_target_failed",
+      "target_achievement": {
+        "target_status": "current_resources_target_failed",
+        "business_success": false
       }
     }
   }
@@ -86,7 +69,8 @@
 
 ## 前端展示契约
 
-- `current_resources_best_effort_refinement` 显示为“最佳努力精排”。
+- `current_resources_best_effort_refinement` 仅作为历史兼容来源显示，不作为当前固定资源主链路的新结果来源。
+- `current_resources_target_failed` 显示为“当前资源目标未满足”，并展示目标达成诊断与资源建议。
 - `minimum_resources_best_effort_refinement` 显示为“最少资源候选最佳努力精排”。
 - 当 `best_effort_refinement.enabled = true` 时，精排诊断必须显示：
   - 严格精排状态；
@@ -99,4 +83,4 @@
 
 - 旧前端若不认识最佳努力来源，仍可根据 `milestones`、`validation` 和 `objective_days` 展示基础结果。
 - 新元数据放在 `stats` 和 `objective_breakdown`，不要求旧 payload 新增顶层字段。
-- 既有来源 `current_resources_control_priority_balanced`、`current_resources_capacity_shortest_fallback`、`minimum_resources_control_priority_balanced`、`minimum_resources_refinement_fallback` 语义保持不变。
+- 既有来源 `current_resources_control_priority_balanced`、`current_resources_target_failed`、`minimum_resources_control_priority_balanced`、`minimum_resources_best_effort_refinement`、`minimum_resources_refinement_fallback` 语义保持不变；`current_resources_capacity_shortest_fallback` 仅为历史兼容或内部诊断辅助，不作为当前资源失败后的主展示来源。

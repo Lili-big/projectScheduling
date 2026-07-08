@@ -148,8 +148,7 @@ type ObjectiveTermId =
   | "control_node_late"
   | "makespan_and_soft_milestone"
   | "resource_path_continuity"
-  | "resource_idle"
-  | "resource_workload_balance";
+  | "resource_idle";
 
 type ObjectiveTermConfig = {
   enabled: boolean;
@@ -311,11 +310,10 @@ const DEFAULT_RESOURCE_MAX_QUANTITIES: Record<string, number> = {
   cap_beam_team: 10,
 };
 const DEFAULT_OBJECTIVE_TERM_WEIGHTS: Record<ObjectiveTermId, number> = {
-  control_node_late: 1_000_000_000,
+  control_node_late: 10_000_000_000,
   makespan_and_soft_milestone: 10_000,
   resource_path_continuity: 3_000,
   resource_idle: 1_000,
-  resource_workload_balance: 100,
 };
 const DEFAULT_SCHEDULE_STRATEGY: Omit<ScheduleStrategyConfig, "objective_terms"> = {
   strategy: "comprehensive",
@@ -361,7 +359,7 @@ const UPPER_STRUCTURE_LOGIC_RULE_IDS = [
 function normalizeObjectiveWeight(value: unknown, enabled = true): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return enabled ? 1 : 0;
-  return Math.min(1_000_000_000, Math.max(enabled ? 1 : 0, Math.round(parsed)));
+  return Math.min(10_000_000_000, Math.max(enabled ? 1 : 0, Math.round(parsed)));
 }
 
 function normalizeScheduleStrategy(config?: ScheduleStrategyConfig | null): ScheduleStrategyConfig {
@@ -402,7 +400,7 @@ function objectiveTermsUsed(strategy: ScheduleStrategyConfig): Record<ObjectiveT
         },
       ];
     }),
-  );
+  ) as Record<ObjectiveTermId, { enabled: boolean; weight: number; effective_weight: number }>;
 }
 
 function objectiveWeights(strategy: ScheduleStrategyConfig): Record<ObjectiveTermId, number> {
@@ -598,7 +596,7 @@ function createDefaultScenario(): ScenarioInput {
       milestone("M-control-ws-lower", "下部结构及上部现浇梁强控节点", "control", "hard", "bridge", "B1", "2028-12-15", 10),
       milestone("M-internal-cap", "承台内部目标", "internal", "soft", "component", "cap", "2027-05-25", 20),
     ],
-    time_limit_seconds: 10,
+    time_limit_seconds: 15,
   };
   applyDefaultResourcePoolQuantities(scenario);
   return applyCachedLocalScenarioConfig(scenario);
@@ -2365,7 +2363,7 @@ function expandResources(pools: ResourcePool[], useMaxResources: boolean): Resou
 
 function solveScenario(scenario: ScenarioInput, useMaxResources: boolean) {
   const generated = generateScheduleInput(scenario, useMaxResources);
-  const result = schedule(generated);
+  const result = schedule(generated, useMaxResources ? "max_resources" : "current_resources");
   const diagnostics = [
     ...generated.validation,
     { level: "info", message: "Netlify Functions 演示排程已完成。完整 CP-SAT 求解仍建议部署 FastAPI/OR-Tools 后端。" },
@@ -2458,7 +2456,7 @@ function earliestStartFromPrecedenceLink(link: PrecedenceLink, predecessor: Sche
   return predecessor.end_offset + link.lag_days;
 }
 
-function schedule(generated: GeneratedScheduleInput): any {
+function schedule(generated: GeneratedScheduleInput, evaluatedAtSource = "current_resources"): any {
   const input = generated.schedule_input;
   const scheduleStrategy = normalizeScheduleStrategy(input.schedule_strategy);
   const predecessorLinks = groupBy(input.precedence_links, (link) => link.successor_id);
@@ -2508,6 +2506,8 @@ function schedule(generated: GeneratedScheduleInput): any {
   const spanApplied = applyContinuousBeamTeamSpans(input, Array.from(scheduledById.values()));
   const tasks = spanApplied.tasks.sort((a, b) => a.start_offset - b.start_offset || a.id.localeCompare(b.id));
   const makespan = tasks.reduce((max, task) => Math.max(max, task.end_offset), 0);
+  const milestone_results = milestoneResults(input.milestones, tasks, input.start_date);
+  const target_achievement = targetAchievementForDemo(milestone_results, evaluatedAtSource);
   return {
     status: "FEASIBLE",
     objective_days: makespan,
@@ -2530,10 +2530,11 @@ function schedule(generated: GeneratedScheduleInput): any {
       })),
       ...spanApplied.allocations,
     ],
-    milestone_results: milestoneResults(input.milestones, tasks, input.start_date),
+    milestone_results,
     validation: [],
     stats: {
       solve_mode: "netlify_functions_demo_scheduler",
+      target_achievement,
       continuous_beam_team_spans: spanApplied.summary,
       continuity_metrics: {
         continuity_score: 100,
@@ -2554,7 +2555,30 @@ function schedule(generated: GeneratedScheduleInput): any {
       resource_guarantee: scheduleStrategy.resource_guarantee,
       objective_weights: objectiveWeights(scheduleStrategy),
       objective_terms_used: objectiveTermsUsed(scheduleStrategy),
+      target_achievement,
     },
+  };
+}
+
+function targetAchievementForDemo(milestoneResultsList: any[], evaluatedAtSource: string) {
+  const hardMilestoneLateDays = milestoneResultsList
+    .filter((item) => item.mode === "hard")
+    .reduce((sum, item) => sum + Number(item.lateness_days ?? 0), 0);
+  const failedStatus = evaluatedAtSource === "max_resources"
+    ? "max_resources_target_failed"
+    : "current_resources_target_failed";
+  const targetStatus = hardMilestoneLateDays > 0 ? failedStatus : "met";
+  return {
+    business_success: targetStatus === "met",
+    target_status: targetStatus,
+    solver_status: "FEASIBLE",
+    hard_milestone_late_days: hardMilestoneLateDays,
+    fixed_duration_overrun_days: 0,
+    failure_reasons: hardMilestoneLateDays > 0 ? ["hard_milestone_late"] : [],
+    time_budget_seconds: 15,
+    time_budget_exhausted: false,
+    evaluated_at_source: evaluatedAtSource,
+    demo_capability: "simplified_scheduler",
   };
 }
 

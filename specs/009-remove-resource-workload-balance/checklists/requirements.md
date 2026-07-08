@@ -1,4 +1,4 @@
-# 规格质量检查表：移除同类资源工作量均衡目标
+﻿# 规格质量检查表：移除同类资源工作量均衡目标
 
 **目的**：检查 `009-remove-resource-workload-balance` 的需求是否清晰、可验收，并且不会误伤并行的 007/008 工作。
 **创建日期**：2026-07-06
@@ -7,7 +7,7 @@
 ## 需求清晰度
 
 - [x] CHK001 已明确要移除的目标项 ID 为 `resource_workload_balance`。
-- [x] CHK002 已明确不移除 `unconfigured_normal_balance`、`resource_idle`、`resource_path_continuity` 和 `resource_slot_balance`。
+- [x] CHK002 已明确不移除 `unconfigured_normal_balance`、`resource_idle`、`resource_path_continuity` 和 槽位均衡诊断。
 - [x] CHK003 已区分“目标函数贡献”和“资源工作量原始诊断数据”。
 - [x] CHK004 已说明历史请求中废弃字段的兼容处理。
 

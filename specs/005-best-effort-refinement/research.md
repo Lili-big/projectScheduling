@@ -1,5 +1,9 @@
 # 研究记录：精排失败最佳努力方案
 
+## 当前实现校正（2026-07-08）
+
+后续 `011-drill-group-two-stage-refinement` 和 `018-unified-target-solve` 已替代本研究中关于“当前资源严格失败后进入当前资源最佳努力”的决策。当前固定资源主链路直接运行目标函数排程，并用 `current_resources_target_failed` 表达可排程但目标未达成；`current_resources_best_effort_refinement` 和 `current_resources_capacity_shortest_fallback` 不再作为当前资源主展示来源。本研究仍可作为最少资源候选 `minimum_resources_best_effort_refinement` 的历史依据。
+
 ## 决策 1：严格精排优先，失败后才进入最佳努力
 
 **决定**：保留现有严格精排作为主路径。只有严格精排未返回 `OPTIMAL` 或 `FEASIBLE` 时，才启动最佳努力精排。
@@ -18,11 +22,11 @@
 
 ## 决策 3：结果来源必须新增，不能复用既有回退
 
-**决定**：新增 `current_resources_best_effort_refinement` 和 `minimum_resources_best_effort_refinement` 两类来源。
+**决定（已部分替代）**：历史方案曾新增 `current_resources_best_effort_refinement` 和 `minimum_resources_best_effort_refinement` 两类来源。当前实现仅保留 `minimum_resources_best_effort_refinement` 作为有效新结果来源；`current_resources_best_effort_refinement` 仅作为历史兼容来源。
 
 **理由**：最佳努力结果既不是严格精排，也不是容量快排回退。复用来源会让前端文案、诊断和用户判断混淆。
 
-**备选方案**：继续使用 `current_resources_capacity_shortest_fallback` 并在诊断中补充说明。该方案无法让页面稳定识别来源，拒绝。
+**备选方案**：继续使用 `current_resources_capacity_shortest_fallback` 并在诊断中补充说明。该方案已被后续固定资源主链路重构替代，当前资源失败应返回 `current_resources_target_failed`。
 
 ## 决策 4：最佳努力使用当前求解时间配置
 
@@ -34,7 +38,7 @@
 
 ## 决策 5：P1 当前资源，P2 最少资源候选
 
-**决定**：首期实现优先覆盖固定资源当前资源链路；最少资源候选二次精排纳入第二优先级任务；资源成本优化暂不覆盖。
+**决定（当前校正）**：固定资源当前资源链路由后续统一目标达成规格接管；本研究当前只保留最少资源候选二次复排的最佳努力口径；资源成本优化暂不覆盖。
 
 **理由**：用户截图问题来自当前资源固定资源链路；最少资源候选存在同类失败回退问题，但不应扩大到所有优化入口。
 
@@ -42,7 +46,7 @@
 
 ## 决策 6：最佳努力无法得到可用解时保留现有回退
 
-**决定**：如果目标放松后仍返回 `UNKNOWN`、`INFEASIBLE` 或模型错误且没有可用方案，继续使用当前容量快排或候选回退。
+**决定（当前校正）**：如果最少资源候选目标放松后仍返回 `UNKNOWN`、`INFEASIBLE` 或模型错误且没有可用方案，继续使用候选回退或容量模型已验证候选。固定资源当前资源链路不再以容量快排作为目标失败后的主展示回退。
 
 **理由**：现有回退至少提供可检查的参考排程；新增分支不应让用户失去可查看结果。
 

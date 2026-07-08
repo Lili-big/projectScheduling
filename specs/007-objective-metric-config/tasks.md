@@ -24,9 +24,9 @@
 
 **目标**：建立目标指标目录、配置契约和统一贡献模型；本阶段完成前不得开始页面故事实现。
 
-- [X] T006 [P] 在 `backend/tests/test_scheduler.py` 或新的后端测试文件中增加目标项目录测试，覆盖新增项 `target_relaxation`、`resource_slot_balance`、`unconfigured_normal_balance`。
+- [X] T006 [P] 在 `backend/tests/test_scheduler.py` 或新的后端测试文件中增加目标项目录测试，覆盖当前 4 个有效目标项，并确认放松目标诊断、槽位均衡诊断、`unconfigured_normal_balance` 不作为可配置目标项恢复。
 - [X] T007 [P] 在 `backend/tests/test_scheduler.py` 或新的后端测试文件中增加旧配置兼容测试，覆盖缺失新增目标项时自动补齐默认值。
-- [X] T008 在 `backend/app/models.py` 扩展 `ObjectiveTermId` 和 `DEFAULT_OBJECTIVE_TERM_WEIGHTS`，纳入 `target_relaxation`、`resource_slot_balance`、`unconfigured_normal_balance`。
+- [X] T008 当前校正：`ObjectiveTermId` 和 `DEFAULT_OBJECTIVE_TERM_WEIGHTS` 只保留 4 个有效目标项；放松目标诊断、槽位均衡诊断、`unconfigured_normal_balance` 作为诊断或废弃兼容字段处理。
 - [X] T009 在 `backend/app/models.py` 建立目标指标目录结构，包含标签、分组、说明、默认权重、可配置性、来源、适用分支和旧字段映射。
 - [X] T010 在 `backend/app/models.py` 更新 `default_objective_terms()`、`effective_objective_weights()`、`objective_terms_used()` 和配置校验，保持旧配置自动补齐。
 - [X] T011 在 `backend/app/solver.py` 增加统一目标贡献构造辅助逻辑，输出 `term_id`、原始罚分、配置权重、有效权重、加权贡献、启用状态、适用分支和说明。
@@ -44,14 +44,14 @@
 
 ### 用户故事 1 的测试
 
-- [X] T013 [P] [US1] 在后端测试中增加新增目标项权重生效测试，验证 `unconfigured_normal_balance`、`target_relaxation`、`resource_slot_balance` 的有效权重进入结果回显。
+- [X] T013 [P] [US1] 在后端测试中增加目标项权重生效测试，验证当前 4 个有效目标项的有效权重进入结果回显，并验证废弃/诊断项不进入 `objective_weights`。
 - [X] T014 [P] [US1] 在前端类型或构建验证范围内覆盖新增 `ObjectiveTermId`，确保目标配置表没有遗漏目录项。
 
 ### 用户故事 1 的实现
 
-- [X] T015 [US1] 在 `backend/app/solver.py` 将 `unconfigured_normal_balance` 从固定 `UNCONFIGURED_NORMAL_BALANCE_WEIGHT` 切换为目标配置有效权重，默认值保持 10。
-- [X] T016 [US1] 在 `backend/app/solver.py` 将 `target_relaxation` 的贡献与权重从 `control_node_late` 中独立暴露，保持旧默认行为等价。
-- [X] T017 [US1] 在 `backend/app/solver.py` 将 `resource_slot_balance` 独立暴露为目标项贡献；如实现仍与路径连续性共享表达式，必须明确有效权重来源。
+- [X] T015 [US1] 当前校正：在 `backend/app/solver.py` 中移除 `unconfigured_normal_balance` 目标项建模，仅保留 `normal_balance_metrics` 只读诊断。
+- [X] T016 [US1] 在 `backend/app/solver.py` 将 放松目标诊断 的贡献与权重从 `control_node_late` 中独立暴露，保持旧默认行为等价。
+- [X] T017 [US1] 在 `backend/app/solver.py` 将 槽位均衡诊断 独立暴露为目标项贡献；如实现仍与路径连续性共享表达式，必须明确有效权重来源。
 - [X] T018 [US1] 在 `frontend/src/app/App.tsx` 调整 `objectiveTermDefinitions` 或目录消费逻辑，展示全部可配置目标项和业务说明。
 - [X] T019 [US1] 在 `frontend/src/app/App.tsx` 更新 `defaultObjectiveTermsConfig()`、`withDefaultScheduleStrategy()` 和目标项更新逻辑，保证新增项可启用、停用和调整权重。
 - [X] T020 [US1] 在 `frontend/src/app/App.tsx` 调整目标配置区的计数、分组和禁用最后一项规则，覆盖全部可配置目标项。
@@ -69,7 +69,7 @@
 ### 用户故事 2 的测试
 
 - [X] T021 [P] [US2] 在后端测试中增加 `objective_contributions` 求和测试，验证贡献加总等于 `weighted_objective`。
-- [X] T022 [P] [US2] 在后端测试中增加最佳努力分支样例，验证 `target_relaxation` 在目标放松分支显示为 active 并输出贡献。
+- [X] T022 [P] [US2] 在后端测试中增加最佳努力分支样例，验证 放松目标诊断 在目标放松分支显示为 active 并输出贡献。
 
 ### 用户故事 2 的实现
 
@@ -86,7 +86,7 @@
 
 **目标**：旧场景、旧请求和旧结果在新增目标项后仍能使用。
 
-**独立测试**：使用只包含旧 7 项的场景求解并打开旧结果，系统不报错且默认行为等价。
+**独立测试**：使用包含历史 7 项目标配置的场景求解并打开旧结果，系统过滤废弃项、不报错，当前 4 项默认行为等价。
 
 ### 用户故事 3 的测试
 
@@ -191,4 +191,3 @@
 
 - `[P]` 表示不同文件且无依赖冲突，可并行。
 - 本任务清单生成后，需要用户确认和 `$speckit-analyze` 结果通过后才能进入实现。
-

@@ -1,4 +1,4 @@
-# 数据模型：移除未配置资源普通工程均衡目标
+﻿# 数据模型：移除未配置资源普通工程均衡目标
 
 ## ObjectiveTermId
 
@@ -8,7 +8,7 @@
 | `resource_workload_balance` | 009 后已废弃 | 保持废弃，不恢复 |
 | `resource_idle` | 有效目标项 | 保持不变 |
 | `resource_path_continuity` | 有效目标项 | 保持不变 |
-| `resource_slot_balance` | 有效目标项 | 保持不变 |
+| 槽位均衡诊断 | 有效目标项 | 保持不变 |
 
 ## DEFAULT_OBJECTIVE_TERM_WEIGHTS
 

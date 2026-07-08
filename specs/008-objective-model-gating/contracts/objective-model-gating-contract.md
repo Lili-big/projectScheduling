@@ -17,10 +17,10 @@
   "schedule_strategy": {
     "strategy": "comprehensive",
     "objective_terms": {
-      "control_node_late": { "enabled": true, "weight": 1000000000 },
-      "resource_workload_balance": { "enabled": false, "weight": 100 },
-      "resource_idle": { "enabled": false, "weight": 1000 },
-      "resource_path_continuity": { "enabled": false, "weight": 3000 }
+      "control_node_late": { "enabled": true, "weight": 10000000000 },
+      "makespan_and_soft_milestone": { "enabled": true, "weight": 5000000 },
+      "resource_path_continuity": { "enabled": false, "weight": 50000 },
+      "resource_idle": { "enabled": false, "weight": 50000 }
     }
   }
 }
@@ -79,7 +79,7 @@
 
 ## 前端契约
 
-- 目标函数配置区继续展示 7 个当前目标项。
+- 目标函数配置区继续展示 4 个当前目标项：`control_node_late`、`makespan_and_soft_milestone`、`resource_path_continuity`、`resource_idle`。
 - 关闭项的结果展示必须根据 `effective_weight = 0` 和状态字段表达为未启用或未评价。
 - 已启用但罚分为 0 的指标必须和关闭项区分。
 - 若后端未返回 `objective_modeling_gates`，前端仍可依据 `objective_terms_used` 和既有诊断字段兼容展示。
@@ -91,5 +91,5 @@
 要求：
 
 - 不把最佳努力放松迟延误报为用户关闭的常规目标项已启用。
-- `target_relaxation_penalty`、`relaxed_constraints` 和 `schedule_source` 保持现有兼容路径。
+- `relaxed_target_penalty_days`、`relaxed_constraints` 和 `schedule_source` 保持现有兼容路径。
 - 页面应继续提示“该结果不代表目标已全部满足”。

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -44,9 +45,26 @@ CONTINUOUS_BEAM_CLOSURE_RULE_IDS = {
 CONTINUOUS_BEAM_RESOURCE_TYPE = "cast_in_place_continuous_beam_team"
 DEFAULT_CONTINUOUS_CLOSURE_FINISH_GAP_DAYS = 7
 MINIMUM_RESOURCES_BEST_EFFORT_SOURCE = "minimum_resources_best_effort_refinement"
+TARGET_SOLVE_TIME_LIMIT_SECONDS = 15.0
 MECHANICAL_DRILL_RESOURCE_TYPES = frozenset({"rotary_drill", "circulation_drill", "impact_drill"})
 MECHANICAL_DRILL_PATH_SUPPORT_WINDOW = 2
 MECHANICAL_DRILL_CROSS_SIDE_SUPPORT_WINDOW = 1
+
+
+class _SolveBudget:
+    def __init__(self, time_limit_seconds: float) -> None:
+        self.time_limit_seconds = min(TARGET_SOLVE_TIME_LIMIT_SECONDS, max(0.1, float(time_limit_seconds or TARGET_SOLVE_TIME_LIMIT_SECONDS)))
+        self.started_at = time.perf_counter()
+
+    def with_time_limit(self, schedule_input: ScheduleInput) -> ScheduleInput:
+        return schedule_input.model_copy(update={"time_limit_seconds": self.remaining_seconds()})
+
+    def remaining_seconds(self) -> float:
+        elapsed = time.perf_counter() - self.started_at
+        return max(0.1, self.time_limit_seconds - elapsed)
+
+    def exhausted(self) -> bool:
+        return self.remaining_seconds() <= 0.11
 
 
 @dataclass(frozen=True)
@@ -62,6 +80,16 @@ class _DrillGroupNode:
     sequence_order: int
     eligible_resource_ids: tuple[str, ...]
     representative_task: Task
+
+
+@dataclass(frozen=True)
+class _DrillGroupStage1RouteDecision:
+    allowed: bool
+    transition_kind: str
+    penalty: int = 0
+    rejection_reason: str | None = None
+    same_side_sequence_distance: int | None = None
+    cross_side_support_gap: int | None = None
 
 
 @dataclass(frozen=True)
@@ -127,8 +155,12 @@ def _objective_contributions_for_result(
                 "active": active,
                 "configured_weight": configured_weight,
                 "effective_weight": effective_weight,
+                "weight": effective_weight,
                 "raw_penalty": raw_penalty,
+                "raw_value": raw_penalty,
+                "unit": "days",
                 "weighted_contribution": weighted_contribution,
+                "weighted_value": weighted_contribution,
                 "applies_to": list(definition.get("applies_to", [])),
                 "parent_term_id": definition.get("parent_term_id"),
                 "notes": notes_by_term.get(term_id, ""),
@@ -755,7 +787,25 @@ def _drill_group_id(rule_key: tuple[str, str, str, str]) -> str:
 
 
 def _drill_group_child_sort_key(task: Task) -> tuple[Any, ...]:
-    return (task.sequence_order, _component_rank(task.component_type), task.id)
+    pile_sequence = _pile_sequence_number(task)
+    return (
+        pile_sequence is None,
+        pile_sequence if pile_sequence is not None else 0,
+        task.sequence_order,
+        _component_rank(task.component_type),
+        task.id,
+    )
+
+
+def _pile_sequence_number(task: Task) -> int | None:
+    for value in (task.id, task.name):
+        match = re.search(r"(?:^|[-_\s])PILE[-_\s]*(\d+)(?:$|[-_\s])", value, flags=re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+        match = re.search(r"(\d+)\s*#\s*pile", value, flags=re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    return None
 
 
 def _build_drill_group_nodes(
@@ -934,6 +984,280 @@ def _bool_and_var(model: Any, name: str, literals: list[Any]) -> Any:
         model.Add(both <= literal)
     model.Add(both >= sum(literals) - (len(literals) - 1))
     return both
+
+
+def _empty_drill_group_stage1_route_terms(status: str = "not_applicable") -> dict[str, Any]:
+    return {
+        "route_terms": [],
+        "same_side_terms": [],
+        "cross_side_terms": [],
+        "metadata": {
+            "stage1_route_status": status,
+            "stage1_route_node_count": 0,
+            "stage1_route_unique_group_count": 0,
+            "stage1_route_candidate_arc_count": 0,
+            "stage1_route_rejected_arc_counts": {
+                "same_side_window_exceeded": 0,
+                "cross_side_gap_exceeded": 0,
+                "missing_location": 0,
+                "scope_mismatch": 0,
+            },
+            "stage1_same_side_penalty": 0,
+            "stage1_cross_side_penalty": 0,
+            "stage1_route_penalty": 0,
+            "stage1_route_failure_reason": None,
+            "stage1_route_sparse_same_side_window": MECHANICAL_DRILL_PATH_SUPPORT_WINDOW,
+            "stage1_route_sparse_cross_side_window": MECHANICAL_DRILL_CROSS_SIDE_SUPPORT_WINDOW,
+        },
+    }
+
+
+def _stage1_route_metadata_from_path(path_metadata: dict[str, Any] | None) -> dict[str, Any]:
+    if not path_metadata:
+        return _empty_drill_group_stage1_route_terms("not_applicable")["metadata"]
+    empty = _empty_drill_group_stage1_route_terms("not_applicable")["metadata"]
+    return {
+        key: path_metadata.get(key, value)
+        for key, value in empty.items()
+    }
+
+
+def _with_stage1_route_failure(metadata: dict[str, Any], reason: str) -> dict[str, Any]:
+    next_metadata = dict(metadata)
+    if next_metadata.get("stage1_route_status") == "enabled":
+        next_metadata["stage1_route_status"] = "infeasible"
+        next_metadata["stage1_route_failure_reason"] = reason
+    return next_metadata
+
+
+def _drill_group_stage1_route_context(
+    groups: list[_DrillGroupNode],
+) -> dict[str, dict[tuple[Any, ...], dict[str, int]]]:
+    same_side_positions: dict[tuple[Any, ...], dict[str, int]] = {}
+    buckets: dict[tuple[Any, ...], list[_DrillGroupNode]] = defaultdict(list)
+    for group in groups:
+        task = group.representative_task
+        location = _task_location(task)
+        support_index = location["support_index"]
+        side = location["side"]
+        if location["structure_type"] != "pier" or support_index is None or side not in {"L", "R"}:
+            continue
+        key = (
+            task.bridge_id or "",
+            group.resource_group_key,
+            group.component_type,
+            group.process_name,
+            side,
+        )
+        buckets[key].append(group)
+
+    for key, items in buckets.items():
+        ordered = sorted(
+            items,
+            key=lambda group: (
+                _task_location(group.representative_task)["support_index"],
+                group.sequence_order,
+                group.group_id,
+            ),
+        )
+        same_side_positions[key] = {
+            group.group_id: position
+            for position, group in enumerate(ordered)
+        }
+    return {"same_side": same_side_positions}
+
+
+def _drill_group_stage1_routable(group: _DrillGroupNode) -> bool:
+    location = _task_location(group.representative_task)
+    return (
+        location["structure_type"] == "pier"
+        and location["support_index"] is not None
+        and location["side"] in {"L", "R"}
+    )
+
+
+def _drill_group_stage1_transition_decision(
+    previous_group: _DrillGroupNode,
+    current_group: _DrillGroupNode,
+    route_context: dict[str, dict[tuple[Any, ...], dict[str, int]]],
+) -> _DrillGroupStage1RouteDecision:
+    previous_task = previous_group.representative_task
+    current_task = current_group.representative_task
+    previous_location = _task_location(previous_task)
+    current_location = _task_location(current_task)
+    if (
+        previous_location["structure_type"] != "pier"
+        or current_location["structure_type"] != "pier"
+        or previous_location["support_index"] is None
+        or current_location["support_index"] is None
+        or previous_location["side"] not in {"L", "R"}
+        or current_location["side"] not in {"L", "R"}
+    ):
+        return _DrillGroupStage1RouteDecision(
+            allowed=False,
+            transition_kind="unknown",
+            rejection_reason="missing_location",
+        )
+    if (
+        previous_task.bridge_id != current_task.bridge_id
+        or previous_group.resource_group_key != current_group.resource_group_key
+        or previous_group.component_type != current_group.component_type
+        or previous_group.process_name != current_group.process_name
+    ):
+        return _DrillGroupStage1RouteDecision(
+            allowed=False,
+            transition_kind="unknown",
+            rejection_reason="scope_mismatch",
+        )
+
+    previous_side = previous_location["side"]
+    current_side = current_location["side"]
+    previous_support_index = previous_location["support_index"]
+    current_support_index = current_location["support_index"]
+    if previous_side == current_side:
+        key = (
+            previous_task.bridge_id or "",
+            previous_group.resource_group_key,
+            previous_group.component_type,
+            previous_group.process_name,
+            previous_side,
+        )
+        positions = route_context["same_side"].get(key, {})
+        previous_position = positions.get(previous_group.group_id)
+        current_position = positions.get(current_group.group_id)
+        if previous_position is None or current_position is None:
+            return _DrillGroupStage1RouteDecision(
+                allowed=False,
+                transition_kind="same_side",
+                rejection_reason="missing_location",
+            )
+        sequence_distance = abs(current_position - previous_position)
+        if 0 < sequence_distance <= MECHANICAL_DRILL_PATH_SUPPORT_WINDOW:
+            return _DrillGroupStage1RouteDecision(
+                allowed=True,
+                transition_kind="same_side",
+                penalty=max(0, sequence_distance - 1),
+                same_side_sequence_distance=sequence_distance,
+            )
+        return _DrillGroupStage1RouteDecision(
+            allowed=False,
+            transition_kind="same_side",
+            rejection_reason="same_side_window_exceeded",
+            same_side_sequence_distance=sequence_distance,
+        )
+
+    support_gap = abs(current_support_index - previous_support_index)
+    if support_gap <= MECHANICAL_DRILL_CROSS_SIDE_SUPPORT_WINDOW:
+        return _DrillGroupStage1RouteDecision(
+            allowed=True,
+            transition_kind="cross_side",
+            penalty=1,
+            cross_side_support_gap=support_gap,
+        )
+    return _DrillGroupStage1RouteDecision(
+        allowed=False,
+        transition_kind="cross_side",
+        rejection_reason="cross_side_gap_exceeded",
+        cross_side_support_gap=support_gap,
+    )
+
+
+def _build_drill_group_stage1_route_terms(
+    model: Any,
+    starts: dict[str, Any],
+    ends: dict[str, Any],
+    groups: list[_DrillGroupNode],
+    enabled_resources: list[Resource],
+    assignment_vars: dict[tuple[str, str], Any],
+) -> dict[str, Any]:
+    result = _empty_drill_group_stage1_route_terms("not_applicable")
+    if not groups:
+        return result
+
+    routable_groups = [group for group in groups if _drill_group_stage1_routable(group)]
+    if not routable_groups:
+        return result
+
+    metadata = result["metadata"]
+    metadata["stage1_route_status"] = "enabled"
+    metadata["stage1_route_unique_group_count"] = len(routable_groups)
+    rejected_counts = metadata["stage1_route_rejected_arc_counts"]
+    same_side_terms: list[Any] = []
+    cross_side_terms: list[Any] = []
+    resources_by_id = {
+        resource.id: resource
+        for resource in enabled_resources
+        if resource.type in MECHANICAL_DRILL_RESOURCE_TYPES
+    }
+
+    for resource in sorted(resources_by_id.values(), key=_resource_sort_key):
+        resource_groups = [
+            group
+            for group in routable_groups
+            if resource.id in group.eligible_resource_ids
+            and group.child_task_ids
+            and assignment_vars.get((group.child_task_ids[0], resource.id)) is not None
+        ]
+        if not resource_groups:
+            continue
+        resource_groups = sorted(
+            resource_groups,
+            key=lambda group: (_task_spatial_sort_key(group.representative_task), group.group_id),
+        )
+        metadata["stage1_route_node_count"] += len(resource_groups)
+        if len(resource_groups) <= 1:
+            continue
+
+        assignments = [
+            assignment_vars[(group.child_task_ids[0], resource.id)]
+            for group in resource_groups
+        ]
+        resource_used = model.NewBoolVar(f"drill_stage1_resource_used_{_safe(resource.id)}")
+        for assignment in assignments:
+            model.Add(assignment <= resource_used)
+        model.Add(sum(assignments) >= resource_used)
+
+        indexed_groups = list(enumerate(resource_groups, start=1))
+        arcs = [(0, 0, resource_used.Not())]
+        for node_index, group in indexed_groups:
+            presence = assignment_vars[(group.child_task_ids[0], resource.id)]
+            arcs.append((node_index, node_index, presence.Not()))
+            arcs.append((0, node_index, model.NewBoolVar(f"drill_stage1_start_{_safe(resource.id)}_{node_index}")))
+            arcs.append((node_index, 0, model.NewBoolVar(f"drill_stage1_end_{_safe(resource.id)}_{node_index}")))
+
+        route_context = _drill_group_stage1_route_context(resource_groups)
+        for previous_index, previous_group in indexed_groups:
+            for current_index, current_group in indexed_groups:
+                if previous_index == current_index:
+                    continue
+                decision = _drill_group_stage1_transition_decision(
+                    previous_group,
+                    current_group,
+                    route_context,
+                )
+                if not decision.allowed:
+                    reason = decision.rejection_reason or "scope_mismatch"
+                    rejected_counts[reason] = int(rejected_counts.get(reason, 0)) + 1
+                    continue
+
+                transition = model.NewBoolVar(
+                    f"drill_stage1_arc_{_safe(resource.id)}_{previous_index}_{current_index}"
+                )
+                arcs.append((previous_index, current_index, transition))
+                metadata["stage1_route_candidate_arc_count"] += 1
+                model.Add(starts[current_group.child_task_ids[0]] >= ends[previous_group.child_task_ids[-1]]).OnlyEnforceIf(transition)
+                if decision.penalty:
+                    if decision.transition_kind == "same_side":
+                        same_side_terms.append(decision.penalty * transition)
+                    elif decision.transition_kind == "cross_side":
+                        cross_side_terms.append(decision.penalty * transition)
+
+        model.AddCircuit(arcs)
+
+    result["same_side_terms"] = same_side_terms
+    result["cross_side_terms"] = cross_side_terms
+    result["route_terms"] = same_side_terms + cross_side_terms
+    return result
 
 
 def _build_drill_group_coarse_jump_terms(
@@ -1240,6 +1564,7 @@ def _drill_group_refinement_payload(
         "makespan_tolerance": makespan_tolerance,
         "fallback_reason": fallback_reason,
     }
+    payload.update(_stage1_route_metadata_from_path(path_metadata))
     if stage2_path_diagnostics_by_resource is not None:
         payload["stage2_path_diagnostics_by_resource"] = stage2_path_diagnostics_by_resource
     return payload
@@ -1989,71 +2314,7 @@ def solve_control_priority_schedule(
         )
         if coarse_result.status not in {"OPTIMAL", "FEASIBLE"}:
             return coarse_result
-        if not resource_path_continuity_enabled:
-            return coarse_result
-
-        fixed_resource_by_task_id = _fixed_resources_from_drill_groups(drill_groups, coarse_result.tasks)
-        stage2_path_diagnostics_by_resource = _drill_group_stage2_path_diagnostics_by_resource(
-            drill_groups,
-            coarse_result.tasks,
-            enabled_resources,
-        )
-        if not fixed_resource_by_task_id:
-            fallback_payload = _drill_group_refinement_payload(
-                status="stage2_fallback",
-                groups=drill_groups,
-                scheduled_tasks=coarse_result.tasks,
-                path_metadata=(coarse_result.stats.get("continuity_objective") or {}),
-                stage2_path_diagnostics_by_resource=stage2_path_diagnostics_by_resource,
-                fallback_reason="coarse_group_assignment_missing",
-            )
-            return _attach_drill_group_refinement_metadata(coarse_result, fallback_payload)
-
-        refined_result = solve_control_priority_schedule(
-            schedule_input,
-            enforce_hard_milestones=enforce_hard_milestones,
-            baseline_result=baseline_result,
-            max_makespan_days=max_makespan_days,
-            warm_start_result=coarse_result,
-            relax_target_constraints=relax_target_constraints,
-            _drill_group_stage="refined",
-            _fixed_resource_by_task_id=fixed_resource_by_task_id,
-            _path_task_filter_by_resource=_drill_group_path_filter_by_resource(drill_groups, fixed_resource_by_task_id),
-            _path_filter_task_ids=_drill_group_task_ids(drill_groups),
-        )
-        if (
-            refined_result.status in {"OPTIMAL", "FEASIBLE"}
-            and (relax_target_constraints or not _has_late_hard_milestone(refined_result))
-        ):
-            return _attach_stage2_makespan_delta(
-                refined_result,
-                stage1_makespan_days=coarse_result.objective_days,
-                stage2_makespan_days=refined_result.objective_days,
-            )
-
-        fallback = coarse_result.model_copy(deep=True)
-        fallback_reason = f"stage2_{refined_result.status.lower()}"
-        if (
-            not relax_target_constraints
-            and refined_result.status in {"OPTIMAL", "FEASIBLE"}
-            and _has_late_hard_milestone(refined_result)
-        ):
-            fallback_reason = "stage2_hard_milestone_late"
-        fallback_payload = _drill_group_refinement_payload(
-            status="stage2_fallback",
-            groups=drill_groups,
-            scheduled_tasks=fallback.tasks,
-            path_metadata=(fallback.stats.get("continuity_objective") or {}),
-            stage2_path_diagnostics_by_resource=stage2_path_diagnostics_by_resource,
-            fallback_reason=fallback_reason,
-        )
-        fallback.validation.append(
-            ValidationMessage(
-                level="warning",
-                message=f"Drill group path refinement fell back to coarse result: {fallback_reason}.",
-            )
-        )
-        return _attach_drill_group_refinement_metadata(fallback, fallback_payload)
+        return coarse_result
 
     try:
         from ortools.sat.python import cp_model
@@ -2088,12 +2349,13 @@ def solve_control_priority_schedule(
     control_node_late_enabled = _objective_term_enabled(objective_weights, "control_node_late")
     resource_idle_enabled = _objective_term_enabled(objective_weights, "resource_idle")
     resource_path_continuity_enabled = _objective_term_enabled(objective_weights, "resource_path_continuity")
-    resource_slot_balance_enabled = resource_path_continuity_enabled and _objective_term_enabled(
-        objective_weights,
-        "resource_slot_balance",
-    )
     drill_group_constraints_enabled = _drill_group_stage in {"coarse", "refined"} and bool(drill_groups)
     drill_group_path_circuit_enabled = resource_path_continuity_enabled and _drill_group_stage != "coarse"
+    inherited_stage1_route_metadata = (
+        _stage1_route_metadata_from_path(warm_start_result.stats.get("continuity_objective"))
+        if _drill_group_stage == "refined" and warm_start_result is not None
+        else _empty_drill_group_stage1_route_terms("not_applicable")["metadata"]
+    )
     makespan_objective_enabled = _objective_term_enabled(objective_weights, "makespan_and_soft_milestone")
     control_chain_task_ids = _control_chain_task_ids(schedule_input)
     normal_tasks = _normal_balance_tasks(schedule_input.tasks, control_chain_task_ids)
@@ -2260,65 +2522,60 @@ def solve_control_priority_schedule(
         include_workload_balance=False,
         include_idle=resource_idle_enabled,
         include_path_continuity=drill_group_path_circuit_enabled,
-        include_slot_balance=resource_slot_balance_enabled,
+        include_slot_balance=False,
         path_task_filter_by_resource=_path_task_filter_by_resource,
         path_filter_task_ids=_path_filter_task_ids,
     )
-    drill_group_jump_terms = (
-        _build_drill_group_coarse_jump_terms(model, drill_groups, assignment_vars)
+    drill_group_stage1_route_terms = (
+        _build_drill_group_stage1_route_terms(
+            model,
+            starts,
+            ends,
+            drill_groups,
+            enabled_resources,
+            assignment_vars,
+        )
         if resource_path_continuity_enabled and drill_group_constraints_enabled and _drill_group_stage == "coarse"
-        else {"adjacent_terms": [], "hole_terms": []}
+        else _empty_drill_group_stage1_route_terms(
+            "not_enabled" if not resource_path_continuity_enabled else "not_applicable"
+        )
     )
-    target_relaxation_terms = list(relaxed_hard_lateness_vars.values())
+    if _drill_group_stage == "refined":
+        drill_group_stage1_route_terms["metadata"] = inherited_stage1_route_metadata
+    relaxed_target_terms = list(relaxed_hard_lateness_vars.values())
     if fixed_duration_overrun_var is not None:
-        target_relaxation_terms.append(fixed_duration_overrun_var)
-    target_relaxation_enabled = relax_target_constraints and bool(target_relaxation_terms)
-    target_relaxation_weight = (
-        int(objective_weights.get("target_relaxation", 0) or 0)
-        if _objective_term_enabled(objective_weights, "target_relaxation")
-        else DEFAULT_OBJECTIVE_TERM_WEIGHTS["target_relaxation"]
-    )
+        relaxed_target_terms.append(fixed_duration_overrun_var)
+    relaxed_target_enabled = relax_target_constraints and bool(relaxed_target_terms)
+    relaxed_target_weight = objective_weights["control_node_late"]
     modeled_terms = {
         term_id
         for term_id, enabled in {
-            "control_node_late": control_node_late_enabled and bool(control_lateness_terms),
+            "control_node_late": control_node_late_enabled and bool(control_lateness_terms or relaxed_target_terms),
             "makespan_and_soft_milestone": makespan_objective_enabled,
             "resource_idle": resource_idle_enabled and bool(resource_organization_terms["idle_terms"]),
             "resource_path_continuity": resource_path_continuity_enabled
             and bool(
                 resource_organization_terms["path_terms"]
-                or drill_group_jump_terms["adjacent_terms"]
-                or drill_group_jump_terms["hole_terms"]
+                or drill_group_stage1_route_terms["route_terms"]
             ),
-            "resource_slot_balance": resource_slot_balance_enabled
-            and bool(resource_organization_terms["slot_balance_terms"]),
-            "target_relaxation": target_relaxation_enabled,
         }.items()
         if enabled
     }
     objective_modeling_gates = _objective_modeling_gates(
         objective_terms_used_payload,
         modeled_terms=modeled_terms,
-        reason_overrides={
-            "target_relaxation": "best_effort_refinement" if target_relaxation_enabled else "effective weight is 0",
-        },
-        effective_weight_overrides={"target_relaxation": target_relaxation_weight}
-        if target_relaxation_enabled
-        else None,
     )
     resource_path_transition_terms = (
         resource_organization_terms["same_side_gap_terms"]
         + resource_organization_terms["side_switch_terms"]
-        + drill_group_jump_terms["adjacent_terms"]
-        + drill_group_jump_terms["hole_terms"]
+        + drill_group_stage1_route_terms["route_terms"]
     )
 
     model.Minimize(
         sum(control_lateness_terms) * objective_weights["control_node_late"]
-        + sum(target_relaxation_terms) * target_relaxation_weight
+        + sum(relaxed_target_terms) * relaxed_target_weight
         + sum(resource_organization_terms["idle_terms"]) * objective_weights["resource_idle"]
         + sum(resource_path_transition_terms) * objective_weights["resource_path_continuity"]
-        + sum(resource_organization_terms["slot_balance_terms"]) * objective_weights["resource_slot_balance"]
         + makespan * (objective_weights["makespan_and_soft_milestone"] if makespan_objective_enabled else 0)
     )
     warm_start_used = _add_schedule_hints(
@@ -2385,23 +2642,65 @@ def solve_control_priority_schedule(
             for item in stage2_path_diagnostics_by_resource
         )
 
+    stage1_route_metadata = dict(drill_group_stage1_route_terms["metadata"])
     if status not in {"OPTIMAL", "FEASIBLE"}:
+        if _drill_group_stage == "coarse":
+            stage1_route_metadata = _with_stage1_route_failure(
+                stage1_route_metadata,
+                "stage1_route_window_infeasible",
+            )
+        failed_continuity_objective = {
+            "primary_weight": CONTINUITY_PRIMARY_WEIGHT,
+            "resource_path_continuity_weight": objective_weights["resource_path_continuity"],
+            "resource_path_continuity_penalty": 0,
+            "resource_path_transition_penalty": 0,
+            "drill_group_adjacent_resource_switch_penalty": 0,
+            "drill_group_hole_jump_penalty": 0,
+            "stage1_same_side_penalty": 0,
+            "stage1_cross_side_penalty": 0,
+            "stage1_route_penalty": 0,
+            "resource_path_status": "not_evaluated",
+            **resource_organization_terms["path_metadata"],
+            **stage1_route_metadata,
+        }
+        stats["continuity_objective"] = failed_continuity_objective
+        drill_group_status = "not_applicable"
+        if drill_groups:
+            drill_group_status = "coarse_infeasible" if _drill_group_stage == "coarse" else "stage2_infeasible"
+        drill_group_payload = _drill_group_refinement_payload(
+            status=drill_group_status,
+            groups=drill_groups,
+            scheduled_tasks=[],
+            path_metadata=failed_continuity_objective,
+            stage2_path_diagnostics_by_resource=stage2_path_diagnostics_by_resource,
+        )
+        stats["drill_group_refinement"] = drill_group_payload
+        failure_messages = [
+            ValidationMessage(
+                level="error",
+                message="控制性工程优先策略在当前工艺、资源、窗口和工作面约束下未找到可行排程。",
+            )
+        ]
+        if stage1_route_metadata.get("stage1_route_status") == "infeasible":
+            failure_messages.append(
+                ValidationMessage(
+                    level="error",
+                    message="第一阶段钻机组路径窗口未找到可行路径，系统未放开远距离候选转移。",
+                )
+            )
         return ScheduleResult(
             status=status,
             plan_start_date=schedule_input.start_date,
             milestone_results=_not_evaluated_milestones(schedule_input.milestones),
-            validation=validation
-            + [
-                ValidationMessage(
-                    level="error",
-                    message="控制性工程优先策略在当前工艺、资源、窗口和工作面约束下未找到可行排程。",
-                )
-            ],
+            validation=validation + failure_messages,
             stats=stats,
             objective_breakdown={
                 "objective_weights": objective_weights,
                 "objective_terms_used": objective_terms_used_payload,
                 "objective_modeling_gates": objective_modeling_gates,
+                "continuity_objective": failed_continuity_objective,
+                "drill_group_refinement": drill_group_payload,
+                "drill_group_refinement_status": drill_group_payload["status"],
             },
         )
 
@@ -2479,21 +2778,34 @@ def solve_control_priority_schedule(
     fixed_duration_overrun_days = (
         solver.Value(fixed_duration_overrun_var) if fixed_duration_overrun_var is not None else 0
     )
-    target_relaxation_penalty = relaxed_hard_milestone_lateness_days + fixed_duration_overrun_days
+    relaxed_target_penalty_days = relaxed_hard_milestone_lateness_days + fixed_duration_overrun_days
     soft_control_lateness_penalty = sum(
         result.lateness_days
         for result in milestone_results
         if result.id in soft_control_milestone_ids
     )
     reported_control_lateness_days = control_lateness_days if control_node_late_enabled else 0
+    reported_control_target_lateness_days = (
+        reported_control_lateness_days + relaxed_target_penalty_days
+        if control_node_late_enabled
+        else 0
+    )
     reported_soft_control_lateness_penalty = (
         soft_control_lateness_penalty if control_node_late_enabled else 0
     )
     resource_idle_penalty = sum(solver.Value(term) for term in resource_organization_terms["idle_terms"])
     resource_path_continuity_penalty = sum(solver.Value(term) for term in resource_path_transition_terms)
-    drill_group_adjacent_penalty = sum(solver.Value(term) for term in drill_group_jump_terms["adjacent_terms"])
-    drill_group_hole_penalty = sum(solver.Value(term) for term in drill_group_jump_terms["hole_terms"])
-    resource_slot_balance_penalty = sum(solver.Value(term) for term in resource_organization_terms["slot_balance_terms"])
+    drill_group_adjacent_penalty = 0
+    drill_group_hole_penalty = 0
+    stage1_same_side_penalty = sum(solver.Value(term) for term in drill_group_stage1_route_terms["same_side_terms"])
+    stage1_cross_side_penalty = sum(solver.Value(term) for term in drill_group_stage1_route_terms["cross_side_terms"])
+    stage1_route_penalty = stage1_same_side_penalty + stage1_cross_side_penalty
+    stage1_route_metadata = {
+        **stage1_route_metadata,
+        "stage1_same_side_penalty": stage1_same_side_penalty,
+        "stage1_cross_side_penalty": stage1_cross_side_penalty,
+        "stage1_route_penalty": stage1_route_penalty,
+    }
     normal_balance_metrics = _build_normal_balance_metrics(
         scheduled_tasks,
         config,
@@ -2533,14 +2845,18 @@ def solve_control_priority_schedule(
         "resource_path_transition_penalty": resource_path_continuity_penalty,
         "drill_group_adjacent_resource_switch_penalty": drill_group_adjacent_penalty,
         "drill_group_hole_jump_penalty": drill_group_hole_penalty,
-        "resource_slot_balance_weight": objective_weights["resource_slot_balance"],
-        "resource_slot_balance_penalty": resource_slot_balance_penalty,
+        "stage1_same_side_penalty": stage1_same_side_penalty,
+        "stage1_cross_side_penalty": stage1_cross_side_penalty,
+        "stage1_route_penalty": stage1_route_penalty,
         "resource_path_status": "enabled" if drill_group_path_circuit_enabled else "not_evaluated",
         **resource_organization_terms["path_metadata"],
+        **stage1_route_metadata,
     }
     drill_group_status = "not_applicable"
     if drill_groups:
-        if not resource_path_continuity_enabled or _drill_group_stage == "coarse":
+        if resource_path_continuity_enabled and _drill_group_stage == "coarse":
+            drill_group_status = "stage1_final"
+        elif not resource_path_continuity_enabled:
             drill_group_status = "coarse_only"
         elif _drill_group_stage == "refined":
             drill_group_status = "stage2_refined"
@@ -2558,35 +2874,22 @@ def solve_control_priority_schedule(
     stats["objective_modeling_gates"] = objective_modeling_gates
     stats["continuous_beam_team_spans"] = continuous_span_payload
     if relax_target_constraints:
-        stats["target_relaxation"] = {
+        stats["relaxed_target_constraints"] = {
             "relaxed_hard_milestone_lateness_days": relaxed_hard_milestone_lateness_days,
             "fixed_duration_overrun_days": fixed_duration_overrun_days,
-            "target_relaxation_penalty": target_relaxation_penalty,
-            "target_relaxation_weight": target_relaxation_weight,
+            "penalty_days": relaxed_target_penalty_days,
+            "weight": relaxed_target_weight,
         }
     objective_contributions = _objective_contributions_for_result(
         objective_terms_used_payload=objective_terms_used_payload,
         raw_penalties={
-            "control_node_late": reported_control_lateness_days,
+            "control_node_late": reported_control_target_lateness_days,
             "makespan_and_soft_milestone": objective_days if makespan_objective_enabled else 0,
             "resource_path_continuity": resource_path_continuity_penalty,
-            "resource_slot_balance": resource_slot_balance_penalty,
             "resource_idle": resource_idle_penalty,
-            "target_relaxation": target_relaxation_penalty,
         },
         active_terms={
             term_id: term_id in modeled_terms for term_id in DEFAULT_OBJECTIVE_TERM_WEIGHTS
-        },
-        effective_weight_overrides={
-            "target_relaxation": target_relaxation_weight,
-        } if target_relaxation_enabled else None,
-        notes_by_term={
-            "target_relaxation": (
-                "仅在最佳努力精排分支参与目标函数。"
-                if not relax_target_constraints
-                else "强制节点或固定工期目标被放松时参与目标函数。"
-            ),
-            "resource_slot_balance": "从资源路径连续性中拆出的并行槽位均衡贡献。",
         },
     )
     weighted_objective = sum(item["weighted_contribution"] for item in objective_contributions)
@@ -2600,7 +2903,7 @@ def solve_control_priority_schedule(
         )
     )
     if relax_target_constraints:
-        if target_relaxation_penalty > 0:
+        if relaxed_target_penalty_days > 0:
             validation.append(
                 ValidationMessage(
                     level="warning",
@@ -2637,20 +2940,22 @@ def solve_control_priority_schedule(
             "makespan_days": objective_days,
             "baseline_makespan_days": baseline_result.objective_days,
             "control_lateness_days": reported_control_lateness_days,
+            "control_target_lateness_days": reported_control_target_lateness_days,
             "relaxed_hard_milestone_lateness_days": relaxed_hard_milestone_lateness_days,
             "fixed_duration_overrun_days": fixed_duration_overrun_days,
-            "target_relaxation_penalty": target_relaxation_penalty,
-            "target_relaxation_weight": target_relaxation_weight,
-            "target_relaxation_weighted_penalty": target_relaxation_penalty * target_relaxation_weight,
+            "relaxed_target_penalty_days": relaxed_target_penalty_days,
+            "relaxed_target_weight": relaxed_target_weight,
+            "relaxed_target_weighted_penalty": relaxed_target_penalty_days * relaxed_target_weight,
             "soft_control_lateness_penalty": reported_soft_control_lateness_penalty,
             "resource_idle_penalty": resource_idle_penalty,
             "resource_path_continuity_penalty": resource_path_continuity_penalty,
             "resource_path_transition_penalty": resource_path_continuity_penalty,
             "drill_group_adjacent_resource_switch_penalty": drill_group_adjacent_penalty,
             "drill_group_hole_jump_penalty": drill_group_hole_penalty,
-            "resource_slot_balance_penalty": resource_slot_balance_penalty,
+            "stage1_same_side_penalty": stage1_same_side_penalty,
+            "stage1_cross_side_penalty": stage1_cross_side_penalty,
+            "stage1_route_penalty": stage1_route_penalty,
             "resource_path_continuity_weight": objective_weights["resource_path_continuity"],
-            "resource_slot_balance_weight": objective_weights["resource_slot_balance"],
             "resource_idle_weight": objective_weights["resource_idle"],
             "soft_milestone_penalty": soft_milestone_penalty,
             "continuity_score": continuity_metrics["continuity_score"],
@@ -3569,7 +3874,7 @@ def _empty_resource_path_terms(
             "resource_path_node_count": 0,
             "resource_path_transition_arc_count": 0,
             "resource_path_task_candidate_count": sum(len(items) for items in assignments_by_resource.values()),
-            "resource_slot_balance_term_count": 0,
+            "slot_balance_term_count": 0,
             "resource_path_sparse_support_window": MECHANICAL_DRILL_PATH_SUPPORT_WINDOW,
             "resource_path_sparse_same_side_window": MECHANICAL_DRILL_PATH_SUPPORT_WINDOW,
             "resource_path_sparse_cross_side_window": MECHANICAL_DRILL_CROSS_SIDE_SUPPORT_WINDOW,
@@ -3668,7 +3973,7 @@ def _build_resource_path_continuity_terms(
         if include_slot_balance
         else []
     )
-    metadata["resource_slot_balance_term_count"] = len(slot_balance_terms)
+    metadata["slot_balance_term_count"] = len(slot_balance_terms)
 
     return {
         "path_terms": same_side_gap_terms + side_switch_terms + slot_balance_terms,
@@ -3886,11 +4191,6 @@ def _resource_path_allowed_transition_pairs(
             visible_support_context,
         )
     }
-    outgoing = {previous_index for previous_index, _ in allowed_pairs}
-    incoming = {current_index for _, current_index in allowed_pairs}
-    for previous_index, current_index in all_pairs:
-        if previous_index not in outgoing or current_index not in incoming:
-            allowed_pairs.add((previous_index, current_index))
     return allowed_pairs
 
 
@@ -3977,13 +4277,8 @@ def _resource_path_transition_candidate_allowed(
         )
         return 0 < same_side_distance <= MECHANICAL_DRILL_PATH_SUPPORT_WINDOW
     if previous_side in {"L", "R"} and current_side in {"L", "R"}:
-        cross_side_distance = _visible_support_distance(
-            visible_support_context["cross_side"],
-            base_key,
-            previous_support_index,
-            current_support_index,
-        )
-        return cross_side_distance <= MECHANICAL_DRILL_CROSS_SIDE_SUPPORT_WINDOW
+        cross_side_gap = abs(current_support_index - previous_support_index)
+        return cross_side_gap <= MECHANICAL_DRILL_CROSS_SIDE_SUPPORT_WINDOW
     return False
 
 
@@ -4531,7 +4826,15 @@ def solve_capacity_shortest_schedule(schedule_input: ScheduleInput) -> ScheduleR
     return result
 
 
-def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_days: int | None = None) -> ScheduleResult:
+def solve_min_resources_schedule(
+    schedule_input: ScheduleInput,
+    fallback_target_days: int | None = None,
+    minimum_resource_counts: dict[str, int] | None = None,
+    verify_with_full_objective: bool = True,
+) -> ScheduleResult:
+    def new_budget() -> _SolveBudget:
+        return _SolveBudget(schedule_input.time_limit_seconds)
+
     enabled_resources = [resource for resource in schedule_input.resources if resource.enabled]
     resource_candidates = _resource_candidates_by_task(schedule_input.tasks, enabled_resources)
     validation = _validate_resource_coverage(schedule_input.tasks, resource_candidates)
@@ -4546,6 +4849,108 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
     hard_match_count = _matched_hard_milestone_count(schedule_input)
     target_days = _min_resource_target_days(schedule_input, fallback_target_days)
     groups = _resource_groups(enabled_resources)
+    minimum_counts = _normalized_minimum_resource_counts(groups, minimum_resource_counts)
+    if hard_match_count == 0 and target_days is None:
+        return ScheduleResult(
+            status="MODEL_INVALID",
+            plan_start_date=schedule_input.start_date,
+            validation=validation
+            + _unmatched_hard_milestone_warnings(schedule_input)
+            + [
+                ValidationMessage(
+                    level="error",
+                    message="固定工期推算最少资源需要至少一个可匹配的强制里程碑目标，或先运行固定资源最短工期作为目标工期。",
+                )
+            ],
+            stats={"reason": "missing_target_duration", "solve_mode": "min_resources_fixed_duration"},
+        )
+
+    try:
+        from ortools.sat.python import cp_model
+    except ImportError:
+        return ScheduleResult(
+            status="MODEL_INVALID",
+            plan_start_date=schedule_input.start_date,
+            validation=[ValidationMessage(level="error", message="未安装 OR-Tools，请先安装后端依赖再执行求解。")],
+            stats={"reason": "ortools_missing", "solve_mode": "min_resources_fixed_duration"},
+        )
+
+    max_resource_precheck_budget = new_budget()
+    max_resource_hard_precheck = _solve_capacity_model(
+        max_resource_precheck_budget.with_time_limit(schedule_input),
+        cp_model=cp_model,
+        groups=groups,
+        counts={group["key"]: group["max_quantity"] for group in groups},
+        fallback_target_days=target_days if hard_match_count == 0 else None,
+        enforce_fixed_duration=True,
+    )
+    if max_resource_hard_precheck["status"] == "UNKNOWN" or max_resource_precheck_budget.exhausted():
+        result = ScheduleResult(
+            status="UNKNOWN",
+            plan_start_date=schedule_input.start_date,
+            milestone_results=_not_evaluated_milestones(schedule_input.milestones),
+            validation=validation + max_resource_hard_precheck["validation"],
+            stats={**max_resource_hard_precheck["stats"]},
+            objective_breakdown={},
+        )
+        _annotate_target_achievement(
+            result,
+            evaluated_at_source="max_resources",
+            forced_status="unconfirmed",
+            fixed_duration_target=target_days,
+            time_budget_seconds=max_resource_precheck_budget.time_limit_seconds,
+            time_budget_exhausted=True,
+        )
+        metadata = {
+            "solve_mode": "min_resources_fixed_duration",
+            "target_days": target_days,
+            "schedule_source": "target_unconfirmed",
+            "recommended_schedule_source": "target_unconfirmed",
+            "resource_recommendation_status": "unconfirmed",
+            "resource_recommendation_message": "最大资源硬里程碑快速预检在限定时间内无法确认，未判断资源上限不足。",
+            "max_resource_precheck_mode": "hard_milestone_fast",
+            "capacity_precheck_status": max_resource_hard_precheck["status"],
+        }
+        result.stats.update(metadata)
+        result.objective_breakdown.update(metadata)
+        return result
+    if max_resource_hard_precheck["status"] in {"INFEASIBLE", "MODEL_INVALID"}:
+        critical_path = _critical_path_schedule(schedule_input)
+        capacity_window_days = _capacity_window_days(schedule_input, target_days)
+        result = _fixed_duration_infeasible_result(
+            schedule_input=schedule_input,
+            checked=max_resource_hard_precheck,
+            critical_path=critical_path,
+            validation=validation,
+            groups=groups,
+            target_days=target_days,
+            capacity_window_days=capacity_window_days,
+        )
+        _annotate_target_achievement(
+            result,
+            evaluated_at_source="max_resources",
+            forced_status="max_resources_target_failed"
+            if max_resource_hard_precheck["status"] == "INFEASIBLE"
+            else "physical_infeasible",
+            fixed_duration_target=target_days,
+            time_budget_seconds=max_resource_precheck_budget.time_limit_seconds,
+            time_budget_exhausted=max_resource_precheck_budget.exhausted(),
+        )
+        metadata = {
+            "solve_mode": "min_resources_fixed_duration",
+            "target_days": target_days,
+            "schedule_source": result.stats["target_achievement"]["target_status"],
+            "recommended_schedule_source": result.stats["target_achievement"]["target_status"],
+            "resource_recommendation_status": result.stats["target_achievement"]["target_status"],
+            "resource_recommendation_message": "当前最大资源硬里程碑快速预检未满足硬里程碑或固定工期目标。",
+            "max_resource_precheck_mode": "hard_milestone_fast",
+            "capacity_precheck_status": max_resource_hard_precheck["status"],
+        }
+        result.stats.update(metadata)
+        result.objective_breakdown.update(metadata)
+        return result
+    fixed_duration_check = max_resource_hard_precheck
+
     capacity_window_days = _capacity_window_days(schedule_input, target_days)
     lower_bound_prune = _resource_capacity_exclusive_lower_bound_diagnostics(
         schedule_input,
@@ -4585,64 +4990,14 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
         result.stats.update(metadata)
         result.objective_breakdown.update(metadata)
         return result
-    if hard_match_count == 0 and target_days is None:
-        return ScheduleResult(
-            status="MODEL_INVALID",
-            plan_start_date=schedule_input.start_date,
-            validation=validation
-            + _unmatched_hard_milestone_warnings(schedule_input)
-            + [
-                ValidationMessage(
-                    level="error",
-                    message="固定工期推算最少资源需要至少一个可匹配的强制里程碑目标，或先运行固定资源最短工期作为目标工期。",
-                )
-            ],
-            stats={"reason": "missing_target_duration", "solve_mode": "min_resources_fixed_duration"},
-        )
 
-    try:
-        from ortools.sat.python import cp_model
-    except ImportError:
-        return ScheduleResult(
-            status="MODEL_INVALID",
-            plan_start_date=schedule_input.start_date,
-            validation=[ValidationMessage(level="error", message="未安装 OR-Tools，请先安装后端依赖再执行求解。")],
-            stats={"reason": "ortools_missing", "solve_mode": "min_resources_fixed_duration"},
-        )
-
-    fixed_duration_check = _solve_capacity_model(
-        schedule_input,
-        cp_model=cp_model,
-        groups=groups,
-        counts={group["key"]: group["max_quantity"] for group in groups},
-        fallback_target_days=target_days if hard_match_count == 0 else None,
-        enforce_fixed_duration=True,
-    )
-    if fixed_duration_check["status"] in {"INFEASIBLE", "MODEL_INVALID"}:
-        critical_path = _critical_path_schedule(schedule_input)
-        capacity_window_days = _capacity_window_days(schedule_input, target_days)
-        return _fixed_duration_infeasible_result(
-            schedule_input=schedule_input,
-            checked=fixed_duration_check,
-            critical_path=critical_path,
-            validation=validation,
-            groups=groups,
-            target_days=target_days,
-            capacity_window_days=capacity_window_days,
-        )
-    if fixed_duration_check["status"] == "UNKNOWN":
-        validation.append(
-            ValidationMessage(
-                level="warning",
-                message="最大资源可行性预检在限定时间内未完成，已改用逐资源池二分搜索继续推算。",
-            )
-        )
-
+    global_capacity_budget = new_budget()
     global_capacity_optimization = _solve_capacity_model(
-        schedule_input,
+        global_capacity_budget.with_time_limit(schedule_input),
         cp_model=cp_model,
         groups=groups,
         counts=None,
+        minimum_resource_counts=minimum_counts,
         fallback_target_days=target_days if hard_match_count == 0 else None,
         enforce_fixed_duration=True,
         minimize_resource_count=True,
@@ -4655,12 +5010,15 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
                 message="全局最少资源优化在限定时间内未完成，已改用逐资源池二分搜索继续推算。",
             )
         )
+        fallback_budget = new_budget()
         capacity_optimization = _solve_min_resource_counts_by_group_fallback(
-            schedule_input,
+            fallback_budget.with_time_limit(schedule_input),
             cp_model=cp_model,
             groups=groups,
+            minimum_resource_counts=minimum_counts,
             fixed_duration_check=fixed_duration_check,
             fallback_target_days=target_days if hard_match_count == 0 else None,
+            budget=fallback_budget,
         )
     if capacity_optimization["status"] not in {"OPTIMAL", "FEASIBLE"}:
         return ScheduleResult(
@@ -4679,6 +5037,7 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
                 "reason": "resource_count_optimization_failed",
                 "solve_mode": "min_resources_fixed_duration",
                 "target_days": target_days,
+                "minimum_resource_counts": minimum_counts,
                 "global_capacity_model_status": global_capacity_optimization["status"],
                 "global_capacity_model_stats": global_capacity_optimization["stats"],
                 "workface_parallelism_diagnostics": _workface_parallelism_diagnostics(schedule_input),
@@ -4698,12 +5057,58 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
         target_days=target_days,
         hard_match_count=hard_match_count,
     )
+    if not verify_with_full_objective:
+        selected_source = "capacity_model_verified_schedule" if capacity_verified else "capacity_model_unverified"
+        result = capacity_result.model_copy(deep=True)
+        if not capacity_verified:
+            result.status = "INFEASIBLE"
+        metadata = {
+            "solve_mode": "min_resources_fixed_duration",
+            "target_days": target_days,
+            "minimum_resource_counts": minimum_counts,
+            "recommended_resource_counts": recommended,
+            "resource_optimization_phases": phase_stats,
+            "schedule_source": selected_source,
+            "recommended_schedule_source": selected_source,
+            "capacity_model_status": capacity_optimization["status"],
+            "global_capacity_model_status": global_capacity_optimization["status"],
+            "capacity_model_group_counts": fixed_counts,
+            "capacity_model_stats": capacity_optimization["stats"],
+            "independent_solve_time_limit_seconds": TARGET_SOLVE_TIME_LIMIT_SECONDS,
+            "max_resource_precheck_mode": "hard_milestone_fast",
+            "capacity_precheck_status": fixed_duration_check["status"],
+            "capacity_verification_status": "verified" if capacity_verified else "failed",
+            "balanced_reoptimization_status": "not_run",
+            "unbalanced_reoptimization_status": "not_run",
+            "reoptimization_attempts": [],
+            "parallel_reoptimization_used": False,
+            "resource_count_optimality": "optimal" if capacity_optimization["status"] == "OPTIMAL" else "feasible",
+            "capacity_model_role": "internal_candidate_search",
+            "capacity_model_retention_reason": (
+                "保留为固定工期最大资源硬里程碑快速预检和候选资源数量搜索的内部加速器；业务结论仍以快速预检状态和候选复排的 target_achievement 为准。"
+            ),
+            "full_objective_verification_skipped": True,
+        }
+        result.stats.update(metadata)
+        result.objective_breakdown.update(metadata)
+        _annotate_target_achievement(
+            result,
+            evaluated_at_source="candidate_resources",
+            forced_status="unconfirmed" if capacity_verified else "candidate_resources_target_failed",
+            fixed_duration_target=target_days,
+            time_budget_seconds=TARGET_SOLVE_TIME_LIMIT_SECONDS,
+            time_budget_exhausted=False,
+        )
+        return result
+
+    reoptimization_budget = new_budget()
     reoptimization_attempts = _run_min_resource_reoptimizations(
-        schedule_input,
+        reoptimization_budget.with_time_limit(schedule_input),
         fixed_counts,
         target_days=target_days,
         hard_match_count=hard_match_count,
         capacity_hint_result=capacity_result,
+        budget=reoptimization_budget,
     )
     selected_attempt = _select_verified_reoptimization(
         reoptimization_attempts,
@@ -4716,19 +5121,25 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
         result = selected_attempt["result"].model_copy(deep=True)
         selected_source = selected_attempt["source"]
         result.validation = validation + capacity_optimization["validation"] + result.validation
+        target_time_budget_seconds = float(selected_attempt.get("time_limit_seconds") or TARGET_SOLVE_TIME_LIMIT_SECONDS)
+        target_time_budget_exhausted = False
     elif capacity_verified:
+        best_effort_budget = new_budget()
         best_effort_attempt = _run_min_resource_best_effort_reoptimization(
-            schedule_input,
+            best_effort_budget.with_time_limit(schedule_input),
             fixed_counts,
             target_days=target_days,
             hard_match_count=hard_match_count,
             capacity_hint_result=capacity_result,
             strict_attempts=reoptimization_attempts,
+            budget=best_effort_budget,
         )
         reoptimization_attempts.append(best_effort_attempt)
         if best_effort_attempt["result"].status in {"OPTIMAL", "FEASIBLE"}:
             result = best_effort_attempt["result"].model_copy(deep=True)
             selected_source = MINIMUM_RESOURCES_BEST_EFFORT_SOURCE
+            target_time_budget_seconds = float(best_effort_attempt.get("time_limit_seconds") or TARGET_SOLVE_TIME_LIMIT_SECONDS)
+            target_time_budget_exhausted = bool(best_effort_attempt.get("time_budget_exhausted", False))
             result.validation = validation + capacity_optimization["validation"] + result.validation
             result.validation.append(
                 ValidationMessage(
@@ -4749,6 +5160,8 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
         else:
             result = capacity_result.model_copy(deep=True)
             selected_source = "capacity_model_verified_schedule"
+            target_time_budget_seconds = float(best_effort_attempt.get("time_limit_seconds") or TARGET_SOLVE_TIME_LIMIT_SECONDS)
+            target_time_budget_exhausted = True
             result.validation = validation + result.validation + best_effort_attempt["result"].validation
             result.validation.append(
                 ValidationMessage(
@@ -4763,6 +5176,8 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
     else:
         result = capacity_result.model_copy(deep=True, update={"status": "INFEASIBLE"})
         selected_source = "capacity_model_unverified"
+        target_time_budget_seconds = TARGET_SOLVE_TIME_LIMIT_SECONDS
+        target_time_budget_exhausted = False
         result.validation = validation + result.validation
         result.validation.append(
             ValidationMessage(
@@ -4777,6 +5192,7 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
     metadata = {
         "solve_mode": "min_resources_fixed_duration",
         "target_days": target_days,
+        "minimum_resource_counts": minimum_counts,
         "recommended_resource_counts": recommended,
         "resource_optimization_phases": phase_stats,
         "schedule_source": selected_source,
@@ -4785,6 +5201,9 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
         "global_capacity_model_status": global_capacity_optimization["status"],
         "capacity_model_group_counts": fixed_counts,
         "capacity_model_stats": capacity_optimization["stats"],
+        "independent_solve_time_limit_seconds": TARGET_SOLVE_TIME_LIMIT_SECONDS,
+        "max_resource_precheck_mode": "hard_milestone_fast",
+        "capacity_precheck_status": fixed_duration_check["status"],
         "capacity_verification_status": "verified" if capacity_verified else "failed",
         "balanced_reoptimization_status": _reoptimization_status(
             reoptimization_attempts,
@@ -4801,10 +5220,23 @@ def solve_min_resources_schedule(schedule_input: ScheduleInput, fallback_target_
         ),
         "parallel_reoptimization_used": _reoptimization_parallelism(reoptimization_attempts) > 1,
         "resource_count_optimality": "optimal" if capacity_optimization["status"] == "OPTIMAL" else "feasible",
+        "capacity_model_role": "internal_candidate_search",
+        "capacity_model_retention_reason": (
+            "保留为固定工期最大资源硬里程碑快速预检和候选资源数量搜索的内部加速器；业务结论仍以快速预检状态和候选复排的 target_achievement 为准。"
+        ),
     }
 
     result.stats.update(metadata)
     result.objective_breakdown.update(metadata)
+    _annotate_target_achievement(
+        result,
+        evaluated_at_source="candidate_resources",
+        default_failed_status="candidate_resources_target_failed",
+        success_status="candidate_resources_target_met",
+        fixed_duration_target=target_days,
+        time_budget_seconds=target_time_budget_seconds,
+        time_budget_exhausted=target_time_budget_exhausted,
+    )
     if best_effort_metadata is not None:
         result.stats["best_effort_refinement"] = best_effort_metadata
         result.objective_breakdown["best_effort_refinement"] = {
@@ -4825,21 +5257,27 @@ def _run_min_resource_reoptimizations(
     target_days: int | None,
     hard_match_count: int,
     capacity_hint_result: ScheduleResult | None = None,
+    budget: _SolveBudget | None = None,
 ) -> list[dict[str, Any]]:
+    budget = budget or _SolveBudget(schedule_input.time_limit_seconds)
     candidates = _min_resource_reoptimization_candidates(schedule_input, fixed_counts)
     parallelism = _solve_task_parallelism(len(candidates))
 
     def run(candidate: dict[str, Any]) -> dict[str, Any]:
+        attempt_budget = _SolveBudget(schedule_input.time_limit_seconds)
         result = solve_control_priority_schedule(
-            candidate["schedule_input"],
+            attempt_budget.with_time_limit(candidate["schedule_input"]),
             enforce_hard_milestones=True,
             max_makespan_days=target_days if hard_match_count == 0 else None,
             warm_start_result=capacity_hint_result,
+            relax_target_constraints=True,
         )
         return {
             "source": candidate["source"],
             "result": result,
             "parallelism": parallelism,
+            "time_limit_seconds": attempt_budget.time_limit_seconds,
+            "time_budget_exhausted": attempt_budget.exhausted(),
         }
 
     if parallelism <= 1:
@@ -4869,11 +5307,14 @@ def _run_min_resource_best_effort_reoptimization(
     hard_match_count: int,
     capacity_hint_result: ScheduleResult | None,
     strict_attempts: list[dict[str, Any]],
+    budget: _SolveBudget | None = None,
 ) -> dict[str, Any]:
+    budget = budget or _SolveBudget(schedule_input.time_limit_seconds)
     strict_source = strict_attempts[0]["source"] if strict_attempts else "control_priority_balanced_reoptimization"
     candidate = _min_resource_reoptimization_candidates(schedule_input, fixed_counts)[0]
+    attempt_budget = _SolveBudget(schedule_input.time_limit_seconds)
     result = solve_control_priority_schedule(
-        candidate["schedule_input"],
+        attempt_budget.with_time_limit(candidate["schedule_input"]),
         enforce_hard_milestones=True,
         max_makespan_days=target_days if hard_match_count == 0 else None,
         warm_start_result=capacity_hint_result,
@@ -4884,6 +5325,8 @@ def _run_min_resource_best_effort_reoptimization(
         "result": result,
         "parallelism": 1,
         "fallback_from": strict_source,
+        "time_limit_seconds": attempt_budget.time_limit_seconds,
+        "time_budget_exhausted": attempt_budget.exhausted(),
     }
 
 
@@ -4932,6 +5375,122 @@ def _schedule_result_verified(
     return not any(message.level == "error" for message in result.validation)
 
 
+def _annotate_target_achievement(
+    result: ScheduleResult,
+    *,
+    evaluated_at_source: str,
+    default_failed_status: str = "current_resources_target_failed",
+    success_status: str = "met",
+    forced_status: str | None = None,
+    fixed_duration_target: int | None = None,
+    time_budget_seconds: float = TARGET_SOLVE_TIME_LIMIT_SECONDS,
+    time_budget_exhausted: bool = False,
+) -> dict[str, Any]:
+    hard_milestone_late_days = sum(
+        int(milestone.lateness_days or 0)
+        for milestone in result.milestone_results
+        if milestone.mode == "hard"
+    )
+    fixed_duration_overrun_days = _target_fixed_duration_overrun_days(
+        result,
+        fixed_duration_target=fixed_duration_target,
+    )
+    status = forced_status or _target_status_for_result(
+        result,
+        hard_milestone_late_days=hard_milestone_late_days,
+        fixed_duration_overrun_days=fixed_duration_overrun_days,
+        default_failed_status=default_failed_status,
+        success_status=success_status,
+        time_budget_exhausted=time_budget_exhausted,
+    )
+    failure_reasons = _target_failure_reasons(
+        status=status,
+        hard_milestone_late_days=hard_milestone_late_days,
+        fixed_duration_overrun_days=fixed_duration_overrun_days,
+        time_budget_exhausted=time_budget_exhausted,
+    )
+    payload = {
+        "business_success": status in {"met", "candidate_resources_target_met"},
+        "target_status": status,
+        "solver_status": result.status,
+        "hard_milestone_late_days": hard_milestone_late_days,
+        "fixed_duration_overrun_days": fixed_duration_overrun_days,
+        "failure_reasons": failure_reasons,
+        "time_budget_seconds": time_budget_seconds,
+        "time_budget_exhausted": time_budget_exhausted,
+        "evaluated_at_source": evaluated_at_source,
+    }
+    result.stats["target_achievement"] = payload
+    result.objective_breakdown["target_achievement"] = payload
+    result.stats["hard_milestone_late_days"] = hard_milestone_late_days
+    result.stats["fixed_duration_overrun_days"] = fixed_duration_overrun_days
+    result.objective_breakdown["hard_milestone_late_days"] = hard_milestone_late_days
+    result.objective_breakdown["fixed_duration_overrun_days"] = fixed_duration_overrun_days
+    return payload
+
+
+def _target_fixed_duration_overrun_days(
+    result: ScheduleResult,
+    *,
+    fixed_duration_target: int | None,
+) -> int:
+    direct = _int_or_none(result.objective_breakdown.get("fixed_duration_overrun_days"))
+    if direct is not None:
+        return max(0, direct)
+    relaxed = result.stats.get("relaxed_target_constraints")
+    if isinstance(relaxed, dict):
+        relaxed_overrun = _int_or_none(relaxed.get("fixed_duration_overrun_days"))
+        if relaxed_overrun is not None:
+            return max(0, relaxed_overrun)
+    target = fixed_duration_target
+    if target is None:
+        target = _int_or_none(result.stats.get("max_makespan_days") or result.objective_breakdown.get("max_makespan_days"))
+    if target is None or result.objective_days is None:
+        return 0
+    return max(0, int(result.objective_days) - target)
+
+
+def _target_status_for_result(
+    result: ScheduleResult,
+    *,
+    hard_milestone_late_days: int,
+    fixed_duration_overrun_days: int,
+    default_failed_status: str,
+    success_status: str,
+    time_budget_exhausted: bool,
+) -> str:
+    if time_budget_exhausted or result.status == "UNKNOWN":
+        return "unconfirmed"
+    if result.status not in {"OPTIMAL", "FEASIBLE"}:
+        return "physical_infeasible"
+    if hard_milestone_late_days == 0 and fixed_duration_overrun_days == 0:
+        return success_status
+    return default_failed_status
+
+
+def _target_failure_reasons(
+    *,
+    status: str,
+    hard_milestone_late_days: int,
+    fixed_duration_overrun_days: int,
+    time_budget_exhausted: bool,
+) -> list[str]:
+    reasons: list[str] = []
+    if hard_milestone_late_days > 0:
+        reasons.append("hard_milestone_late")
+    if fixed_duration_overrun_days > 0:
+        reasons.append("fixed_duration_overrun")
+    if status == "physical_infeasible":
+        reasons.append("physical_infeasible")
+    if status == "max_resources_target_failed":
+        reasons.append("max_resources_target_failed")
+    if status == "unconfirmed":
+        reasons.append("unconfirmed")
+    if time_budget_exhausted:
+        reasons.append("time_budget_exhausted")
+    return list(dict.fromkeys(reasons))
+
+
 def _first_reoptimization_result(
     attempts: list[dict[str, Any]],
     *,
@@ -4957,7 +5516,7 @@ def _best_effort_reoptimization_metadata(
     )
     fixed_duration_overrun_days = int(
         result.objective_breakdown.get("fixed_duration_overrun_days")
-        or result.stats.get("target_relaxation", {}).get("fixed_duration_overrun_days", 0)
+        or result.stats.get("relaxed_target_constraints", {}).get("fixed_duration_overrun_days", 0)
         or 0
     )
     strict_status = strict_result.status if strict_result is not None else "not_attempted"
@@ -5063,6 +5622,8 @@ def _reoptimization_attempt_summaries(
                 "status": result.status,
                 "verified": _schedule_result_verified(result, target_days=target_days, hard_match_count=hard_match_count),
                 "objective_days": result.objective_days,
+                "time_limit_seconds": attempt.get("time_limit_seconds"),
+                "time_budget_exhausted": attempt.get("time_budget_exhausted"),
                 "wall_time_seconds": result.stats.get("wall_time_seconds"),
                 "conflicts": result.stats.get("conflicts"),
                 "branches": result.stats.get("branches"),
@@ -5078,14 +5639,20 @@ def _solve_min_resource_counts_by_group_fallback(
     *,
     cp_model: Any,
     groups: list[dict[str, Any]],
+    minimum_resource_counts: dict[str, int],
     fixed_duration_check: dict[str, Any],
-    fallback_target_days: int | None,
+    fallback_target_days: int | None = None,
+    budget: _SolveBudget | None = None,
 ) -> dict[str, Any]:
+    budget = budget or _SolveBudget(schedule_input.time_limit_seconds)
     max_counts = {group["key"]: int(group["max_quantity"]) for group in groups}
     attempts: list[dict[str, Any]] = []
     total_wall_time = 0.0
     total_conflicts = 0
     total_branches = 0
+
+    def attempt_input() -> ScheduleInput:
+        return _SolveBudget(schedule_input.time_limit_seconds).with_time_limit(schedule_input)
 
     def remember(label: str, solved: dict[str, Any], counts: dict[str, int]) -> None:
         nonlocal total_wall_time, total_conflicts, total_branches
@@ -5110,7 +5677,7 @@ def _solve_min_resource_counts_by_group_fallback(
         remember("max_resources_precheck", fixed_duration_check, best_counts)
     else:
         max_check = _solve_capacity_model(
-            schedule_input,
+            attempt_input(),
             cp_model=cp_model,
             groups=groups,
             counts=max_counts,
@@ -5143,13 +5710,13 @@ def _solve_min_resource_counts_by_group_fallback(
 
     for group in groups:
         key = group["key"]
-        low = 0
+        low = int(minimum_resource_counts.get(key, 0))
         high = int(best_counts.get(key, group["max_quantity"]))
         while low < high:
             mid = (low + high) // 2
             trial_counts = {**best_counts, key: mid}
             trial = _solve_capacity_model(
-                schedule_input,
+                attempt_input(),
                 cp_model=cp_model,
                 groups=groups,
                 counts=trial_counts,
@@ -5629,7 +6196,8 @@ def _solve_capacity_model(
     cp_model: Any,
     groups: list[dict[str, Any]],
     counts: dict[str, int] | None,
-    fallback_target_days: int | None,
+    minimum_resource_counts: dict[str, int] | None = None,
+    fallback_target_days: int | None = None,
     enforce_fixed_duration: bool = True,
     minimize_resource_count: bool = False,
     minimize_total_cost: bool = False,
@@ -5720,6 +6288,7 @@ def _solve_capacity_model(
 
     for group in groups:
         intervals = intervals_by_group.get(group["key"], [])
+        minimum_count = int((minimum_resource_counts or {}).get(group["key"], 0) or 0)
         if counts is None:
             cost_config = (resource_linear_costs_by_group or {}).get(group["key"]) if minimize_total_cost else None
             if cost_config:
@@ -5789,7 +6358,9 @@ def _solve_capacity_model(
                 model.AddExactlyOne(selected_quantity_vars)
                 model.Add(capacity == sum(quantity * selected for quantity, selected in zip(range(current_quantity, max_quantity + 1), selected_quantity_vars)))
             else:
-                lower_bound = 1 if intervals else 0
+                lower_bound = 0
+                lower_bound = max(lower_bound, minimum_count)
+                lower_bound = min(lower_bound, group["max_quantity"])
                 capacity = model.NewIntVar(lower_bound, group["max_quantity"], f"resource_count_{_safe(group['key'])}")
             count_vars[group["key"]] = capacity
         else:
@@ -7102,6 +7673,19 @@ def _resource_groups(resources: list[Resource]) -> list[dict[str, Any]]:
         if not groups[key]["parallel_rule_description"] and resource.parallel_rule_description:
             groups[key]["parallel_rule_description"] = resource.parallel_rule_description
     return sorted(groups.values(), key=lambda group: (group["resource_type"], group["key"], group["label"]))
+
+
+def _normalized_minimum_resource_counts(
+    groups: list[dict[str, Any]],
+    minimum_resource_counts: dict[str, int] | None,
+) -> dict[str, int]:
+    if not minimum_resource_counts:
+        return {}
+    normalized: dict[str, int] = {}
+    for group in groups:
+        raw_count = int(minimum_resource_counts.get(group["key"], 0) or 0)
+        normalized[group["key"]] = max(0, min(raw_count, int(group["max_quantity"])))
+    return normalized
 
 
 def _apply_resource_limits(resources: list[Resource], limits: dict[str, int]) -> list[Resource]:

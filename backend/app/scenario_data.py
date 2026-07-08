@@ -167,7 +167,7 @@ def default_scenario() -> ScenarioInput:
         resource_calendars=default_resource_calendars(),
         resource_pools=default_resource_pools(),
         milestones=default_milestones(),
-        time_limit_seconds=20,
+        time_limit_seconds=15,
     )
     sync_bridge_completion_milestones(scenario)
     apply_resource_max_quantity_defaults(scenario)

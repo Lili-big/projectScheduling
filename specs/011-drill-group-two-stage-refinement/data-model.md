@@ -55,14 +55,14 @@
 - 序列只包含实际存在的墩组，不补造缺失墩号。
 - 左右幅、不同钻机资源组、不同结构类型、不同施工工艺不得混入同一序列。
 
-## 实体：粗排结果
+## 实体：第一阶段结果
 
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
 | `status` | string | 可行、不可行或超时状态 |
 | `group_assignments` | object | `group_id -> resource_id` |
 | `group_start_end` | object | `group_id -> start/end` |
-| `baseline_makespan_days` | integer | 粗排总工期 |
+| `baseline_makespan_days` | integer | 第一阶段总工期 |
 | `hard_milestone_feasible` | boolean | 硬里程碑是否满足 |
 | `adjacent_resource_switch_penalty` | integer | 相邻墩换资源原始惩罚 |
 | `hole_jump_penalty` | integer | 洞洞式跳墩原始惩罚 |
@@ -70,12 +70,12 @@
 
 规则：
 
-- 粗排成功是细排的前置条件。
-- 粗排不得建立全量路径环路。
+- 当前常规自动流程中，第一阶段可行结果即为最终主结果。
+- 第一阶段不得建立全量路径环路。
 - 固定资源主链路应直接产生第一阶段精排结果；若第一阶段不可行或超时，当前资源主结果保持失败语义，并尝试资源建议。
 - 池级最短工期结果只能用于资源建议测算或明确标记的内部诊断辅助，不得作为固定资源失败后的兜底展示结果。
 
-## 实体：细排结果
+## 实体：细排结果（历史兼容）
 
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
@@ -85,14 +85,14 @@
 | `stage2_arc_count` | integer | 实际路径转移弧数量 |
 | `path_distance_penalty` | integer | 墩号距离原始惩罚 |
 | `side_switch_penalty` | integer | 左右幅切换原始惩罚 |
-| `makespan_tolerance` | integer | 第一版默认 0 |
+| `makespan_tolerance` | integer | 历史字段；当前常规自动流程不再运行第二阶段 |
 | `fallback_reason` | string/null | 细排失败或跳过时填写 |
 
 规则：
 
-- `resource_routes` 只包含粗排实际分配给该资源的墩组。
+- `resource_routes` 只包含第一阶段实际分配给该资源的墩组。
 - 细排不得重新选择资源。
-- 细排不得超过粗排总工期。
+- 当前常规自动流程不再依赖细排结果作为主排程；该实体仅用于历史兼容或显式诊断路径。
 
 ## 实体：展开结果
 
@@ -114,11 +114,11 @@
 
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
-| `drill_group_refinement_status` | string | `not_applicable`、`coarse_only`、`stage2_refined`、`stage2_fallback` 等 |
+| `drill_group_refinement_status` | string | 当前主口径包含 `stage1_final`、`not_applicable`、`coarse_only`、`coarse_infeasible`；`stage2_refined`、`stage2_fallback` 为历史兼容 |
 | `coarse_group_count` | integer | 粗排墩组数量 |
 | `coarse_child_task_count` | integer | 被聚合的原任务数量 |
-| `stage2_node_count` | integer | 细排实际路径节点数量 |
-| `stage2_arc_count` | integer | 细排实际路径弧数量 |
+| `stage2_node_count` | integer | 当前常规流程通常为 0；历史细排实际路径节点数量 |
+| `stage2_arc_count` | integer | 当前常规流程通常为 0；历史细排实际路径弧数量 |
 | `baseline_candidate_arc_count` | integer | 用于对比的全候选路径弧估算 |
 | `arc_reduction_ratio` | number | 路径弧减少比例 |
 | `adjacent_resource_switch_penalty` | integer | 粗排相邻换资源惩罚 |

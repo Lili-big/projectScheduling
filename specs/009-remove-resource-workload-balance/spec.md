@@ -1,4 +1,4 @@
-# 功能规格：移除同类资源工作量均衡目标
+﻿# 功能规格：移除同类资源工作量均衡目标
 
 **功能目录/分支**：`009-remove-resource-workload-balance`
 
@@ -19,7 +19,7 @@
   - `frontend/src/app/App.tsx` 和 `frontend/src/types/scheduler.ts` 当前把该项作为可配置目标项展示，并在旧结果拆解中合成贡献。
 - **不在范围内**：
   - 不移除“未配置资源普通工程均衡”目标。
-  - 不调整 `resource_idle`、`resource_path_continuity`、`resource_slot_balance`、`target_relaxation` 等其他目标项。
+  - 不调整 `resource_idle`、`resource_path_continuity`、槽位均衡诊断、放松目标诊断 等其他目标项。
   - 不改变资源互斥、命名资源分配、同结构同工艺、工作面并行、里程碑等硬约束。
   - 不删除资源工作量原始诊断数据；只是不再将其解释为目标函数贡献。
   - 不修改 `README.md`，不提交 git。

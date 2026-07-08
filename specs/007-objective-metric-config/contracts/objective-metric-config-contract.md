@@ -11,16 +11,10 @@
   "schedule_strategy": {
     "strategy": "comprehensive",
     "objective_terms": {
-      "control_node_late": { "enabled": true, "weight": 1000000000 },
-      "control_buffer_risk": { "enabled": true, "weight": 5000000 },
-      "risk_related_control_wait": { "enabled": true, "weight": 1000000 },
-      "makespan_and_soft_milestone": { "enabled": true, "weight": 10000 },
-      "resource_path_continuity": { "enabled": true, "weight": 3000 },
-      "resource_idle": { "enabled": true, "weight": 1000 },
-      "resource_workload_balance": { "enabled": true, "weight": 100 },
-      "target_relaxation": { "enabled": true, "weight": 1000000000 },
-      "resource_slot_balance": { "enabled": true, "weight": 3000 },
-      "unconfigured_normal_balance": { "enabled": true, "weight": 10 }
+      "control_node_late": { "enabled": true, "weight": 10000000000 },
+      "makespan_and_soft_milestone": { "enabled": true, "weight": 5000000 },
+      "resource_path_continuity": { "enabled": true, "weight": 50000 },
+      "resource_idle": { "enabled": true, "weight": 50000 }
     }
   }
 }
@@ -76,7 +70,7 @@
 - `weighted_objective` 必须与 `objective_contributions[*].weighted_contribution` 求和对齐。
 - 分支不适用但目录存在的目标项可以返回 `active=false` 和 `raw_penalty=0`。
 - 继承父项权重的派生项必须在 `notes` 或 `parent_term_id` 中说明来源。
-- 旧字段如 `target_relaxation_penalty`、`resource_slot_balance_penalty`、`unconfigured_normal_balance_penalty` 可继续保留，用于兼容旧前端和调试。
+- 旧字段如 `relaxed_target_penalty_days`、`slot_balance_penalty`、`unconfigured_normal_balance_penalty` 可继续保留为兼容或诊断字段，但不得作为当前可配置目标项。
 
 ## 3. 目标指标目录契约
 

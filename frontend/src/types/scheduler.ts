@@ -24,9 +24,7 @@ export type ObjectiveTermId =
   | "control_node_late"
   | "makespan_and_soft_milestone"
   | "resource_path_continuity"
-  | "resource_slot_balance"
-  | "resource_idle"
-  | "target_relaxation";
+  | "resource_idle";
 export type TabKey = "process" | "logic" | "resources" | "milestones" | "tasks" | "results" | "resultsMvp";
 export type GanttMode = "by_time" | "by_structure" | "by_process";
 export type TaskViewMode = "by_structure" | "by_process";
@@ -82,11 +80,54 @@ export type ObjectiveContribution = {
   active: boolean;
   configured_weight: number;
   effective_weight: number;
+  weight?: number;
   raw_penalty: number;
+  raw_value?: number;
+  unit?: string;
   weighted_contribution: number;
+  weighted_value?: number;
   applies_to: string[];
   parent_term_id?: ObjectiveTermId | string | null;
   notes?: string;
+};
+
+export type TargetStatus =
+  | "met"
+  | "current_resources_target_failed"
+  | "candidate_resources_target_met"
+  | "candidate_resources_target_failed"
+  | "max_resources_target_failed"
+  | "physical_infeasible"
+  | "unconfirmed"
+  | string;
+
+export type TargetAchievement = {
+  business_success: boolean;
+  target_status: TargetStatus;
+  solver_status: string;
+  hard_milestone_late_days: number;
+  fixed_duration_overrun_days: number;
+  failure_reasons: string[];
+  time_budget_seconds?: number;
+  time_budget_exhausted?: boolean;
+  evaluated_at_source?: string;
+};
+
+export type ResourceSearchRange = {
+  resource_type: string;
+  resource_pool_id?: string;
+  current_quantity: number;
+  max_quantity: number;
+  lower_bound: number;
+  upper_bound: number;
+};
+
+export type RecommendedResourcesOutcome = {
+  candidate_quantities: Record<string, number>;
+  added_quantities: Record<string, number>;
+  search_range: ResourceSearchRange[];
+  verification_result_source: string;
+  target_achievement?: TargetAchievement | null;
 };
 
 export type ObjectiveEvaluationStatus =
@@ -680,6 +721,7 @@ export type ResourcePath = {
 export type DrillGroupRefinementStatus =
   | "not_applicable"
   | "coarse_only"
+  | "stage1_final"
   | "stage2_refined"
   | "stage2_fallback"
   | string;

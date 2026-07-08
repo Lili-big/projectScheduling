@@ -1,4 +1,4 @@
-﻿import {
+import {
   AlertCircle,
   Bot,
   CalendarDays,
@@ -48,6 +48,7 @@ import type {
   ObjectiveContribution,
   ObjectiveModelingGate,
   ObjectiveTermId,
+  TargetAchievement,
   ScheduleStrategyConfig,
   TabKey,
   GanttMode,
@@ -198,11 +199,11 @@ type ObjectiveContributionSummary = {
 const objectiveTermDefinitions: ObjectiveTermDefinition[] = [
   {
     id: "control_node_late",
-    label: "软控制节点迟延",
+    label: "控制节点迟延",
     group: "控制优先",
-    description: "看软控制节点晚于目标日期的天数；每晚 1 天按最高权重计罚，优先压低控制节点迟延。",
-    defaultWeight: 1_000_000_000,
-    appliesTo: "控制优先、综合精排",
+    description: "看控制节点晚于目标日期的天数；每晚 1 天按最高权重计罚，优先压低控制节点迟延。",
+    defaultWeight: 10_000_000_000,
+    appliesTo: "目标函数排程",
   },
   {
     id: "makespan_and_soft_milestone",
@@ -210,7 +211,7 @@ const objectiveTermDefinitions: ObjectiveTermDefinition[] = [
     group: "工期",
     description: "看项目整体完工跨度；总工期越长，罚分越高。",
     defaultWeight: 5_000_000,
-    appliesTo: "控制优先、综合精排",
+    appliesTo: "目标函数排程",
   },
   {
     id: "resource_path_continuity",
@@ -218,7 +219,7 @@ const objectiveTermDefinitions: ObjectiveTermDefinition[] = [
     group: "资源组织",
     description: "看同一资源相邻任务是否同幅邻近推进；同幅墩号间隔越大、左右幅切换越多，罚分越高。",
     defaultWeight: 50_000,
-    appliesTo: "控制优先、综合精排",
+    appliesTo: "目标函数排程",
   },
   {
     id: "resource_idle",
@@ -226,18 +227,7 @@ const objectiveTermDefinitions: ObjectiveTermDefinition[] = [
     group: "资源组织",
     description: "看单个资源两次任务之间是否长时间停等；中途空闲天数越多，罚分越高。",
     defaultWeight: 50_000,
-    appliesTo: "控制优先、综合精排",
-  },
-  {
-    id: "target_relaxation",
-    label: "目标放松迟延",
-    group: "最佳努力",
-    description: "只在最佳努力精排中计罚强制节点迟延和固定工期超期；严格精排不会因此放松目标。",
-    defaultWeight: 1_000_000_000,
-    defaultEnabled: false,
-    appliesTo: "最佳努力精排",
-    source: "derived_objective",
-    parentTermId: "control_node_late",
+    appliesTo: "目标函数排程",
   },
 ];
 
@@ -268,23 +258,28 @@ const controlLevelLabels: Record<ControlLevel, string> = {
 };
 
 const scheduleSourceLabels: Record<string, string> = {
-  current_resources_control_priority_balanced: "命名资源精排",
-  current_resources_best_effort_refinement: "最佳努力精排",
-  current_resources_refinement_failed: "当前资源精排失败",
-  current_resources_capacity_shortest: "固定资源快排",
-  current_resources_capacity_shortest_fallback: "固定资源回退",
-  control_priority_balanced_reoptimization: "命名资源重排",
-  minimum_resources_control_priority_balanced: "最少资源候选精排",
-  minimum_resources_best_effort_refinement: "最少资源候选最佳努力精排",
+  current_resources_control_priority_balanced: "当前资源目标函数排程",
+  current_resources_target_failed: "当前资源目标未满足",
+  current_resources_best_effort_refinement: "当前资源目标函数排程",
+  current_resources_refinement_failed: "当前资源目标未满足",
+  target_unconfirmed: "限时内无法确认",
+  physical_infeasible: "物理无可行排程",
+  max_resources_target_failed: "最大资源目标未满足",
+  current_resources_capacity_shortest: "固定资源参考排程",
+  current_resources_capacity_shortest_fallback: "固定资源参考排程",
+  control_priority_balanced_reoptimization: "目标函数重排",
+  minimum_resources_control_priority_balanced: "最少资源候选排程",
+  minimum_resources_best_effort_refinement: "最少资源候选目标未满足",
   minimum_resources_refinement_fallback: "最少资源候选回退",
-  capacity_model_verified_schedule: "容量模型校验排程",
+  capacity_model_verified_schedule: "候选资源内部搜索排程",
 };
 
 const drillGroupRefinementStatusLabels: Record<string, string> = {
   not_applicable: "未触发两阶段",
-  coarse_only: "第一阶段粗排结果",
-  stage2_refined: "第二阶段细排结果",
-  stage2_fallback: "第一阶段粗排结果",
+  coarse_only: "墩组分配结果",
+  stage1_final: "墩组分配结果",
+  stage2_refined: "路径复核结果",
+  stage2_fallback: "墩组分配结果",
 };
 
 const resourcePathStatusLabels: Record<string, string> = {
@@ -1817,12 +1812,13 @@ function ResultsTab({
                   <input type="date" value={scenario.project.start_date} onChange={(event) => onPatchProject({ start_date: event.target.value })} />
                 </label>
                 <label>
-                  时限参数(暂不生效)
+                  求解上限(秒)
                   <input
                     type="number"
                     min={1}
+                    max={15}
                     value={scenario.time_limit_seconds}
-                    onChange={(event) => onPatchScenario({ time_limit_seconds: Number(event.target.value) })}
+                    onChange={(event) => onPatchScenario({ time_limit_seconds: Math.min(15, Number(event.target.value)) })}
                   />
                 </label>
               </>
@@ -1875,7 +1871,7 @@ function ResultsTab({
                             <input
                               type="number"
                               min={1}
-                              max={1_000_000_000}
+                              max={10_000_000_000}
                               step={1}
                               value={termConfig.weight}
                               disabled={!termConfig.enabled}
@@ -1949,7 +1945,7 @@ function ResultsTab({
               <Workflow size={22} />
             </div>
             <div>
-              <span>精排主结果</span>
+              <span>目标函数主结果</span>
               <h2>{refinementSummary.title}</h2>
             </div>
           </div>
@@ -1963,27 +1959,27 @@ function ResultsTab({
               <strong>{refinementSummary.baselineDays}</strong>
             </div>
             <div>
-              <span>强制节点状态</span>
-              <strong>{refinementSummary.hardMilestoneStatus}</strong>
+              <span>业务目标状态</span>
+              <strong>{refinementSummary.businessStatus}</strong>
             </div>
             <div>
-              <span>方案来源</span>
-              <strong>{refinementSummary.scheduleSource}</strong>
+              <span>求解器状态</span>
+              <strong>{refinementSummary.solverStatus}</strong>
             </div>
             <div>
-              <span>采用阶段</span>
-              <strong>{refinementSummary.stageLabel}</strong>
+              <span>硬里程碑晚点</span>
+              <strong>{refinementSummary.hardMilestoneLateDays}</strong>
             </div>
             <div>
-              <span>资源路径状态</span>
-              <strong>{refinementSummary.resourcePathStatus}</strong>
+              <span>固定工期超期</span>
+              <strong>{refinementSummary.fixedDurationOverrunDays}</strong>
             </div>
           </div>
           {refinementSummary.stageDescription && (
             <p>{refinementSummary.stageDescription}</p>
           )}
-          {refinementSummary.fallbackReason && (
-            <p>{refinementSummary.source.startsWith("minimum_resources_") ? "最少资源候选精排未作为主结果展示，当前保留已验证的候选排程：" : "命名资源精排未作为主结果展示，当前已回退到固定资源参考排程："}{refinementSummary.fallbackReason}</p>
+          {refinementSummary.fallbackMessage && (
+            <p>{refinementSummary.fallbackMessage}</p>
           )}
           {refinementSummary.bestEffortMessage && (
             <p>{refinementSummary.bestEffortMessage}</p>
@@ -2119,7 +2115,7 @@ function ResultsTab({
 
       {!isMvp && controlPriorityAnalysis && (
         <section className="panel full">
-          <PanelTitle title="精排诊断" subtitle="资源组织与精排过程诊断" />
+          <PanelTitle title="目标函数诊断" subtitle="资源组织与求解过程诊断" />
           {resourceOrganization && (
             <div className="control-diagnostic-grid refinement-diagnostics">
               <div className="table-wrap short">
@@ -2258,14 +2254,14 @@ function ResultsTab({
           )}
           {drillGroupRefinement && drillGroupRefinement.coarse_group_count > 0 && (
             <div className="table-wrap short refinement-path-groups">
-              <div className="table-caption">桩基墩组精排</div>
+              <div className="table-caption">桩基墩组诊断</div>
               <table>
                 <thead>
                   <tr>
                     <th>状态</th>
-                    <th>粗排墩组</th>
-                    <th>细排节点</th>
-                    <th>细排弧</th>
+                    <th>墩组数量</th>
+                    <th>复核节点</th>
+                    <th>复核弧</th>
                     <th>弧减少</th>
                     <th>回退原因</th>
                   </tr>
@@ -2291,7 +2287,7 @@ function ResultsTab({
           <PanelTitle title="资源增量诊断" subtitle="当前资源上限探测、最少资源求解和关键路径检查结果" />
           <div className="diagnostics">
             <div className={`diagnostic ${resourceRecommendationStatus === "resource_upper_bound_infeasible" || resourceRecommendationStatus === "critical_path_infeasible" ? "error" : "warning"}`}>
-              <strong>{resourceRecommendationStatus === "resource_upper_bound_infeasible" ? "上限不可行" : "未输出推荐"}</strong>
+              <strong>{resourceRecommendationDiagnosticTitle(resourceRecommendationStatus)}</strong>
               <span>{resourceRecommendationMessage}</span>
             </div>
             {resourceCapacityLowerBounds.filter((item) => item.exceeds_upper_bound).map((item) => (
@@ -3806,10 +3802,10 @@ function resultOptionLabel(option: ScenarioSolveResult, index: number, isMvp = f
   if (index === 0) return "方案1 当前资源";
   const source = stringFromUnknown(option.result.objective_breakdown?.schedule_source ?? option.result.stats?.schedule_source);
   if (source === "minimum_resources_control_priority_balanced") {
-    return isMvp ? `方案${index + 1} 最少资源候选` : `方案${index + 1} 最少资源候选精排`;
+    return `方案${index + 1} 最少资源候选`;
   }
   if (source === "minimum_resources_best_effort_refinement") {
-    return isMvp ? `方案${index + 1} 最少资源候选` : `方案${index + 1} 最少资源候选最佳努力精排`;
+    return `方案${index + 1} 最少资源候选复核`;
   }
   if (source === "minimum_resources_refinement_fallback") return `方案${index + 1} 最少资源候选`;
   return `方案${index + 1} 资源候选`;
@@ -4113,12 +4109,17 @@ type RefinementSummary = {
   title: string;
   recommendedDays: string;
   baselineDays: string;
+  businessStatus: string;
+  solverStatus: string;
+  hardMilestoneLateDays: string;
+  fixedDurationOverrunDays: string;
   hardMilestoneStatus: string;
   scheduleSource: string;
   stageLabel: string;
   stageDescription: string;
   resourcePathStatus: string;
   fallbackReason: string;
+  fallbackMessage: string;
   bestEffortMessage: string;
 };
 
@@ -4187,6 +4188,68 @@ function resourceRecommendationMessageFromResult(result: ScheduleResult | null):
   return typeof raw === "string" ? raw : "";
 }
 
+function targetAchievementFromResult(result: ScheduleResult | null): TargetAchievement | null {
+  const raw = result?.stats?.target_achievement ?? result?.objective_breakdown?.target_achievement;
+  if (!isRecord(raw)) return null;
+  return {
+    business_success: Boolean(raw.business_success),
+    target_status: stringFromUnknown(raw.target_status) || "unconfirmed",
+    solver_status: stringFromUnknown(raw.solver_status) || result?.status || "",
+    hard_milestone_late_days: Number(raw.hard_milestone_late_days ?? 0),
+    fixed_duration_overrun_days: Number(raw.fixed_duration_overrun_days ?? 0),
+    failure_reasons: Array.isArray(raw.failure_reasons) ? raw.failure_reasons.map(String) : [],
+    time_budget_seconds: numberFromUnknown(raw.time_budget_seconds) ?? undefined,
+    time_budget_exhausted: typeof raw.time_budget_exhausted === "boolean" ? raw.time_budget_exhausted : undefined,
+    evaluated_at_source: stringFromUnknown(raw.evaluated_at_source) || undefined,
+  };
+}
+
+function isSolverScheduleAvailable(status: string): boolean {
+  const normalized = status.toUpperCase();
+  return normalized === "FEASIBLE" || normalized === "OPTIMAL";
+}
+
+function targetHasMeasuredFailure(target: TargetAchievement | null): boolean {
+  if (!target) return false;
+  return target.hard_milestone_late_days > 0 || target.fixed_duration_overrun_days > 0;
+}
+
+function targetHasKnownCurrentFailure(target: TargetAchievement | null): boolean {
+  if (!target) return false;
+  return target.target_status === "unconfirmed"
+    && isSolverScheduleAvailable(target.solver_status)
+    && targetHasMeasuredFailure(target);
+}
+
+function targetFailureIssueText(target: TargetAchievement | null): string {
+  if (!target) return "";
+  const issues = [
+    target.hard_milestone_late_days > 0 ? `硬里程碑晚点 ${target.hard_milestone_late_days} 天` : "",
+    target.fixed_duration_overrun_days > 0 ? `固定工期超期 ${target.fixed_duration_overrun_days} 天` : "",
+  ].filter(Boolean);
+  return issues.join("，") || "业务目标未满足";
+}
+
+function targetStatusLabel(target: TargetAchievement | null, resourceRecommendationStatus = ""): string {
+  if (!target) return "未评估";
+  if (targetHasKnownCurrentFailure(target)) {
+    if (resourceRecommendationStatus === "resource_upper_bound_infeasible") return "当前资源目标未满足，最大资源也不满足";
+    if (resourceRecommendationStatus === "critical_path_infeasible") return "当前资源目标未满足，关键路径不可行";
+    if (resourceRecommendationStatus === "recommended_resources_verified") return "当前资源目标未满足，已找到候选资源";
+    return "当前资源目标未满足，推荐未确认";
+  }
+  const labels: Record<string, string> = {
+    met: "业务目标已达成",
+    current_resources_target_failed: "当前资源目标未满足",
+    candidate_resources_target_met: "候选资源目标已达成",
+    candidate_resources_target_failed: "候选资源目标未满足",
+    max_resources_target_failed: "最大资源目标未满足",
+    physical_infeasible: "物理无可行排程",
+    unconfirmed: "限时内无法确认",
+  };
+  return labels[target.target_status] ?? target.target_status;
+}
+
 function shouldShowResourceRecommendation(result: ScheduleResult | null, counts: RecommendedResourceCount[]): boolean {
   if (!counts.length) return false;
   const status = resourceRecommendationStatusFromResult(result);
@@ -4201,6 +4264,89 @@ function shouldShowResourceRecommendationDiagnostic(status: string, message: str
     && status
     && !["recommended_resources_verified", "not_needed", "not_evaluated"].includes(status),
   );
+}
+
+function resourceRecommendationDiagnosticTitle(status: string): string {
+  const labels: Record<string, string> = {
+    resource_recommendation_unresolved: "推荐未确认",
+    unconfirmed: "推荐未确认",
+    critical_path_infeasible: "关键路径不可行",
+    resource_upper_bound_infeasible: "上限不可行",
+    physical_infeasible: "物理不可行",
+    max_resource_generation_error: "上限场景生成失败",
+    candidate_resources_target_failed: "候选资源未满足目标",
+  };
+  return labels[status] ?? "未输出推荐";
+}
+
+function resourceRecommendationOutcomeText(status: string): string {
+  const labels: Record<string, string> = {
+    recommended_resources_verified: "已找到并验证推荐资源组合。",
+    resource_recommendation_unresolved: "已进入资源增量建议，当前限时内未确认可行推荐资源组合。",
+    unconfirmed: "已进入资源增量建议，当前限时内未确认可行推荐资源组合。",
+    critical_path_infeasible: "资源增量建议已停止：目标关键路径在当前规则下不可行。",
+    resource_upper_bound_infeasible: "资源增量建议已停止：当前最大资源仍不满足目标。",
+    physical_infeasible: "资源增量建议已停止：最大资源下仍无可行排程。",
+    max_resource_generation_error: "资源增量建议未完成：最大资源场景生成失败。",
+    candidate_resources_target_failed: "候选资源复排后仍未满足业务目标。",
+  };
+  return labels[status] ?? "";
+}
+
+function refinementTargetDescription(
+  target: TargetAchievement | null,
+  resourceRecommendationStatus: string,
+): string {
+  if (!target) return "";
+  const issue = targetFailureIssueText(target);
+  const resourceOutcome = resourceRecommendationOutcomeText(resourceRecommendationStatus);
+  if (targetHasKnownCurrentFailure(target)) {
+    return `系统已生成可查看排程，但${issue}。${resourceOutcome}`;
+  }
+  if (target.target_status === "current_resources_target_failed") {
+    return `系统已生成可查看排程，但${issue}。`;
+  }
+  if (target.target_status === "candidate_resources_target_failed") {
+    return `候选资源已完成复排，但${issue}。`;
+  }
+  if (target.target_status === "max_resources_target_failed") {
+    return `最大资源已完成预检，但${issue}。`;
+  }
+  if (target.target_status === "physical_infeasible") {
+    return "当前资源在业务规则下没有可用排程。";
+  }
+  if (target.target_status === "unconfirmed") {
+    return resourceOutcome || "求解器在当前时限内未返回足够信息，暂时无法确认业务目标是否满足。";
+  }
+  return "";
+}
+
+function fallbackReasonLabel(reason: string): string {
+  const labels: Record<string, string> = {
+    current_resources_target_failed: "当前资源排程未满足目标",
+    current_resources_full_objective_unconfirmed: "当前资源完整目标函数求解限时内未确认",
+    current_resources_full_objective_physical_infeasible: "当前资源物理无可行排程",
+    minimum_resource_full_objective_unknown: "候选资源完整目标函数复排限时内未确认",
+    minimum_resources_target_failed: "候选资源排程未满足目标",
+    candidate_resources_target_failed: "候选资源排程未满足目标",
+    target_unconfirmed: "目标是否满足在限时内未确认",
+    physical_infeasible: "物理无可行排程",
+  };
+  if (labels[reason]) return labels[reason];
+  if (/^[a-z0-9_:-]+$/i.test(reason)) return "未通过成功结果校验";
+  return reason;
+}
+
+function refinementFallbackMessage(source: string, fallbackReason: string): string {
+  if (!fallbackReason) return "";
+  const reason = fallbackReasonLabel(fallbackReason);
+  if (source.startsWith("minimum_resources_")) {
+    return `最少资源候选复排未作为成功结果展示，当前保留候选排程用于复核：${reason}。`;
+  }
+  if (fallbackReason === "current_resources_target_failed") {
+    return "当前资源排程未满足目标，已作为参考排程保留。";
+  }
+  return `当前资源目标函数排程未作为成功结果展示，已保留参考排程：${reason}。`;
 }
 
 function resourceUpperBoundCountsFromResult(result: ScheduleResult | null): ResourceUpperBoundCount[] {
@@ -4460,7 +4606,9 @@ function refinementSummaryFromResult(result: ScheduleResult | null): RefinementS
   const source = stringFromUnknown(result.objective_breakdown?.schedule_source ?? result.stats?.schedule_source);
   if (!analysis && !source) return null;
   const bestEffort = bestEffortRefinementFromResult(result);
+  const targetAchievement = targetAchievementFromResult(result);
   const stageSummary = refinementStageSummaryFromResult(result, source);
+  const resourceRecommendationStatus = resourceRecommendationStatusFromResult(result);
   const isBestEffort = Boolean(bestEffort?.enabled)
     || source === "current_resources_best_effort_refinement"
     || source === "minimum_resources_best_effort_refinement";
@@ -4480,21 +4628,27 @@ function refinementSummaryFromResult(result: ScheduleResult | null): RefinementS
     isFallback,
     isBestEffort,
     isRefinementFailed,
+    targetAchievement,
   });
   return {
     source,
     tone,
-    title: refinementTitle({ source, hardLateCount, isFallback, isBestEffort, isRefinementFailed }),
+    title: refinementTitle({ source, hardLateCount, isFallback, isBestEffort, isRefinementFailed, targetAchievement }),
     recommendedDays: result.objective_days == null ? "-" : `${result.objective_days} 天`,
     baselineDays: Number.isFinite(baselineDays) ? `${baselineDays} 天` : "-",
+    businessStatus: targetStatusLabel(targetAchievement, resourceRecommendationStatus),
+    solverStatus: targetAchievement?.solver_status || result.status,
+    hardMilestoneLateDays: targetAchievement ? `${targetAchievement.hard_milestone_late_days} 天` : "-",
+    fixedDurationOverrunDays: targetAchievement ? `${targetAchievement.fixed_duration_overrun_days} 天` : "-",
     hardMilestoneStatus: hardMilestones.length
       ? (hardLateCount > 0 ? `不满足 ${hardLateCount} 个` : "全部满足")
       : "未配置",
     scheduleSource: scheduleSourceLabels[source] ?? (source || "-"),
     stageLabel: stageSummary.label,
-    stageDescription: stageSummary.description,
+    stageDescription: refinementTargetDescription(targetAchievement, resourceRecommendationStatus) || stageSummary.description,
     resourcePathStatus: resourcePathStatusLabels[resourcePathStatus] ?? resourcePathStatus,
     fallbackReason,
+    fallbackMessage: refinementFallbackMessage(source, fallbackReason),
     bestEffortMessage: bestEffortMessage(bestEffort),
   };
 }
@@ -4502,49 +4656,55 @@ function refinementSummaryFromResult(result: ScheduleResult | null): RefinementS
 function refinementStageSummaryFromResult(result: ScheduleResult, source: string): { label: string; description: string } {
   if (source === "current_resources_refinement_failed") {
     return {
-      label: "第一阶段精排失败",
-      description: "当前资源未得到可用的命名资源第一阶段精排结果，主流程已进入资源建议。",
+      label: "当前资源目标未满足",
+      description: "当前资源未得到达成业务目标的排程结果，主流程已进入资源建议。",
     };
   }
   if (source === "current_resources_capacity_shortest_fallback") {
     return {
       label: "固定资源参考排程",
-      description: "当前展示的是固定资源参考排程，不是桩基钻机两阶段精排结果。",
+      description: "当前展示的是固定资源参考排程。",
     };
   }
 
   const drillGroup = drillGroupRefinementFromResult(result);
   if (drillGroup && drillGroup.coarse_group_count > 0) {
+    if (drillGroup.status === "stage1_final") {
+      return {
+        label: "墩组分配结果",
+        description: "系统已完成钻机墩组资源分配和时间排程。",
+      };
+    }
     if (drillGroup.status === "stage2_refined") {
       return {
-        label: "第二阶段细排结果",
-        description: "系统先完成第一阶段墩组到桩机分配，再采用第二阶段路径细排结果作为当前主排程。",
+        label: "路径复核结果",
+        description: "系统在墩组分配后完成钻机路径复核，并采用复核后的排程结果。",
       };
     }
     if (drillGroup.status === "stage2_fallback") {
       return {
-        label: "第一阶段粗排结果",
+        label: "墩组分配结果",
         description: drillGroup.fallback_reason
-          ? `第二阶段路径细排未作为主结果展示，当前回退第一阶段粗排展开结果：${drillGroup.fallback_reason}。`
-          : "第二阶段路径细排未作为主结果展示，当前回退第一阶段粗排展开结果。",
+          ? `路径复核未作为主结果展示，当前保留墩组分配展开结果：${drillGroup.fallback_reason}。`
+          : "路径复核未作为主结果展示，当前保留墩组分配展开结果。",
       };
     }
     if (drillGroup.status === "coarse_only") {
       return {
-        label: "第一阶段粗排结果",
-        description: "本次只采用第一阶段墩组资源分配和粗排结果，未进入第二阶段路径细排。",
+        label: "墩组分配结果",
+        description: "本次采用墩组资源分配结果，未进入路径复核。",
       };
     }
     return {
       label: drillGroupRefinementStatusLabels[drillGroup.status] ?? drillGroup.status,
-      description: "本次存在桩基钻机墩组精排诊断，请结合下方“桩基墩组精排”表复核阶段状态。",
+      description: "本次存在桩基钻机墩组诊断，请结合下方“桩基墩组诊断”表复核阶段状态。",
     };
   }
 
   if (source === "current_resources_control_priority_balanced") {
     return {
-      label: "常规命名资源精排",
-      description: "本次没有触发桩基钻机两阶段精排，当前主结果来自常规命名资源精排。",
+      label: "常规目标函数排程",
+      description: "本次没有触发桩基钻机墩组诊断，当前主结果来自常规目标函数排程。",
     };
   }
 
@@ -4569,12 +4729,12 @@ function bestEffortRefinementFromResult(result: ScheduleResult): BestEffortRefin
 function bestEffortMessage(bestEffort: BestEffortRefinement | null): string {
   if (!bestEffort?.enabled) return "";
   const parts = [
-    bestEffort.strictStatus ? `严格精排状态：${bestEffort.strictStatus}` : "",
+    bestEffort.strictStatus ? `目标函数求解状态：${bestEffort.strictStatus}` : "",
     bestEffort.strictReason ? `原因：${bestEffort.strictReason}` : "",
     `强制节点迟延合计 ${bestEffort.targetLatenessDays} 天`,
     `固定工期超期 ${bestEffort.fixedDurationOverrunDays} 天`,
   ].filter(Boolean);
-  return `当前为放松强制节点/固定工期后的最佳努力精排，不代表目标已满足。${parts.join("；")}。`;
+  return `当前为目标函数求解后的目标未满足结果，不代表目标已满足。${parts.join("；")}。`;
 }
 
 function pathGroupDiagnosticFromRecord(item: Record<string, unknown>) {
@@ -4602,13 +4762,19 @@ function refinementTone({
   isFallback,
   isBestEffort,
   isRefinementFailed,
+  targetAchievement,
 }: {
   hardLateCount: number;
   resourcePathStatus: string;
   isFallback: boolean;
   isBestEffort: boolean;
   isRefinementFailed: boolean;
+  targetAchievement: TargetAchievement | null;
 }): MetricTone {
+  if (targetHasKnownCurrentFailure(targetAchievement)) return "danger";
+  if (targetAchievement?.target_status === "unconfirmed") return "warn";
+  if (targetAchievement?.target_status === "physical_infeasible") return "danger";
+  if (targetAchievement && !targetAchievement.business_success) return "danger";
   if (isRefinementFailed) return "danger";
   if (hardLateCount > 0) return "danger";
   if (
@@ -4627,18 +4793,34 @@ function refinementTitle({
   isFallback,
   isBestEffort,
   isRefinementFailed,
+  targetAchievement,
 }: {
   source: string;
   hardLateCount: number;
   isFallback: boolean;
   isBestEffort: boolean;
   isRefinementFailed: boolean;
+  targetAchievement: TargetAchievement | null;
 }): string {
-  if (isRefinementFailed) return "当前资源精排失败，已转资源建议";
-  if (isBestEffort) return hardLateCount > 0 ? "最佳努力精排，目标未满足" : "最佳努力精排可用于复核";
+  if (targetHasKnownCurrentFailure(targetAchievement)) {
+    const hasHardMilestoneDelay = targetAchievement ? targetAchievement.hard_milestone_late_days > 0 : false;
+    const hasFixedDurationOverrun = targetAchievement ? targetAchievement.fixed_duration_overrun_days > 0 : false;
+    if (hasHardMilestoneDelay && hasFixedDurationOverrun) return "当前资源排程未满足业务目标";
+    if (hasHardMilestoneDelay) return "当前资源排程未满足硬里程碑";
+    if (hasFixedDurationOverrun) return "当前资源排程超过固定工期";
+  }
+  if (targetAchievement?.target_status === "unconfirmed") return "限时内无法确认目标是否满足";
+  if (targetAchievement?.target_status === "physical_infeasible") return "当前资源无可行排程";
+  if (targetAchievement?.target_status === "current_resources_target_failed") return "当前资源可排程，但目标未满足";
+  if (targetAchievement?.target_status === "candidate_resources_target_failed") return "候选资源复排后目标仍未满足";
+  if (targetAchievement?.target_status === "max_resources_target_failed") return "当前最大资源仍不满足目标";
+  if (targetAchievement?.target_status === "candidate_resources_target_met") return "候选资源目标已达成";
+  if (targetAchievement?.target_status === "met") return "当前资源目标已达成";
+  if (isRefinementFailed) return "当前资源目标未满足，已转资源建议";
+  if (isBestEffort) return hardLateCount > 0 ? "目标函数排程，目标未满足" : "目标函数排程可用于复核";
   if (isFallback) return "已回退固定资源参考排程";
   if (hardLateCount > 0) return "强制节点未满足";
-  if (source === "current_resources_control_priority_balanced") return "命名资源精排可用于复核";
+  if (source === "current_resources_control_priority_balanced") return "当前资源排程可用于复核";
   return scheduleSourceLabels[source] ?? "排程结果可用于复核";
 }
 
@@ -4668,7 +4850,7 @@ function formatPercent(value: number): string {
 function normalizeObjectiveWeight(value: string | number): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 1;
-  return Math.min(1_000_000_000, Math.max(1, Math.round(parsed)));
+  return Math.min(10_000_000_000, Math.max(1, Math.round(parsed)));
 }
 
 function inheritedObjectiveTermConfig(
@@ -4677,7 +4859,6 @@ function inheritedObjectiveTermConfig(
 ): ObjectiveTermConfig | undefined {
   const direct = incomingTerms[term.id];
   if (direct) return direct;
-  if (term.id === "target_relaxation") return incomingTerms.control_node_late;
   return undefined;
 }
 
@@ -4742,7 +4923,6 @@ function objectiveContributionSummaryFromResult(result: ScheduleResult | null): 
 function objectiveContributionFromRecord(item: Record<string, unknown>): ObjectiveContribution | null {
   const termId = stringFromUnknown(item.term_id);
   if (!termId) return null;
-  if (termId === "resource_slot_balance") return null;
   const definition = objectiveTermDefinitionById(termId);
   const effectiveWeight = numberFromUnknown(item.effective_weight) ?? 0;
   return {
@@ -4754,8 +4934,11 @@ function objectiveContributionFromRecord(item: Record<string, unknown>): Objecti
     active: Boolean(item.active),
     configured_weight: numberFromUnknown(item.configured_weight) ?? effectiveWeight,
     effective_weight: effectiveWeight,
-    raw_penalty: numberFromUnknown(item.raw_penalty) ?? 0,
-    weighted_contribution: numberFromUnknown(item.weighted_contribution) ?? 0,
+    raw_penalty: numberFromUnknown(item.raw_penalty ?? item.raw_value) ?? 0,
+    raw_value: numberFromUnknown(item.raw_value ?? item.raw_penalty) ?? undefined,
+    unit: stringFromUnknown(item.unit) || undefined,
+    weighted_contribution: numberFromUnknown(item.weighted_contribution ?? item.weighted_value) ?? 0,
+    weighted_value: numberFromUnknown(item.weighted_value ?? item.weighted_contribution) ?? undefined,
     applies_to: Array.isArray(item.applies_to) ? item.applies_to.map(String) : [],
     parent_term_id: stringFromUnknown(item.parent_term_id) || definition?.parentTermId,
     notes: stringFromUnknown(item.notes),
@@ -4770,7 +4953,6 @@ function legacyObjectiveContributionsFromBreakdown(breakdown: Record<string, unk
     makespan_and_soft_milestone: numberFromUnknown(breakdown.makespan_days) ?? 0,
     resource_path_continuity: numberFromUnknown(breakdown.resource_path_continuity_penalty) ?? 0,
     resource_idle: numberFromUnknown(breakdown.resource_idle_penalty) ?? 0,
-    target_relaxation: numberFromUnknown(breakdown.target_relaxation_penalty) ?? 0,
   };
 
   return objectiveTermDefinitions.map((definition) => {
@@ -4780,8 +4962,7 @@ function legacyObjectiveContributionsFromBreakdown(breakdown: Record<string, unk
     const configuredWeight = numberFromUnknown(termUsed.weight) ?? definition.defaultWeight;
     const rawPenalty = rawPenaltyByTerm[definition.id] ?? 0;
     const enabled = typeof termUsed.enabled === "boolean" ? termUsed.enabled : effectiveWeight > 0;
-    const targetNotApplicable = definition.id === "target_relaxation" && !Boolean(breakdown.relax_target_constraints);
-    const active = effectiveWeight > 0 && !targetNotApplicable;
+    const active = effectiveWeight > 0;
     return {
       term_id: definition.id,
       label: definition.label,
@@ -4795,7 +4976,7 @@ function legacyObjectiveContributionsFromBreakdown(breakdown: Record<string, unk
       weighted_contribution: active ? rawPenalty * effectiveWeight : 0,
       applies_to: [definition.appliesTo],
       parent_term_id: definition.parentTermId,
-      notes: targetNotApplicable ? "旧字段汇总：本次不是最佳努力精排分支。" : "旧字段汇总。",
+      notes: "旧字段汇总。",
     };
   });
 }
@@ -5055,4 +5236,3 @@ function formatScheduleStatus(value: unknown): string {
   }
   return value == null ? "-" : String(value);
 }
-

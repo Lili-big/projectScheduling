@@ -53,10 +53,17 @@ CONTINUOUS_BEAM_DEFAULT_STANDARD_SEGMENT_CYCLES = 18
 CAST_IN_PLACE_BOX_BEAM_STRUCTURE_CODE = "castInPlaceBoxGirder"
 SIMPLE_BEAM_STRUCTURE_CODE = "precastTGirder"
 FIXED_RESOURCE_SOLVE_MODE = "fixed_resources_shortest_control_balanced"
+TARGET_SOLVE_TIME_LIMIT_SECONDS = 15.0
+CURRENT_RESOURCES_TARGET_FAILED_SOURCE = "current_resources_target_failed"
+TARGET_UNCONFIRMED_SOURCE = "target_unconfirmed"
+PHYSICAL_INFEASIBLE_SOURCE = "physical_infeasible"
+MAX_RESOURCES_TARGET_FAILED_SOURCE = "max_resources_target_failed"
+MINIMUM_RESOURCE_SEARCH_SOURCE = "minimum_resources_candidate_search"
 CURRENT_RESOURCES_REFINEMENT_FAILED_SOURCE = "current_resources_refinement_failed"
 MINIMUM_RESOURCES_REFINED_SOURCE = "minimum_resources_control_priority_balanced"
 MINIMUM_RESOURCES_BEST_EFFORT_SOURCE = "minimum_resources_best_effort_refinement"
 MINIMUM_RESOURCES_FALLBACK_SOURCE = "minimum_resources_refinement_fallback"
+MAX_RESOURCE_RECOMMENDATION_ATTEMPTS = 5
 UPPER_STRUCTURE_LOGIC_RULE_IDS = (
     "cast_in_place_box_beam_after_lower_structure",
     "continuous_beam_zero_block_after_main_pier_lower_structure",
@@ -107,10 +114,18 @@ def _upper_structure_logic_rule(
 
 class _FixedResourceSolveBudget:
     def __init__(self, time_limit_seconds: float) -> None:
-        self.time_limit_seconds = time_limit_seconds
+        self.time_limit_seconds = min(TARGET_SOLVE_TIME_LIMIT_SECONDS, max(0.1, float(time_limit_seconds or TARGET_SOLVE_TIME_LIMIT_SECONDS)))
+        self.started_at = time.perf_counter()
 
     def with_time_limit(self, schedule_input: ScheduleInput, **_: Any) -> ScheduleInput:
-        return schedule_input.model_copy(update={"time_limit_seconds": self.time_limit_seconds})
+        return schedule_input.model_copy(update={"time_limit_seconds": self.remaining_seconds()})
+
+    def remaining_seconds(self) -> float:
+        elapsed = time.perf_counter() - self.started_at
+        return max(0.1, self.time_limit_seconds - elapsed)
+
+    def exhausted(self) -> bool:
+        return self.remaining_seconds() <= 0.11
 
 
 def generate_schedule_input_from_scenario(scenario: ScenarioInput, *, use_max_resources: bool = False) -> GeneratedScheduleInput:
@@ -206,17 +221,26 @@ def _solve_fixed_resources_shortest_scenario(
     scenario: ScenarioInput,
     generated: GeneratedScheduleInput,
 ) -> tuple[ScheduleResult, list[ScenarioAlternativeResult]]:
+    budget = _FixedResourceSolveBudget(scenario.time_limit_seconds)
     critical_path = _critical_path_schedule(generated.schedule_input)
-    final_input = generated.schedule_input
+    final_input = budget.with_time_limit(generated.schedule_input)
     final_result = solve_control_priority_schedule(
         final_input,
         enforce_hard_milestones=True,
+        relax_target_constraints=True,
     )
-    late_hard = _late_hard_milestones(final_result)
     baseline_makespan_days = final_result.stats.get("baseline_objective_days") or final_result.objective_days
     solver_call_count = _int_or_none(final_result.stats.get("solver_call_count")) or 1
+    _apply_target_achievement(
+        final_result,
+        evaluated_at_source="current_resources",
+        default_failed_status=CURRENT_RESOURCES_TARGET_FAILED_SOURCE,
+        time_budget_seconds=budget.time_limit_seconds,
+        time_budget_exhausted=budget.exhausted(),
+    )
+    target_achievement = final_result.stats.get("target_achievement", {})
 
-    if final_result.status in {"OPTIMAL", "FEASIBLE"} and not late_hard:
+    if final_result.status in {"OPTIMAL", "FEASIBLE"} and target_achievement.get("business_success") is True:
         _apply_fixed_resource_metadata(
             final_result,
             baseline_makespan_days=baseline_makespan_days,
@@ -231,26 +255,71 @@ def _solve_fixed_resources_shortest_scenario(
         )
         return final_result, []
 
+    if final_result.status == "UNKNOWN":
+        result = final_result.model_copy(deep=True)
+        _apply_target_achievement(
+            result,
+            evaluated_at_source="current_resources",
+            forced_status="unconfirmed",
+            time_budget_seconds=budget.time_limit_seconds,
+            time_budget_exhausted=True,
+        )
+        _apply_fixed_resource_metadata(
+            result,
+            baseline_makespan_days=baseline_makespan_days,
+            hard_milestone_feasible=False,
+            schedule_source=TARGET_UNCONFIRMED_SOURCE,
+            performance_path="current_resources_full_objective_unconfirmed",
+            solver_call_count=solver_call_count,
+            capacity_precheck_status="not_run",
+            warm_start_used=bool(final_result.stats.get("warm_start_used")),
+            resource_recommendation_status="unconfirmed",
+            resource_recommendation_message="当前资源完整目标函数求解在限定时间内无法确认，未进入确定性资源不足判断。",
+        )
+        return result, []
+
+    if final_result.status not in {"OPTIMAL", "FEASIBLE"}:
+        result = final_result.model_copy(deep=True)
+        _apply_target_achievement(
+            result,
+            evaluated_at_source="current_resources",
+            forced_status="physical_infeasible",
+            time_budget_seconds=budget.time_limit_seconds,
+            time_budget_exhausted=budget.exhausted(),
+        )
+        _apply_fixed_resource_metadata(
+            result,
+            baseline_makespan_days=baseline_makespan_days,
+            hard_milestone_feasible=False,
+            schedule_source=PHYSICAL_INFEASIBLE_SOURCE,
+            performance_path="current_resources_full_objective_physical_infeasible",
+            solver_call_count=solver_call_count,
+            capacity_precheck_status="not_run",
+            warm_start_used=bool(final_result.stats.get("warm_start_used")),
+            resource_recommendation_status="physical_infeasible",
+            resource_recommendation_message="当前资源、施工硬规则或资源覆盖未得到物理可行排程。",
+        )
+        return result, []
+
     failure_reason = (
-        "current_resources_late_hard_milestone"
-        if late_hard
+        "current_resources_target_failed"
+        if target_achievement
         else f"control_priority_{final_result.status.lower()}"
     )
     result = final_result.model_copy(deep=True)
-    if final_result.status in {"OPTIMAL", "FEASIBLE"}:
-        result.status = "INFEASIBLE"
 
     result.validation = list(final_result.validation)
     result.validation.append(
         ValidationMessage(
-            level="error",
-            message="当前固定资源直接精排未得到满足硬里程碑的可行结果，已进入资源增量建议。",
+            level="warning",
+            message="当前固定资源已得到可查看排程，但未满足业务目标，已进入资源增量建议。",
         )
     )
+    late_hard = _late_hard_milestones(final_result)
     for milestone in late_hard:
         result.validation.append(
             ValidationMessage(
-                level="error",
+                level="warning",
                 subject_id=milestone.id,
                 message=(
                     f"硬里程碑“{milestone.name}”目标 {milestone.target_date}，"
@@ -263,6 +332,7 @@ def _solve_fixed_resources_shortest_scenario(
         scenario,
         generated.schedule_input,
         critical_path=critical_path,
+        budget=_FixedResourceSolveBudget(scenario.time_limit_seconds),
     )
     recommendation_metadata = {
         key: value
@@ -273,8 +343,8 @@ def _solve_fixed_resources_shortest_scenario(
         result,
         baseline_makespan_days=baseline_makespan_days,
         hard_milestone_feasible=False,
-        schedule_source=CURRENT_RESOURCES_REFINEMENT_FAILED_SOURCE,
-        performance_path="direct_named_refinement_failed_resource_recommendation",
+        schedule_source=CURRENT_RESOURCES_TARGET_FAILED_SOURCE,
+        performance_path="current_resources_full_objective_target_failed_resource_recommendation",
         solver_call_count=solver_call_count,
         capacity_precheck_status="not_run",
         warm_start_used=bool(final_result.stats.get("warm_start_used")),
@@ -292,6 +362,122 @@ def _late_hard_milestones(result: ScheduleResult) -> list[Any]:
         for milestone in result.milestone_results
         if milestone.mode == "hard" and milestone.lateness_days > 0
     ]
+
+
+def _apply_target_achievement(
+    result: ScheduleResult,
+    *,
+    evaluated_at_source: str,
+    default_failed_status: str = "current_resources_target_failed",
+    success_status: str = "met",
+    forced_status: str | None = None,
+    fixed_duration_target: int | None = None,
+    time_budget_seconds: float = TARGET_SOLVE_TIME_LIMIT_SECONDS,
+    time_budget_exhausted: bool = False,
+) -> dict[str, Any]:
+    hard_milestone_late_days = sum(
+        int(milestone.lateness_days or 0)
+        for milestone in result.milestone_results
+        if milestone.mode == "hard"
+    )
+    fixed_duration_overrun_days = _fixed_duration_overrun_days(
+        result,
+        fixed_duration_target=fixed_duration_target,
+    )
+    status = forced_status or _target_status_for_result(
+        result,
+        hard_milestone_late_days=hard_milestone_late_days,
+        fixed_duration_overrun_days=fixed_duration_overrun_days,
+        default_failed_status=default_failed_status,
+        success_status=success_status,
+        time_budget_exhausted=time_budget_exhausted,
+    )
+    failure_reasons = _target_failure_reasons(
+        status=status,
+        hard_milestone_late_days=hard_milestone_late_days,
+        fixed_duration_overrun_days=fixed_duration_overrun_days,
+        time_budget_exhausted=time_budget_exhausted,
+    )
+    payload = {
+        "business_success": status in {"met", "candidate_resources_target_met"},
+        "target_status": status,
+        "solver_status": result.status,
+        "hard_milestone_late_days": hard_milestone_late_days,
+        "fixed_duration_overrun_days": fixed_duration_overrun_days,
+        "failure_reasons": failure_reasons,
+        "time_budget_seconds": time_budget_seconds,
+        "time_budget_exhausted": time_budget_exhausted,
+        "evaluated_at_source": evaluated_at_source,
+    }
+    result.stats["target_achievement"] = payload
+    result.objective_breakdown["target_achievement"] = payload
+    result.stats["hard_milestone_late_days"] = hard_milestone_late_days
+    result.stats["fixed_duration_overrun_days"] = fixed_duration_overrun_days
+    result.objective_breakdown["hard_milestone_late_days"] = hard_milestone_late_days
+    result.objective_breakdown["fixed_duration_overrun_days"] = fixed_duration_overrun_days
+    return payload
+
+
+def _fixed_duration_overrun_days(
+    result: ScheduleResult,
+    *,
+    fixed_duration_target: int | None = None,
+) -> int:
+    direct = _int_or_none(result.objective_breakdown.get("fixed_duration_overrun_days"))
+    if direct is not None:
+        return max(0, direct)
+    relaxed = result.stats.get("relaxed_target_constraints")
+    if isinstance(relaxed, dict):
+        relaxed_overrun = _int_or_none(relaxed.get("fixed_duration_overrun_days"))
+        if relaxed_overrun is not None:
+            return max(0, relaxed_overrun)
+    target = fixed_duration_target
+    if target is None:
+        target = _int_or_none(result.stats.get("max_makespan_days") or result.objective_breakdown.get("max_makespan_days"))
+    if target is None or result.objective_days is None:
+        return 0
+    return max(0, int(result.objective_days) - target)
+
+
+def _target_status_for_result(
+    result: ScheduleResult,
+    *,
+    hard_milestone_late_days: int,
+    fixed_duration_overrun_days: int,
+    default_failed_status: str,
+    success_status: str,
+    time_budget_exhausted: bool,
+) -> str:
+    if time_budget_exhausted or result.status == "UNKNOWN":
+        return "unconfirmed"
+    if result.status not in {"OPTIMAL", "FEASIBLE"}:
+        return "physical_infeasible"
+    if hard_milestone_late_days == 0 and fixed_duration_overrun_days == 0:
+        return success_status
+    return default_failed_status
+
+
+def _target_failure_reasons(
+    *,
+    status: str,
+    hard_milestone_late_days: int,
+    fixed_duration_overrun_days: int,
+    time_budget_exhausted: bool,
+) -> list[str]:
+    reasons: list[str] = []
+    if hard_milestone_late_days > 0:
+        reasons.append("hard_milestone_late")
+    if fixed_duration_overrun_days > 0:
+        reasons.append("fixed_duration_overrun")
+    if status == "physical_infeasible":
+        reasons.append("physical_infeasible")
+    if status == "max_resources_target_failed":
+        reasons.append("max_resources_target_failed")
+    if status == "unconfirmed":
+        reasons.append("unconfirmed")
+    if time_budget_exhausted:
+        reasons.append("time_budget_exhausted")
+    return list(dict.fromkeys(reasons))
 
 
 def _apply_best_effort_refinement_metadata(
@@ -390,7 +576,11 @@ def _fixed_resource_recommendation(
     current_schedule_input: ScheduleInput,
     *,
     critical_path: dict[str, Any] | None = None,
+    budget: _FixedResourceSolveBudget | None = None,
 ) -> dict[str, Any]:
+    recommendation_time_limit_seconds = (
+        budget.time_limit_seconds if budget is not None else current_schedule_input.time_limit_seconds
+    )
     if critical_path is None:
         critical_path = _critical_path_schedule(current_schedule_input)
     critical_metadata = _critical_path_metadata(critical_path)
@@ -453,28 +643,150 @@ def _fixed_resource_recommendation(
 
     max_schedule_input = max_generated.schedule_input
     resource_upper_bounds = _resource_upper_bound_counts(current_schedule_input, max_schedule_input)
-    min_resource_result = solve_min_resources_schedule(max_schedule_input)
-    if _min_resource_result_has_verified_recommendation(min_resource_result):
+    minimum_resource_counts = _resource_minimum_counts(current_schedule_input)
+    recommendation_attempts: list[dict[str, Any]] = []
+    last_min_resource_result: ScheduleResult | None = None
+    last_candidate_result: ScheduleResult | None = None
+    last_recommendation: list[dict[str, Any]] = []
+
+    for attempt_index in range(1, MAX_RESOURCE_RECOMMENDATION_ATTEMPTS + 1):
+        search_budget = _FixedResourceSolveBudget(recommendation_time_limit_seconds)
+        min_resource_result = solve_min_resources_schedule(
+            search_budget.with_time_limit(max_schedule_input),
+            minimum_resource_counts=minimum_resource_counts,
+            verify_with_full_objective=False,
+        )
+        last_min_resource_result = min_resource_result
+
+        if _min_resource_result_is_upper_bound_infeasible(min_resource_result):
+            recommendation_attempts.append(
+                _resource_recommendation_attempt_summary(
+                    attempt_index=attempt_index,
+                    minimum_resource_counts=minimum_resource_counts,
+                    min_resource_result=min_resource_result,
+                    fixed_counts={},
+                    candidate_result=None,
+                    time_limit_seconds=search_budget.time_limit_seconds,
+                )
+            )
+            return {
+                "metadata": {
+                    **critical_metadata,
+                    "resource_recommendation_status": "resource_upper_bound_infeasible",
+                    "resource_recommendation_message": "工艺逻辑关键路径可满足目标，但当前资源池最大数量或资源类型结构仍无法满足硬里程碑。",
+                    "recommended_resource_counts": [],
+                    "resource_upper_bound_counts": resource_upper_bounds,
+                    "resource_capacity_lower_bounds": min_resource_result.stats.get("resource_capacity_lower_bounds", []),
+                    "resource_solver_status": min_resource_result.status,
+                    "resource_recommendation_attempt_count": len(recommendation_attempts),
+                    "resource_recommendation_attempt_limit": MAX_RESOURCE_RECOMMENDATION_ATTEMPTS,
+                    "resource_recommendation_attempts": recommendation_attempts,
+                    "recommended_resources": {
+                        "candidate_quantities": {},
+                        "added_quantities": {},
+                        "search_range": _resource_search_range_from_recommendation(resource_upper_bounds),
+                        "verification_result_source": "max_resources_target_failed",
+                        "target_achievement": min_resource_result.stats.get("target_achievement"),
+                    },
+                    **_min_resource_recommendation_metadata(min_resource_result),
+                },
+                "validation": [
+                    ValidationMessage(
+                        level="error",
+                        message="当前资源池最大数量仍无法满足强制里程碑；请提高资源上限或检查资源类型配置。",
+                    )
+                ],
+            }
+
+        if not _min_resource_result_has_capacity_verified_candidate(min_resource_result):
+            recommendation_attempts.append(
+                _resource_recommendation_attempt_summary(
+                    attempt_index=attempt_index,
+                    minimum_resource_counts=minimum_resource_counts,
+                    min_resource_result=min_resource_result,
+                    fixed_counts={},
+                    candidate_result=None,
+                    time_limit_seconds=search_budget.time_limit_seconds,
+                )
+            )
+            return {
+                "metadata": {
+                    **critical_metadata,
+                    "resource_recommendation_status": "resource_recommendation_unresolved",
+                    "resource_recommendation_message": "最少资源模型未得到可进入完整目标函数复排的候选结果；当前求解限时内无法确认推荐资源组合。",
+                    "recommended_resource_counts": [],
+                    "resource_upper_bound_counts": resource_upper_bounds,
+                    "resource_capacity_lower_bounds": min_resource_result.stats.get("resource_capacity_lower_bounds", []),
+                    "resource_solver_status": min_resource_result.status,
+                    "resource_recommendation_attempt_count": len(recommendation_attempts),
+                    "resource_recommendation_attempt_limit": MAX_RESOURCE_RECOMMENDATION_ATTEMPTS,
+                    "resource_recommendation_attempts": recommendation_attempts,
+                    "recommended_resources": {
+                        "candidate_quantities": {},
+                        "added_quantities": {},
+                        "search_range": _resource_search_range_from_recommendation(resource_upper_bounds),
+                        "verification_result_source": "unconfirmed",
+                        "target_achievement": min_resource_result.stats.get("target_achievement"),
+                    },
+                    **_min_resource_recommendation_metadata(min_resource_result),
+                },
+                "validation": [
+                    ValidationMessage(
+                        level="warning",
+                        message="最少资源模型未得到可进入完整目标函数复排的候选结果；请提高求解限时或检查工作面并行约束、资源上限配置。",
+                    )
+                ],
+            }
+
         fixed_counts = _resource_count_map(min_resource_result)
         recommendation = _enriched_resource_counts(
             current_schedule_input=current_schedule_input,
             max_schedule_input=max_schedule_input,
             fixed_counts=fixed_counts,
         )
-        candidate_result = min_resource_result.model_copy(deep=True)
-        recommendation_metadata = {
-            "resource_recommendation_status": "recommended_resources_verified",
-            "resource_recommendation_message": "已输出固定工期条件下的可行最少资源方案。",
-            "recommended_resource_counts": recommendation,
-            "resource_upper_bound_counts": resource_upper_bounds,
-            "resource_solver_status": min_resource_result.status,
-            **_min_resource_recommendation_metadata(min_resource_result),
-        }
+        last_recommendation = recommendation
         limited_schedule_input = max_generated.schedule_input.model_copy(
             update={"resources": _apply_resource_limits(max_generated.schedule_input.resources, fixed_counts)}
         )
         alternative_generated = max_generated.model_copy(update={"schedule_input": limited_schedule_input})
-        candidate_result = _minimum_resource_candidate_result(limited_schedule_input, candidate_result)
+        verification_budget = _FixedResourceSolveBudget(recommendation_time_limit_seconds)
+        candidate_result = _minimum_resource_candidate_result(
+            verification_budget.with_time_limit(limited_schedule_input),
+            min_resource_result.model_copy(deep=True),
+            budget=verification_budget,
+        )
+        last_candidate_result = candidate_result
+        recommendation_attempts.append(
+            _resource_recommendation_attempt_summary(
+                attempt_index=attempt_index,
+                minimum_resource_counts=minimum_resource_counts,
+                min_resource_result=min_resource_result,
+                fixed_counts=fixed_counts,
+                candidate_result=candidate_result,
+                time_limit_seconds=verification_budget.time_limit_seconds,
+            )
+        )
+
+        if not _result_business_success(candidate_result):
+            minimum_resource_counts = _next_resource_minimum_counts(minimum_resource_counts, fixed_counts)
+            continue
+
+        recommendation_metadata = {
+            "resource_recommendation_status": "recommended_resources_verified",
+            "resource_recommendation_message": "已输出固定工期条件下的可行最少资源方案。",
+            "recommended_resource_counts": recommendation,
+            "recommended_resources": _resource_candidate_outcome(
+                recommendation,
+                candidate_result,
+                verification_result_source="candidate_resources_full_objective",
+            ),
+            "resource_upper_bound_counts": resource_upper_bounds,
+            "resource_solver_status": min_resource_result.status,
+            "resource_recommendation_attempt_count": len(recommendation_attempts),
+            "resource_recommendation_attempt_limit": MAX_RESOURCE_RECOMMENDATION_ATTEMPTS,
+            "resource_recommendation_attempts": recommendation_attempts,
+            **_min_resource_recommendation_metadata(min_resource_result),
+        }
         candidate_result.stats.update(recommendation_metadata)
         candidate_result.objective_breakdown.update(recommendation_metadata)
         candidate_source = candidate_result.stats.get("schedule_source") or candidate_result.objective_breakdown.get("schedule_source")
@@ -506,41 +818,51 @@ def _fixed_resource_recommendation(
             ],
         }
 
-    if _min_resource_result_is_upper_bound_infeasible(min_resource_result):
-        return {
-            "metadata": {
-                **critical_metadata,
-                "resource_recommendation_status": "resource_upper_bound_infeasible",
-                "resource_recommendation_message": "工艺逻辑关键路径可满足目标，但当前资源池最大数量或资源类型结构仍无法满足硬里程碑。",
-                "recommended_resource_counts": [],
-                "resource_upper_bound_counts": resource_upper_bounds,
-                "resource_capacity_lower_bounds": min_resource_result.stats.get("resource_capacity_lower_bounds", []),
-                "resource_solver_status": min_resource_result.status,
-                **_min_resource_recommendation_metadata(min_resource_result),
-            },
-            "validation": [
-                ValidationMessage(
-                    level="error",
-                    message="当前资源池最大数量仍无法满足强制里程碑；请提高资源上限或检查资源类型配置。",
-                )
-            ],
+    fallback_result = last_candidate_result or last_min_resource_result
+    recommendation = last_recommendation
+    recommended_resources = (
+        _resource_candidate_outcome(
+            recommendation,
+            fallback_result,
+            verification_result_source="candidate_resources_full_objective_failed",
+        )
+        if recommendation and fallback_result is not None
+        else {
+            "candidate_quantities": {},
+            "added_quantities": {},
+            "search_range": _resource_search_range_from_recommendation(resource_upper_bounds),
+            "verification_result_source": "candidate_resources_full_objective_failed",
+            "target_achievement": fallback_result.stats.get("target_achievement") if fallback_result else None,
         }
+    )
 
     return {
         "metadata": {
             **critical_metadata,
-            "resource_recommendation_status": "resource_recommendation_unresolved",
-            "resource_recommendation_message": "最少资源模型未得到可验证结果；当前求解限时内无法确认推荐资源组合。",
-            "recommended_resource_counts": [],
+            "resource_recommendation_status": "candidate_resources_full_objective_failed",
+            "resource_recommendation_message": (
+                f"候选资源已完成 {len(recommendation_attempts)} 次完整目标函数复排验证，仍未满足硬里程碑或固定工期；"
+                f"已达到 {MAX_RESOURCE_RECOMMENDATION_ATTEMPTS} 次循环上限，排程失败。"
+            ),
+            "recommended_resource_counts": recommendation,
             "resource_upper_bound_counts": resource_upper_bounds,
-            "resource_capacity_lower_bounds": min_resource_result.stats.get("resource_capacity_lower_bounds", []),
-            "resource_solver_status": min_resource_result.status,
-            **_min_resource_recommendation_metadata(min_resource_result),
+            "resource_capacity_lower_bounds": last_min_resource_result.stats.get("resource_capacity_lower_bounds", [])
+            if last_min_resource_result
+            else [],
+            "resource_solver_status": last_min_resource_result.status if last_min_resource_result else "UNKNOWN",
+            "resource_recommendation_attempt_count": len(recommendation_attempts),
+            "resource_recommendation_attempt_limit": MAX_RESOURCE_RECOMMENDATION_ATTEMPTS,
+            "resource_recommendation_attempts": recommendation_attempts,
+            "recommended_resources": recommended_resources,
+            **(_min_resource_recommendation_metadata(last_min_resource_result) if last_min_resource_result else {}),
         },
         "validation": [
             ValidationMessage(
-                level="warning",
-                message="最少资源模型未得到可验证结果；请提高求解限时或检查工作面并行约束、资源上限配置。",
+                level="error",
+                message=(
+                    f"候选资源-完整目标函数复排循环已达到 {MAX_RESOURCE_RECOMMENDATION_ATTEMPTS} 次上限，"
+                    "仍未得到满足硬里程碑和固定工期的排程结果。"
+                ),
             )
         ],
     }
@@ -573,16 +895,75 @@ def _resource_count_map(result: ScheduleResult) -> dict[str, int]:
     return fixed_counts
 
 
+def _resource_minimum_counts(schedule_input: ScheduleInput) -> dict[str, int]:
+    return {
+        group["key"]: int(group["max_quantity"])
+        for group in _resource_groups([resource for resource in schedule_input.resources if resource.enabled])
+    }
+
+
+def _next_resource_minimum_counts(current_minimums: dict[str, int], fixed_counts: dict[str, int]) -> dict[str, int]:
+    merged = dict(current_minimums)
+    for key, count in fixed_counts.items():
+        merged[key] = max(int(merged.get(key, 0)), int(count or 0))
+    return merged
+
+
+def _result_target_achievement(result: ScheduleResult | None) -> dict[str, Any] | None:
+    if result is None:
+        return None
+    target = result.stats.get("target_achievement") or result.objective_breakdown.get("target_achievement")
+    return target if isinstance(target, dict) else None
+
+
+def _result_business_success(result: ScheduleResult | None) -> bool:
+    target = _result_target_achievement(result)
+    return bool(target and target.get("business_success") is True)
+
+
+def _target_int(target: dict[str, Any] | None, key: str) -> int:
+    if not target:
+        return 0
+    try:
+        return int(target.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _min_resource_result_has_verified_recommendation(result: ScheduleResult) -> bool:
     recommended = result.stats.get("recommended_resource_counts") or result.objective_breakdown.get("recommended_resource_counts") or []
     capacity_status = result.stats.get("capacity_verification_status") or result.objective_breakdown.get("capacity_verification_status")
-    return result.status in {"OPTIMAL", "FEASIBLE"} and bool(recommended) and capacity_status == "verified"
+    target = result.stats.get("target_achievement")
+    return (
+        result.status in {"OPTIMAL", "FEASIBLE"}
+        and bool(recommended)
+        and capacity_status == "verified"
+        and isinstance(target, dict)
+        and target.get("business_success") is True
+    )
+
+
+def _min_resource_result_has_capacity_verified_candidate(result: ScheduleResult) -> bool:
+    recommended = result.stats.get("recommended_resource_counts") or result.objective_breakdown.get("recommended_resource_counts") or []
+    capacity_status = result.stats.get("capacity_verification_status") or result.objective_breakdown.get("capacity_verification_status")
+    target = _result_target_achievement(result)
+    return (
+        result.status in {"OPTIMAL", "FEASIBLE"}
+        and bool(recommended)
+        and capacity_status == "verified"
+        and target is not None
+        and _target_int(target, "hard_milestone_late_days") == 0
+        and _target_int(target, "fixed_duration_overrun_days") == 0
+    )
 
 
 def _min_resource_result_is_upper_bound_infeasible(result: ScheduleResult) -> bool:
     reason = result.stats.get("reason")
     capacity_status = result.stats.get("capacity_model_status")
     global_status = result.stats.get("global_capacity_model_status")
+    target = result.stats.get("target_achievement")
+    if isinstance(target, dict) and target.get("target_status") == "max_resources_target_failed":
+        return True
     return result.status in {"INFEASIBLE", "MODEL_INVALID"} and (
         bool(result.stats.get("fixed_duration_precheck_failed"))
         or reason == "resource_upper_bound_or_deadline_infeasible"
@@ -608,6 +989,38 @@ def _min_resource_recommendation_metadata(result: ScheduleResult) -> dict[str, A
         if key in result.stats:
             metadata[key] = result.stats[key]
     return metadata
+
+
+def _resource_recommendation_attempt_summary(
+    *,
+    attempt_index: int,
+    minimum_resource_counts: dict[str, int],
+    min_resource_result: ScheduleResult,
+    fixed_counts: dict[str, int],
+    candidate_result: ScheduleResult | None,
+    time_limit_seconds: float,
+) -> dict[str, Any]:
+    resource_target = _result_target_achievement(min_resource_result)
+    candidate_target = _result_target_achievement(candidate_result)
+    return {
+        "attempt": attempt_index,
+        "time_limit_seconds": time_limit_seconds,
+        "search_lower_bounds": dict(minimum_resource_counts),
+        "candidate_quantities": dict(fixed_counts),
+        "resource_solver_status": min_resource_result.status,
+        "resource_schedule_source": min_resource_result.stats.get("schedule_source")
+        or min_resource_result.objective_breakdown.get("schedule_source"),
+        "capacity_verification_status": min_resource_result.stats.get("capacity_verification_status")
+        or min_resource_result.objective_breakdown.get("capacity_verification_status"),
+        "resource_target_status": resource_target.get("target_status") if resource_target else None,
+        "full_objective_status": candidate_result.status if candidate_result else None,
+        "full_objective_schedule_source": candidate_result.stats.get("schedule_source")
+        or candidate_result.objective_breakdown.get("schedule_source")
+        if candidate_result
+        else None,
+        "full_objective_target_status": candidate_target.get("target_status") if candidate_target else None,
+        "business_success": candidate_target.get("business_success") if candidate_target else None,
+    }
 
 
 def _enriched_resource_counts(
@@ -665,18 +1078,71 @@ def _resource_upper_bound_counts(
     return upper_bounds
 
 
+def _resource_search_range_from_recommendation(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ranges: list[dict[str, Any]] = []
+    for item in items:
+        current_quantity = int(item.get("current_quantity") or 0)
+        max_quantity = int(item.get("max_quantity") or item.get("upper_bound_quantity") or current_quantity)
+        ranges.append(
+            {
+                "resource_type": str(item.get("resource_type") or item.get("resource_pool_id") or ""),
+                "resource_pool_id": str(item.get("resource_pool_id") or ""),
+                "current_quantity": current_quantity,
+                "max_quantity": max_quantity,
+                "lower_bound": current_quantity,
+                "upper_bound": max_quantity,
+            }
+        )
+    return ranges
+
+
+def _resource_candidate_outcome(
+    recommendation: list[dict[str, Any]],
+    result: ScheduleResult,
+    *,
+    verification_result_source: str,
+) -> dict[str, Any]:
+    candidate_quantities: dict[str, int] = {}
+    added_quantities: dict[str, int] = {}
+    for item in recommendation:
+        key = str(item.get("resource_pool_id") or item.get("resource_type") or "")
+        if not key:
+            continue
+        candidate_quantities[key] = int(item.get("recommended_quantity") or 0)
+        added_quantities[key] = int(item.get("added_quantity") or 0)
+    return {
+        "candidate_quantities": candidate_quantities,
+        "added_quantities": added_quantities,
+        "search_range": _resource_search_range_from_recommendation(recommendation),
+        "verification_result_source": verification_result_source,
+        "target_achievement": result.stats.get("target_achievement"),
+    }
+
+
 def _minimum_resource_candidate_result(
     limited_schedule_input: ScheduleInput,
     min_resource_result: ScheduleResult,
+    *,
+    budget: _FixedResourceSolveBudget | None = None,
 ) -> ScheduleResult:
-    refined_input = limited_schedule_input
+    budget = budget or _FixedResourceSolveBudget(limited_schedule_input.time_limit_seconds)
+    refined_input = budget.with_time_limit(limited_schedule_input)
     refined_result = solve_control_priority_schedule(
         refined_input,
         enforce_hard_milestones=True,
         baseline_result=min_resource_result,
         warm_start_result=min_resource_result,
+        relax_target_constraints=True,
     )
-    if _result_meets_hard_milestones(refined_result):
+    target = _apply_target_achievement(
+        refined_result,
+        evaluated_at_source="candidate_resources",
+        default_failed_status="candidate_resources_target_failed",
+        success_status="candidate_resources_target_met",
+        time_budget_seconds=budget.time_limit_seconds,
+        time_budget_exhausted=budget.exhausted(),
+    )
+    if target["business_success"]:
         result = refined_result.model_copy(deep=True)
         metadata = {
             "schedule_source": MINIMUM_RESOURCES_REFINED_SOURCE,
@@ -691,31 +1157,24 @@ def _minimum_resource_candidate_result(
         result.objective_breakdown.update(metadata)
         return result
 
-    fallback_reason = f"minimum_resource_refinement_{refined_result.status.lower()}"
-    best_effort_result = solve_control_priority_schedule(
-        refined_input,
-        enforce_hard_milestones=True,
-        baseline_result=min_resource_result,
-        warm_start_result=min_resource_result,
-        relax_target_constraints=True,
-    )
-    if best_effort_result.status in {"OPTIMAL", "FEASIBLE"}:
-        result = best_effort_result.model_copy(deep=True)
-        result.validation = list(min_resource_result.validation) + list(refined_result.validation) + list(result.validation)
+    fallback_reason = f"minimum_resource_full_objective_{refined_result.status.lower()}"
+    if refined_result.status in {"OPTIMAL", "FEASIBLE"}:
+        result = refined_result.model_copy(deep=True)
+        result.validation = list(min_resource_result.validation) + list(result.validation)
         result.validation.append(
             ValidationMessage(
                 level="warning",
-                message="最少资源候选严格精排未得到可用结果，已放松强制节点和固定工期目标返回候选资源最佳努力精排。",
+                message="最少资源候选已完成完整目标函数复排，但业务目标仍未满足，不能标记为推荐成功。",
             )
         )
         metadata = {
             "schedule_source": MINIMUM_RESOURCES_BEST_EFFORT_SOURCE,
             "recommended_schedule_source": MINIMUM_RESOURCES_BEST_EFFORT_SOURCE,
             "minimum_resource_refinement_status": refined_result.status,
-            "minimum_resource_best_effort_status": best_effort_result.status,
+            "minimum_resource_best_effort_status": refined_result.status,
             "minimum_resource_refinement_fallback_reason": fallback_reason,
             "skipped_named_refinement_reason": fallback_reason,
-            "warm_start_used": bool(best_effort_result.stats.get("warm_start_used")),
+            "warm_start_used": bool(refined_result.stats.get("warm_start_used")),
         }
         result.stats.update(metadata)
         result.objective_breakdown.update(metadata)
@@ -723,18 +1182,17 @@ def _minimum_resource_candidate_result(
             result,
             schedule_source=MINIMUM_RESOURCES_BEST_EFFORT_SOURCE,
             fallback_from=MINIMUM_RESOURCES_REFINED_SOURCE,
-            strict_result=refined_result,
+            strict_result=min_resource_result,
             strict_failure_reason=fallback_reason,
         )
         return result
 
     result = min_resource_result.model_copy(deep=True)
     result.validation = list(min_resource_result.validation) + list(refined_result.validation)
-    result.validation.extend(best_effort_result.validation)
     result.validation.append(
         ValidationMessage(
             level="warning",
-            message="最少资源候选方案的严格二次精排和最佳努力精排均未返回可用结果，已保留已验证的可行候选排程。",
+            message="最少资源候选方案的完整目标函数复排未返回可用结果，已保留资源搜索阶段结果供诊断。",
         )
     )
     metadata = {
@@ -742,8 +1200,8 @@ def _minimum_resource_candidate_result(
         "recommended_schedule_source": MINIMUM_RESOURCES_FALLBACK_SOURCE,
         "minimum_resource_refinement_status": refined_result.status,
         "minimum_resource_refinement_fallback_reason": fallback_reason,
-        "minimum_resource_best_effort_status": best_effort_result.status,
-        "best_effort_refinement_failure_reason": f"best_effort_{best_effort_result.status.lower()}",
+        "minimum_resource_best_effort_status": "not_run",
+        "best_effort_refinement_failure_reason": fallback_reason,
         "skipped_named_refinement_reason": fallback_reason,
     }
     result.stats.update(metadata)

@@ -8,6 +8,10 @@
 
 **输入**：用户描述：“调整前端页面显示，后端引导的指标项都需要展示在前端，支持配置。”
 
+## 当前实现校正（2026-07-08）
+
+当前后端仅保留 4 个可配置目标项：`control_node_late`、`makespan_and_soft_milestone`、`resource_path_continuity`、`resource_idle`。`control_buffer_risk`、`risk_related_control_wait`、`resource_workload_balance`、`unconfigured_normal_balance`、`normal_balance` 等均为废弃兼容输入或只读诊断相关字段，不应再作为前端可配置目标项恢复。结果页仍可展示 `normal_balance_metrics`、`continuity_metrics`、`resource_organization_analysis` 等只读诊断。
+
 ## 来源与评审上下文（必填）
 
 - **来源文档**：
@@ -19,11 +23,11 @@
   - `specs/005-best-effort-refinement/spec.md`：最佳努力精排与目标放松相关规格。
 - **评审结论**：用户已明确要求调整前端展示和配置，但该需求会改变目标项配置契约、结果指标展示和后端目标函数解释口径，因此按项目契约先进入 Spec Kit，不直接修改实现代码。
 - **使用的 Demo/代码事实**：
-  - `backend/app/models.py` 当前 `ObjectiveTermId` 和默认配置只包含 7 个前端可配置项：`control_node_late`、`control_buffer_risk`、`risk_related_control_wait`、`makespan_and_soft_milestone`、`resource_path_continuity`、`resource_idle`、`resource_workload_balance`。
-  - `backend/app/solver.py` 的 `solve_control_priority_schedule()` 实际目标函数还包含或折叠了后端引导项：`target_relaxation` 与 `control_node_late` 共用权重、`unconfigured_normal_balance` 使用固定后端权重 10、`resource_slot_balance` 当前计入 `resource_path_continuity` 的路径项并在结果中单独输出。
-  - `backend/app/solver.py` 结果中已经输出 `target_relaxation_penalty`、`resource_slot_balance_penalty`、`unconfigured_normal_balance_penalty`、`weighted_objective`、`objective_weights`、`objective_terms_used` 以及 `stats.continuity_metrics`、`stats.normal_balance_metrics` 等诊断信息。
-  - `frontend/src/app/App.tsx` 当前目标函数配置表只显示上述 7 个目标项，未完整覆盖后端参与目标函数的所有指标，也没有把结果中的每一项权重、原始罚分、加权贡献统一展示。
-  - `frontend/src/types/scheduler.ts` 当前 `ObjectiveTermId` 联合类型只包含 7 个目标项，结果侧 `objective_breakdown` 与 `stats` 仍是宽泛字典。
+  - `backend/app/models.py` 当前 `ObjectiveTermId` 和默认配置只包含 4 个前端可配置项：`control_node_late`、`makespan_and_soft_milestone`、`resource_path_continuity`、`resource_idle`。
+  - `backend/app/solver.py` 的 `solve_control_priority_schedule()` 当前只把上述 4 个有效目标项纳入 `objective_weights` 和 `model.Minimize(...)`；目标放松诊断、普通工程分布、连续性统计和资源组织分析作为结果诊断展示。
+  - `backend/app/solver.py` 结果中已经输出 `relaxed_target_penalty_days`、`weighted_objective`、`objective_weights`、`objective_terms_used`、`objective_contributions` 以及 `stats.continuity_metrics`、`stats.normal_balance_metrics` 等诊断信息。
+  - `frontend/src/app/App.tsx` 当前目标函数配置表应只显示上述 4 个目标项；只读诊断应在结果区展示，不得作为可编辑目标项。
+  - `frontend/src/types/scheduler.ts` 当前 `ObjectiveTermId` 联合类型应只包含 4 个目标项，结果侧通过 `objective_contributions` 和诊断字典解释贡献。
 - **不在范围内**：
   - 不新增控制节点、资源、工期或工序硬约束。
   - 不把 `jump_pier_count`、`direction_reversal_count`、`continuity_score`、`normal_balance_score` 等诊断项提升为独立优化目标，除非后端目标函数明确使用该项。
@@ -37,14 +41,14 @@
 
 排程人员在求解前进入目标函数配置区域，可以看到后端实际用于引导精排结果的全部目标项，并能按业务优先级启用、停用或调整权重。
 
-**优先级理由**：这是用户本次需求的核心价值。当前页面只展示 7 项，导致部分后端引导项对结果产生影响但无法被用户感知或配置。
+**优先级理由**：这是用户本次需求的核心价值。当前页面应完整展示 4 个有效加权目标项，并把其余后端诊断清楚地区分为只读解释。
 
 **独立测试**：打开精排页面，查看目标函数配置表，确认后端目标函数中的每个加权目标项均有对应行，且可配置项可以修改权重并随请求发送到后端。
 
 **验收场景**：
 
 1. **假设** 已加载任一可精排场景，**当** 用户查看目标函数配置区域，**则** 页面展示所有后端加权目标项，并标明默认权重、业务含义、适用分支和当前启用状态。
-2. **假设** 用户调整 `unconfigured_normal_balance` 权重并求解，**当** 后端返回结果，**则** 请求中包含该配置，结果中的有效权重与用户配置一致。
+2. **假设** 用户调整 `resource_path_continuity` 或 `resource_idle` 权重并求解，**当** 后端返回结果，**则** 请求中包含该配置，结果中的有效权重与用户配置一致。
 3. **假设** 用户尝试关闭最后一个启用目标项，**当** 页面或后端校验该配置，**则** 系统阻止提交并提示至少保留一个有效目标项。
 
 ---
@@ -60,8 +64,8 @@
 **验收场景**：
 
 1. **假设** 求解成功并返回 `objective_breakdown`，**当** 用户查看结果页目标函数分解，**则** 每个目标项显示原始罚分、有效权重、加权贡献和是否参与本次求解。
-2. **假设** 本次不是最佳努力精排，**当** 用户查看 `target_relaxation`，**则** 页面显示该项不适用于本次分支或原始罚分为 0，不误导用户以为强制目标已被放松。
-3. **假设** 后端返回 `resource_slot_balance_penalty`，**当** 用户查看目标分解，**则** 页面可单独看到资源槽位均衡项，而不是只能从资源路径连续性中猜测。
+2. **假设** 本次不是最佳努力精排，**当** 用户查看 放松目标诊断，**则** 页面显示该项不适用于本次分支或原始罚分为 0，不误导用户以为强制目标已被放松。
+3. **假设** 后端返回连续性或资源组织诊断，**当** 用户查看结果分解，**则** 页面能看到只读诊断来源，而不会把诊断项误展示成可配置目标。
 
 ---
 
@@ -75,7 +79,7 @@
 
 **验收场景**：
 
-1. **假设** 旧场景只包含 7 个目标项，**当** 后端解析配置，**则** 自动补齐新增目标项默认配置，并保持与当前模型行为等价。
+1. **假设** 旧场景只包含历史 7 项目标项，**当** 后端解析配置，**则** 过滤废弃项，补齐当前 4 项默认配置，并保持与当前模型行为等价。
 2. **假设** 旧结果没有新的目标贡献列表，**当** 前端展示结果，**则** 页面回退读取 `objective_breakdown` 里的旧字段，不出现空白或报错。
 3. **假设** 请求包含已废弃目标项，**当** 后端解析，**则** 按现有兼容策略忽略废弃项，不影响有效目标配置。
 
@@ -108,10 +112,10 @@
 ### 功能需求
 
 - **FR-001**：系统必须建立一份后端权威的目标指标目录，覆盖所有实际参与精排目标函数的加权贡献项，并提供前端所需的稳定 `term_id`、名称、分组、说明、默认权重、是否可配置、适用分支和兼容字段。
-- **FR-002**：前端目标函数配置区域必须展示后端目标指标目录中的所有可配置目标项，至少包含当前 7 项以及 `target_relaxation`、`unconfigured_normal_balance`、`resource_slot_balance`。
-- **FR-003**：`target_relaxation` 必须作为最佳努力精排相关目标项在前端可见，并说明它只在目标放松分支中对强制节点迟延和固定工期超期计罚；严格精排分支不得误提示目标已放松。
-- **FR-004**：`unconfigured_normal_balance` 必须从后端固定隐藏权重改为目标配置体系中的可见项；缺省权重必须等价于当前固定权重 10。
-- **FR-005**：`resource_slot_balance` 如果继续作为独立罚分输出，必须在目标配置和目标贡献中单独可见；若实现上仍与 `resource_path_continuity` 共用局部表达式，也必须在展示上说明有效权重来源，不得只隐藏在路径连续性中。
+- **FR-002**：前端目标函数配置区域必须展示后端目标指标目录中的所有可配置目标项，当前为 `control_node_late`、`makespan_and_soft_milestone`、`resource_path_continuity`、`resource_idle`。
+- **FR-003**：放松目标诊断 必须作为最佳努力精排相关目标项在前端可见，并说明它只在目标放松分支中对强制节点迟延和固定工期超期计罚；严格精排分支不得误提示目标已放松。
+- **FR-004（已废弃）**：`unconfigured_normal_balance` 不得恢复为可配置目标项；旧请求包含该字段时应作为废弃输入过滤，`normal_balance_metrics` 仅作为只读诊断保留。
+- **FR-005**：连续性、资源组织、普通工程分布等诊断如果继续作为独立结果输出，必须在展示上说明其只读诊断来源，不得隐藏成目标项，也不得让用户误以为可通过独立权重配置。
 - **FR-006**：后端必须在解析 `schedule_strategy.objective_terms` 时补齐新增目标项默认值，并继续兼容缺失新增项的旧场景。
 - **FR-007**：后端必须拒绝未知目标项、非法权重和全禁用配置；错误信息必须能让前端定位到具体配置问题。
 - **FR-008**：后端求解结果必须输出统一的目标贡献列表，列表项至少包含 `term_id`、名称或可映射名称、原始罚分、配置权重、有效权重、加权贡献、启用状态、是否参与本次求解、适用分支和来源。
@@ -146,5 +150,5 @@
 
 - “后端引导的指标项”默认指实际进入精排 `model.Minimize(...)` 或直接决定 `weighted_objective` 的加权目标贡献项，不包含纯展示或纯诊断统计。
 - 已经单独输出罚分并影响目标值的项，优先独立成为可配置目标项；如果实现必须保留父项权重继承，必须在前端和结果中明确“继承自哪一项”。
-- `target_relaxation` 是最佳努力精排的目标放松罚分，不改变严格分支中硬节点和固定工期目标的业务含义。
+- 放松目标诊断 是最佳努力精排的目标放松罚分，不改变严格分支中硬节点和固定工期目标的业务含义。
 - 本功能以本地 Python 后端与 React 前端为主链路；Netlify 只做兼容展示和字段兜底。

@@ -36,7 +36,6 @@
 
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
-| `workload_balance_enabled` | boolean | `resource_workload_balance` 是否建模 |
 | `idle_enabled` | boolean | `resource_idle` 是否建模 |
 | `path_continuity_enabled` | boolean | `resource_path_continuity` 是否建模 |
 | `resource_path_node_count` | integer | 路径连续性关闭时必须为 0 |
@@ -44,8 +43,9 @@
 
 规则：
 
-- 三个资源目标全关时，不构建资源组织优化模型。
+- 两个当前资源目标全关时，不构建资源组织优化模型。
 - 命名资源互斥仍属于硬约束，不受资源组织门控影响。
+- 历史 `resource_workload_balance` 已不是当前可配置目标项，不再作为资源组织门控字段。
 
 ## 实体：目标评价状态
 
@@ -79,7 +79,7 @@
 | 字段 | 类型 | 规则 |
 | --- | --- | --- |
 | `relaxed_constraints` | array | 被放松目标清单 |
-| `target_relaxation_penalty` | integer | 放松目标迟延罚分 |
+| `relaxed_target_penalty_days` | integer | 放松目标迟延罚分 |
 | `source` | string | `best_effort_refinement` 或现有来源值 |
 | `reason` | string | 说明该建模来自最佳努力分支 |
 

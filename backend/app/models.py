@@ -82,12 +82,10 @@ ObjectiveTermId = Literal[
     "control_node_late",
     "makespan_and_soft_milestone",
     "resource_path_continuity",
-    "resource_slot_balance",
     "resource_idle",
-    "target_relaxation",
 ]
 
-OBJECTIVE_TERM_MAX_WEIGHT = 1_000_000_000
+OBJECTIVE_TERM_MAX_WEIGHT = 10_000_000_000
 DEPRECATED_OBJECTIVE_TERM_IDS = {
     "spatial_resource_assignment",
     "same_structure_craft_split",
@@ -98,25 +96,19 @@ DEPRECATED_OBJECTIVE_TERM_IDS = {
     "risk_related_control_wait",
 }
 DEFAULT_OBJECTIVE_TERM_WEIGHTS: dict[ObjectiveTermId, int] = {
-    "control_node_late": 1_000_000_000,
+    "control_node_late": 10_000_000_000,
     "makespan_and_soft_milestone": 5_000_000,
     "resource_path_continuity": 50_000,
-    "resource_slot_balance": 50_000,
     "resource_idle": 50_000,
-    "target_relaxation": 1_000_000_000,
 }
 DEFAULT_OBJECTIVE_TERM_ENABLED: dict[ObjectiveTermId, bool] = {
     "control_node_late": True,
     "makespan_and_soft_milestone": True,
     "resource_path_continuity": True,
-    "resource_slot_balance": False,
     "resource_idle": True,
-    "target_relaxation": False,
 }
 OBJECTIVE_TERM_IDS = tuple(DEFAULT_OBJECTIVE_TERM_WEIGHTS.keys())
-OBJECTIVE_TERM_INHERIT_CONFIG_FROM: dict[ObjectiveTermId, ObjectiveTermId] = {
-    "target_relaxation": "control_node_late",
-}
+OBJECTIVE_TERM_INHERIT_CONFIG_FROM: dict[ObjectiveTermId, ObjectiveTermId] = {}
 OBJECTIVE_METRIC_DEFINITIONS: dict[str, dict[str, Any]] = {
     "control_node_late": {
         "label": "软控制节点迟延",
@@ -148,17 +140,6 @@ OBJECTIVE_METRIC_DEFINITIONS: dict[str, dict[str, Any]] = {
         "applies_to": ["control_priority", "balanced_normal", "comprehensive"],
         "legacy_fields": ["resource_path_continuity_penalty"],
     },
-    "resource_slot_balance": {
-        "label": "资源槽位均衡",
-        "group": "资源组织",
-        "description": "同结构并行槽位的资源分配均衡程度；权重越高，模型越倾向均衡使用并行槽位。",
-        "default_weight": DEFAULT_OBJECTIVE_TERM_WEIGHTS["resource_slot_balance"],
-        "configurable": True,
-        "source": "derived_objective",
-        "applies_to": ["control_priority", "balanced_normal", "comprehensive"],
-        "legacy_fields": ["resource_slot_balance_penalty"],
-        "parent_term_id": "resource_path_continuity",
-    },
     "resource_idle": {
         "label": "资源空闲",
         "group": "资源组织",
@@ -168,21 +149,6 @@ OBJECTIVE_METRIC_DEFINITIONS: dict[str, dict[str, Any]] = {
         "source": "objective",
         "applies_to": ["control_priority", "balanced_normal", "comprehensive"],
         "legacy_fields": ["resource_idle_penalty"],
-    },
-    "target_relaxation": {
-        "label": "目标放松迟延",
-        "group": "最佳努力",
-        "description": "最佳努力精排中强制节点迟延和固定工期超期；权重越高，模型越优先减少被放松目标的迟延。",
-        "default_weight": DEFAULT_OBJECTIVE_TERM_WEIGHTS["target_relaxation"],
-        "configurable": True,
-        "source": "derived_objective",
-        "applies_to": ["best_effort_refinement"],
-        "legacy_fields": [
-            "target_relaxation_penalty",
-            "relaxed_hard_milestone_lateness_days",
-            "fixed_duration_overrun_days",
-        ],
-        "parent_term_id": "control_node_late",
     },
 }
 
@@ -650,7 +616,7 @@ class ScenarioInput(BaseModel):
     resource_pools: list[ResourcePool]
     milestones: list[MilestoneConstraint] = []
     schedule_strategy: ScheduleStrategyConfig = Field(default_factory=ScheduleStrategyConfig)
-    time_limit_seconds: float = Field(default=20.0, gt=0)
+    time_limit_seconds: float = Field(default=15.0, gt=0)
 
 
 class AiParameterUploadedMaterialSummary(BaseModel):
@@ -863,7 +829,7 @@ class ScheduleInput(BaseModel):
     resources: list[Resource]
     milestones: list[MilestoneConstraint] = []
     schedule_strategy: ScheduleStrategyConfig = Field(default_factory=ScheduleStrategyConfig)
-    time_limit_seconds: float = Field(default=20.0, gt=0)
+    time_limit_seconds: float = Field(default=15.0, gt=0)
 
 
 class ContinuousBeamTeamSpan(BaseModel):

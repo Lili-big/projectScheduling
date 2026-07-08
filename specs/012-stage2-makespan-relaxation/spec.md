@@ -8,6 +8,10 @@
 
 **输入**：用户描述：“在第二阶段求解时，移除计算总工期需要小于第一阶段求解总工期的限制要求。”
 
+## 当前实现校正（2026-07-08）
+
+后续 `017-stage1-route-continuity` 已取消常规自动第二阶段排程：资源连续性开启且第一阶段可行时，系统直接采用第一阶段结果并输出 `drill_group_refinement.status = "stage1_final"`。因此本规格当前仅适用于历史兼容或显式调用第二阶段诊断路径，不再作为固定资源主链路的常规验收要求。
+
 ## 来源与评审上下文（必填）
 
 - **来源文档**：`AGENTS.md`、`.specify/memory/constitution.md`、`specs/011-drill-group-two-stage-refinement/spec.md`、`specs/011-drill-group-two-stage-refinement/tasks.md`。

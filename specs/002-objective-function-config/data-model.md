@@ -5,12 +5,9 @@
 Stable ids for editable refinement soft objectives:
 
 - `control_node_late`
-- `control_buffer_risk`
-- `risk_related_control_wait`
-- `resource_workload_balance`
-- `resource_idle`
-- `resource_path_continuity`
 - `makespan_and_soft_milestone`
+- `resource_path_continuity`
+- `resource_idle`
 
 ## ObjectiveTermConfig
 
@@ -19,12 +16,12 @@ Represents one requested objective term configuration.
 | Field | Type | Rule |
 | --- | --- | --- |
 | `enabled` | boolean | Defaults to true for all terms unless compatibility rules say otherwise |
-| `weight` | integer | Requested display/solve weight, valid range `1..1_000_000_000` |
+| `weight` | integer | Requested display/solve weight, valid range `1..10_000_000_000` |
 
 Validation:
 
 - Unknown term ids are rejected.
-- Legacy `spatial_resource_assignment`, `same_structure_craft_split`, and `normal_balance` inputs are ignored as deprecated terms.
+- Legacy `control_buffer_risk`, `risk_related_control_wait`, `resource_workload_balance`, `unconfigured_normal_balance`, `spatial_resource_assignment`, `same_structure_craft_split`, and `normal_balance` inputs are ignored as deprecated terms.
 - Enabled term weights outside range are rejected.
 - Disabled terms retain their stored weight for display.
 - At least one term must be enabled.
@@ -52,7 +49,7 @@ Compatibility:
 
 - Existing `enable_balance_objective` remains accepted.
 - `enable_balance_objective` no longer enables a current objective term and is normalized to false.
-- If `objective_terms.normal_balance` is present in a legacy payload, it is filtered out and does not appear in normalized objective terms.
+- If a legacy payload contains deprecated objective terms, they are filtered out and do not appear in normalized objective terms.
 
 ## ScheduleResult objective metadata
 

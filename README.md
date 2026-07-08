@@ -1,104 +1,44 @@
-# 桥梁下部结构 CP-SAT 自动排程 Demo
+# 桥梁施工自动排程 Demo
 
-这个 demo 用 `FastAPI + React + OR-Tools CP-SAT` 模拟桥梁下部结构自动排程。当前版本已经从单一 WBS 原型升级为“场景化模拟”：项目桥梁参数、施工工艺及工效库、工艺逻辑、资源配置和关键里程碑分开建模，再统一生成求解输入。
+## 本地启动命令
 
-## 当前能力
+### 首次安装依赖
 
-- 项目模型：`ProjectModel -> Bridge -> WorkSection -> Structure -> Component`。
-- 桥梁参数导入：支持上传 `.xlsx/.xlsm` 桥梁结构参数表，先标准化合并表头和合并单元格，再按本体配置理解左右幅、墩台、构件尺寸并覆盖项目参数。
-- 工艺库：桩基支持旋挖钻、冲击钻、人工挖孔，其他构件支持承台、墩柱、盖梁、桥台模板工效。
-- 逻辑库：支持 FS/SS、滞后天数、候选前置回退，并预留跨墩台顺序规则。
-- 资源约束：资源池按数量展开为命名资源，CP-SAT 对每个命名资源做 `NoOverlap`。
-- 里程碑：硬节点作为 CP-SAT 日期约束，软节点转为迟延变量并进入加权目标。
-- 前端页签：项目参数、工艺工效库、工艺逻辑、资源配置、里程碑、模拟结果。
-
-
-## 后端接口
-
-- `GET /api/demo-scenario`：返回完整默认模拟场景。
-- `POST /api/generate-schedule-input`：把场景配置转换为任务图和求解输入。
-- `POST /api/solve-scenario`：执行 CP-SAT 求解，返回排程、资源分配、里程碑结果和诊断。
-- `POST /api/compare-scenarios`：输入多个场景结果，返回对比摘要。
-- `POST /api/import-bridge-params`：multipart 上传 Excel、当前 `ScenarioInput` 和可选目标桥名，返回覆盖项目桥梁参数后的场景、Canonical Bridge JSON、质量检查和告警。
-- 兼容接口仍保留：`/api/demo`、`/api/generate-wbs`、`/api/solve`。
-
-## 本地运行
-
-项目包含两个部分：
-
-- 后端：`FastAPI + OR-Tools CP-SAT`，默认监听 `127.0.0.1:8000`。
-- 前端：`React + Vite`，构建产物在 `frontend/dist`，构建后由后端同一个服务托管。
-
-### 1. 安装依赖
-
-如果 `.venv` 不存在，先创建 Python 虚拟环境：
+在项目根目录执行：
 
 ```powershell
-py -3 -m venv .venv
-```
-
-第一次运行或依赖变化后执行：
-
-```powershell
+py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt --cache-dir .pip-cache
-cd frontend
-npm install --cache ..\.npm-cache
-cd ..
+npm.cmd install --cache .npm-cache
 ```
 
-如果当前机器没有把 `npm` 加到 `PATH`，把相关命令写成完整路径，例如：
+如果本机没有 Python 3.12，可先使用 `py -3 -m venv .venv` 创建虚拟环境；当前 Dockerfile 使用 Python 3.12，项目最低 Python 版本未在配置文件中声明，需确认。
+
+如果 `npm.cmd` 不在 `PATH` 中，可使用完整路径：
 
 ```powershell
-& 'C:\Program Files\nodejs\npm.cmd' install --cache ..\.npm-cache
-& 'C:\Program Files\nodejs\npm.cmd' run build
-& 'C:\Program Files\nodejs\npm.cmd' run dev
+& 'C:\Program Files\nodejs\npm.cmd' install --cache .npm-cache
 ```
 
-### 2. 演示模式：构建前端后启动单个后端服务
+### 演示模式：单服务启动
 
-这种方式最接近最终部署形态，适合演示、验收或给同事临时查看：先构建前端，再由 FastAPI 同时提供页面和接口。
+适用于演示、验收或给同事临时查看。前端先构建为静态文件，再由 FastAPI 同时提供页面和 API。
 
 ```powershell
-cd frontend
 npm.cmd run build
-cd ..
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir backend
 ```
 
-启动成功后访问：
+访问地址：
 
 - 页面：`http://127.0.0.1:8000/`
 - 健康检查：`http://127.0.0.1:8000/api/health`
 
-演示模式下，前端代码已经被打包到 `frontend/dist`。如果修改了前端代码，需要重新执行 `npm.cmd run build` 并刷新页面；如果修改了后端 Python 代码，需要重启后端服务后重新求解。
+修改前端代码后需要重新执行 `npm.cmd run build`；修改后端代码后需要重启后端服务并重新求解。
 
-如果需要让同一局域网内的同事访问，仍推荐使用单个后端服务托管前端和 API，只把监听地址改为 `0.0.0.0`：
+### 开发模式：前后端分离启动
 
-```powershell
-cd frontend
-npm.cmd run build
-cd ..
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend
-```
-
-启动后先用 `ipconfig` 查看当前 Wi-Fi 或以太网的 IPv4 地址，例如 `192.168.1.23`。同事访问：
-
-- 页面：`http://192.168.1.23:8000/`
-- 健康检查：`http://192.168.1.23:8000/api/health`
-
-`0.0.0.0` 只是服务监听地址，不是浏览器访问地址。如果同事打不开页面，先确认双方在同一局域网或同一 VPN，并在 Windows 防火墙中允许当前 Python/uvicorn 服务或 `8000` 端口入站。
-
-如果 `8000` 被占用，可以换一个端口，例如：
-
-```powershell
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8002 --app-dir backend
-```
-
-此时访问 `http://127.0.0.1:8002/`。
-
-### 3. 开发模式：后端和前端分别启动，支持自动更新
-
-需要频繁修改前端、后端算法或联调接口时，推荐使用开发模式。开发模式需要开两个 PowerShell 窗口。
+适用于频繁修改前端、后端算法或接口联调。需要打开两个 PowerShell 窗口。
 
 窗口 A 启动后端：
 
@@ -106,200 +46,359 @@ cd ..
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir backend --reload
 ```
 
-窗口 B 启动 Vite 前端：
+窗口 B 启动前端：
 
 ```powershell
-cd frontend
-npm.cmd run dev
+npm.cmd run frontend:dev
 ```
 
-开发模式下访问：
+访问地址：
 
 - 页面：`http://127.0.0.1:5173/`
 - 后端健康检查：`http://127.0.0.1:8000/api/health`
 
-前端的 `/api` 请求会通过 `frontend/vite.config.ts` 代理到 `http://127.0.0.1:8000`。
+开发模式下，`frontend/vite.config.ts` 会把 `/api` 代理到 `http://127.0.0.1:8000`。不要用 `http://127.0.0.1:8000/` 检查前端热更新效果；`8000` 读取的是上一次构建后的静态文件，开发模式看 `5173`。
 
-开发模式的更新规则：
+### 局域网访问
 
-- 修改前端 `frontend/src/` 下的代码后，Vite 会自动热更新；多数情况下页面会自己更新，如果没有变化，刷新 `http://127.0.0.1:5173/` 即可看到新效果。
-- 修改后端 Python 代码后，`--reload` 会自动重载后端服务；如果是算法逻辑变化，需要在页面上重新点击求解，已有求解结果不会自动重算。
-- 不要用 `http://127.0.0.1:8000/` 检查前端热更新效果；`8000` 在演示模式下读取的是上一次构建后的静态文件，开发模式请看 `5173`。
+临时让同一局域网内同事访问时，推荐仍使用单服务模式：
 
-## 云端部署
-
-当前生产部署采用“Netlify 静态前端 + Docker FastAPI 后端”的拆分形态：
-
-- Netlify 绑定本仓库 `main` 分支后，从根目录执行 `npm run build`，发布 `frontend/dist`。
-- Netlify 项目环境变量需要设置 `VITE_API_BASE_URL`，值为 Docker 后端的公开 HTTPS 地址，例如 `https://your-backend.example.com`。
-- 完整排程能力由 Docker 后端提供，包含 FastAPI、OR-Tools CP-SAT、Excel 导入和本地规则解析。
-- 后端镜像内置 `backend/app/default_scenario_config.json` 作为随代码发布的默认配置，云端打开页面时会先读取这份默认资源、工艺和逻辑配置。
-- `netlify/demo-functions/api.mts` 只保留为早期演示 API 参考，不会作为生产 `/api` 部署。
-
-Docker 后端可在支持 Docker 的云服务中绑定同一个 Git 仓库自动部署。构建入口使用仓库根目录的 `Dockerfile`，运行命令已在镜像中定义为：
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --app-dir backend
+```powershell
+npm.cmd run build
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend
 ```
 
-后端跨域配置通过环境变量控制：
+启动后用 `ipconfig` 查看本机 IPv4 地址，例如 `192.168.1.23`，同事访问 `http://192.168.1.23:8000/`。
 
-- `SCHEDULER_CORS_ORIGINS`：逗号分隔的允许来源，建议包含 Netlify 生产域名，例如 `https://project-scheduling-lili-big.netlify.app`。
-- `SCHEDULER_CORS_ORIGIN_REGEX`：可选，默认允许 `https://<deploy-id>--project-scheduling-lili-big.netlify.app` 形式的 Netlify 预览域名。
+`0.0.0.0` 是服务监听地址，不是浏览器访问地址。如果无法访问，检查是否在同一局域网或 VPN，并确认 Windows 防火墙允许当前 Python/uvicorn 服务或 `8000` 端口入站。
 
-第一版云端部署不配置持久化存储，工艺库、资源配置、项目参数等保存接口写入的 `.local-data` 内容可能在实例重启或重新部署后丢失；需要长期固化的默认值应更新到 `backend/app/default_scenario_config.json` 并随 Git 发布。
+### 停止服务
 
-## 关闭服务
+前台启动的服务可在对应 PowerShell 窗口按 `Ctrl+C` 停止。
 
-### 常规关闭
-
-如果服务是在当前 PowerShell 窗口前台启动的，按 `Ctrl+C` 即可停止：
-
-- 单服务模式：在运行 `uvicorn` 的窗口按 `Ctrl+C`。
-- 开发模式：分别在后端窗口和前端 Vite 窗口按 `Ctrl+C`。
-
-### 端口被旧进程占用时强制关闭
-
-先查询端口对应的进程：
+如果端口被旧进程占用，先查询 PID：
 
 ```powershell
 Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue |
   Select-Object LocalAddress, LocalPort, OwningProcess
 ```
 
-再结束对应进程，把 `<PID>` 替换为上一步查到的 `OwningProcess`：
+再结束进程：
 
 ```powershell
 Stop-Process -Id <PID> -Force
 ```
 
-开发模式下如果 `5173` 也被占用，同样查询并关闭：
+开发模式下如 `5173` 被占用，可用同样方式查询并停止。
 
-```powershell
-Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue |
-  Select-Object LocalAddress, LocalPort, OwningProcess
+## 项目简介
 
-Stop-Process -Id <PID> -Force
+本项目是桥梁施工自动排程 Demo，用于把项目结构参数、施工工艺及工效、工艺逻辑、资源配置、里程碑目标和求解策略统一建模，并通过 OR-Tools CP-SAT 输出施工计划、资源分配、里程碑偏差、资源建议、连续性指标和方案对比结果。
+
+当前实现以桥梁施工排程验证为主，前端提供可操作的配置与结果页面，后端负责默认场景、结构参数导入、任务生成、CP-SAT 求解、本地配置读写和演示静态页面托管。详细算法口径见 `docs/排程算法当前实现交底文档_v1.0.md`。
+
+## 核心功能
+
+- 项目结构建模：使用 `ProjectModel -> ProjectBridge -> WorkSection -> StructureModel -> ComponentModel` 表达项目、桥梁、工区、墩台和构件。
+- 结构参数导入：支持 `.xlsx`、`.xlsm` 桥梁结构参数表，结合本体配置生成项目结构参数、质量检查和告警。
+- 工艺工效库：维护构件类型、施工工艺、工程量来源、工期算法、工效值、默认资源类型。
+- 工艺逻辑：维护下部结构同结构内逻辑、跨结构顺序逻辑，以及现浇箱梁、现浇连续梁相关上部结构逻辑。
+- 任务视图：从 `ScenarioInput` 生成求解前任务图，输出任务、前后置、资源候选和诊断。
+- 资源配置：维护受限 / 不受限资源池、当前数量、最大数量、启用状态、成本属性和资源日历。
+- 里程碑配置：维护桥梁、工点或项目层级的关键目标日期，并参与结果评价。
+- 模拟求解：支持固定资源最短工期、固定工期最少资源、资源成本优化和方案对比。
+- AI 参数输入助手：支持文本和资料文件提取工艺、资源、里程碑参数建议，经人工审阅后应用。
+- 自然语言工艺设置：支持用自然语言批量调整构件工艺，默认先使用本地解析，可选接入外部模型。
+
+## 适用场景
+
+- 产品和研发共同验证桥梁施工排程 Demo 的功能闭环。
+- 基于结构参数、资源和里程碑快速生成可解释的施工计划。
+- 对比不同资源配置、工艺配置或工期目标下的排程结果。
+- 作为需求评审、研发交底、算法说明和 Spec Kit 规格化开发的项目样例。
+
+不适合作为正式生产排程系统直接使用；生产级用户、权限、审计、持久化、项目级配置隔离和正式数据接入仍需确认。
+
+## 技术栈
+
+- 后端：Python、FastAPI、Pydantic、OR-Tools CP-SAT、openpyxl、pytest。
+- 前端：React 19、TypeScript、Vite 6、lucide-react。
+- 本地运行：PowerShell、Python 虚拟环境、npm workspace。
+- 部署配置：Netlify 静态前端、Docker FastAPI 后端。
+
+## 目录结构
+
+```text
+.
+├── AGENTS.md                 # 项目工作分流与治理规则
+├── agent.md                  # 项目 Agent 工作手册和项目知识索引
+├── README.md                 # 项目入口说明、启动、配置、测试和部署
+├── requirements.txt          # 后端 Python 依赖
+├── package.json              # 前端 npm workspace 根配置
+├── Dockerfile                # FastAPI 后端容器构建配置
+├── netlify.toml              # Netlify 前端构建与发布配置
+├── backend/
+│   ├── app/                  # FastAPI、模型、任务生成、求解器、导入和本地配置
+│   └── tests/                # 后端测试
+├── frontend/
+│   ├── src/                  # React 页面、领域逻辑、API 客户端和类型
+│   └── vite.config.ts        # Vite 开发代理配置
+├── docs/                     # PRD、算法交底、页面需求和验证说明
+├── specs/                    # Spec Kit 规格化开发产物
+├── .agents/                  # 项目内 Spec Kit / Agent 技能
+├── .specify/                 # Spec Kit 配置
+└── .local-data/              # 本地运行生成的配置数据，已被 git 忽略
 ```
 
-也可以一次性清理本项目常用端口：
+根目录下的 `.xlsx` 文件会被 `backend/app/project_structure_params.py` 作为本地结构参数来源之一读取。当前仓库中可见示例文件为 `渠溪河特大桥结构设计表.xlsx`。
+
+## 环境要求
+
+- Windows PowerShell：当前命令示例以 Windows 为主。
+- Python：Dockerfile 使用 `python:3.12-slim`；本地最低版本未在项目配置中声明，需确认。
+- Node.js / npm：Netlify 构建环境声明 `NODE_VERSION = "22"`；Vite 6 依赖要求 Node 18+，`@vitejs/plugin-react` 当前依赖要求 `^20.19.0 || >=22.12.0`。
+- 网络：首次安装 Python 和 npm 依赖需要访问包源；项目运行本身不要求公网，除非配置外部 AI / LLM 适配器。
+
+## 安装依赖
+
+后端依赖：
 
 ```powershell
-foreach ($port in 8000, 8002, 5173) {
-  Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
-    ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
-}
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt --cache-dir .pip-cache
 ```
 
-## 验证
+前端依赖：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest backend\tests -q
-cd frontend
-npm run build
+npm.cmd install --cache .npm-cache
 ```
 
-项目根目录支持本地配置文件 `.local.env`，后端启动时会自动读取。该文件已加入 `.gitignore`，不会随 git 推送。首次配置时可以复制模板：
+常用 npm 脚本：
+
+```powershell
+npm.cmd run build
+npm.cmd run frontend:dev
+npm.cmd run frontend:preview
+```
+
+## 配置说明
+
+### `.local.env`
+
+项目根目录支持 `.local.env`，后端启动时会自动读取。该文件已加入 `.gitignore`，不要提交真实密钥。
+
+首次配置可复制模板：
 
 ```powershell
 Copy-Item .local.env.example .local.env
 ```
 
-桥梁 Excel 导入默认使用本地本体适配器。需要接外部 AI 服务时，在 `.local.env` 中配置：
+当前模板包含以下配置组：
+
+| 配置组 | 作用 |
+| --- | --- |
+| `BRIDGE_IMPORT_LLM_*` | 桥梁 Excel 导入适配器。默认 `local`，可选接入 HTTP 适配器。 |
+| `PROCESS_NL_LLM_*` | 自然语言工艺设置适配器。默认 `local`，可选接入 OpenAI-compatible 或自定义 HTTP 适配器。 |
+| `SUPABASE_POSTGRES_*` | 后端服务端连接 Supabase PostgreSQL 的配置；当前 README 未在代码路径中确认其生产使用方式，需确认。 |
+
+代码中还支持 `AI_PARAMETER_ASSISTANT_*` 作为 AI 参数输入助手的外部模型配置，但 `.local.env.example` 当前未提供模板项，需确认是否补充。
+
+### 本地配置数据
+
+后端读取 `/api/demo-scenario` 时的配置合并顺序：
+
+1. `backend/app/scenario_data.py` 生成默认场景。
+2. 叠加 `backend/app/default_scenario_config.json` 中随代码发布的默认配置。
+3. 叠加 `.local-data/scheduler-config.json` 中本地保存的配置。
+
+`.local-data/` 已被 git 忽略，用于本地模拟配置库；浏览器刷新或本地服务重启后仍会读取。需要随代码发布的默认值应更新到 `backend/app/default_scenario_config.json`。
+
+当前本地配置可保存：
+
+- `process_library`：工艺工效库。
+- `logic_rules`：下部结构工艺逻辑。
+- `upper_structure_logic_rules`：上部结构逻辑。
+- `resource_pools`：资源配置。
+- `milestones`：里程碑配置。
+
+项目结构参数另存为 `.local-data/project-structure-params.json`。如果该文件不存在，后端会尝试读取根目录第一个非临时 `.xlsx` 文件；仍未找到时使用默认示例项目。
+
+### 本体配置
+
+结构参数导入和工艺逻辑依赖本地本体 JSON：
+
+- `backend/app/ontology/bridge_structure_ontology.v1.json`
+- `backend/app/ontology/bridge_schedule_logic_ontology.v1.json`
+
+修改本体会影响结构识别、任务生成和前后置规则，应结合测试验证。
+
+## 主要 API
+
+| API | 作用 |
+| --- | --- |
+| `GET /api/health` | 健康检查 |
+| `GET /api/demo-scenario` | 读取合并后的默认排程场景 |
+| `GET /api/process-library` | 读取工艺工效库 |
+| `PUT /api/process-library` | 保存工艺工效库 |
+| `PUT /api/local-scenario-config` | 保存工艺、逻辑、资源、里程碑等本地配置 |
+| `GET /api/project-structure-params` | 读取项目结构参数 |
+| `PUT /api/project-structure-params` | 保存项目结构参数 |
+| `POST /api/apply-project-structure-params` | 将项目结构参数应用到当前场景 |
+| `POST /api/generate-schedule-input` | 由场景生成任务图和求解输入 |
+| `POST /api/solve-scenario` | 固定资源最短工期求解 |
+| `POST /api/solve-min-resources` | 固定工期最少资源求解 |
+| `POST /api/solve-resource-cost` | 固定工期资源成本优化 |
+| `POST /api/compare-scenarios` | 多方案结果对比 |
+| `POST /api/apply-process-natural-language` | 自然语言工艺设置 |
+| `POST /api/ai-parameter-assistant/parse` | AI 参数输入助手解析资料 |
+| `POST /api/ai-parameter-assistant/apply` | 应用 AI 参数建议 |
+| `POST /api/import-bridge-params` | 上传 Excel 并导入结构参数 |
+| `POST /api/import-local-bridge-params` | 使用本地结构参数来源导入 |
+
+兼容接口仍保留：`GET /api/demo`、`POST /api/generate-wbs`、`POST /api/solve`。
+
+## 常用命令
+
+```powershell
+# 后端健康检查
+Invoke-RestMethod http://127.0.0.1:8000/api/health
+
+# 后端测试
+.\.venv\Scripts\python.exe -m pytest backend\tests -q
+
+# 前端构建
+npm.cmd run build
+
+# 前端开发服务
+npm.cmd run frontend:dev
+
+# 前端预览构建产物
+npm.cmd run frontend:preview
+```
+
+## 测试方式
+
+后端测试：
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest backend\tests -q
+```
+
+前端类型检查和构建：
+
+```powershell
+npm.cmd run build
+```
+
+文档或配置改动至少应运行相关轻量验证。算法、资源、工期、CP-SAT、前后端共享字段或结果口径变更，应补充或运行对应后端测试，并说明未覆盖场景。
+
+## 部署说明
+
+当前仓库保留“Netlify 静态前端 + Docker FastAPI 后端”的拆分部署配置。
+
+### Netlify 前端
+
+`netlify.toml` 当前配置：
+
+- 构建命令：`npm run build`
+- 发布目录：`frontend/dist`
+- Node 版本：`22`
+- 单页应用重定向：`/* -> /index.html`
+
+前端 API 客户端会读取 `VITE_API_BASE_URL`。生产环境部署到 Netlify 且未配置该变量时，前端会主动报错，提示无法连接完整 FastAPI / OR-Tools 后端。
+
+示例：
 
 ```env
-BRIDGE_IMPORT_LLM_PROVIDER=http
-BRIDGE_IMPORT_LLM_ENDPOINT=https://your-adapter.example.com/bridge-import
-BRIDGE_IMPORT_LLM_MODEL=your-model
-BRIDGE_IMPORT_LLM_API_KEY=your-api-key
+VITE_API_BASE_URL=https://your-backend.example.com
 ```
 
-项目参数页“工艺快速设置”默认先尝试本地解析。需要直接调用公网模型时，推荐使用 OpenAI-compatible 配置：
+### Docker 后端
 
-```env
-PROCESS_NL_LLM_PROVIDER=openai_compatible
-PROCESS_NL_LLM_ENDPOINT=https://your-provider.example.com/v1/chat/completions
-PROCESS_NL_LLM_MODEL=your-model
-PROCESS_NL_LLM_API_KEY=your-api-key
-PROCESS_NL_LLM_TEMPERATURE=0
-PROCESS_NL_LLM_RESPONSE_FORMAT=json_object
+`Dockerfile` 使用 `python:3.12-slim`，安装 `requirements.txt`，复制 `backend/` 和根目录 `.xlsx` 文件，启动命令为：
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --app-dir backend
 ```
 
-常见兼容接口只需要把 `PROCESS_NL_LLM_ENDPOINT`、`PROCESS_NL_LLM_MODEL`、`PROCESS_NL_LLM_API_KEY` 换成供应商提供的值即可。`PROCESS_NL_LLM_PROVIDER` 也可以写成 `deepseek`、`qwen`、`siliconflow`，内部都会按 Chat Completions 格式调用。
+后端跨域配置：
 
-如果你的公网模型不支持 `response_format`，可以关闭强制 JSON：
+| 环境变量 | 作用 |
+| --- | --- |
+| `SCHEDULER_CORS_ORIGINS` | 逗号分隔的允许来源，建议包含 Netlify 生产域名。 |
+| `SCHEDULER_CORS_ORIGIN_REGEX` | 可选，默认允许 `https://<deploy-id>--project-scheduling-lili-big.netlify.app` 形式的 Netlify 预览域名。 |
 
-```env
-PROCESS_NL_LLM_RESPONSE_FORMAT=none
-```
+生产后端实际托管平台、正式域名、持久化存储和备份方式未在仓库配置中完整确认，需确认。
 
-如果你仍想接一个自定义中间适配器，可以使用：
+### Netlify Functions
 
-```env
-PROCESS_NL_LLM_PROVIDER=http
-PROCESS_NL_LLM_ENDPOINT=https://your-adapter.example.com/process-intent
-PROCESS_NL_LLM_MODEL=your-model
-PROCESS_NL_LLM_API_KEY=your-api-key
-```
+`netlify/demo-functions/api.mts` 保留为演示 / 参考 API。当前 `netlify.toml` 未配置 Functions 发布目录，完整排程能力以 FastAPI 后端为准。
 
-适配器返回 JSON 即可，例如：
+## 开发规范
 
-```json
-{
-  "intents": [
-    {
-      "component_type": "pile",
-      "process_method_id": "manual_pile",
-      "process_name": "人工挖孔",
-      "sides": ["left"],
-      "support_nos": ["3#墩", "4#墩"],
-      "action": "指定墩桩基工艺"
-    }
-  ],
-  "warnings": []
-}
-```
+- 进入项目后先看 `AGENTS.md` 判断工作流，再结合 `agent.md`、`README.md` 和相关 `docs/` 理解项目事实。
+- 涉及算法、排程、资源、工期、CP-SAT、前后端联动或中大型改动时，按 `AGENTS.md` 进入 Spec Kit。
+- 不把 Demo、Mock、兼容接口或本地 `.local-data` 写成正式产品规则。
+- 不提交 `.local.env`、真实密钥、个人凭据、`.local-data/`、缓存目录或构建产物。
+- 优先复用现有模型、服务、组件、接口和测试结构，避免无关重构。
+- 修改共享字段或结果口径时，同步检查 `backend/app/models.py`、`frontend/src/types/scheduler.ts`、相关 API 调用和测试。
+- 文档更新应基于当前代码、配置和 docs 事实；不确定内容写入“需确认”，不要自行补全为确定结论。
 
-服务启动后也可以快速检查后端是否可用：
+## 主要文档
+
+- `docs/项目排程系统整体说明_v1.1.md`：系统定位、模块和数据模型总览。
+- `docs/排程算法当前实现交底文档_v1.0.md`：当前算法实现、目标函数、约束、资源规则和诊断口径。
+- `docs/模拟求解-MVP页面需求文档_v1.2.md`：模拟求解 MVP 页面需求。
+- `docs/任务视图页面需求文档_v1.0.md`：任务视图页面需求。
+- `docs/资源配置页面需求文档_v1.0.md`：资源配置页面需求。
+- `docs/工艺逻辑约束需求文档_v1.1.md`：工艺逻辑约束需求。
+- `docs/施工工艺及工效库需求文档_v1.1.md`：施工工艺及工效库需求。
+- `docs/AI参数输入助手验证说明.md`：AI 参数输入助手验证说明。
+
+## 常见问题
+
+### 页面打不开或接口请求失败
+
+先确认后端是否启动：
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/api/health
 ```
-## 本地配置模拟
 
-后端启动 `/api/demo-scenario` 时会先构造默认场景，再叠加 `backend/app/default_scenario_config.json` 中随代码发布的默认配置，最后叠加 `.local-data/scheduler-config.json` 中保存的本地配置。`.local-data` 文件用于临时模拟配置库，不随 git 提交。
+开发模式请访问 `http://127.0.0.1:5173/`，演示模式请访问 `http://127.0.0.1:8000/`。
 
-当前保存的配置范围包括：
+### 修改前端后页面没有变化
 
-- `process_library`：工艺工效库。
-- `logic_rules`：下部结构工艺逻辑。
-- `upper_structure_logic_rules`：上部结构关联逻辑。
-- `resource_pools`：资源配置。
+如果使用演示模式，需要重新执行：
 
-前端“工艺工效库”“工艺逻辑”“资源配置”页签均使用显式保存按钮。保存会调用后端本地配置接口并写入上述 JSON 文件；刷新浏览器或重启本地服务后仍会读取该配置。
-
-相关接口：
-
-- `GET /api/process-library`：读取本地叠加后的工艺工效库。
-- `PUT /api/process-library`：仅保存工艺工效库。
-- `PUT /api/local-scenario-config`：一次保存工艺工效库、工艺逻辑和资源配置。
-
-## 本地本体配置
-
-工艺逻辑规则由本地 JSON 维护，文件路径：
-
-```text
-backend/app/ontology/bridge_schedule_logic_ontology.v1.json
+```powershell
+npm.cmd run build
 ```
 
-产品经理可直接维护其中的 `logic_rules`：
+如果使用开发模式，访问 `5173`，不要访问 `8000` 检查热更新。
 
-- `id`：规则稳定编号，供系统引用。
-- `scope`：`same_structure` 表示同一墩台内约束，`structure_sequence` 表示跨墩台顺序约束。
-- `structure_type`：`pier` 表示桥墩，`abutment` 表示桥台，`null` 表示都适用。
-- `to_component`：当前/后续构件类型，例如 `cap`、`pier_body`、`abutment_body`。
-- `predecessor_candidates`：候选前置构件类型，按数组顺序表达优先级。
-- `predecessor_strategy`：`all` 表示候选前置全部满足，`first_available` 表示按顺序优先回退。
-- `relationship`：`FS` 表示前置完成后开始，`SS` 表示前置开始后开始。
-- `lag_days`：逻辑间隔天数。
-- `note`：页面展示和诊断使用的中文说明。
+### Netlify 页面提示无法连接后端
+
+确认 Netlify 环境变量 `VITE_API_BASE_URL` 已设置为 FastAPI 后端公开 HTTPS 地址，并确认后端 CORS 允许该前端域名。
+
+### 本地保存的工艺、逻辑或资源配置没有同步到云端
+
+`.local-data/scheduler-config.json` 是本地模拟配置库，已被 git 忽略。需要随代码发布的默认配置应更新到 `backend/app/default_scenario_config.json` 并随 Git 发布。
+
+### Excel 导入失败
+
+确认文件后缀为 `.xlsx` 或 `.xlsm`，不要上传 Excel 临时锁文件 `~$*.xlsx`。如使用外部导入适配器，检查 `BRIDGE_IMPORT_LLM_*` 配置。
+
+### AI 参数助手无法调用外部模型
+
+代码支持 `AI_PARAMETER_ASSISTANT_PROVIDER`、`AI_PARAMETER_ASSISTANT_ENDPOINT`、`AI_PARAMETER_ASSISTANT_MODEL`、`AI_PARAMETER_ASSISTANT_API_KEY`、`AI_PARAMETER_ASSISTANT_RESPONSE_FORMAT`、`AI_PARAMETER_ASSISTANT_TIMEOUT_SECONDS`。当前 `.local.env.example` 未包含该配置组，需确认是否补充模板。
+
+## 待确认事项
+
+- 本地运行支持的最低 Python 版本。当前 Dockerfile 使用 Python 3.12，但 `requirements.txt` 未声明最低版本。
+- 本地运行推荐的 Node.js 版本。Netlify 使用 Node 22，Vite 6 依赖 Node 18+，`@vitejs/plugin-react` 当前依赖要求 `^20.19.0 || >=22.12.0`。
+- 生产后端的正式托管平台、域名、持久化存储、备份和权限策略。
+- `SUPABASE_POSTGRES_*` 在当前项目中的实际启用范围和数据写入边界。
+- 是否将 `AI_PARAMETER_ASSISTANT_*` 补充到 `.local.env.example`。
+- 是否需要为云端默认配置建立明确发布流程，避免本地 `.local-data` 与代码内置默认值混淆。

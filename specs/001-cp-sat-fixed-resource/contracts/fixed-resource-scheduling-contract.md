@@ -19,16 +19,17 @@ This contract documents the user-visible scheduling behavior that backend, front
 **Required main-result behavior**
 
 - If scenario generation has blocking errors, return no misleading schedule and include diagnostics.
-- If current resources produce a usable reference schedule, evaluate all matched mandatory milestones.
-- If all matched mandatory milestones are satisfied, return a refined current-resource schedule when refinement succeeds.
-- If all matched mandatory milestones are satisfied but refinement fails, return the current-resource reference schedule as a clearly labeled fallback.
-- If at least one matched mandatory milestone is delayed, return the current-resource reference schedule with delayed milestone diagnostics and resource recommendation status.
+- Run the current-resource target schedule directly with the current objective model.
+- If current resources satisfy the business target, return the current-resource target schedule as `current_resources_control_priority_balanced`.
+- If current resources produce an inspectable schedule but the business target is not met, return that schedule as `current_resources_target_failed` with delayed milestone diagnostics and resource recommendation status.
+- If the solver cannot confirm target feasibility within run limits, return `target_unconfirmed` with diagnostics.
+- If construction hard rules or resource coverage are physically infeasible, return `physical_infeasible` without implying that resource recommendation solved the case.
 
 ## Minimum-Resource Candidate
 
 **Trigger**
 
-- Only when the current-resource reference schedule delays at least one matched mandatory milestone.
+- Only when the current-resource target schedule is inspectable but fails the business target.
 
 **Required behavior**
 
@@ -50,9 +51,10 @@ This contract documents the user-visible scheduling behavior that backend, front
 
 The result contract must distinguish these categories in result metadata and frontend display:
 
-- `current_resources_capacity_shortest`: current-resource reference schedule.
 - `current_resources_control_priority_balanced`: refined current-resource schedule.
-- `current_resources_capacity_shortest_fallback`: current-resource refinement fallback.
+- `current_resources_target_failed`: current-resource schedule is inspectable but does not meet the business target.
+- `target_unconfirmed`: current-resource target status is not confirmed within run limits.
+- `physical_infeasible`: construction hard rules or resource coverage are infeasible.
 - `minimum_resources_control_priority_balanced`: refined minimum-resource candidate.
 - `minimum_resources_refinement_fallback`: minimum-resource refinement fallback after feasibility verification.
 

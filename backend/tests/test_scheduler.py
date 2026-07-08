@@ -38,18 +38,14 @@ def test_schedule_strategy_merges_objective_term_defaults_and_ignores_legacy_bal
         "control_node_late",
         "resource_idle",
         "resource_path_continuity",
-        "resource_slot_balance",
         "makespan_and_soft_milestone",
-        "target_relaxation",
     }
     assert set(OBJECTIVE_METRIC_DEFINITIONS) == set(config.objective_terms)
     assert config.enable_balance_objective is False
-    assert config.objective_terms["control_node_late"].weight == 1_000_000_000
+    assert config.objective_terms["control_node_late"].weight == 10_000_000_000
     assert config.objective_terms["makespan_and_soft_milestone"].weight == 5_000_000
     assert config.objective_terms["resource_path_continuity"].weight == 50_000
     assert config.objective_terms["resource_idle"].weight == 50_000
-    assert config.objective_terms["target_relaxation"].weight == 1_000_000_000
-    assert config.objective_terms["resource_slot_balance"].weight == 50_000
     assert {
         term_id
         for term_id, term_config in config.objective_terms.items()
@@ -79,10 +75,8 @@ def test_schedule_strategy_merges_objective_term_defaults_and_ignores_legacy_bal
             "resource_path_continuity": {"enabled": False, "weight": 456},
         }
     )
-    assert inherited_config.objective_terms["target_relaxation"].enabled is False
-    assert inherited_config.objective_terms["target_relaxation"].weight == 123
-    assert inherited_config.objective_terms["resource_slot_balance"].enabled is False
-    assert inherited_config.objective_terms["resource_slot_balance"].weight == 50_000
+    assert inherited_config.objective_terms["control_node_late"].enabled is False
+    assert inherited_config.objective_terms["resource_path_continuity"].weight == 456
 
     legacy_config = ScheduleStrategyConfig(
         enable_balance_objective=True,
@@ -128,15 +122,15 @@ def test_schedule_strategy_merges_objective_term_defaults_and_ignores_legacy_bal
     assert "same_structure_craft_split" not in deprecated_same_structure.objective_terms
 
 
-def test_default_solve_time_limit_is_twenty_seconds() -> None:
-    assert default_scenario().time_limit_seconds == 20
+def test_default_solve_time_limit_is_fifteen_seconds() -> None:
+    assert default_scenario().time_limit_seconds == 15
     assert ScheduleInput(
         project_name="default-time-limit",
         start_date=date(2026, 1, 1),
         tasks=[],
         precedence_links=[],
         resources=[],
-    ).time_limit_seconds == 20
+    ).time_limit_seconds == 15
 
 
 def test_schedule_strategy_rejects_invalid_objective_term_config() -> None:
@@ -144,7 +138,7 @@ def test_schedule_strategy_rejects_invalid_objective_term_config() -> None:
         ScheduleStrategyConfig(objective_terms={"unknown_term": {"enabled": True, "weight": 1}})
 
     with pytest.raises(ValidationError, match="less than or equal"):
-        ScheduleStrategyConfig(objective_terms={"resource_idle": {"enabled": True, "weight": 1_000_000_001}})
+        ScheduleStrategyConfig(objective_terms={"resource_idle": {"enabled": True, "weight": 10_000_000_001}})
 
     with pytest.raises(ValidationError, match="at least one objective term must be enabled"):
         ScheduleStrategyConfig(
@@ -152,9 +146,7 @@ def test_schedule_strategy_rejects_invalid_objective_term_config() -> None:
                 "control_node_late": {"enabled": False, "weight": 1},
                 "resource_idle": {"enabled": False, "weight": 1},
                 "resource_path_continuity": {"enabled": False, "weight": 1},
-                "resource_slot_balance": {"enabled": False, "weight": 1},
                 "makespan_and_soft_milestone": {"enabled": False, "weight": 1},
-                "target_relaxation": {"enabled": False, "weight": 1},
             }
         )
 
@@ -164,9 +156,7 @@ def test_schedule_strategy_rejects_invalid_objective_term_config() -> None:
                 "control_node_late": {"enabled": False, "weight": 1},
                 "resource_idle": {"enabled": False, "weight": 1},
                 "resource_path_continuity": {"enabled": False, "weight": 1},
-                "resource_slot_balance": {"enabled": False, "weight": 1},
                 "makespan_and_soft_milestone": {"enabled": False, "weight": 1},
-                "target_relaxation": {"enabled": False, "weight": 1},
                 "resource_workload_balance": {"enabled": True, "weight": 100},
             }
         )
@@ -177,9 +167,7 @@ def test_schedule_strategy_rejects_invalid_objective_term_config() -> None:
                 "control_node_late": {"enabled": False, "weight": 1},
                 "resource_idle": {"enabled": False, "weight": 1},
                 "resource_path_continuity": {"enabled": False, "weight": 1},
-                "resource_slot_balance": {"enabled": False, "weight": 1},
                 "makespan_and_soft_milestone": {"enabled": False, "weight": 1},
-                "target_relaxation": {"enabled": False, "weight": 1},
                 "unconfigured_normal_balance": {"enabled": True, "weight": 10},
             }
         )
@@ -190,9 +178,7 @@ def _objective_terms_with_only(enabled_term: str, weight: int) -> dict[str, dict
         "control_node_late",
         "makespan_and_soft_milestone",
         "resource_path_continuity",
-        "resource_slot_balance",
         "resource_idle",
-        "target_relaxation",
     ]
     return {
         term_id: {"enabled": term_id == enabled_term, "weight": weight if term_id == enabled_term else 1}
@@ -1355,7 +1341,7 @@ def test_scenario_solver_satisfies_ss_logic() -> None:
         assert by_task[link.successor_id].start_offset >= by_task[link.predecessor_id].start_offset + link.lag_days
 
 
-def test_fixed_resource_shortest_marks_hard_milestone_lateness_infeasible_but_keeps_schedule() -> None:
+def test_fixed_resource_shortest_marks_hard_milestone_lateness_as_target_failed_and_keeps_schedule() -> None:
     pytest.importorskip("ortools")
     scenario = default_scenario()
     hard_milestone = scenario.milestones[0].model_copy(
@@ -1365,30 +1351,36 @@ def test_fixed_resource_shortest_marks_hard_milestone_lateness_infeasible_but_ke
 
     solved = solve_scenario(scenario)
 
-    assert solved.result.status == "INFEASIBLE"
+    target = solved.result.stats["target_achievement"]
+    assert solved.result.status in {"OPTIMAL", "FEASIBLE"}
     assert solved.result.objective_breakdown["solve_mode"] == "fixed_resources_shortest_control_balanced"
-    assert solved.result.objective_breakdown["schedule_source"] == "current_resources_refinement_failed"
+    assert solved.result.objective_breakdown["schedule_source"] == "current_resources_target_failed"
     assert solved.result.objective_breakdown["capacity_precheck_status"] == "not_run"
     assert solved.result.objective_breakdown["resource_recommendation_status"] == "critical_path_infeasible"
-    assert solved.result.tasks == []
+    assert target["business_success"] is False
+    assert target["target_status"] == "current_resources_target_failed"
+    assert target["hard_milestone_late_days"] > 0
+    assert solved.result.tasks
 
 
 def test_fixed_resource_shortest_returns_resource_increment_recommendation_when_resources_can_meet_target() -> None:
     pytest.importorskip("ortools")
     solved = solve_scenario(_parallel_fixed_resource_scenario(target_days=5, current_resources=1, max_resources=3))
 
-    assert solved.result.status == "INFEASIBLE"
+    target = solved.result.stats["target_achievement"]
+    assert solved.result.status in {"OPTIMAL", "FEASIBLE"}
+    assert target["target_status"] == "current_resources_target_failed"
     assert solved.result.objective_breakdown["resource_recommendation_status"] == "recommended_resources_verified"
     recommended = solved.result.objective_breakdown["recommended_resource_counts"][0]
     assert recommended["current_quantity"] == 1
     assert recommended["recommended_quantity"] == 2
     assert recommended["added_quantity"] == 1
     assert recommended["max_quantity"] == 3
-    assert solved.result.objective_breakdown["schedule_source"] == "current_resources_refinement_failed"
-    assert solved.result.objective_breakdown["performance_path"] == "direct_named_refinement_failed_resource_recommendation"
+    assert solved.result.objective_breakdown["schedule_source"] == "current_resources_target_failed"
+    assert solved.result.objective_breakdown["performance_path"] == "current_resources_full_objective_target_failed_resource_recommendation"
     assert solved.result.objective_breakdown["capacity_precheck_status"] == "not_run"
-    assert solved.result.objective_breakdown["skipped_named_refinement_reason"] == "control_priority_infeasible"
-    assert "control_priority_analysis" not in solved.result.stats
+    assert solved.result.objective_breakdown["skipped_named_refinement_reason"] == "current_resources_target_failed"
+    assert "control_priority_analysis" in solved.result.stats
     assert len(solved.alternative_results) == 1
     alternative = solved.alternative_results[0]
     assert alternative.role == "minimum_resources"
@@ -1404,7 +1396,12 @@ def test_fixed_resource_recommendation_matches_direct_min_resource_solver() -> N
     pytest.importorskip("ortools")
     scenario = _parallel_fixed_resource_scenario(target_days=5, current_resources=1, max_resources=3)
     direct_generated = generate_schedule_input_from_scenario(scenario, use_max_resources=True)
-    direct = solve_min_resources_schedule(direct_generated.schedule_input)
+    current_generated = generate_schedule_input_from_scenario(scenario)
+    minimum_counts = scenario_module._resource_minimum_counts(current_generated.schedule_input)
+    direct = solve_min_resources_schedule(
+        direct_generated.schedule_input,
+        minimum_resource_counts=minimum_counts,
+    )
     solved = solve_scenario(scenario)
 
     direct_recommended = {
@@ -1456,7 +1453,7 @@ def test_fixed_resource_minimum_candidate_reruns_refinement_before_display(
     assert alternative.result.stats["continuity_objective"]["resource_path_node_count"] == 0
 
 
-def test_fixed_resource_minimum_candidate_keeps_verified_schedule_when_refinement_fails(
+def test_fixed_resource_unconfirmed_current_solve_does_not_enter_recommendation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pytest.importorskip("ortools")
@@ -1477,13 +1474,12 @@ def test_fixed_resource_minimum_candidate_keeps_verified_schedule_when_refinemen
 
     solved = solve_scenario(_parallel_fixed_resource_scenario(target_days=5, current_resources=1, max_resources=3))
 
-    assert solved.result.objective_breakdown["resource_recommendation_status"] == "recommended_resources_verified"
-    assert solved.result.objective_breakdown["recommended_schedule_source"] == "minimum_resources_refinement_fallback"
-    alternative = solved.alternative_results[0]
-    assert alternative.result.status in {"OPTIMAL", "FEASIBLE"}
-    assert alternative.result.stats["schedule_source"] == "minimum_resources_refinement_fallback"
-    assert alternative.result.stats["minimum_resource_refinement_status"] == "UNKNOWN"
-    assert alternative.result.stats["recommended_resource_counts"][0]["added_quantity"] == 1
+    target = solved.result.stats["target_achievement"]
+    assert solved.result.status == "UNKNOWN"
+    assert solved.result.objective_breakdown["resource_recommendation_status"] == "unconfirmed"
+    assert solved.result.objective_breakdown["schedule_source"] == "target_unconfirmed"
+    assert target["target_status"] == "unconfirmed"
+    assert solved.alternative_results == []
 
 
 def test_fixed_resource_strict_refinement_failure_returns_failure_and_recommendation(
@@ -1501,21 +1497,22 @@ def test_fixed_resource_strict_refinement_failure_returns_failure_and_recommenda
         **_: object,
     ) -> ScheduleResult:
         calls.append(relax_target_constraints)
-        if not relax_target_constraints:
+        if relax_target_constraints:
             return ScheduleResult(
                 status="UNKNOWN",
                 plan_start_date=schedule_input.start_date,
-                validation=[ValidationMessage(level="warning", message="strict refinement timed out")],
+                validation=[ValidationMessage(level="warning", message="full objective refinement timed out")],
                 stats={"wall_time_seconds": 5.0, "warm_start_used": True, "solver_call_count": 1},
             )
 
-        raise AssertionError("current-resource best-effort refinement should not be called")
+        raise AssertionError("fixed-resource strict refinement should not be called")
 
     def fake_recommendation(
         scenario_input: ScenarioInput,
         current_schedule_input: ScheduleInput,
         *,
         critical_path: dict[str, object] | None = None,
+        budget: object | None = None,
     ) -> dict[str, object]:
         recommendation_calls.append(current_schedule_input.project_name)
         return {
@@ -1532,18 +1529,18 @@ def test_fixed_resource_strict_refinement_failure_returns_failure_and_recommenda
 
     solved = solve_scenario(scenario)
 
-    assert calls == [False]
-    assert recommendation_calls == [solved.generated.schedule_input.project_name]
+    assert calls == [True]
+    assert recommendation_calls == []
     assert solved.result.status == "UNKNOWN"
-    assert solved.result.stats["schedule_source"] == "current_resources_refinement_failed"
-    assert solved.result.objective_breakdown["performance_path"] == "direct_named_refinement_failed_resource_recommendation"
+    assert solved.result.stats["schedule_source"] == "target_unconfirmed"
+    assert solved.result.objective_breakdown["performance_path"] == "current_resources_full_objective_unconfirmed"
     assert solved.result.objective_breakdown["capacity_precheck_status"] == "not_run"
-    assert solved.result.objective_breakdown["skipped_named_refinement_reason"] == "control_priority_unknown"
-    assert solved.result.objective_breakdown["resource_recommendation_status"] == "resource_recommendation_unresolved"
+    assert solved.result.objective_breakdown["resource_recommendation_status"] == "unconfirmed"
+    assert solved.result.stats["target_achievement"]["target_status"] == "unconfirmed"
     assert "best_effort_refinement" not in solved.result.stats
 
 
-def test_minimum_resource_candidate_returns_best_effort_when_strict_refinement_fails(
+def test_minimum_resource_candidate_returns_target_failed_when_full_objective_misses_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     start = date(2026, 1, 1)
@@ -1583,12 +1580,6 @@ def test_minimum_resource_candidate_returns_best_effort_when_strict_refinement_f
         **_: object,
     ) -> ScheduleResult:
         calls.append(relax_target_constraints)
-        if not relax_target_constraints:
-            return ScheduleResult(
-                status="UNKNOWN",
-                plan_start_date=schedule_input.start_date,
-                validation=[ValidationMessage(level="warning", message="strict minimum refinement timed out")],
-            )
 
         milestone = schedule_input.milestones[0]
         return ScheduleResult(
@@ -1613,11 +1604,13 @@ def test_minimum_resource_candidate_returns_best_effort_when_strict_refinement_f
 
     result = scenario_module._minimum_resource_candidate_result(schedule_input, min_resource_result)
 
-    assert calls == [False, True]
+    assert calls == [True]
     assert result.status == "FEASIBLE"
     assert result.stats["schedule_source"] == "minimum_resources_best_effort_refinement"
     assert result.stats["recommended_schedule_source"] == "minimum_resources_best_effort_refinement"
-    assert result.stats["minimum_resource_refinement_status"] == "UNKNOWN"
+    assert result.stats["minimum_resource_refinement_status"] == "FEASIBLE"
+    assert result.stats["target_achievement"]["target_status"] == "candidate_resources_target_failed"
+    assert result.stats["target_achievement"]["business_success"] is False
     best_effort = result.stats["best_effort_refinement"]
     assert best_effort["target_lateness_days"] == 4
     assert best_effort["relaxed_constraints"][0]["type"] == "hard_milestone"
@@ -1656,8 +1649,15 @@ def test_fixed_resource_late_current_runs_direct_refinement_and_keeps_recommenda
         call_limits.append(("control", schedule_input.time_limit_seconds))
         return late_result(schedule_input)
 
-    def fake_min_resources(schedule_input: ScheduleInput, fallback_target_days: int | None = None) -> ScheduleResult:
+    def fake_min_resources(
+        schedule_input: ScheduleInput,
+        fallback_target_days: int | None = None,
+        minimum_resource_counts: dict[str, int] | None = None,
+        verify_with_full_objective: bool = True,
+    ) -> ScheduleResult:
         call_limits.append(("min_resources", schedule_input.time_limit_seconds))
+        assert minimum_resource_counts == {"pool-cap": 1}
+        assert verify_with_full_objective is False
         return ScheduleResult(
             status="INFEASIBLE",
             plan_start_date=schedule_input.start_date,
@@ -1684,25 +1684,147 @@ def test_fixed_resource_late_current_runs_direct_refinement_and_keeps_recommenda
 
     solve_scenario(scenario)
 
-    assert ("control", 5) in call_limits
-    assert ("min_resources", 5) in call_limits
+    assert any(label == "control" and 0 < limit <= 5 for label, limit in call_limits)
+    assert any(label == "min_resources" and 0 < limit <= 5 for label, limit in call_limits)
     assert not any(label == "capacity" for label, _ in call_limits)
-    assert all(limit == 5 for _, limit in call_limits)
+    assert all(0 < limit <= 5 for _, limit in call_limits)
+
+
+def test_fixed_resource_recommendation_retries_candidate_full_objective_up_to_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario = _parallel_fixed_resource_scenario(target_days=5, current_resources=1, max_resources=3)
+    scenario.time_limit_seconds = 5
+    lower_bound_calls: list[int] = []
+    search_limits: list[float] = []
+    verification_limits: list[float] = []
+
+    def late_current_result(schedule_input: ScheduleInput, **_: object) -> ScheduleResult:
+        milestone = schedule_input.milestones[0]
+        return ScheduleResult(
+            status="FEASIBLE",
+            objective_days=10,
+            plan_start_date=schedule_input.start_date,
+            plan_finish_date=schedule_input.start_date + timedelta(days=9),
+            milestone_results=[
+                MilestoneResult(
+                    **milestone.model_dump(),
+                    actual_date=schedule_input.start_date + timedelta(days=9),
+                    actual_offset=10,
+                    lateness_days=5,
+                    status="late",
+                )
+            ],
+        )
+
+    def fake_min_resources(
+        schedule_input: ScheduleInput,
+        fallback_target_days: int | None = None,
+        minimum_resource_counts: dict[str, int] | None = None,
+        verify_with_full_objective: bool = True,
+    ) -> ScheduleResult:
+        lower = int((minimum_resource_counts or {}).get("pool-cap", 0))
+        assert verify_with_full_objective is False
+        candidate = min(3, lower + 1)
+        lower_bound_calls.append(lower)
+        search_limits.append(schedule_input.time_limit_seconds)
+        target = {
+            "target_status": "unconfirmed",
+            "business_success": False,
+            "hard_milestone_late_days": 0,
+            "fixed_duration_overrun_days": 0,
+        }
+        recommended = [{"resource_pool_id": "pool-cap", "recommended_quantity": candidate}]
+        return ScheduleResult(
+            status="FEASIBLE",
+            plan_start_date=schedule_input.start_date,
+            stats={
+                "recommended_resource_counts": recommended,
+                "capacity_verification_status": "verified",
+                "schedule_source": "capacity_model_verified_schedule",
+                "recommended_schedule_source": "capacity_model_verified_schedule",
+                "target_achievement": target,
+                "fallback_target_days": fallback_target_days,
+            },
+            objective_breakdown={
+                "recommended_resource_counts": recommended,
+                "capacity_verification_status": "verified",
+                "target_achievement": target,
+            },
+        )
+
+    def failed_candidate_result(
+        limited_schedule_input: ScheduleInput,
+        min_resource_result: ScheduleResult,
+        *,
+        budget: object | None = None,
+    ) -> ScheduleResult:
+        verification_limits.append(limited_schedule_input.time_limit_seconds)
+        target = {
+            "target_status": "candidate_resources_target_failed",
+            "business_success": False,
+            "hard_milestone_late_days": 1,
+            "fixed_duration_overrun_days": 1,
+        }
+        return ScheduleResult(
+            status="FEASIBLE",
+            plan_start_date=limited_schedule_input.start_date,
+            stats={
+                "schedule_source": "minimum_resources_best_effort_refinement",
+                "target_achievement": target,
+            },
+            objective_breakdown={
+                "schedule_source": "minimum_resources_best_effort_refinement",
+                "target_achievement": target,
+            },
+        )
+
+    monkeypatch.setattr(scenario_module, "solve_control_priority_schedule", late_current_result)
+    monkeypatch.setattr(scenario_module, "solve_min_resources_schedule", fake_min_resources)
+    monkeypatch.setattr(scenario_module, "_minimum_resource_candidate_result", failed_candidate_result)
+    monkeypatch.setattr(
+        scenario_module,
+        "_critical_path_schedule",
+        lambda schedule_input: {
+            "status": "OK",
+            "objective_days": 4,
+            "plan_finish_date": schedule_input.start_date + timedelta(days=3),
+            "milestone_results": [],
+        },
+    )
+
+    solved = solve_scenario(scenario)
+
+    assert lower_bound_calls == [1, 2, 3, 3, 3]
+    assert len(search_limits) == scenario_module.MAX_RESOURCE_RECOMMENDATION_ATTEMPTS
+    assert len(verification_limits) == scenario_module.MAX_RESOURCE_RECOMMENDATION_ATTEMPTS
+    assert all(0 < limit <= 5 for limit in search_limits + verification_limits)
+    assert solved.result.objective_breakdown["resource_recommendation_status"] == "candidate_resources_full_objective_failed"
+    assert solved.result.objective_breakdown["resource_recommendation_attempt_count"] == 5
+    assert solved.result.objective_breakdown["recommended_resource_counts"][0]["recommended_quantity"] == 3
+    assert solved.alternative_results == []
+    assert any("5 次上限" in message.message for message in solved.result.validation)
 
 
 def test_fixed_resource_shortest_does_not_recommend_max_when_upper_bound_is_infeasible() -> None:
     pytest.importorskip("ortools")
     solved = solve_scenario(_parallel_fixed_resource_scenario(target_days=5, current_resources=1, max_resources=1))
 
-    assert solved.result.status == "INFEASIBLE"
+    target = solved.result.stats["target_achievement"]
+    assert solved.result.status in {"OPTIMAL", "FEASIBLE"}
+    assert solved.result.tasks
+    assert solved.result.objective_breakdown["schedule_source"] == "current_resources_target_failed"
+    assert target["business_success"] is False
+    assert target["target_status"] == "current_resources_target_failed"
+    assert target["hard_milestone_late_days"] > 0
     assert solved.result.objective_breakdown["resource_recommendation_status"] == "resource_upper_bound_infeasible"
     assert solved.result.objective_breakdown["recommended_resource_counts"] == []
     upper_bounds = solved.result.objective_breakdown["resource_upper_bound_counts"]
     assert upper_bounds[0]["current_quantity"] == 1
     assert upper_bounds[0]["upper_bound_quantity"] == 1
-    lower_bounds = solved.result.objective_breakdown["resource_capacity_lower_bounds"]
-    assert lower_bounds[0]["required_minimum"] == 2
-    assert lower_bounds[0]["exceeds_upper_bound"] is True
+    recommended_resources = solved.result.objective_breakdown["recommended_resources"]
+    assert recommended_resources["verification_result_source"] == "max_resources_target_failed"
+    assert recommended_resources["target_achievement"]["target_status"] == "max_resources_target_failed"
     assert solved.alternative_results == []
 
 
@@ -1712,7 +1834,12 @@ def test_fixed_resource_shortest_reports_critical_path_infeasible_without_resour
     pytest.importorskip("ortools")
     min_resource_calls = 0
 
-    def fake_min_resources(schedule_input: ScheduleInput, fallback_target_days: int | None = None) -> ScheduleResult:
+    def fake_min_resources(
+        schedule_input: ScheduleInput,
+        fallback_target_days: int | None = None,
+        minimum_resource_counts: dict[str, int] | None = None,
+        verify_with_full_objective: bool = True,
+    ) -> ScheduleResult:
         nonlocal min_resource_calls
         min_resource_calls += 1
         return ScheduleResult(status="UNKNOWN", plan_start_date=schedule_input.start_date)
@@ -1720,9 +1847,11 @@ def test_fixed_resource_shortest_reports_critical_path_infeasible_without_resour
     monkeypatch.setattr(scenario_module, "solve_min_resources_schedule", fake_min_resources)
     solved = solve_scenario(_parallel_fixed_resource_scenario(target_days=4, current_resources=1, max_resources=2))
 
-    assert solved.result.status == "INFEASIBLE"
+    assert solved.result.status in {"OPTIMAL", "FEASIBLE"}
+    assert solved.result.stats["target_achievement"]["target_status"] == "current_resources_target_failed"
     assert solved.result.objective_breakdown["resource_recommendation_status"] == "critical_path_infeasible"
     assert solved.result.objective_breakdown["recommended_resource_counts"] == []
+    assert solved.result.tasks
     assert solved.alternative_results == []
     assert min_resource_calls == 0
     assert any("增加资源也无法满足" in message.message for message in solved.result.validation)
@@ -2096,14 +2225,13 @@ def test_resource_path_continuity_groups_mechanical_drill_nodes_without_limit_co
     diagnostic = result.stats["drill_group_refinement"]
 
     assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert diagnostic["status"] == "stage2_refined"
+    assert diagnostic["status"] == "stage1_final"
     assert diagnostic["coarse_group_count"] == 3
     assert diagnostic["coarse_child_task_count"] == len(tasks)
-    assert objective["resource_path_node_count"] == 3
-    assert objective["resource_path_transition_arc_count"] == 6
-    assert objective["resource_path_granularity_counts"]["task"] == 0
-    assert objective["resource_path_granularity_counts"]["same_structure"] == 3
-    assert objective["resource_path_granularity_counts"]["same_structure_slot"] == 0
+    assert objective["resource_path_node_count"] == 0
+    assert objective["resource_path_transition_arc_count"] == 0
+    assert objective["stage1_route_node_count"] == 3
+    assert objective["stage1_route_candidate_arc_count"] == 6
 
 
 def test_resource_path_continuity_groups_mechanical_nodes_by_structure() -> None:
@@ -2134,14 +2262,28 @@ def test_resource_path_continuity_groups_mechanical_nodes_by_structure() -> None
     objective = result.stats["continuity_objective"]
 
     assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert objective["resource_path_node_count"] == 3
-    assert objective["resource_path_transition_arc_count"] == 6
-    assert objective["resource_path_granularity_counts"]["task"] == 0
-    assert objective["resource_path_granularity_counts"]["same_structure"] == 3
-    assert objective["resource_path_granularity_counts"]["same_structure_slot"] == 0
+    assert objective["resource_path_node_count"] == 0
+    assert objective["resource_path_transition_arc_count"] == 0
+    assert objective["stage1_route_node_count"] == 3
+    assert objective["stage1_route_candidate_arc_count"] == 6
 
 
-def test_drill_group_two_stage_keeps_original_task_grain_and_ids() -> None:
+def test_drill_group_orders_child_piles_by_pile_sequence_number() -> None:
+    tasks = list(reversed(_same_pier_pile_tasks("rotary_drill", count=3)))
+    tasks = [
+        task.model_copy(update={"sequence_order": index})
+        for index, task in enumerate(tasks, start=1)
+    ]
+    resources = [Resource(id="rotary_1", name="Rotary 1", type="rotary_drill")]
+    candidates = solver_module._resource_candidates_by_task(tasks, resources)
+
+    groups = solver_module._build_drill_group_nodes(tasks, candidates, resources)
+
+    assert len(groups) == 1
+    assert groups[0].child_task_ids == ("P10-PILE-1", "P10-PILE-2", "P10-PILE-3")
+
+
+def test_drill_group_stage1_final_keeps_original_task_grain_and_ids() -> None:
     pytest.importorskip("ortools")
     tasks = _multi_pier_pile_tasks("rotary_drill", pier_count=6, piles_per_pier=2)
     original_task_ids = {task.id for task in tasks}
@@ -2175,10 +2317,10 @@ def test_drill_group_two_stage_keeps_original_task_grain_and_ids() -> None:
     for task in result.tasks:
         by_structure[task.structure_id].add(task.assigned_resource_id)
     assert all(len(resource_ids) == 1 for resource_ids in by_structure.values())
-    assert result.stats["drill_group_refinement"]["status"] == "stage2_refined"
+    assert result.stats["drill_group_refinement"]["status"] == "stage1_final"
 
 
-def test_drill_group_two_stage_reduces_path_arcs_to_actual_assignments() -> None:
+def test_drill_group_stage1_final_skips_second_stage_path_arcs() -> None:
     pytest.importorskip("ortools")
     tasks = _multi_pier_pile_tasks("rotary_drill", pier_count=30, piles_per_pier=2)
 
@@ -2207,16 +2349,16 @@ def test_drill_group_two_stage_reduces_path_arcs_to_actual_assignments() -> None
     diagnostic = result.stats["drill_group_refinement"]
 
     assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert diagnostic["status"] == "stage2_refined"
+    assert diagnostic["status"] == "stage1_final"
     assert diagnostic["coarse_group_count"] == 30
     assert diagnostic["coarse_child_task_count"] == 60
     assert diagnostic["baseline_candidate_arc_count"] == 3 * 30 * 29
-    assert diagnostic["stage2_arc_count"] <= 120
-    assert diagnostic["arc_reduction_ratio"] >= 0.95
-    assert result.stats["continuity_objective"]["resource_path_transition_arc_count"] == diagnostic["stage2_arc_count"]
+    assert diagnostic["stage2_arc_count"] == 0
+    assert result.stats["continuity_objective"]["resource_path_transition_arc_count"] == 0
+    assert result.stats["continuity_objective"]["stage1_route_candidate_arc_count"] > 0
 
 
-def test_drill_group_stage2_sparse_arcs_use_same_side_two_and_cross_side_one_visible_window() -> None:
+def test_drill_group_stage1_sparse_arcs_use_same_side_two_and_cross_side_one_window() -> None:
     pytest.importorskip("ortools")
 
     def pile_task(side: str, pier_no: int) -> Task:
@@ -2260,14 +2402,14 @@ def test_drill_group_stage2_sparse_arcs_use_same_side_two_and_cross_side_one_vis
     objective = result.stats["continuity_objective"]
 
     assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert diagnostic["status"] == "stage2_refined"
+    assert diagnostic["status"] == "stage1_final"
     assert diagnostic["coarse_group_count"] == 12
     assert diagnostic["baseline_candidate_arc_count"] == 12 * 11
-    assert diagnostic["stage2_arc_count"] == 68
-    assert objective["resource_path_transition_arc_count"] == 68
-    assert objective["resource_path_sparse_support_window"] == 2
-    assert objective["resource_path_sparse_same_side_window"] == 2
-    assert objective["resource_path_sparse_cross_side_window"] == 1
+    assert diagnostic["stage2_arc_count"] == 0
+    assert objective["resource_path_transition_arc_count"] == 0
+    assert objective["stage1_route_candidate_arc_count"] == 68
+    assert objective["stage1_route_sparse_same_side_window"] == 2
+    assert objective["stage1_route_sparse_cross_side_window"] == 1
 
 
 def test_drill_group_stage2_sparse_arcs_use_visible_support_distance_when_middle_piers_absent() -> None:
@@ -2315,7 +2457,7 @@ def test_drill_group_stage2_sparse_arcs_use_visible_support_distance_when_middle
         cross_side_sparse_nodes
     )
 
-    assert solver_module._resource_path_transition_candidate_allowed(
+    assert not solver_module._resource_path_transition_candidate_allowed(
         resource,
         cross_side_sparse_nodes[0][1],
         cross_side_sparse_nodes[1][1],
@@ -2352,6 +2494,268 @@ def test_drill_group_stage2_sparse_arcs_use_visible_support_distance_when_middle
         cross_side_dense_nodes[2][1],
         cross_side_dense_context,
     )
+
+
+def test_drill_group_stage1_same_side_uses_buildable_sequence_distance() -> None:
+    def pile_task(pier_no: int) -> Task:
+        return _solver_task(
+            f"PL{pier_no:02d}-STAGE1-PILE-01",
+            f"L{pier_no} stage1 pile",
+            5,
+            "rotary_drill",
+        ).model_copy(
+            update={
+                "bridge_id": "B1",
+                "work_section_id": "WS-L",
+                "sequence_order": pier_no * 100,
+                "structure_id": f"B1-L-P{pier_no:02d}",
+                "structure_name": f"{pier_no}# pier",
+                "structure_type": "pier",
+                "component_type": "pile",
+                "process_name": "pile",
+                "quantity_label": "1",
+            }
+        )
+
+    tasks = [pile_task(pier_no) for pier_no in [1, 2, 4, 7]]
+    resources = [Resource(id="rotary_1", name="Rotary 1", type="rotary_drill")]
+    candidates = solver_module._resource_candidates_by_task(tasks, resources)
+    groups = solver_module._build_drill_group_nodes(tasks, candidates, resources)
+    group_by_support = {
+        solver_module._task_location(group.representative_task)["support_index"]: group
+        for group in groups
+    }
+    context = solver_module._drill_group_stage1_route_context(groups)
+
+    one_to_two = solver_module._drill_group_stage1_transition_decision(
+        group_by_support[1],
+        group_by_support[2],
+        context,
+    )
+    four_to_seven = solver_module._drill_group_stage1_transition_decision(
+        group_by_support[4],
+        group_by_support[7],
+        context,
+    )
+    one_to_four = solver_module._drill_group_stage1_transition_decision(
+        group_by_support[1],
+        group_by_support[4],
+        context,
+    )
+    one_to_seven = solver_module._drill_group_stage1_transition_decision(
+        group_by_support[1],
+        group_by_support[7],
+        context,
+    )
+
+    assert one_to_two.allowed
+    assert one_to_two.same_side_sequence_distance == 1
+    assert one_to_two.penalty == 0
+    assert four_to_seven.allowed
+    assert four_to_seven.same_side_sequence_distance == 1
+    assert four_to_seven.penalty == 0
+    assert one_to_four.allowed
+    assert one_to_four.same_side_sequence_distance == 2
+    assert one_to_four.penalty == 1
+    assert not one_to_seven.allowed
+    assert one_to_seven.same_side_sequence_distance == 3
+    assert one_to_seven.rejection_reason == "same_side_window_exceeded"
+
+
+def test_drill_group_stage1_cross_side_uses_real_support_gap() -> None:
+    def pile_task(side: str, pier_no: int) -> Task:
+        return _solver_task(
+            f"P{side}{pier_no:02d}-STAGE1-CROSS-PILE-01",
+            f"{side}{pier_no} stage1 cross pile",
+            5,
+            "rotary_drill",
+        ).model_copy(
+            update={
+                "bridge_id": "B1",
+                "work_section_id": f"WS-{side}",
+                "sequence_order": pier_no * 100 + (0 if side == "L" else 1),
+                "structure_id": f"B1-{side}-P{pier_no:02d}",
+                "structure_name": f"{pier_no}# pier",
+                "structure_type": "pier",
+                "component_type": "pile",
+                "process_name": "pile",
+                "quantity_label": "1",
+            }
+        )
+
+    tasks = [pile_task("L", 1), pile_task("R", 1), pile_task("R", 2), pile_task("R", 4)]
+    resources = [Resource(id="rotary_1", name="Rotary 1", type="rotary_drill")]
+    candidates = solver_module._resource_candidates_by_task(tasks, resources)
+    groups = solver_module._build_drill_group_nodes(tasks, candidates, resources)
+    group_by_structure = {group.structure_id: group for group in groups}
+    context = solver_module._drill_group_stage1_route_context(groups)
+
+    same_pier = solver_module._drill_group_stage1_transition_decision(
+        group_by_structure["B1-L-P01"],
+        group_by_structure["B1-R-P01"],
+        context,
+    )
+    neighbor_pier = solver_module._drill_group_stage1_transition_decision(
+        group_by_structure["B1-L-P01"],
+        group_by_structure["B1-R-P02"],
+        context,
+    )
+    remote_pier = solver_module._drill_group_stage1_transition_decision(
+        group_by_structure["B1-L-P01"],
+        group_by_structure["B1-R-P04"],
+        context,
+    )
+
+    assert same_pier.allowed
+    assert same_pier.cross_side_support_gap == 0
+    assert same_pier.penalty == 1
+    assert neighbor_pier.allowed
+    assert neighbor_pier.cross_side_support_gap == 1
+    assert neighbor_pier.penalty == 1
+    assert not remote_pier.allowed
+    assert remote_pier.cross_side_support_gap == 3
+    assert remote_pier.rejection_reason == "cross_side_gap_exceeded"
+
+
+def test_drill_group_stage1_route_diagnostics_report_sparse_window_counts() -> None:
+    pytest.importorskip("ortools")
+
+    def pile_task(pier_no: int) -> Task:
+        return _solver_task(
+            f"PL{pier_no:02d}-STAGE1-DIAG-PILE-01",
+            f"L{pier_no} stage1 diagnostic pile",
+            5,
+            "rotary_drill",
+        ).model_copy(
+            update={
+                "bridge_id": "B1",
+                "work_section_id": "WS-L",
+                "sequence_order": pier_no * 100,
+                "structure_id": f"B1-L-P{pier_no:02d}",
+                "structure_name": f"{pier_no}# pier",
+                "structure_type": "pier",
+                "component_type": "pile",
+                "process_name": "pile",
+                "quantity_label": "1",
+            }
+        )
+
+    result = solve_schedule(
+        ScheduleInput(
+            project_name="stage1 route sparse diagnostics",
+            start_date=date(2026, 1, 1),
+            tasks=[pile_task(pier_no) for pier_no in [1, 2, 4, 7]],
+            precedence_links=[],
+            resources=[Resource(id="rotary_1", name="Rotary 1", type="rotary_drill")],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("resource_path_continuity", 3_000),
+            ),
+            time_limit_seconds=10,
+        )
+    )
+
+    diagnostic = result.stats["drill_group_refinement"]
+    objective = result.stats["continuity_objective"]
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert diagnostic["stage1_route_status"] == "enabled"
+    assert diagnostic["stage1_route_unique_group_count"] == 4
+    assert diagnostic["stage1_route_node_count"] == 4
+    assert diagnostic["stage1_route_candidate_arc_count"] == 10
+    assert diagnostic["stage1_route_rejected_arc_counts"]["same_side_window_exceeded"] == 2
+    assert objective["stage1_route_candidate_arc_count"] == 10
+    assert objective["stage1_route_sparse_same_side_window"] == 2
+
+
+def test_drill_group_stage1_window_infeasible_does_not_add_remote_fallback_arc() -> None:
+    pytest.importorskip("ortools")
+    start = date(2026, 1, 1)
+
+    def pile_task(pier_no: int) -> Task:
+        return _solver_task(
+            f"PL{pier_no:02d}-STAGE1-STRICT-PILE-01",
+            f"L{pier_no} strict stage1 pile",
+            5,
+            "rotary_drill",
+        ).model_copy(
+            update={
+                "bridge_id": "B1",
+                "work_section_id": "WS-L",
+                "sequence_order": pier_no * 100,
+                "structure_id": f"B1-L-P{pier_no:02d}",
+                "structure_name": f"{pier_no}# pier",
+                "structure_type": "pier",
+                "component_type": "pile",
+                "process_name": "pile",
+                "quantity_label": "1",
+            }
+        )
+
+    tasks = [pile_task(pier_no) for pier_no in [1, 2, 4, 7]]
+    task_by_support = {
+        solver_module._task_location(task)["support_index"]: task
+        for task in tasks
+    }
+    result = solver_module.solve_control_priority_schedule(
+        ScheduleInput(
+            project_name="stage1 strict no remote fallback",
+            start_date=start,
+            tasks=tasks,
+            precedence_links=[
+                PrecedenceLink(
+                    id="p1-before-p7",
+                    predecessor_id=task_by_support[1].id,
+                    successor_id=task_by_support[7].id,
+                    relationship="FS",
+                    lag_days=0,
+                    source_rule_id="test",
+                ),
+                PrecedenceLink(
+                    id="p7-before-p2",
+                    predecessor_id=task_by_support[7].id,
+                    successor_id=task_by_support[2].id,
+                    relationship="FS",
+                    lag_days=0,
+                    source_rule_id="test",
+                ),
+                PrecedenceLink(
+                    id="p7-before-p4",
+                    predecessor_id=task_by_support[7].id,
+                    successor_id=task_by_support[4].id,
+                    relationship="FS",
+                    lag_days=0,
+                    source_rule_id="test",
+                ),
+            ],
+            resources=[Resource(id="rotary_1", name="Rotary 1", type="rotary_drill")],
+            milestones=[
+                MilestoneConstraint(
+                    id="M-hard",
+                    name="Hard finish",
+                    level="contract",
+                    mode="hard",
+                    scope_type="project",
+                    target_event="finish",
+                    target_date=start + timedelta(days=20),
+                )
+            ],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("resource_path_continuity", 3_000),
+            ),
+            time_limit_seconds=10,
+        ),
+        enforce_hard_milestones=True,
+    )
+
+    diagnostic = result.stats["drill_group_refinement"]
+
+    assert result.status == "INFEASIBLE"
+    assert diagnostic["stage1_route_status"] == "infeasible"
+    assert diagnostic["stage1_route_failure_reason"] == "stage1_route_window_infeasible"
+    assert diagnostic["stage1_route_rejected_arc_counts"]["same_side_window_exceeded"] == 2
+    assert any("未放开远距离候选转移" in message.message for message in result.validation)
 
 
 def test_manual_pile_team_does_not_enter_drill_group_refinement() -> None:
@@ -2414,7 +2818,10 @@ def test_drill_group_path_objective_disabled_skips_two_stage_path_modeling() -> 
     assert result.status in {"OPTIMAL", "FEASIBLE"}
     assert objective["resource_path_node_count"] == 0
     assert objective["resource_path_transition_arc_count"] == 0
+    assert objective["stage1_route_status"] == "not_enabled"
+    assert objective["stage1_route_node_count"] == 0
     assert diagnostic["status"] == "coarse_only"
+    assert diagnostic["stage1_route_status"] == "not_enabled"
     assert diagnostic["coarse_group_count"] == 3
 
 
@@ -2511,146 +2918,23 @@ def test_drill_group_external_precedence_lifts_to_group_boundary() -> None:
     assert min(by_task[task.id].start_offset for task in group_tasks) >= by_task[predecessor.id].end_offset
 
 
-def test_drill_group_stage2_accepts_longer_refined_result(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_drill_group_auto_stage_skips_refined_stage(monkeypatch: pytest.MonkeyPatch) -> None:
     pytest.importorskip("ortools")
     original_refinement = solver_module.solve_control_priority_schedule
+    called_stages: list[str] = []
 
-    def longer_refined_stage(schedule_input: ScheduleInput, **kwargs: object) -> ScheduleResult:
+    def fail_if_refined_stage(schedule_input: ScheduleInput, **kwargs: object) -> ScheduleResult:
+        called_stages.append(str(kwargs.get("_drill_group_stage", "auto")))
         if kwargs.get("_drill_group_stage") == "refined":
-            assert "_hard_max_makespan_days" not in kwargs
-            coarse_result = kwargs["warm_start_result"]
-            assert isinstance(coarse_result, ScheduleResult)
-            assert coarse_result.objective_days is not None
-            refined = coarse_result.model_copy(deep=True)
-            refined.status = "FEASIBLE"
-            refined.objective_days = coarse_result.objective_days + 3
-            refined.plan_finish_date = schedule_input.start_date + timedelta(days=refined.objective_days - 1)
-            payload = dict(refined.stats.get("drill_group_refinement") or {})
-            payload["status"] = "stage2_refined"
-            refined.stats["drill_group_refinement"] = payload
-            refined.objective_breakdown["drill_group_refinement"] = payload
-            refined.objective_breakdown["drill_group_refinement_status"] = "stage2_refined"
-            return refined
+            raise AssertionError("refined drill group stage should not be called")
         return original_refinement(schedule_input, **kwargs)
 
-    monkeypatch.setattr(solver_module, "solve_control_priority_schedule", longer_refined_stage)
+    monkeypatch.setattr(solver_module, "solve_control_priority_schedule", fail_if_refined_stage)
     tasks = _multi_pier_pile_tasks("rotary_drill", pier_count=3, piles_per_pier=2)
 
     result = original_refinement(
         ScheduleInput(
-            project_name="accept longer stage2",
-            start_date=date(2026, 1, 1),
-            tasks=tasks,
-            precedence_links=[],
-            resources=[Resource(id="rotary_1", name="Rotary 1", type="rotary_drill")],
-            schedule_strategy=ScheduleStrategyConfig(
-                strategy="comprehensive",
-                objective_terms=_objective_terms_with_only("resource_path_continuity", 3_000),
-            ),
-            time_limit_seconds=5,
-        )
-    )
-
-    diagnostic = result.stats["drill_group_refinement"]
-    contribution_ids = {
-        item["term_id"]
-        for item in result.objective_breakdown["objective_contributions"]
-    }
-
-    assert result.status == "FEASIBLE"
-    assert diagnostic["status"] == "stage2_refined"
-    assert diagnostic["stage2_makespan_days"] == diagnostic["stage1_makespan_days"] + 3
-    assert diagnostic["stage2_makespan_delta_days"] == 3
-    assert result.objective_days == diagnostic["stage2_makespan_days"]
-    assert "stage2_makespan_delta_days" not in contribution_ids
-
-
-def test_drill_group_stage2_rejects_late_hard_milestone(monkeypatch: pytest.MonkeyPatch) -> None:
-    pytest.importorskip("ortools")
-    original_refinement = solver_module.solve_control_priority_schedule
-
-    def late_hard_refined_stage(schedule_input: ScheduleInput, **kwargs: object) -> ScheduleResult:
-        if kwargs.get("_drill_group_stage") == "refined":
-            coarse_result = kwargs["warm_start_result"]
-            assert isinstance(coarse_result, ScheduleResult)
-            milestone = schedule_input.milestones[0]
-            refined = coarse_result.model_copy(deep=True)
-            refined.status = "FEASIBLE"
-            refined.objective_days = (coarse_result.objective_days or 0) + 1
-            refined.milestone_results = [
-                MilestoneResult(
-                    **milestone.model_dump(),
-                    actual_date=milestone.target_date + timedelta(days=1),
-                    actual_offset=91,
-                    lateness_days=1,
-                    status="late",
-                )
-            ]
-            payload = dict(refined.stats.get("drill_group_refinement") or {})
-            payload["status"] = "stage2_refined"
-            refined.stats["drill_group_refinement"] = payload
-            refined.objective_breakdown["drill_group_refinement"] = payload
-            refined.objective_breakdown["drill_group_refinement_status"] = "stage2_refined"
-            return refined
-        return original_refinement(schedule_input, **kwargs)
-
-    monkeypatch.setattr(solver_module, "solve_control_priority_schedule", late_hard_refined_stage)
-    start = date(2026, 1, 1)
-    tasks = _multi_pier_pile_tasks("rotary_drill", pier_count=3, piles_per_pier=2)
-
-    result = original_refinement(
-        ScheduleInput(
-            project_name="reject late hard stage2",
-            start_date=start,
-            tasks=tasks,
-            precedence_links=[],
-            resources=[Resource(id="rotary_1", name="Rotary 1", type="rotary_drill")],
-            milestones=[
-                MilestoneConstraint(
-                    id="M-hard",
-                    name="Hard finish",
-                    level="contract",
-                    mode="hard",
-                    scope_type="project",
-                    target_event="finish",
-                    target_date=start + timedelta(days=90),
-                )
-            ],
-            schedule_strategy=ScheduleStrategyConfig(
-                strategy="comprehensive",
-                objective_terms=_objective_terms_with_only("resource_path_continuity", 3_000),
-            ),
-            time_limit_seconds=5,
-        )
-    )
-
-    diagnostic = result.stats["drill_group_refinement"]
-
-    assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert diagnostic["status"] == "stage2_fallback"
-    assert diagnostic["fallback_reason"] == "stage2_hard_milestone_late"
-    assert all(milestone.lateness_days == 0 for milestone in result.milestone_results)
-
-
-def test_drill_group_stage2_failure_returns_coarse_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    pytest.importorskip("ortools")
-    original_refinement = solver_module.solve_control_priority_schedule
-
-    def fail_refined_stage(schedule_input: ScheduleInput, **kwargs: object) -> ScheduleResult:
-        if kwargs.get("_drill_group_stage") == "refined":
-            return ScheduleResult(
-                status="INFEASIBLE",
-                plan_start_date=schedule_input.start_date,
-                stats={"reason": "forced_stage2_failure"},
-            )
-        return original_refinement(schedule_input, **kwargs)
-
-    monkeypatch.setattr(solver_module, "solve_control_priority_schedule", fail_refined_stage)
-    tasks = _multi_pier_pile_tasks("rotary_drill", pier_count=3, piles_per_pier=2)
-
-    result = original_refinement(
-        ScheduleInput(
-            project_name="forced drill group fallback",
+            project_name="stage1 final skips refined",
             start_date=date(2026, 1, 1),
             tasks=tasks,
             precedence_links=[],
@@ -2666,16 +2950,11 @@ def test_drill_group_stage2_failure_returns_coarse_fallback(monkeypatch: pytest.
     diagnostic = result.stats["drill_group_refinement"]
 
     assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert diagnostic["status"] == "stage2_fallback"
-    assert diagnostic["fallback_reason"] == "stage2_infeasible"
-    assert diagnostic["stage2_node_count"] == 3
-    assert diagnostic["stage2_arc_count"] == 6
-    path_diagnostics = diagnostic["stage2_path_diagnostics_by_resource"]
-    assert len(path_diagnostics) == 1
-    assert path_diagnostics[0]["resource_id"] == "rotary_1"
-    assert path_diagnostics[0]["path_node_count"] == 3
-    assert path_diagnostics[0]["candidate_transition_arc_count"] == 6
-    assert path_diagnostics[0]["coarse_order_violation_count"] == 0
+    assert called_stages == ["coarse"]
+    assert diagnostic["status"] == "stage1_final"
+    assert diagnostic["fallback_reason"] is None
+    assert diagnostic["stage2_node_count"] == 0
+    assert diagnostic["stage2_arc_count"] == 0
     assert {task.id for task in result.tasks} == {task.id for task in tasks}
 
 
@@ -3323,8 +3602,6 @@ def test_control_priority_reports_configured_objective_terms_used() -> None:
     assert result.status in {"OPTIMAL", "FEASIBLE"}
     assert weights["resource_idle"] == 0
     assert weights["makespan_and_soft_milestone"] == 333
-    assert weights["target_relaxation"] == 0
-    assert weights["resource_slot_balance"] == 0
     assert "normal_balance" not in weights
     assert "unconfigured_normal_balance" not in weights
     assert "control_buffer_risk" not in weights
@@ -3341,11 +3618,6 @@ def test_control_priority_reports_configured_objective_terms_used() -> None:
     assert "risk_related_control_wait_penalty" not in result.objective_breakdown
     assert "control_resource_wait_penalty" not in result.objective_breakdown
     assert terms_used["resource_idle"] == {"enabled": False, "weight": 1234, "effective_weight": 0}
-    assert terms_used["target_relaxation"] == {
-        "enabled": False,
-        "weight": 1_000_000_000,
-        "effective_weight": 0,
-    }
     assert "normal_balance_penalty" not in result.objective_breakdown
     contributions = result.objective_breakdown["objective_contributions"]
     contribution_by_id = {item["term_id"]: item for item in contributions}
@@ -3355,7 +3627,6 @@ def test_control_priority_reports_configured_objective_terms_used() -> None:
     assert "risk_related_control_wait" not in contribution_by_id
     assert contribution_by_id["resource_idle"]["enabled"] is False
     assert contribution_by_id["resource_idle"]["weighted_contribution"] == 0
-    assert contribution_by_id["target_relaxation"]["active"] is False
     assert sum(item["weighted_contribution"] for item in contributions) == result.objective_breakdown["weighted_objective"]
 
 
@@ -3450,44 +3721,6 @@ def test_control_priority_disabled_makespan_objective_keeps_finish_metrics_witho
     assert contribution_by_id["makespan_and_soft_milestone"]["weighted_contribution"] == 0
 
 
-def test_control_priority_reports_new_objective_term_weights() -> None:
-    pytest.importorskip("ortools")
-    first = _solver_task("A-first", "first", 2, "team")
-    second = _solver_task("B-second", "second", 2, "team")
-
-    result = solve_schedule(
-        ScheduleInput(
-            project_name="new-objective-term-config",
-            start_date=date(2026, 1, 1),
-            tasks=[first, second],
-            precedence_links=[],
-            resources=[Resource(id="team_1", name="Team 1", type="team")],
-            schedule_strategy=ScheduleStrategyConfig(
-                strategy="comprehensive",
-                objective_terms={
-                    "target_relaxation": {"enabled": True, "weight": 99},
-                    "resource_slot_balance": {"enabled": True, "weight": 88},
-                },
-            ),
-            time_limit_seconds=5,
-        )
-    )
-
-    terms_used = result.objective_breakdown["objective_terms_used"]
-    contribution_by_id = {
-        item["term_id"]: item
-        for item in result.objective_breakdown["objective_contributions"]
-    }
-
-    assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert terms_used["target_relaxation"] == {"enabled": True, "weight": 99, "effective_weight": 99}
-    assert terms_used["resource_slot_balance"] == {"enabled": True, "weight": 88, "effective_weight": 88}
-    assert "unconfigured_normal_balance" not in terms_used
-    assert contribution_by_id["target_relaxation"]["active"] is False
-    assert contribution_by_id["resource_slot_balance"]["effective_weight"] == 88
-    assert "unconfigured_normal_balance" not in contribution_by_id
-
-
 def test_control_priority_enforces_hard_milestone_without_explicit_flag() -> None:
     pytest.importorskip("ortools")
     start = date(2026, 1, 1)
@@ -3565,12 +3798,7 @@ def test_control_priority_best_effort_relaxes_hard_milestone_and_keeps_same_stru
     assert result.milestone_results[0].lateness_days > 0
     assert result.stats["relax_target_constraints"] is True
     assert result.objective_breakdown["relaxed_hard_milestone_lateness_days"] == result.milestone_results[0].lateness_days
-    contribution_by_id = {
-        item["term_id"]: item
-        for item in result.objective_breakdown["objective_contributions"]
-    }
-    assert contribution_by_id["target_relaxation"]["active"] is True
-    assert contribution_by_id["target_relaxation"]["raw_penalty"] == result.milestone_results[0].lateness_days
+    assert result.stats["relaxed_target_constraints"]["penalty_days"] == result.milestone_results[0].lateness_days
 
 
 def test_control_priority_best_effort_relaxes_fixed_duration_target() -> None:
@@ -3600,13 +3828,47 @@ def test_control_priority_best_effort_relaxes_fixed_duration_target() -> None:
     assert relaxed.status in {"OPTIMAL", "FEASIBLE"}
     assert relaxed.objective_days == 10
     assert relaxed.objective_breakdown["fixed_duration_overrun_days"] == 5
-    assert relaxed.stats["target_relaxation"]["fixed_duration_overrun_days"] == 5
-    contribution_by_id = {
+    assert relaxed.stats["relaxed_target_constraints"]["fixed_duration_overrun_days"] == 5
+    assert relaxed.stats["relaxed_target_constraints"]["penalty_days"] == 5
+
+
+def test_hard_milestone_lateness_is_control_node_objective_contribution() -> None:
+    pytest.importorskip("ortools")
+    start = date(2026, 1, 1)
+    milestone = MilestoneConstraint(
+        id="M-hard-objective",
+        name="强制完工目标",
+        mode="hard",
+        scope_type="project",
+        target_event="finish",
+        target_date=start,
+    )
+
+    result = solver_module.solve_control_priority_schedule(
+        ScheduleInput(
+            project_name="hard milestone objective contribution",
+            start_date=start,
+            tasks=[_solver_task("T-hard-late", "Hard late task", 5, "team")],
+            precedence_links=[],
+            resources=[Resource(id="team_1", name="班组1", type="team")],
+            milestones=[milestone],
+            schedule_strategy=ScheduleStrategyConfig(strategy="comprehensive"),
+            time_limit_seconds=5,
+        ),
+        relax_target_constraints=True,
+    )
+
+    late_days = result.milestone_results[0].lateness_days
+    contribution = {
         item["term_id"]: item
-        for item in relaxed.objective_breakdown["objective_contributions"]
-    }
-    assert contribution_by_id["target_relaxation"]["active"] is True
-    assert contribution_by_id["target_relaxation"]["raw_penalty"] == 5
+        for item in result.objective_breakdown["objective_contributions"]
+    }["control_node_late"]
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert late_days > 0
+    assert contribution["raw_value"] == late_days
+    assert contribution["unit"] == "days"
+    assert contribution["weight"] == 10_000_000_000
+    assert contribution["weighted_value"] == late_days * 10_000_000_000
 
 
 def test_control_priority_hard_milestone_is_not_control_lateness_objective() -> None:
@@ -4012,6 +4274,10 @@ def test_continuity_metrics_report_side_switch_without_ordered_pier_jump() -> No
                 )
             ],
             resources=[Resource(id="rotary_drill_1", name="旋挖钻1", type="rotary_drill")],
+            schedule_strategy=ScheduleStrategyConfig(
+                strategy="comprehensive",
+                objective_terms=_objective_terms_with_only("makespan_and_soft_milestone", 5_000_000),
+            ),
             time_limit_seconds=5,
         )
     )
@@ -4260,6 +4526,47 @@ def test_min_resource_solver_uses_fallback_target_days() -> None:
     assert {allocation.resource_id for allocation in result.resource_allocations} <= {"team_1", "team_2"}
 
 
+def test_min_resource_solver_respects_explicit_minimum_resource_counts() -> None:
+    pytest.importorskip("ortools")
+    result = solve_min_resources_schedule(
+        _min_resource_test_input(max_resources=3),
+        fallback_target_days=5,
+        minimum_resource_counts={"pool-team": 3},
+    )
+
+    recommended = result.stats["recommended_resource_counts"][0]
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.stats["minimum_resource_counts"] == {"pool-team": 3}
+    assert recommended["recommended_quantity"] == 3
+
+
+def test_min_resource_solver_direct_search_allows_zero_lower_bound() -> None:
+    pytest.importorskip("ortools")
+    start = date(2026, 1, 1)
+    schedule_input = ScheduleInput(
+        project_name="direct-min-resource-zero-lower-bound",
+        start_date=start,
+        tasks=[_solver_task("T1", "单任务", 5, "team")],
+        precedence_links=[],
+        resources=[
+            Resource(id="team_a_1", name="A班组1", type="team", pool_id="pool-a", pool_label="A班组"),
+            Resource(id="team_b_1", name="B班组1", type="team", pool_id="pool-b", pool_label="B班组"),
+        ],
+        time_limit_seconds=5,
+    )
+
+    result = solve_min_resources_schedule(schedule_input, fallback_target_days=5)
+
+    quantities = {
+        item["resource_pool_id"]: item["recommended_quantity"]
+        for item in result.stats["recommended_resource_counts"]
+    }
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.stats["minimum_resource_counts"] == {}
+    assert sum(quantities.values()) == 1
+    assert 0 in quantities.values()
+
+
 def test_min_resource_solver_reoptimizes_with_control_priority() -> None:
     pytest.importorskip("ortools")
     start = date(2026, 1, 1)
@@ -4373,7 +4680,7 @@ def test_min_resource_solver_keeps_capacity_schedule_when_balanced_reoptimizatio
 ) -> None:
     pytest.importorskip("ortools")
     schedule_input = _min_resource_test_input(max_resources=2)
-    calls: list[tuple[bool, bool]] = []
+    calls: list[tuple[bool, bool, float]] = []
 
     def fake_control_priority(
         schedule_input: ScheduleInput,
@@ -4381,7 +4688,7 @@ def test_min_resource_solver_keeps_capacity_schedule_when_balanced_reoptimizatio
         relax_target_constraints: bool = False,
         **_: object,
     ) -> ScheduleResult:
-        calls.append((schedule_input.schedule_strategy.enable_balance_objective, relax_target_constraints))
+        calls.append((schedule_input.schedule_strategy.enable_balance_objective, relax_target_constraints, schedule_input.time_limit_seconds))
         return ScheduleResult(
             status="UNKNOWN",
             plan_start_date=schedule_input.start_date,
@@ -4401,15 +4708,12 @@ def test_min_resource_solver_keeps_capacity_schedule_when_balanced_reoptimizatio
 
     assert result.status in {"OPTIMAL", "FEASIBLE"}
     assert result.stats["schedule_source"] == "capacity_model_verified_schedule"
-    assert result.stats["recommended_schedule_source"] == "capacity_model_verified_schedule"
     assert result.stats["capacity_verification_status"] == "verified"
-    assert result.stats["balanced_reoptimization_status"] == "UNKNOWN"
-    assert result.stats["unbalanced_reoptimization_status"] == "not_attempted"
-    assert result.stats["recommended_resource_counts"][0]["recommended_quantity"] == 2
-    assert result.tasks
-    assert result.resource_allocations
-    assert calls == [(False, False), (False, True)]
-    assert any("capacity model" in message.message for message in result.validation)
+    assert result.stats["target_achievement"]["target_status"] == "unconfirmed"
+    assert result.stats["target_achievement"]["time_budget_exhausted"] is True
+    assert [(balance, relaxed) for balance, relaxed, _ in calls] == [(False, True), (False, True)]
+    assert all(limit > 4.9 for _, _, limit in calls)
+    assert all((attempt["time_limit_seconds"] or 0) > 4.9 for attempt in result.stats["reoptimization_attempts"])
 
 
 def test_min_resource_reoptimization_uses_single_control_priority_candidate(
@@ -4464,14 +4768,8 @@ def test_min_resource_solver_returns_best_effort_when_reoptimization_misses_targ
         **_: object,
     ) -> ScheduleResult:
         calls.append(relax_target_constraints)
-        if not relax_target_constraints:
-            return ScheduleResult(
-                status="UNKNOWN",
-                plan_start_date=schedule_input.start_date,
-                validation=[ValidationMessage(level="warning", message="strict reoptimization timed out")],
-                stats={"wall_time_seconds": schedule_input.time_limit_seconds},
-            )
         objective_days = (max_makespan_days or 5) + 1
+        fixed_duration_overrun_days = 1
         return ScheduleResult(
             status="FEASIBLE",
             objective_days=objective_days,
@@ -4482,10 +4780,10 @@ def test_min_resource_solver_returns_best_effort_when_reoptimization_misses_targ
             stats={
                 "wall_time_seconds": schedule_input.time_limit_seconds,
                 "max_makespan_days": max_makespan_days,
-                "target_relaxation": {"fixed_duration_overrun_days": 1},
+                "relaxed_target_constraints": {"fixed_duration_overrun_days": fixed_duration_overrun_days},
             },
             objective_breakdown={
-                "fixed_duration_overrun_days": 1,
+                "fixed_duration_overrun_days": fixed_duration_overrun_days,
                 "weighted_objective": 789,
                 "best_effort_score": 789,
             },
@@ -4495,12 +4793,13 @@ def test_min_resource_solver_returns_best_effort_when_reoptimization_misses_targ
 
     result = solve_min_resources_schedule(schedule_input, fallback_target_days=5)
 
-    assert calls == [False, True]
+    assert calls == [True, True]
     assert result.status == "FEASIBLE"
     assert result.stats["schedule_source"] == "minimum_resources_best_effort_refinement"
     assert result.stats["recommended_schedule_source"] == "minimum_resources_best_effort_refinement"
+    assert result.stats["target_achievement"]["target_status"] == "candidate_resources_target_failed"
     best_effort = result.stats["best_effort_refinement"]
-    assert best_effort["strict_refinement_status"] == "UNKNOWN"
+    assert best_effort["strict_refinement_status"] == "FEASIBLE"
     assert best_effort["fixed_duration_overrun_days"] == 1
     assert best_effort["relaxed_constraints"][0]["type"] == "fixed_duration"
 
@@ -4538,9 +4837,10 @@ def test_min_resource_solver_returns_infeasible_when_reoptimization_cannot_meet_
     result = solve_min_resources_schedule(schedule_input, fallback_target_days=5)
 
     assert result.status == "INFEASIBLE"
-    assert result.stats["reason"] == "resource_upper_bound_or_deadline_infeasible"
-    assert result.stats["fixed_duration_precheck_failed"] is True
-    assert result.stats["resource_upper_bound_counts"][0]["upper_bound_quantity"] == 2
+    assert result.stats["schedule_source"] == "max_resources_target_failed"
+    assert result.stats["target_achievement"]["target_status"] == "max_resources_target_failed"
+    assert "max_resources_target_failed" in result.stats["target_achievement"]["failure_reasons"]
+    assert result.stats["max_resource_precheck_mode"] == "hard_milestone_fast"
 
 
 def test_min_resource_solver_requires_target_duration() -> None:
@@ -4556,28 +4856,28 @@ def test_min_resource_solver_reports_infeasible_when_max_resources_cannot_meet_t
 ) -> None:
     pytest.importorskip("ortools")
     capacity_model_calls = 0
+    control_priority_calls = 0
 
     def fake_solve_capacity_model(*args: object, **kwargs: object) -> dict[str, object]:
         nonlocal capacity_model_calls
         capacity_model_calls += 1
         return {"status": "UNKNOWN", "validation": [], "stats": {}, "group_counts": {}}
 
+    def fake_control_priority(*args: object, **kwargs: object) -> ScheduleResult:
+        nonlocal control_priority_calls
+        control_priority_calls += 1
+        raise AssertionError("最大资源预检不应调用完整目标函数")
+
     monkeypatch.setattr(solver_module, "_solve_capacity_model", fake_solve_capacity_model)
+    monkeypatch.setattr(solver_module, "solve_control_priority_schedule", fake_control_priority)
     result = solve_min_resources_schedule(_min_resource_test_input(max_resources=1), fallback_target_days=5)
 
-    assert result.status == "INFEASIBLE"
-    assert result.stats["reason"] == "resource_upper_bound_or_deadline_infeasible"
-    assert result.stats["fixed_duration_precheck_failed"] is True
-    assert result.stats["capacity_precheck_status"] == "exclusive_lower_bound_infeasible"
-    assert result.stats["lower_bound_prune_used"] is True
-    assert capacity_model_calls == 0
-    assert result.stats["resource_upper_bound_counts"][0]["upper_bound_quantity"] == 1
-    lower_bound = result.stats["resource_capacity_lower_bounds"][0]
-    assert lower_bound["required_minimum"] == 2
-    assert lower_bound["exceeds_upper_bound"] is True
-    assert any("资源最大数量后仍不可行" in message.message for message in result.validation)
-    assert any("工艺逻辑关键路径" in message.message for message in result.validation)
-    assert any("至少需要约" in message.message for message in result.validation)
+    assert result.status == "UNKNOWN"
+    assert result.stats["schedule_source"] == "target_unconfirmed"
+    assert result.stats["target_achievement"]["target_status"] == "unconfirmed"
+    assert result.stats["max_resource_precheck_mode"] == "hard_milestone_fast"
+    assert capacity_model_calls == 1
+    assert control_priority_calls == 0
 
 
 def test_min_resource_solver_enforces_hard_milestone_target() -> None:
@@ -4597,8 +4897,10 @@ def test_min_resource_solver_enforces_hard_milestone_target() -> None:
     result = solve_min_resources_schedule(schedule_input)
 
     assert result.status == "INFEASIBLE"
-    assert result.stats["reason"] == "resource_upper_bound_or_deadline_infeasible"
-    assert result.stats["fixed_duration_precheck_failed"] is True
+    assert result.stats["schedule_source"] == "max_resources_target_failed"
+    assert result.stats["target_achievement"]["target_status"] == "max_resources_target_failed"
+    assert result.stats["target_achievement"]["hard_milestone_late_days"] > 0
+    assert result.stats["max_resource_precheck_mode"] == "hard_milestone_fast"
 
 
 def test_resource_cost_solver_keeps_current_when_current_meets_fixed_duration() -> None:

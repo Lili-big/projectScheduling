@@ -6,6 +6,8 @@
 **测试要求**：本功能涉及 CP-SAT 建模范围、目标函数配置、结果诊断和前端展示，必须包含后端回归测试、前端构建验证和可复现手工场景。  
 **组织方式**：任务按用户故事分组，确保每个故事都可独立实现和验证。用户确认本清单和分析报告前不得实施代码。
 
+**当前实现校正（2026-07-08）**：本清单中已完成的任务按当前代码事实回看时，只保留 4 个当前目标项：`control_node_late`、`makespan_and_soft_milestone`、`resource_path_continuity`、`resource_idle`。涉及 `resource_workload_balance`、`control_buffer_risk`、`risk_related_control_wait` 的旧任务记录仅代表历史实现阶段，不再作为当前待实现或验收范围。
+
 ## Phase 1：准备（共享基础）
 
 **目标**：确认当前工作树和实现入口，避免覆盖 007 或其他 agent 的改动。
@@ -13,7 +15,7 @@
 - [X] T001 检查当前 `git status --short`，确认 `backend/app/scenario.py`、`backend/app/solver.py`、`.specify/feature.json`、`specs/007-objective-metric-config/` 的既有改动归属，实施时不得回退无关改动。
 - [X] T002 复核 `specs/008-objective-model-gating/spec.md`、`plan.md`、`research.md`、`data-model.md`、`contracts/objective-model-gating-contract.md`，确认本功能只在 008 下继续。
 - [X] T003 [P] 复核 `backend/app/models.py` 中 `ObjectiveTermId`、`DEFAULT_OBJECTIVE_TERM_WEIGHTS`、`effective_objective_weights()`、`objective_terms_used()` 的当前行为。
-- [X] T004 [P] 复核 `backend/app/solver.py` 中 `solve_control_priority_schedule()`、`_build_resource_organization_terms()`、`_build_control_buffer_terms()`、`_build_control_wait_term_details()`、`_risk_related_control_wait_terms()` 的建模入口。
+- [X] T004 [P] 复核 `backend/app/solver.py` 中 `solve_control_priority_schedule()`、`_build_resource_organization_terms()`、`_build_resource_path_continuity_terms()` 等当前建模入口；旧控制缓冲/等待风险目标入口不再作为当前目标项验收范围。
 - [X] T005 [P] 复核 `frontend/src/types/scheduler.ts` 和 `frontend/src/app/App.tsx` 中目标项、状态字段和结果诊断展示入口。
 
 ---
@@ -42,15 +44,15 @@
 
 - [X] T011 [US1] 在 `backend/tests/test_scheduler.py` 增加“只启用 `control_node_late` 时资源路径连续性不建模”的测试，断言路径节点数和转移弧数为 0。
 - [X] T012 [US1] 在 `backend/tests/test_scheduler.py` 增加“全部资源类目标关闭时仍保留命名资源互斥”的测试，断言同一资源上的任务不重叠。
-- [X] T013 [US1] 在 `backend/tests/test_scheduler.py` 增加“单独关闭 `resource_idle` 或 `resource_workload_balance` 不影响其他启用资源目标”的测试。
-- [X] T014 [US1] 在 `backend/tests/test_scheduler.py` 增加“`risk_related_control_wait` 启用但 `control_buffer_risk` 关闭”的共享支持数据测试，断言只保留等待风险所需支持数据，`control_buffer_risk` 不标为已评价。
+- [X] T013 [US1] 在 `backend/tests/test_scheduler.py` 增加“单独关闭 `resource_idle` 或 `resource_path_continuity` 不影响其他启用资源目标”的测试。
+- [X] T014 [US1] 历史任务：旧版曾覆盖 `risk_related_control_wait` / `control_buffer_risk` 共享支持数据；当前两项已废弃，不再作为当前目标项验收范围。
 - [X] T015 [US1] 在 `backend/tests/test_scheduler.py` 增加“`makespan_and_soft_milestone` 关闭”的测试，断言总工期不进入目标贡献，但完工天数和固定工期检查仍保留。
 
 ### 用户故事 1 的实现
 
 - [X] T016 [US1] 在 `backend/app/solver.py` 拆分 `_build_resource_organization_terms()` 的资源工作量、资源空闲、资源路径连续性建模分支，分别受目标门控控制。
 - [X] T017 [US1] 在 `backend/app/solver.py` 调整 `_build_resource_path_continuity_terms()` 调用路径，`resource_path_continuity` 关闭时不创建路径节点、转移弧和 `Circuit` 约束。
-- [X] T018 [US1] 在 `backend/app/solver.py` 拆分 `_build_control_buffer_terms()`、`_build_control_wait_term_details()` 和 `_risk_related_control_wait_terms()` 的共享支持数据与目标罚分构造，避免关闭项被当作已评价目标。
+- [X] T018 [US1] 历史任务：旧版曾拆分控制缓冲/等待风险目标的共享支持数据与目标罚分；当前相关目标项已废弃，仅保留“关闭项不得被当作已评价目标”的通用门控原则。
 - [X] T019 [US1] 在 `backend/app/solver.py` 拆分总工期基础跨度计算和 `makespan_and_soft_milestone` 目标贡献，关闭该目标时仍保留结果展示和固定工期检查所需跨度。
 - [X] T020 [US1] 在 `backend/app/solver.py` 确保资源互斥 `NoOverlap`、同结构同工序、任务前后置、工期和硬里程碑等硬约束不受目标门控影响。
 
@@ -62,17 +64,17 @@
 
 **目标**：默认目标配置和启用目标项继续保持既有求解行为与结果解释。
 
-**独立测试**：不传 `objective_terms` 或恢复默认目标配置，7 个当前目标项继续启用；启用的资源目标仍产生对应评价和目标贡献。
+**独立测试**：不传 `objective_terms` 或恢复默认目标配置，4 个当前目标项继续启用；启用的资源目标仍产生对应评价和目标贡献。
 
 ### 用户故事 2 的测试
 
-- [X] T021 [US2] 在 `backend/tests/test_scheduler.py` 增加默认目标配置回归测试，断言 7 个当前目标项有效权重和既有默认值一致。
+- [X] T021 [US2] 在 `backend/tests/test_scheduler.py` 增加默认目标配置回归测试，断言 4 个当前目标项有效权重和当前默认值一致。
 - [X] T022 [US2] 在 `backend/tests/test_scheduler.py` 增加启用 `resource_path_continuity` 时路径连续性仍被评价的测试。
-- [X] T023 [US2] 在 `backend/tests/test_scheduler.py` 增加启用 `resource_idle` 和 `resource_workload_balance` 时资源空闲、工作量均衡仍被评价的测试。
+- [X] T023 [US2] 在 `backend/tests/test_scheduler.py` 增加启用 `resource_idle` 和 `resource_path_continuity` 时资源空闲、路径连续性仍被评价的测试。
 
 ### 用户故事 2 的实现
 
-- [X] T024 [US2] 在 `backend/app/models.py` 保持现有 7 个目标项默认配置和兼容过滤规则，不新增目标项 ID，不恢复 `normal_balance`。
+- [X] T024 [US2] 在 `backend/app/models.py` 保持现有 4 个目标项默认配置和兼容过滤规则，不新增目标项 ID，不恢复 `normal_balance` 或其他废弃目标项。
 - [X] T025 [US2] 在 `backend/app/solver.py` 确保启用目标继续构建原有优化变量、约束、罚分项和结果诊断。
 - [X] T026 [US2] 在 `backend/app/solver.py` 确保 `objective_terms_used`、`objective_weights`、`weighted_objective` 对默认配置保持向后兼容。
 
@@ -89,7 +91,7 @@
 ### 用户故事 3 的测试
 
 - [X] T027 [US3] 在 `backend/tests/test_scheduler.py` 增加关闭项与已启用 0 罚分的状态区分测试，并断言 `objective_terms_used` 保留禁用项的请求启用状态、请求权重和有效权重 0。
-- [X] T028 [US3] 在 `backend/tests/test_scheduler.py` 增加最佳努力放松分支测试，断言 `target_relaxation_penalty` 作为 `best_effort_refinement` 诊断保留，不改写 `control_node_late` 的关闭状态。
+- [X] T028 [US3] 在 `backend/tests/test_scheduler.py` 增加最佳努力放松分支测试，断言 `relaxed_target_penalty_days` 作为 `best_effort_refinement` 诊断保留，不改写 `control_node_late` 的关闭状态。
 - [X] T029 [US3] 在 `backend/tests/test_scheduler.py` 增加最少资源候选精排复用目标门控的测试，断言候选方案不重新构建被关闭目标的专属模型。
 - [X] T030 [P] [US3] 在 `frontend/src/types/scheduler.ts` 覆盖目标门控、资源组织诊断和 `best_effort_refinement` 相关字段类型。
 
@@ -99,7 +101,7 @@
 - [X] T032 [US3] 在 `backend/app/solver.py` 调整最佳努力目标放松元数据，确保放松迟延与常规关闭目标项分开展示。
 - [X] T033 [US3] 在 `backend/app/scenario.py` 检查固定资源严格精排、最佳努力精排、最少资源候选精排和回退结果的目标门控元数据透传，不覆盖既有 `schedule_source`。
 - [X] T034 [US3] 在 `frontend/src/app/App.tsx` 调整结果展示逻辑，关闭项显示未启用或未评价，已启用且罚分为 0 的指标显示已评价无风险。
-- [X] T035 [US3] 在 `frontend/src/app/App.tsx` 保持目标函数配置区仍只展示 7 个当前目标项，不新增可配置目标项。
+- [X] T035 [US3] 在 `frontend/src/app/App.tsx` 保持目标函数配置区仍只展示 4 个当前目标项，不新增可配置目标项。
 
 **检查点**：全部用户故事均可独立运行和验证。
 
@@ -136,7 +138,7 @@
 
 ## MVP 范围
 
-MVP 为 Phase 1、Phase 2、Phase 3：只要能证明关闭资源类目标、控制链风险目标和总工期目标时不再构建对应专属模型，同时硬约束和必要基础结果仍保留，就能验证本需求的核心价值。
+MVP 为 Phase 1、Phase 2、Phase 3：只要能证明关闭当前资源类目标和总工期目标时不再构建对应专属模型，同时硬约束和必要基础结果仍保留，就能验证本需求的核心价值。控制链风险类旧目标项已废弃，不再作为当前 MVP 验收范围。
 
 ## 实施策略
 

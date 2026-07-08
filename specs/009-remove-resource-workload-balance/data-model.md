@@ -1,4 +1,4 @@
-# 数据模型：移除同类资源工作量均衡目标
+﻿# 数据模型：移除同类资源工作量均衡目标
 
 ## ObjectiveTermId
 
@@ -7,7 +7,7 @@
 | `resource_workload_balance` | 当前有效目标项 | 从有效目标项中移除，转入废弃输入 |
 | `resource_idle` | 有效目标项 | 保持不变 |
 | `resource_path_continuity` | 有效目标项 | 保持不变 |
-| `resource_slot_balance` | 有效目标项 | 保持不变 |
+| 槽位均衡诊断 | 有效目标项 | 保持不变 |
 | `unconfigured_normal_balance` | 有效目标项 | 保持不变 |
 
 ## DEFAULT_OBJECTIVE_TERM_WEIGHTS

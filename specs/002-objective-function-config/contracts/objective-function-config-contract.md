@@ -19,14 +19,16 @@ Impacted endpoints:
     "strategy": "comprehensive",
     "enable_balance_objective": false,
     "objective_terms": {
-      "control_node_late": { "enabled": true, "weight": 1000000000 },
-      "resource_idle": { "enabled": true, "weight": 1000 }
+      "control_node_late": { "enabled": true, "weight": 10000000000 },
+      "makespan_and_soft_milestone": { "enabled": true, "weight": 5000000 },
+      "resource_path_continuity": { "enabled": true, "weight": 50000 },
+      "resource_idle": { "enabled": true, "weight": 50000 }
     }
   }
 }
 ```
 
-Missing current terms are filled with defaults. Unknown terms or invalid enabled weights reject the request. Legacy `normal_balance` is accepted for compatibility but filtered out.
+Missing current terms are filled with defaults. Unknown terms or invalid enabled weights reject the request. Deprecated terms such as `control_buffer_risk`, `risk_related_control_wait`, `resource_workload_balance`, `unconfigured_normal_balance`, and `normal_balance` are accepted for compatibility but filtered out.
 
 ## Result Contract
 
@@ -36,21 +38,23 @@ Refinement results include effective objective metadata:
 {
   "objective_breakdown": {
     "objective_weights": {
-      "control_node_late": 1000000000,
-      "resource_idle": 1000
+      "control_node_late": 10000000000,
+      "makespan_and_soft_milestone": 5000000,
+      "resource_path_continuity": 50000,
+      "resource_idle": 50000
     },
     "objective_terms_used": {
       "control_node_late": {
         "label": "控制节点迟延",
         "enabled": true,
-        "weight": 1000000000,
-        "effective_weight": 1000000000
+        "weight": 10000000000,
+        "effective_weight": 10000000000
       },
       "resource_idle": {
         "label": "资源空闲",
         "enabled": true,
-        "weight": 1000,
-        "effective_weight": 1000
+        "weight": 50000,
+        "effective_weight": 50000
       }
     }
   }

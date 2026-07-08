@@ -5,6 +5,10 @@
 **状态**：草稿  
 **输入**：用户确认第二阶段机械钻路径连接规则：同幅时桩号距离不超过 2，跨幅时桩号距离不超过 1；距离需要考虑候选任务是否存在，例如只有 1# 墩和 4# 墩任务时应能正常建边。
 
+## 当前实现校正（2026-07-08）
+
+后续 `017-stage1-route-continuity` 已将同幅/跨幅窗口规则前移到第一阶段空间路径候选，并取消常规自动第二阶段排程。当前主链路应以第一阶段 `stage1_route_*` 诊断和 `drill_group_refinement.status = "stage1_final"` 为准；本规格仅保留为历史兼容或显式第二阶段诊断路径说明。
+
 ## 来源与评审上下文
 
 - **来源文档**：`AGENTS.md`、`specs/011-drill-group-two-stage-refinement/`、当前 `backend/app/solver.py` 与 `backend/tests/test_scheduler.py`。

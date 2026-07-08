@@ -1,4 +1,4 @@
-# 实施计划：精排目标指标前端全量展示与配置
+﻿# 实施计划：精排目标指标前端全量展示与配置
 
 **分支/目录**：`007-objective-metric-config` | **日期**：2026-07-06 | **规格**：`specs/007-objective-metric-config/spec.md`
 
@@ -13,7 +13,7 @@
 技术处理方向：
 
 - 后端建立目标指标目录和统一目标贡献输出。
-- 后端将隐藏或折叠目标项纳入配置契约，重点是 `target_relaxation`、`unconfigured_normal_balance`、`resource_slot_balance`。
+- 后端仅将当前 4 个有效目标项纳入配置契约；放松目标诊断、`unconfigured_normal_balance`、槽位均衡诊断等只作为兼容或只读诊断展示，不恢复为可配置目标项。
 - 前端目标函数配置表改为覆盖完整目录，并在结果页展示贡献表与诊断指标。
 - 保持旧场景、旧请求和旧结果兼容。
 

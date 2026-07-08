@@ -1,20 +1,20 @@
 # 快速验证：精排失败最佳努力方案
 
-## 场景 1：当前资源严格精排失败，最佳努力成功
+## 场景 1：当前资源目标未满足（当前口径）
 
-1. 准备一个当前资源容量快排可行、但强制里程碑目标明显早于可完成日期的场景。
+1. 准备一个当前资源可排程、但强制里程碑目标明显早于可完成日期的场景。
 2. 运行固定资源求解。
 3. 期望结果：
-   - `result.stats.schedule_source = "current_resources_best_effort_refinement"`；
-   - `result.stats.best_effort_refinement.enabled = true`；
-   - `relaxed_constraints` 包含强制里程碑；
+   - `result.stats.schedule_source = "current_resources_target_failed"`；
+   - `result.stats.target_achievement.business_success = false`；
+   - 不依赖 `current_resources_best_effort_refinement` 或 `current_resources_capacity_shortest_fallback` 作为主结果来源；
    - 里程碑结果仍显示迟延；
    - 资源互斥和同结构同工序绑定不违规。
 
 建议命令：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest backend\tests -q -k "best_effort"
+.\.venv\Scripts\python.exe -m pytest backend\tests -q -k "target_failed"
 ```
 
 ## 场景 2：严格精排成功，行为不变
@@ -32,14 +32,14 @@
 .\.venv\Scripts\python.exe -m pytest backend\tests -q -k "control_priority"
 ```
 
-## 场景 3：最佳努力仍失败，保留现有回退
+## 场景 3：当前资源物理不可行或限时未确认
 
 1. 准备一个输入错误、资源缺失或模型无效场景。
 2. 运行固定资源求解。
 3. 期望结果：
    - 不伪造最佳努力精排结果；
-   - 保留既有回退或错误诊断；
-   - validation 中说明严格精排和最佳努力尝试的失败原因。
+   - 物理不可行时返回 `physical_infeasible` 或模型错误诊断；
+   - 限时未确认时返回 `target_unconfirmed`，不得提示确定无解。
 
 ## 场景 4：最少资源候选最佳努力
 
@@ -60,7 +60,7 @@ npm.cmd --prefix frontend run build
 
 手工复核：
 
-- 最佳努力来源标签显示为“最佳努力精排”；
-- 精排诊断说明严格精排失败原因和放松目标；
+- 当前资源目标未满足显示为“当前资源目标未满足”；
+- 最少资源候选最佳努力显示目标未满足、放松目标和迟延信息；
 - 里程碑迟延仍在里程碑结果表展示；
-- 严格精排成功场景不出现最佳努力提示。
+- 当前资源目标达成场景不出现最佳努力提示。

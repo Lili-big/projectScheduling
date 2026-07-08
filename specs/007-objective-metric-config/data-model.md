@@ -1,4 +1,4 @@
-# Phase 1 数据模型：精排目标指标前端全量展示与配置
+﻿# Phase 1 数据模型：精排目标指标前端全量展示与配置
 
 ## ObjectiveMetricDefinition（目标指标定义）
 
@@ -21,16 +21,16 @@
 
 | `term_id` | 来源 | 默认口径 |
 |-----------|------|----------|
-| `control_node_late` | objective | 当前默认权重 1,000,000,000 |
-| `control_buffer_risk` | objective | 当前默认权重 5,000,000 |
-| `risk_related_control_wait` | objective | 当前默认权重 1,000,000 |
-| `makespan_and_soft_milestone` | objective | 当前默认权重 10,000 |
-| `resource_path_continuity` | objective | 当前默认权重 3,000 |
-| `resource_idle` | objective | 当前默认权重 1,000 |
-| `resource_workload_balance` | objective | 当前默认权重 100 |
-| `target_relaxation` | derived_objective | 最佳努力分支目标放松罚分；默认应等价于当前与 `control_node_late` 共权重行为 |
-| `resource_slot_balance` | derived_objective | 当前作为 `resource_path_continuity` 路径项组成部分并单独输出罚分 |
-| `unconfigured_normal_balance` | objective | 当前固定后端权重 10，需变为可见配置 |
+| `control_node_late` | objective | 当前默认权重 10,000,000,000 |
+| `makespan_and_soft_milestone` | objective | 当前默认权重 5,000,000 |
+| `resource_path_continuity` | objective | 当前默认权重 50,000 |
+| `resource_idle` | objective | 当前默认权重 50,000 |
+| `control_buffer_risk` | deprecated | 历史兼容输入，当前不进入目标函数 |
+| `risk_related_control_wait` | deprecated | 历史兼容输入，当前不进入目标函数 |
+| `resource_workload_balance` | deprecated | 历史兼容输入，当前不进入目标函数 |
+| 放松目标诊断 | diagnostic | 目标未满足或最少资源最佳努力分支中的只读目标放松诊断 |
+| 槽位均衡诊断 | diagnostic | 历史诊断口径，当前不作为独立可配置目标项 |
+| `unconfigured_normal_balance` | deprecated/diagnostic | 历史兼容输入，当前不进入目标函数；普通工程分布保留为只读诊断 |
 
 诊断项不进入可配置目标项目录，但可进入只读诊断目录。
 

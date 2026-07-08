@@ -2,11 +2,11 @@
 
 ## 请求契约
 
-本功能不新增固定资源求解入口，不要求前端新增请求字段。现有固定资源、最少资源候选精排和最佳努力精排继续使用当前 `ScenarioInput` / `ScheduleInput` / `ScheduleStrategyConfig`。
+本功能不新增固定资源求解入口，不要求前端新增请求字段。现有固定资源、最少资源候选精排和最少资源候选最佳努力精排继续使用当前 `ScenarioInput` / `ScheduleInput` / `ScheduleStrategyConfig`。
 
 请求兼容规则：
 
-- 资源路径连续性目标关闭时，两阶段路径精排相关软目标不建模。
+- 资源路径连续性目标关闭时，机械钻机组路径连续性相关软目标不建模。
 - `ResourcePool.same_structure_parallel_limit` 不再作为机械桩基墩组聚合或两阶段精排触发条件。
 - 旋挖钻、冲击钻、回旋钻机械桩基墩组默认执行组内同一台命名资源负责；人工挖孔桩不执行该规则。
 - 资源池配置仍可通过资源数量、资源启用状态、兼容类型和其他既有规则影响求解，但不得阻止机械桩基墩组进入第一阶段精排。
@@ -29,8 +29,9 @@
 
 | 来源状态 | 含义 |
 | --- | --- |
-| `stage2_refined` | 粗排和细排均成功，主结果使用细排展开结果 |
-| `stage2_fallback` | 粗排成功但细排失败或超时，主结果使用粗排展开结果 |
+| `stage1_final` | 当前常规自动流程中，第一阶段可行并直接作为主结果 |
+| `stage2_refined` | 历史兼容或显式二阶段诊断：粗排和细排均成功，主结果使用细排展开结果 |
+| `stage2_fallback` | 历史兼容或显式二阶段诊断：粗排成功但细排失败或超时，主结果使用粗排展开结果 |
 | `coarse_only` | 资源路径连续性关闭或不适用，未运行细排路径排序 |
 | `not_applicable` | 场景中没有符合条件的机械钻机墩组 |
 
@@ -41,23 +42,24 @@
 | 来源状态 | 含义 |
 | --- | --- |
 | `current_resources_control_priority_balanced` 或等价新值 | 当前资源直接进入命名资源精排并成功 |
-| `current_resources_refinement_failed` 或等价新值 | 第一阶段命名资源精排不可行或超时，当前资源主结果保持失败语义 |
+| `current_resources_target_failed` | 第一阶段目标函数排程可行但业务目标未达成，当前资源主结果保持失败语义并进入资源建议 |
+| `target_unconfirmed` / `physical_infeasible` | 限时未确认或施工硬规则不可行 |
 | `current_resources_capacity_shortest` | 仅作为资源建议测算或内部诊断辅助出现，不作为当前资源失败后的兜底展示结果 |
 
 主链路不得再把池级最短工期排序作为成功精排前的必跑产物。
 
 ## 诊断契约
 
-结果应在现有诊断结构中提供两阶段精排信息。建议字段：
+结果应在现有诊断结构中提供机械钻机组精排信息。建议字段：
 
 ```json
 {
   "drill_group_refinement": {
-    "status": "stage2_refined",
+    "status": "stage1_final",
     "coarse_group_count": 30,
     "coarse_child_task_count": 60,
-    "stage2_node_count": 30,
-    "stage2_arc_count": 180,
+    "stage2_node_count": 0,
+    "stage2_arc_count": 0,
     "baseline_candidate_arc_count": 900,
     "arc_reduction_ratio": 0.8,
     "adjacent_resource_switch_penalty": 2,
@@ -73,11 +75,12 @@
 - 前端可以先只展示现有连续性指标，但必须能安全忽略新增字段。
 - 后端测试必须验证新增诊断存在且数值与场景规模一致。
 - 关闭资源路径连续性时，`status` 应表达未启用或未评价，路径节点和路径弧数量不得伪装为已评价成功。
+- 当前常规自动流程中，第一阶段可行时直接返回 `stage1_final`，第二阶段节点和弧数量通常为 0。
 
 ## 错误和回退契约
 
 - 第一阶段粗排不可行或超时：返回当前资源失败结果，并尝试进入资源建议分支；不得回退展示池级最短工期或当前资源最佳努力结果。
-- 细排不可行或超时：返回粗排展开结果，并写明 `stage2_fallback` 和回退原因。
+- 细排不可行或超时：仅适用于历史兼容或显式二阶段诊断路径，返回粗排展开结果，并写明 `stage2_fallback` 和回退原因。
 - 没有符合条件的机械钻机墩组：不改变现有精排结果，诊断为 `not_applicable`。
 - 人工挖孔：不进入机械钻机墩组聚合，也不受组内单资源规则限制。
 - 机械钻机资源池未配置 `same_structure_parallel_limit`、配置为 0 或配置为大于 1：仍可进入机械桩基墩组聚合，并由显式墩组约束保证组内同一命名资源负责。
