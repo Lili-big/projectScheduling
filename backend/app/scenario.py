@@ -2034,6 +2034,13 @@ def _append_continuous_task(
     control_level: ControlLevel,
     task_overrides: dict[str, TaskOverride] | None = None,
 ) -> Task | None:
+    span_group_id = _continuous_span_group_id(bridge_id, work_section_id, properties.get("group_index"))
+    span_group_name = _continuous_span_group_name(structure_name, properties.get("group_index"))
+    enriched_properties = {
+        **properties,
+        "continuous_span_group_id": span_group_id,
+        "continuous_span_group_name": span_group_name,
+    }
     component = _apply_task_override(ComponentModel(
         id=component_id,
         name=name,
@@ -2041,7 +2048,7 @@ def _append_continuous_task(
         quantity=quantity,
         quantity_label=quantity_label,
         method_id=method_id,
-        properties=properties,
+        properties=enriched_properties,
     ), task_overrides or {})
     task = _task_from_component(
         component=component,
@@ -2060,6 +2067,15 @@ def _append_continuous_task(
             task.compatible_resource_types = []
         tasks.append(task)
     return task
+
+
+def _continuous_span_group_id(bridge_id: str, work_section_id: str, group_index: Any) -> str:
+    return f"{bridge_id}:{work_section_id}:continuous-beam:{group_index}"
+
+
+def _continuous_span_group_name(structure_name: str, group_index: Any) -> str:
+    prefix = structure_name.split("#", 1)[0].rstrip("-")
+    return f"{prefix}组 {group_index}" if group_index is not None else prefix
 
 
 def _continuous_beam_groups(upper_structures: list[UpperStructureComponent]) -> list[list[UpperStructureComponent]]:

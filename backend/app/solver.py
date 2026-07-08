@@ -41,6 +41,7 @@ CONTINUOUS_BEAM_CLOSURE_RULE_IDS = {
     CONTINUOUS_BEAM_SIDE_CLOSURE_RULE_ID,
     CONTINUOUS_BEAM_MIDDLE_CLOSURE_RULE_ID,
 }
+CONTINUOUS_BEAM_RESOURCE_TYPE = "cast_in_place_continuous_beam_team"
 DEFAULT_CONTINUOUS_CLOSURE_FINISH_GAP_DAYS = 7
 MINIMUM_RESOURCES_BEST_EFFORT_SOURCE = "minimum_resources_best_effort_refinement"
 MECHANICAL_DRILL_RESOURCE_TYPES = frozenset({"rotary_drill", "circulation_drill", "impact_drill"})
@@ -61,6 +62,27 @@ class _DrillGroupNode:
     sequence_order: int
     eligible_resource_ids: tuple[str, ...]
     representative_task: Task
+
+
+@dataclass(frozen=True)
+class _ContinuousBeamTeamSpan:
+    span_group_id: str
+    display_name: str
+    bridge_id: str | None
+    work_section_id: str | None
+    group_index: int | None
+    task_ids: tuple[str, ...]
+
+
+@dataclass
+class _ContinuousBeamTeamSpanModel:
+    spans: list[_ContinuousBeamTeamSpan]
+    assignment_vars: dict[tuple[str, str], Any]
+    start_vars: dict[str, Any]
+    end_vars: dict[str, Any]
+    resources_by_id: dict[str, Resource]
+    diagnostics: list[dict[str, Any]] | None = None
+    resource_type: str = CONTINUOUS_BEAM_RESOURCE_TYPE
 
 
 def _objective_weights_for_config(config: Any) -> dict[str, int]:
@@ -266,6 +288,453 @@ def _add_continuous_beam_v18_constraints(
         )
         model.AddAbsEquality(finish_gap, ends[left_id] - ends[right_id])
         model.Add(finish_gap <= max_gap)
+
+
+def _is_continuous_beam_task(task: Task) -> bool:
+    return task.component_type == "cast_in_place_continuous_beam" or task.structure_type == "continuous_beam"
+
+
+def _continuous_span_group_index(task: Task) -> int | None:
+    raw = _task_properties(task).get("group_index")
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, float) and raw.is_integer():
+        return int(raw)
+    if isinstance(raw, str):
+        try:
+            return int(raw)
+        except ValueError:
+            return None
+    return None
+
+
+def _continuous_span_group_id(task: Task) -> str | None:
+    props = _task_properties(task)
+    configured = props.get("continuous_span_group_id")
+    if isinstance(configured, str) and configured.strip():
+        return configured.strip()
+    group_index = _continuous_span_group_index(task)
+    if not task.bridge_id or not task.work_section_id or group_index is None:
+        return None
+    return f"{task.bridge_id}:{task.work_section_id}:continuous-beam:{group_index}"
+
+
+def _continuous_span_display_name(task: Task, group_index: int | None) -> str:
+    props = _task_properties(task)
+    configured = props.get("continuous_span_group_name")
+    if isinstance(configured, str) and configured.strip():
+        return configured.strip()
+    prefix = task.structure_name.split("#", 1)[0].rstrip("-") or task.structure_name
+    return f"{prefix}组 {group_index}" if group_index is not None else prefix
+
+
+def _continuous_beam_team_spans(
+    tasks: list[Task],
+) -> tuple[list[_ContinuousBeamTeamSpan], list[ValidationMessage], list[dict[str, Any]]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    messages: list[ValidationMessage] = []
+    diagnostics: list[dict[str, Any]] = []
+    for task in tasks:
+        if not _is_continuous_beam_task(task):
+            continue
+        group_index = _continuous_span_group_index(task)
+        span_group_id = _continuous_span_group_id(task)
+        missing = []
+        if not task.bridge_id:
+            missing.append("bridge_id")
+        if not task.work_section_id:
+            missing.append("work_section_id")
+        if group_index is None:
+            missing.append("group_index")
+        if not span_group_id:
+            diagnostics.append(
+                {
+                    "level": "warning",
+                    "task_id": task.id,
+                    "task_name": task.name,
+                    "reason": "continuous_span_group_missing",
+                    "missing_fields": missing,
+                }
+            )
+            messages.append(
+                ValidationMessage(
+                    level="warning",
+                    subject_id=task.id,
+                    message=f"现浇连续梁任务“{task.name}”缺少联级识别字段：{', '.join(missing)}，未纳入连续梁班组联级占用。",
+                )
+            )
+            continue
+        bucket = grouped.setdefault(
+            span_group_id,
+            {
+                "span_group_id": span_group_id,
+                "display_name": _continuous_span_display_name(task, group_index),
+                "bridge_id": task.bridge_id,
+                "work_section_id": task.work_section_id,
+                "group_index": group_index,
+                "tasks": [],
+            },
+        )
+        bucket["tasks"].append(task)
+
+    spans = [
+        _ContinuousBeamTeamSpan(
+            span_group_id=str(item["span_group_id"]),
+            display_name=str(item["display_name"]),
+            bridge_id=item["bridge_id"],
+            work_section_id=item["work_section_id"],
+            group_index=item["group_index"],
+            task_ids=tuple(task.id for task in sorted(item["tasks"], key=lambda value: (value.sequence_order, value.id))),
+        )
+        for item in sorted(grouped.values(), key=lambda value: (str(value["bridge_id"] or ""), str(value["work_section_id"] or ""), int(value["group_index"] or 0), str(value["span_group_id"])))
+    ]
+    return spans, messages, diagnostics
+
+
+def _is_continuous_beam_team_task_resource(task: Task, resource: Resource) -> bool:
+    return _is_continuous_beam_task(task) and resource.type == CONTINUOUS_BEAM_RESOURCE_TYPE
+
+
+def _continuous_beam_team_resources(resources: list[Resource]) -> list[Resource]:
+    return [resource for resource in sorted(resources, key=_resource_sort_key) if resource.type == CONTINUOUS_BEAM_RESOURCE_TYPE]
+
+
+def _add_named_continuous_beam_team_span_constraints(
+    model: Any,
+    *,
+    starts: dict[str, Any],
+    ends: dict[str, Any],
+    tasks: list[Task],
+    enabled_resources: list[Resource],
+    resource_intervals: dict[str, list[Any]],
+    validation: list[ValidationMessage],
+    horizon: int,
+) -> _ContinuousBeamTeamSpanModel | None:
+    spans, span_messages, diagnostics = _continuous_beam_team_spans(tasks)
+    validation.extend(span_messages)
+    resources = _continuous_beam_team_resources(enabled_resources)
+    if not spans:
+        return None
+    if not resources:
+        validation.append(
+            ValidationMessage(
+                level="warning",
+                message="已识别现浇连续梁联，但当前没有启用的连续梁班组资源，联级班组占用约束未启用。",
+            )
+        )
+        return _ContinuousBeamTeamSpanModel(spans, {}, {}, {}, {}, diagnostics)
+
+    assignment_vars: dict[tuple[str, str], Any] = {}
+    start_vars: dict[str, Any] = {}
+    end_vars: dict[str, Any] = {}
+    resources_by_id = {resource.id: resource for resource in resources}
+    for index, span in enumerate(spans):
+        start_var = model.NewIntVar(0, horizon, f"continuous_span_start_{index}_{_safe(span.span_group_id)}")
+        end_var = model.NewIntVar(0, horizon, f"continuous_span_end_{index}_{_safe(span.span_group_id)}")
+        duration_var = model.NewIntVar(0, horizon, f"continuous_span_duration_{index}_{_safe(span.span_group_id)}")
+        model.AddMinEquality(start_var, [starts[task_id] for task_id in span.task_ids])
+        model.AddMaxEquality(end_var, [ends[task_id] for task_id in span.task_ids])
+        model.Add(duration_var == end_var - start_var)
+        start_vars[span.span_group_id] = start_var
+        end_vars[span.span_group_id] = end_var
+
+        choices = []
+        for resource in resources:
+            assigned = model.NewBoolVar(f"assign_continuous_span_{index}_{_safe(resource.id)}")
+            assignment_vars[(span.span_group_id, resource.id)] = assigned
+            choices.append(assigned)
+            interval = model.NewOptionalIntervalVar(
+                start_var,
+                duration_var,
+                end_var,
+                assigned,
+                f"interval_continuous_span_{index}_{_safe(resource.id)}",
+            )
+            resource_intervals[resource.id].append(interval)
+        model.AddExactlyOne(choices)
+
+    return _ContinuousBeamTeamSpanModel(spans, assignment_vars, start_vars, end_vars, resources_by_id, diagnostics)
+
+
+def _continuous_span_resource(
+    span: _ContinuousBeamTeamSpan,
+    span_model: _ContinuousBeamTeamSpanModel | None,
+    solver: Any,
+) -> Resource | None:
+    if span_model is None:
+        return None
+    for resource_id, resource in span_model.resources_by_id.items():
+        assignment = span_model.assignment_vars.get((span.span_group_id, resource_id))
+        if assignment is not None and solver.BooleanValue(assignment):
+            return resource
+    return None
+
+
+def _continuous_span_result_payload(
+    *,
+    schedule_input: ScheduleInput,
+    span_model: _ContinuousBeamTeamSpanModel | None,
+    solver: Any | None,
+    diagnostics: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    if span_model is not None:
+        spans = span_model.spans
+        if diagnostics is None:
+            diagnostics = span_model.diagnostics or []
+    else:
+        spans, _, span_diagnostics = _continuous_beam_team_spans(schedule_input.tasks)
+        if diagnostics is None:
+            diagnostics = span_diagnostics
+    resource_quantity = len(span_model.resources_by_id) if span_model is not None else 0
+    payload_spans: list[dict[str, Any]] = []
+    for span in spans:
+        resource = _continuous_span_resource(span, span_model, solver) if solver is not None else None
+        start_offset = solver.Value(span_model.start_vars[span.span_group_id]) if solver is not None and span_model and span.span_group_id in span_model.start_vars else None
+        end_offset = solver.Value(span_model.end_vars[span.span_group_id]) if solver is not None and span_model and span.span_group_id in span_model.end_vars else None
+        payload_spans.append(
+            {
+                "span_group_id": span.span_group_id,
+                "display_name": span.display_name,
+                "bridge_id": span.bridge_id,
+                "work_section_id": span.work_section_id,
+                "group_index": span.group_index,
+                "resource_id": resource.id if resource else None,
+                "resource_name": resource.name if resource else None,
+                "resource_type": CONTINUOUS_BEAM_RESOURCE_TYPE,
+                "start_offset": start_offset,
+                "end_offset": end_offset,
+                "start_date": _offset_date(schedule_input.start_date, start_offset) if start_offset is not None else None,
+                "finish_date": _finish_date(schedule_input.start_date, end_offset) if end_offset is not None else None,
+                "task_ids": list(span.task_ids),
+            }
+        )
+    return {
+        "enabled": bool(span_model and span_model.assignment_vars),
+        "span_count": len(spans),
+        "resource_type": CONTINUOUS_BEAM_RESOURCE_TYPE,
+        "resource_quantity": resource_quantity,
+        "spans": payload_spans,
+        "diagnostics": diagnostics or [],
+    }
+
+
+def _continuous_span_by_task_id(span_payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    by_task_id: dict[str, dict[str, Any]] = {}
+    for span in span_payload.get("spans", []):
+        if not isinstance(span, dict):
+            continue
+        for task_id in span.get("task_ids", []):
+            if isinstance(task_id, str):
+                by_task_id[task_id] = span
+    return by_task_id
+
+
+def _scheduled_continuous_fields(task: Task, span_by_task_id: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    span = span_by_task_id.get(task.id)
+    if not span:
+        return {}
+    return {
+        "continuous_span_group_id": span.get("span_group_id"),
+        "continuous_span_group_name": span.get("display_name"),
+        "continuous_span_resource_id": span.get("resource_id"),
+        "continuous_span_resource_name": span.get("resource_name"),
+    }
+
+
+def _continuous_span_allocations(schedule_input: ScheduleInput, span_payload: dict[str, Any]) -> list[ResourceAllocation]:
+    allocations: list[ResourceAllocation] = []
+    for span in span_payload.get("spans", []):
+        if not isinstance(span, dict) or not span.get("resource_id"):
+            continue
+        start_offset = span.get("start_offset")
+        end_offset = span.get("end_offset")
+        if not isinstance(start_offset, int) or not isinstance(end_offset, int):
+            continue
+        span_group_id = str(span.get("span_group_id") or "")
+        display_name = str(span.get("display_name") or span_group_id)
+        allocations.append(
+            ResourceAllocation(
+                resource_id=str(span["resource_id"]),
+                resource_name=str(span.get("resource_name") or span["resource_id"]),
+                resource_type=CONTINUOUS_BEAM_RESOURCE_TYPE,
+                task_id=f"continuous-span:{span_group_id}",
+                task_name=f"{display_name}（联级占用）",
+                start_offset=start_offset,
+                end_offset=end_offset,
+                start_date=_offset_date(schedule_input.start_date, start_offset),
+                finish_date=_finish_date(schedule_input.start_date, end_offset),
+            )
+        )
+    return allocations
+
+
+def _add_capacity_continuous_beam_team_span_constraints(
+    model: Any,
+    *,
+    starts: dict[str, Any],
+    ends: dict[str, Any],
+    tasks: list[Task],
+    groups_by_type: dict[str, list[dict[str, Any]]],
+    intervals_by_group: dict[str, list[Any]],
+    demands_by_group: dict[str, list[int]],
+    validation: list[ValidationMessage],
+    horizon: int,
+) -> dict[str, Any] | None:
+    spans, span_messages, diagnostics = _continuous_beam_team_spans(tasks)
+    validation.extend(span_messages)
+    groups = groups_by_type.get(CONTINUOUS_BEAM_RESOURCE_TYPE, [])
+    if not spans:
+        return None
+    if not groups:
+        validation.append(
+            ValidationMessage(
+                level="warning",
+                message="已识别现浇连续梁联，但当前容量模型没有可用的连续梁班组资源池，联级班组容量约束未启用。",
+            )
+        )
+        return {
+            "spans": spans,
+            "assignment_vars": {},
+            "start_vars": {},
+            "end_vars": {},
+            "groups_by_key": {},
+            "diagnostics": diagnostics,
+        }
+
+    assignment_vars: dict[tuple[str, str], Any] = {}
+    start_vars: dict[str, Any] = {}
+    end_vars: dict[str, Any] = {}
+    groups_by_key = {str(group["key"]): group for group in groups}
+    for index, span in enumerate(spans):
+        start_var = model.NewIntVar(0, horizon, f"capacity_continuous_span_start_{index}_{_safe(span.span_group_id)}")
+        end_var = model.NewIntVar(0, horizon, f"capacity_continuous_span_end_{index}_{_safe(span.span_group_id)}")
+        duration_var = model.NewIntVar(0, horizon, f"capacity_continuous_span_duration_{index}_{_safe(span.span_group_id)}")
+        model.AddMinEquality(start_var, [starts[task_id] for task_id in span.task_ids])
+        model.AddMaxEquality(end_var, [ends[task_id] for task_id in span.task_ids])
+        model.Add(duration_var == end_var - start_var)
+        start_vars[span.span_group_id] = start_var
+        end_vars[span.span_group_id] = end_var
+
+        choices = []
+        for group in groups:
+            group_key = str(group["key"])
+            assigned = model.NewBoolVar(f"capacity_assign_continuous_span_{index}_{_safe(group_key)}")
+            assignment_vars[(span.span_group_id, group_key)] = assigned
+            choices.append(assigned)
+            interval = model.NewOptionalIntervalVar(
+                start_var,
+                duration_var,
+                end_var,
+                assigned,
+                f"capacity_interval_continuous_span_{index}_{_safe(group_key)}",
+            )
+            intervals_by_group[group_key].append(interval)
+            demands_by_group[group_key].append(1)
+        model.AddExactlyOne(choices)
+
+    return {
+        "spans": spans,
+        "assignment_vars": assignment_vars,
+        "start_vars": start_vars,
+        "end_vars": end_vars,
+        "groups_by_key": groups_by_key,
+        "diagnostics": diagnostics,
+    }
+
+
+def _capacity_continuous_span_payload(
+    *,
+    schedule_input: ScheduleInput,
+    solved: dict[str, Any],
+    fixed_counts: dict[str, int],
+) -> dict[str, Any]:
+    model_payload = solved.get("continuous_span_model")
+    if not model_payload:
+        return _continuous_span_result_payload(schedule_input=schedule_input, span_model=None, solver=None)
+    spans: list[_ContinuousBeamTeamSpan] = list(model_payload.get("spans", []))
+    solver = solved["solver"]
+    limited_resources = _apply_resource_limits(
+        [resource for resource in schedule_input.resources if resource.enabled],
+        fixed_counts,
+    )
+    resources_by_group = {
+        group["key"]: sorted(group["resources"], key=_resource_sort_key)
+        for group in _resource_groups(limited_resources)
+        if group["resource_type"] == CONTINUOUS_BEAM_RESOURCE_TYPE
+    }
+    resource_ready = {
+        resource.id: 0
+        for resources in resources_by_group.values()
+        for resource in resources
+    }
+    selected_resource_by_span_id: dict[str, Resource] = {}
+    ordered_spans = sorted(
+        spans,
+        key=lambda span: (
+            solver.Value(model_payload["start_vars"][span.span_group_id])
+            if span.span_group_id in model_payload.get("start_vars", {})
+            else 0,
+            span.span_group_id,
+        ),
+    )
+    for span in ordered_spans:
+        selected_group_key = None
+        for (span_group_id, group_key), assignment in model_payload.get("assignment_vars", {}).items():
+            if span_group_id == span.span_group_id and solver.BooleanValue(assignment):
+                selected_group_key = group_key
+                break
+        if selected_group_key is None:
+            continue
+        candidates = resources_by_group.get(selected_group_key, [])
+        start_offset = solver.Value(model_payload["start_vars"][span.span_group_id])
+        end_offset = solver.Value(model_payload["end_vars"][span.span_group_id])
+        assigned_resource = next((resource for resource in candidates if resource_ready[resource.id] <= start_offset), None)
+        if not assigned_resource and candidates:
+            assigned_resource = min(candidates, key=lambda resource: resource_ready[resource.id])
+        if assigned_resource:
+            selected_resource_by_span_id[span.span_group_id] = assigned_resource
+            resource_ready[assigned_resource.id] = end_offset
+
+    payload_spans: list[dict[str, Any]] = []
+    for span in spans:
+        resource = selected_resource_by_span_id.get(span.span_group_id)
+        start_offset = (
+            solver.Value(model_payload["start_vars"][span.span_group_id])
+            if span.span_group_id in model_payload.get("start_vars", {})
+            else None
+        )
+        end_offset = (
+            solver.Value(model_payload["end_vars"][span.span_group_id])
+            if span.span_group_id in model_payload.get("end_vars", {})
+            else None
+        )
+        payload_spans.append(
+            {
+                "span_group_id": span.span_group_id,
+                "display_name": span.display_name,
+                "bridge_id": span.bridge_id,
+                "work_section_id": span.work_section_id,
+                "group_index": span.group_index,
+                "resource_id": resource.id if resource else None,
+                "resource_name": resource.name if resource else None,
+                "resource_type": CONTINUOUS_BEAM_RESOURCE_TYPE,
+                "start_offset": start_offset,
+                "end_offset": end_offset,
+                "start_date": _offset_date(schedule_input.start_date, start_offset) if start_offset is not None else None,
+                "finish_date": _finish_date(schedule_input.start_date, end_offset) if end_offset is not None else None,
+                "task_ids": list(span.task_ids),
+            }
+        )
+    return {
+        "enabled": bool(model_payload.get("assignment_vars")),
+        "span_count": len(spans),
+        "resource_type": CONTINUOUS_BEAM_RESOURCE_TYPE,
+        "resource_quantity": sum(len(resources) for resources in resources_by_group.values()),
+        "spans": payload_spans,
+        "diagnostics": model_payload.get("diagnostics", []),
+    }
 
 
 def _resource_parallel_group_key(resource: Resource) -> str:
@@ -1097,12 +1566,15 @@ def _build_named_resource_assignment_model(
 
     for task in tasks:
         candidates = resource_candidates.get(task.id, [])
-        candidate_group_keys = {_resource_parallel_group_key(resource) for resource in candidates}
+        assignment_candidates = [
+            resource for resource in candidates if not _is_continuous_beam_team_task_resource(task, resource)
+        ]
+        candidate_group_keys = {_resource_parallel_group_key(resource) for resource in assignment_candidates}
         if len(candidate_group_keys) == 1:
             group_key = next(iter(candidate_group_keys))
             limit = limits_by_group_key.get(group_key)
             if limit is not None and limit > 0:
-                resource_ids = tuple(resource.id for resource in sorted(candidates, key=_resource_sort_key))
+                resource_ids = tuple(resource.id for resource in sorted(assignment_candidates, key=_resource_sort_key))
                 grouped_tasks[(_same_structure_resource_rule_key(task, group_key), resource_ids, int(limit))].append(task)
                 continue
         fallback_tasks.append(task)
@@ -1110,6 +1582,8 @@ def _build_named_resource_assignment_model(
     for task in fallback_tasks:
         choices = []
         for resource in resource_candidates.get(task.id, []):
+            if _is_continuous_beam_team_task_resource(task, resource):
+                continue
             assigned = model.NewBoolVar(f"{assignment_prefix}_{_safe(task.id)}_{_safe(resource.id)}")
             choices.append(assigned)
             add_task_resource_interval(task, resource, assigned)
@@ -1128,10 +1602,15 @@ def _build_named_resource_assignment_model(
                     f"{assignment_prefix}_same_structure_{group_index}_{_safe(resource.id)}"
                 )
                 for resource in resources
+                if not any(_is_continuous_beam_team_task_resource(task, resource) for task in ordered_tasks)
             }
+            if not resource_choices:
+                continue
             model.AddExactlyOne(resource_choices.values())
             for task in ordered_tasks:
                 for resource in resources:
+                    if resource.id not in resource_choices:
+                        continue
                     add_task_resource_interval(task, resource, resource_choices[resource.id])
             continue
 
@@ -1145,11 +1624,16 @@ def _build_named_resource_assignment_model(
                     f"{assignment_prefix}_same_structure_slot_{group_index}_{slot_index}_{_safe(resource.id)}"
                 )
                 for resource in resources
+                if not any(_is_continuous_beam_team_task_resource(task, resource) for task in slot_tasks)
             }
+            if not choices:
+                continue
             model.AddExactlyOne(choices.values())
             slot_resource_choices.append(choices)
             for task in slot_tasks:
                 for resource in resources:
+                    if resource.id not in choices:
+                        continue
                     add_task_resource_interval(task, resource, choices[resource.id])
 
         for resource in resources:
@@ -1229,6 +1713,16 @@ def solve_shortest_duration_schedule(
         tasks=schedule_input.tasks,
         enabled_resources=enabled_resources,
         resource_candidates=resource_candidates,
+        horizon=horizon,
+    )
+    continuous_span_model = _add_named_continuous_beam_team_span_constraints(
+        model,
+        starts=starts,
+        ends=ends,
+        tasks=schedule_input.tasks,
+        enabled_resources=enabled_resources,
+        resource_intervals=resource_intervals,
+        validation=validation,
         horizon=horizon,
     )
 
@@ -1351,6 +1845,12 @@ def solve_shortest_duration_schedule(
 
     scheduled_tasks: list[ScheduledTask] = []
     allocations: list[ResourceAllocation] = []
+    continuous_span_payload = _continuous_span_result_payload(
+        schedule_input=schedule_input,
+        span_model=continuous_span_model,
+        solver=solver,
+    )
+    continuous_span_by_task_id = _continuous_span_by_task_id(continuous_span_payload)
 
     for task in sorted(schedule_input.tasks, key=lambda item: (solver.Value(starts[item.id]), item.id)):
         assigned_resource = _assigned_resource_for_task(task, resource_candidates, assignment_vars, solver)
@@ -1368,6 +1868,7 @@ def solve_shortest_duration_schedule(
             assigned_resource_id=assigned_resource.id if assigned_resource else None,
             assigned_resource_name=assigned_resource.name if assigned_resource else None,
             assigned_resource_type=assigned_resource.type if assigned_resource else None,
+            **_scheduled_continuous_fields(task, continuous_span_by_task_id),
             predecessor_ids=predecessors_by_successor.get(task.id, []),
         )
         scheduled_tasks.append(scheduled_task)
@@ -1386,6 +1887,7 @@ def solve_shortest_duration_schedule(
                     finish_date=finish_day,
                 )
             )
+    allocations.extend(_continuous_span_allocations(schedule_input, continuous_span_payload))
 
     objective_days = solver.Value(makespan)
     milestone_results = _build_milestone_results(
@@ -1404,6 +1906,7 @@ def solve_shortest_duration_schedule(
     stats["continuity_objective"] = {
         "primary_weight": CONTINUITY_PRIMARY_WEIGHT,
     }
+    stats["continuous_beam_team_spans"] = continuous_span_payload
 
     return ScheduleResult(
         status=status,
@@ -1610,6 +2113,16 @@ def solve_control_priority_schedule(
         tasks=schedule_input.tasks,
         enabled_resources=enabled_resources,
         resource_candidates=resource_candidates,
+        horizon=horizon,
+    )
+    continuous_span_model = _add_named_continuous_beam_team_span_constraints(
+        model,
+        starts=starts,
+        ends=ends,
+        tasks=schedule_input.tasks,
+        enabled_resources=enabled_resources,
+        resource_intervals=resource_intervals,
+        validation=validation,
         horizon=horizon,
     )
     if _fixed_resource_by_task_id:
@@ -1899,6 +2412,12 @@ def solve_control_priority_schedule(
 
     scheduled_tasks: list[ScheduledTask] = []
     allocations: list[ResourceAllocation] = []
+    continuous_span_payload = _continuous_span_result_payload(
+        schedule_input=schedule_input,
+        span_model=continuous_span_model,
+        solver=solver,
+    )
+    continuous_span_by_task_id = _continuous_span_by_task_id(continuous_span_payload)
     for task in sorted(schedule_input.tasks, key=lambda item: (solver.Value(starts[item.id]), item.id)):
         assigned_resource = _assigned_resource_for_task(task, resource_candidates, assignment_vars, solver)
         start_offset = solver.Value(starts[task.id])
@@ -1914,6 +2433,7 @@ def solve_control_priority_schedule(
             assigned_resource_id=assigned_resource.id if assigned_resource else None,
             assigned_resource_name=assigned_resource.name if assigned_resource else None,
             assigned_resource_type=assigned_resource.type if assigned_resource else None,
+            **_scheduled_continuous_fields(task, continuous_span_by_task_id),
             predecessor_ids=predecessors_by_successor.get(task.id, []),
         )
         scheduled_tasks.append(scheduled_task)
@@ -1931,6 +2451,7 @@ def solve_control_priority_schedule(
                     finish_date=finish_day,
                 )
             )
+    allocations.extend(_continuous_span_allocations(schedule_input, continuous_span_payload))
 
     objective_days = solver.Value(makespan)
     milestone_results = _build_milestone_results(
@@ -2035,6 +2556,7 @@ def solve_control_priority_schedule(
     stats["resource_organization_analysis"] = resource_organization_analysis
     stats["control_priority_analysis"] = control_priority_analysis
     stats["objective_modeling_gates"] = objective_modeling_gates
+    stats["continuous_beam_team_spans"] = continuous_span_payload
     if relax_target_constraints:
         stats["target_relaxation"] = {
             "relaxed_hard_milestone_lateness_days": relaxed_hard_milestone_lateness_days,
@@ -5143,6 +5665,8 @@ def _solve_capacity_model(
         seen_group_keys: set[str] = set()
         for resource_type in task.compatible_resource_types:
             for group in groups_by_type.get(resource_type, []):
+                if _is_continuous_beam_task(task) and resource_type == CONTINUOUS_BEAM_RESOURCE_TYPE:
+                    continue
                 if group["key"] in seen_group_keys:
                     continue
                 seen_group_keys.add(group["key"])
@@ -5161,7 +5685,10 @@ def _solve_capacity_model(
                 demands_by_group[group["key"]].append(1)
         if choices:
             model.AddExactlyOne(choices)
-        elif task.compatible_resource_types:
+        elif task.compatible_resource_types and not (
+            _is_continuous_beam_task(task)
+            and CONTINUOUS_BEAM_RESOURCE_TYPE in task.compatible_resource_types
+        ):
             validation.append(
                 ValidationMessage(
                     level="warning",
@@ -5169,6 +5696,18 @@ def _solve_capacity_model(
                     message=f"“{task.name}”没有可用于容量校验的受限资源池，已按资源默认充足处理。",
                 )
             )
+
+    continuous_span_model = _add_capacity_continuous_beam_team_span_constraints(
+        model,
+        starts=starts,
+        ends=ends,
+        tasks=schedule_input.tasks,
+        groups_by_type=groups_by_type,
+        intervals_by_group=intervals_by_group,
+        demands_by_group=demands_by_group,
+        validation=validation,
+        horizon=horizon,
+    )
 
     _add_capacity_same_structure_parallel_rules(
         model,
@@ -5385,6 +5924,7 @@ def _solve_capacity_model(
         "milestone_target_offsets": milestone_target_offsets,
         "soft_lateness_vars": soft_lateness_vars,
         "makespan": makespan,
+        "continuous_span_model": continuous_span_model,
         "validation": validation,
         "selected_resource_costs": selected_resource_costs,
         "resource_incremental_cost": sum(int(resource["incremental_cost"]) for resource in selected_resource_costs),
@@ -5466,6 +6006,12 @@ def _capacity_model_result(
 
     scheduled_tasks: list[ScheduledTask] = []
     allocations: list[ResourceAllocation] = []
+    continuous_span_payload = _capacity_continuous_span_payload(
+        schedule_input=schedule_input,
+        solved=solved,
+        fixed_counts=fixed_counts,
+    )
+    continuous_span_by_task_id = _continuous_span_by_task_id(continuous_span_payload)
     for task in ordered_tasks:
         assigned_resource = assigned_resource_by_task_id.get(task.id)
         start_offset = solver.Value(starts[task.id])
@@ -5480,6 +6026,7 @@ def _capacity_model_result(
                 assigned_resource_id=assigned_resource.id if assigned_resource else None,
                 assigned_resource_name=assigned_resource.name if assigned_resource else None,
                 assigned_resource_type=assigned_resource.type if assigned_resource else None,
+                **_scheduled_continuous_fields(task, continuous_span_by_task_id),
                 predecessor_ids=predecessors_by_successor.get(task.id, []),
             )
         )
@@ -5497,6 +6044,7 @@ def _capacity_model_result(
                     finish_date=_finish_date(schedule_input.start_date, end_offset),
                 )
             )
+    allocations.extend(_continuous_span_allocations(schedule_input, continuous_span_payload))
 
     objective_days = solver.Value(solved["makespan"])
     milestone_results = _build_milestone_results(
@@ -5519,6 +6067,7 @@ def _capacity_model_result(
         "continuity_objective": {
             "primary_weight": CONTINUITY_PRIMARY_WEIGHT,
         },
+        "continuous_beam_team_spans": continuous_span_payload,
     }
     return ScheduleResult(
         status=solved["status"],

@@ -5,6 +5,7 @@ import sys
 from collections import defaultdict
 from datetime import date, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -806,8 +807,121 @@ def test_continuous_beam_left_and_right_standard_segments_solve_synchronously() 
     assert result.status in {"OPTIMAL", "FEASIBLE"}
     assert left_standard.start_offset == right_standard.start_offset
     assert left_standard.end_offset == right_standard.end_offset
-    assert left_standard.assigned_resource_id is not None
+    assert left_standard.assigned_resource_id is None
     assert right_standard.assigned_resource_id is None
+    assert left_standard.continuous_span_resource_id is not None
+    assert right_standard.continuous_span_resource_id == left_standard.continuous_span_resource_id
+
+
+def test_continuous_beam_team_quantity_one_serializes_span_groups() -> None:
+    pytest.importorskip("ortools")
+    scenario = _scenario_with_left_right_continuous_beams(main_pier_count=2, standard_cycles=1, team_quantity=1)
+    generated = generate_schedule_input_from_scenario(scenario)
+
+    result = solve_shortest_duration_schedule(generated.schedule_input)
+    spans = _continuous_team_spans(result)
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert len(spans) == 2
+    assert {span["work_section_id"] for span in spans} == {"WS-L", "WS-R"}
+    assert len({span["resource_id"] for span in spans}) == 1
+    assert _max_parallel_spans(spans) == 1
+
+
+def test_continuous_beam_team_quantity_one_limits_three_span_groups_to_one_active_span() -> None:
+    pytest.importorskip("ortools")
+    scenario = _scenario_with_three_continuous_beams(main_pier_count=2, standard_cycles=1, team_quantity=1)
+    generated = generate_schedule_input_from_scenario(scenario)
+
+    result = solve_shortest_duration_schedule(generated.schedule_input)
+    spans = _continuous_team_spans(result)
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert len(spans) == 3
+    assert len({span["resource_id"] for span in spans}) == 1
+    assert _max_parallel_spans(spans) == 1
+
+
+def test_continuous_beam_team_quantity_two_allows_two_span_groups_parallel() -> None:
+    pytest.importorskip("ortools")
+    scenario = _scenario_with_left_right_continuous_beams(main_pier_count=2, standard_cycles=1, team_quantity=2)
+    generated = generate_schedule_input_from_scenario(scenario)
+
+    result = solve_shortest_duration_schedule(generated.schedule_input)
+    spans = _continuous_team_spans(result)
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert len(spans) == 2
+    assert len({span["resource_id"] for span in spans}) == 2
+    assert _max_parallel_spans(spans) == 2
+
+
+def test_continuous_beam_team_quantity_two_limits_three_span_groups_to_two_active_spans() -> None:
+    pytest.importorskip("ortools")
+    scenario = _scenario_with_three_continuous_beams(main_pier_count=2, standard_cycles=1, team_quantity=2)
+    generated = generate_schedule_input_from_scenario(scenario)
+
+    result = solve_shortest_duration_schedule(generated.schedule_input)
+    spans = _continuous_team_spans(result)
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert len(spans) == 3
+    assert len({span["resource_id"] for span in spans}) == 2
+    assert _max_parallel_spans(spans) == 2
+
+
+def test_continuous_beam_team_span_tracks_resource_neutral_tasks_without_task_level_allocation() -> None:
+    pytest.importorskip("ortools")
+    scenario = _scenario_with_continuous_beam(main_pier_count=2, standard_cycles=1)
+    generated = generate_schedule_input_from_scenario(scenario)
+
+    result = solve_shortest_duration_schedule(generated.schedule_input)
+    spans = _continuous_team_spans(result)
+    span_task_ids = {task_id for span in spans for task_id in span["task_ids"]}
+    right_standard = next(
+        task
+        for task in result.tasks
+        if task.properties.get("continuous_task_type") == "standard_segment_batch"
+        and task.properties.get("standard_side") == "right"
+    )
+
+    assert right_standard.id in span_task_ids
+    assert right_standard.assigned_resource_id is None
+    assert right_standard.continuous_span_resource_id is not None
+
+
+def test_continuous_beam_team_span_reports_missing_group_identity() -> None:
+    pytest.importorskip("ortools")
+    task = _solver_task("CB-MISSING", "continuous missing identity", 5, "cast_in_place_continuous_beam_team").model_copy(
+        update={
+            "structure_type": "continuous_beam",
+            "component_type": "cast_in_place_continuous_beam",
+            "properties": {},
+        }
+    )
+
+    result = solve_shortest_duration_schedule(
+        ScheduleInput(
+            project_name="continuous beam missing identity",
+            start_date=date(2026, 1, 1),
+            tasks=[task],
+            precedence_links=[],
+            resources=[
+                Resource(
+                    id="continuous_1",
+                    name="Continuous 1",
+                    type="cast_in_place_continuous_beam_team",
+                )
+            ],
+            time_limit_seconds=5,
+        )
+    )
+    payload = result.stats["continuous_beam_team_spans"]
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert payload["span_count"] == 0
+    assert payload["diagnostics"][0]["reason"] == "continuous_span_group_missing"
+    assert any("缺少联级识别字段" in message.message for message in result.validation)
 
 
 def test_continuous_beam_closure_predecessor_finish_gap_is_limited() -> None:
@@ -4717,6 +4831,75 @@ def _scenario_with_continuous_beam(
     ]
     scenario.milestones = []
     return scenario
+
+
+def _scenario_with_left_right_continuous_beams(
+    *,
+    main_pier_count: int,
+    standard_cycles: int,
+    team_quantity: int,
+):
+    scenario = _scenario_with_continuous_beam(main_pier_count=main_pier_count, standard_cycles=standard_cycles)
+    bridge = scenario.project.bridges[0]
+    left_section = bridge.work_sections[0]
+    right_section = left_section.model_copy(deep=True)
+    right_section.id = "WS-R"
+    right_section.name = "鍙冲箙缁撴瀯鍙傛暟"
+    right_section.side = "right"
+    for upper in right_section.upper_structures:
+        upper.id = upper.id.replace("-L-", "-R-")
+        upper.side = "right"
+    bridge.work_sections = [left_section, right_section]
+
+    for pool in scenario.resource_pools:
+        if pool.type == "cast_in_place_continuous_beam_team":
+            pool.quantity = team_quantity
+            pool.max_quantity = max(pool.max_quantity or team_quantity, team_quantity)
+    return scenario
+
+
+def _scenario_with_three_continuous_beams(
+    *,
+    main_pier_count: int,
+    standard_cycles: int,
+    team_quantity: int,
+):
+    scenario = _scenario_with_left_right_continuous_beams(
+        main_pier_count=main_pier_count,
+        standard_cycles=standard_cycles,
+        team_quantity=team_quantity,
+    )
+    bridge = scenario.project.bridges[0]
+    third_section = bridge.work_sections[0].model_copy(deep=True)
+    third_section.id = "WS-C"
+    third_section.name = "涓箙缁撴瀯鍙傛暟"
+    third_section.side = "none"
+    for upper in third_section.upper_structures:
+        upper.id = upper.id.replace("-L-", "-C-")
+        upper.side = "none"
+    bridge.work_sections.append(third_section)
+    return scenario
+
+
+def _continuous_team_spans(result: ScheduleResult) -> list[dict[str, Any]]:
+    payload = result.stats.get("continuous_beam_team_spans")
+    assert isinstance(payload, dict)
+    spans = payload.get("spans")
+    assert isinstance(spans, list)
+    return spans
+
+
+def _max_parallel_spans(spans: list[dict[str, Any]]) -> int:
+    events: list[tuple[int, int]] = []
+    for span in spans:
+        events.append((int(span["start_offset"]), 1))
+        events.append((int(span["end_offset"]), -1))
+    active = 0
+    peak = 0
+    for _, delta in sorted(events, key=lambda item: (item[0], item[1])):
+        active += delta
+        peak = max(peak, active)
+    return peak
 
 
 def _scenario_with_single_upper_span(

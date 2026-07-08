@@ -2974,9 +2974,11 @@ tbody tr:hover {
 }
 
 .schedule-split-view {
+  --plan-detail-header-height: 37px;
+  --plan-detail-row-height: 41px;
   position: relative;
   display: grid;
-  grid-template-columns: 160px minmax(760px, 1fr);
+  grid-template-columns: 280px minmax(860px, 1fr);
   align-items: start;
   min-height: 320px;
   max-height: 560px;
@@ -2992,7 +2994,7 @@ tbody tr:hover {
   background: #fff;
   border-right: 1px solid #e2e8f0;
   display: grid;
-  grid-template-rows: 36px auto;
+  grid-template-rows: var(--plan-detail-header-height) auto;
 }
 
 .plan-work-list-header,
@@ -3000,7 +3002,8 @@ tbody tr:hover {
   position: sticky;
   top: 0;
   z-index: 6;
-  min-height: 36px;
+  box-sizing: border-box;
+  height: var(--plan-detail-header-height);
   padding: 9px 12px;
   color: #334155;
   background: #f8fafc;
@@ -3016,16 +3019,19 @@ tbody tr:hover {
 .plan-work-list-row {
   display: flex;
   align-items: center;
+  box-sizing: border-box;
   width: 100%;
-  min-height: 40px;
-  height: 40px;
+  height: var(--plan-detail-row-height);
+  margin: 0;
   padding: 0 10px;
   justify-content: flex-start;
+  border: 0;
   border-radius: 0;
   color: #18212f;
   background: #fff;
   border-bottom: 1px solid #edf2f7;
   text-align: left;
+  font: inherit;
   font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3121,12 +3127,12 @@ tbody tr:hover {
 }
 
 .plan-detail-table-wrap {
-  min-width: 760px;
+  min-width: 860px;
 }
 
 .plan-detail-table {
   width: 100%;
-  min-width: 760px;
+  min-width: 860px;
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
@@ -3134,6 +3140,7 @@ tbody tr:hover {
 
 .plan-detail-table th,
 .plan-detail-table td {
+  box-sizing: border-box;
   height: 40px;
   padding: 0 10px;
   border-bottom: 1px solid #edf2f7;
@@ -3143,6 +3150,7 @@ tbody tr:hover {
   overflow: hidden;
   text-align: left;
   text-overflow: ellipsis;
+  vertical-align: middle;
   white-space: nowrap;
 }
 
@@ -3180,19 +3188,12 @@ tbody tr:hover {
   background: #eff6ff;
 }
 
-.plan-detail-table .control-plan-deadline-cell {
-  color: #0f766e;
-  font-weight: 700;
-}
-
-.plan-detail-side-col { width: 56px; }
-.plan-detail-component-col { width: 66px; }
-.plan-detail-expression-col { width: 150px; }
-.plan-detail-duration-col { width: 56px; }
-.plan-detail-date-col { width: 88px; }
-.plan-detail-resource-col { width: 92px; }
-.plan-detail-control-col { width: 92px; }
-.plan-detail-predecessor-col { width: 58px; }
+.plan-detail-component-col { width: 150px; }
+.plan-detail-expression-col { width: 220px; }
+.plan-detail-duration-col { width: 64px; }
+.plan-detail-date-col { width: 96px; }
+.plan-detail-resource-col { width: 160px; }
+.plan-detail-predecessor-col { width: 82px; }
 
 .result-switcher {
   margin-bottom: 12px;

@@ -243,6 +243,7 @@ type Task = {
   quantity_label: string;
   duration_days: number;
   compatible_resource_types: string[];
+  properties?: Record<string, unknown>;
 };
 
 type PrecedenceLink = {
@@ -273,6 +274,10 @@ type ScheduledTask = Task & {
   assigned_resource_id?: string | null;
   assigned_resource_name?: string | null;
   assigned_resource_type?: string | null;
+  continuous_span_group_id?: string | null;
+  continuous_span_group_name?: string | null;
+  continuous_span_resource_id?: string | null;
+  continuous_span_resource_name?: string | null;
   predecessor_ids: string[];
 };
 
@@ -292,6 +297,7 @@ type GeneratedScheduleInput = {
 };
 
 const CONTINUOUS_BEAM_STRUCTURE_CODE = "castInPlaceContinuousBoxGirder";
+const CONTINUOUS_BEAM_RESOURCE_TYPE = "cast_in_place_continuous_beam_team";
 const CAST_IN_PLACE_BOX_BEAM_STRUCTURE_CODE = "castInPlaceBoxGirder";
 const SIMPLE_BEAM_STRUCTURE_CODE = "precastTGirder";
 const CONTINUOUS_BEAM_DEFAULT_STANDARD_SEGMENT_CYCLES = 18;
@@ -1850,6 +1856,7 @@ function buildContinuousBeamTasks(
         quantityLabel: "1块",
         bridgeId,
         workSectionId: section.id,
+        groupIndex,
         sequenceOrder: baseOrder + tIndex * 1000,
         structureId,
         structureName,
@@ -1876,6 +1883,7 @@ function buildContinuousBeamTasks(
           quantityLabel: `${standardCycles}块`,
           bridgeId,
           workSectionId: section.id,
+          groupIndex,
           sequenceOrder: baseOrder + tIndex * 1000 + 1,
           structureId,
           structureName,
@@ -1898,6 +1906,7 @@ function buildContinuousBeamTasks(
       quantityLabel: "1段",
       bridgeId,
       workSectionId: section.id,
+      groupIndex,
       sequenceOrder: baseOrder + 9000,
       structureId: `${prefix}-LEFT-P${String(mainSupports[0]).padStart(2, "0")}`,
       structureName: leftEdgeStructureName,
@@ -1911,6 +1920,7 @@ function buildContinuousBeamTasks(
       quantityLabel: "1段",
       bridgeId,
       workSectionId: section.id,
+      groupIndex,
       sequenceOrder: baseOrder + 9100,
       structureId: `${prefix}-LEFT-P${String(mainSupports[0]).padStart(2, "0")}`,
       structureName: leftEdgeStructureName,
@@ -1924,6 +1934,7 @@ function buildContinuousBeamTasks(
       quantityLabel: "1段",
       bridgeId,
       workSectionId: section.id,
+      groupIndex,
       sequenceOrder: baseOrder + 9200,
       structureId: `${prefix}-RIGHT-P${String(mainSupports[mainSupports.length - 1]).padStart(2, "0")}`,
       structureName: rightEdgeStructureName,
@@ -1937,6 +1948,7 @@ function buildContinuousBeamTasks(
       quantityLabel: "1段",
       bridgeId,
       workSectionId: section.id,
+      groupIndex,
       sequenceOrder: baseOrder + 9300,
       structureId: `${prefix}-RIGHT-P${String(mainSupports[mainSupports.length - 1]).padStart(2, "0")}`,
       structureName: rightEdgeStructureName,
@@ -1982,6 +1994,7 @@ function buildContinuousBeamTasks(
         quantityLabel: "1段",
         bridgeId,
         workSectionId: section.id,
+        groupIndex,
         sequenceOrder: baseOrder + 9400 + closureIndex,
         structureId: `${prefix}-MID-${String(closureIndex).padStart(2, "0")}-P${String(leftSupport).padStart(2, "0")}-P${String(rightSupport).padStart(2, "0")}`,
         structureName: `${groupLabel}${leftSupport}#墩-${rightSupport}#墩中跨`,
@@ -2023,6 +2036,7 @@ function appendContinuousTask(
     quantityLabel: string;
     bridgeId: string;
     workSectionId: string;
+    groupIndex: number;
     sequenceOrder: number;
     structureId: string;
     structureName: string;
@@ -2039,7 +2053,11 @@ function appendContinuousTask(
     method_id: input.methodId,
     productivity_option_id: null,
     enabled: true,
-    properties: {},
+    properties: {
+      group_index: input.groupIndex,
+      continuous_span_group_id: continuousSpanGroupId(input.bridgeId, input.workSectionId, input.groupIndex),
+      continuous_span_group_name: continuousSpanGroupName(input.structureName, input.groupIndex),
+    },
   }, input.taskOverrides);
   const selected = selectProcess(component, input.processLibrary);
   if (!selected) return null;
@@ -2062,9 +2080,19 @@ function appendContinuousTask(
     quantity_label: component.quantity_label,
     duration_days: calculateDuration(quantity, effectiveProcess),
     compatible_resource_types: [effectiveProcess.resource_type],
+    properties: component.properties,
   };
   tasks.push(task);
   return task;
+}
+
+function continuousSpanGroupId(bridgeId: string, workSectionId: string, groupIndex: number) {
+  return `${bridgeId}:${workSectionId}:continuous-beam:${groupIndex}`;
+}
+
+function continuousSpanGroupName(structureName: string, groupIndex: number) {
+  const prefix = structureName.split("#", 1)[0].replace(/-$/, "");
+  return `${prefix}组 ${groupIndex}`;
 }
 
 function continuousBeamGroups(upperStructures: UpperStructureModel[]) {
@@ -2430,7 +2458,7 @@ function earliestStartFromPrecedenceLink(link: PrecedenceLink, predecessor: Sche
   return predecessor.end_offset + link.lag_days;
 }
 
-function schedule(generated: GeneratedScheduleInput) {
+function schedule(generated: GeneratedScheduleInput): any {
   const input = generated.schedule_input;
   const scheduleStrategy = normalizeScheduleStrategy(input.schedule_strategy);
   const predecessorLinks = groupBy(input.precedence_links, (link) => link.successor_id);
@@ -2453,7 +2481,9 @@ function schedule(generated: GeneratedScheduleInput) {
       if (!predecessor) return 0;
       return earliestStartFromPrecedenceLink(link, predecessor, task);
     }));
-    const candidates = task.compatible_resource_types.flatMap((type) => resourcesByType.get(type) ?? []);
+    const candidates = task.compatible_resource_types
+      .flatMap((type) => resourcesByType.get(type) ?? [])
+      .filter((resource) => !(isContinuousBeamTask(task) && resource.type === CONTINUOUS_BEAM_RESOURCE_TYPE));
     const assigned = candidates.reduce<Resource | null>((best, current) => {
       if (!best) return current;
       return (resourceAvailable.get(current.id) ?? 0) < (resourceAvailable.get(best.id) ?? 0) ? current : best;
@@ -2475,7 +2505,8 @@ function schedule(generated: GeneratedScheduleInput) {
     });
   }
 
-  const tasks = Array.from(scheduledById.values()).sort((a, b) => a.start_offset - b.start_offset || a.id.localeCompare(b.id));
+  const spanApplied = applyContinuousBeamTeamSpans(input, Array.from(scheduledById.values()));
+  const tasks = spanApplied.tasks.sort((a, b) => a.start_offset - b.start_offset || a.id.localeCompare(b.id));
   const makespan = tasks.reduce((max, task) => Math.max(max, task.end_offset), 0);
   return {
     status: "FEASIBLE",
@@ -2483,7 +2514,8 @@ function schedule(generated: GeneratedScheduleInput) {
     plan_start_date: input.start_date,
     plan_finish_date: addDays(input.start_date, makespan),
     tasks,
-    resource_allocations: tasks
+    resource_allocations: [
+      ...tasks
       .filter((task) => task.assigned_resource_id)
       .map((task) => ({
         resource_id: task.assigned_resource_id,
@@ -2496,10 +2528,13 @@ function schedule(generated: GeneratedScheduleInput) {
         start_date: task.start_date,
         finish_date: task.finish_date,
       })),
+      ...spanApplied.allocations,
+    ],
     milestone_results: milestoneResults(input.milestones, tasks, input.start_date),
     validation: [],
     stats: {
       solve_mode: "netlify_functions_demo_scheduler",
+      continuous_beam_team_spans: spanApplied.summary,
       continuity_metrics: {
         continuity_score: 100,
         same_structure_craft_split_count: 0,
@@ -2521,6 +2556,136 @@ function schedule(generated: GeneratedScheduleInput) {
       objective_terms_used: objectiveTermsUsed(scheduleStrategy),
     },
   };
+}
+
+function applyContinuousBeamTeamSpans(input: GeneratedScheduleInput["schedule_input"], scheduledTasks: ScheduledTask[]) {
+  const resources = input.resources.filter((resource) => resource.type === CONTINUOUS_BEAM_RESOURCE_TYPE);
+  const spanBuckets = new Map<string, ScheduledTask[]>();
+  for (const task of scheduledTasks) {
+    if (!isContinuousBeamTask(task)) continue;
+    const spanId = continuousSpanIdFromTask(task);
+    if (!spanId) continue;
+    spanBuckets.set(spanId, [...(spanBuckets.get(spanId) ?? []), task]);
+  }
+  const spans = Array.from(spanBuckets.entries())
+    .map(([spanId, spanTasks]) => {
+      const first = [...spanTasks].sort((a, b) => a.sequence_order - b.sequence_order || a.id.localeCompare(b.id))[0];
+      const startOffset = spanTasks.reduce((min, task) => Math.min(min, task.start_offset), Number.POSITIVE_INFINITY);
+      const endOffset = spanTasks.reduce((max, task) => Math.max(max, task.end_offset), 0);
+      return {
+        spanId,
+        displayName: String(first.properties?.continuous_span_group_name ?? continuousSpanGroupName(first.structure_name, Number(first.properties?.group_index ?? 0))),
+        bridgeId: first.bridge_id ?? null,
+        workSectionId: first.work_section_id ?? null,
+        groupIndex: Number(first.properties?.group_index ?? 0),
+        taskIds: spanTasks.map((task) => task.id),
+        startOffset,
+        endOffset,
+      };
+    })
+    .sort((a, b) => a.startOffset - b.startOffset || a.spanId.localeCompare(b.spanId));
+
+  const resourceAvailable = new Map(resources.map((resource) => [resource.id, 0]));
+  const taskShiftById = new Map<string, number>();
+  const selectedResourceBySpanId = new Map<string, Resource>();
+  for (const span of spans) {
+    if (!resources.length) continue;
+    const resource = resources.reduce((best, current) => (
+      (resourceAvailable.get(current.id) ?? 0) < (resourceAvailable.get(best.id) ?? 0) ? current : best
+    ));
+    const shiftDays = Math.max(0, (resourceAvailable.get(resource.id) ?? 0) - span.startOffset);
+    selectedResourceBySpanId.set(span.spanId, resource);
+    resourceAvailable.set(resource.id, span.endOffset + shiftDays);
+    for (const taskId of span.taskIds) {
+      taskShiftById.set(taskId, shiftDays);
+    }
+  }
+
+  const adjustedTasks = scheduledTasks.map((task) => {
+    const spanId = continuousSpanIdFromTask(task);
+    if (!spanId) return task;
+    const span = spans.find((item) => item.spanId === spanId);
+    const resource = selectedResourceBySpanId.get(spanId);
+    const shiftDays = taskShiftById.get(task.id) ?? 0;
+    const startOffset = task.start_offset + shiftDays;
+    const endOffset = task.end_offset + shiftDays;
+    return {
+      ...task,
+      start_offset: startOffset,
+      end_offset: endOffset,
+      start_date: addDays(input.start_date, startOffset),
+      finish_date: addDays(input.start_date, endOffset),
+      assigned_resource_id: null,
+      assigned_resource_name: null,
+      assigned_resource_type: null,
+      continuous_span_group_id: spanId,
+      continuous_span_group_name: span?.displayName ?? spanId,
+      continuous_span_resource_id: resource?.id ?? null,
+      continuous_span_resource_name: resource?.name ?? null,
+    };
+  });
+
+  const adjustedById = new Map(adjustedTasks.map((task) => [task.id, task]));
+  const payloadSpans = spans.map((span) => {
+    const spanTasks = span.taskIds.map((taskId) => adjustedById.get(taskId)).filter((task): task is ScheduledTask => Boolean(task));
+    const startOffset = spanTasks.reduce((min, task) => Math.min(min, task.start_offset), Number.POSITIVE_INFINITY);
+    const endOffset = spanTasks.reduce((max, task) => Math.max(max, task.end_offset), 0);
+    const resource = selectedResourceBySpanId.get(span.spanId);
+    return {
+      span_group_id: span.spanId,
+      display_name: span.displayName,
+      bridge_id: span.bridgeId,
+      work_section_id: span.workSectionId,
+      group_index: span.groupIndex,
+      resource_id: resource?.id ?? null,
+      resource_name: resource?.name ?? null,
+      resource_type: CONTINUOUS_BEAM_RESOURCE_TYPE,
+      start_offset: Number.isFinite(startOffset) ? startOffset : null,
+      end_offset: endOffset,
+      start_date: Number.isFinite(startOffset) ? addDays(input.start_date, startOffset) : null,
+      finish_date: addDays(input.start_date, endOffset),
+      task_ids: span.taskIds,
+    };
+  });
+
+  return {
+    tasks: adjustedTasks,
+    allocations: payloadSpans
+      .filter((span) => span.resource_id && span.start_offset !== null)
+      .map((span) => ({
+        resource_id: span.resource_id,
+        resource_name: span.resource_name,
+        resource_type: CONTINUOUS_BEAM_RESOURCE_TYPE,
+        task_id: `continuous-span:${span.span_group_id}`,
+        task_name: `${span.display_name}（联级占用）`,
+        start_offset: span.start_offset,
+        end_offset: span.end_offset,
+        start_date: span.start_date,
+        finish_date: span.finish_date,
+      })),
+    summary: {
+      enabled: resources.length > 0 && payloadSpans.length > 0,
+      span_count: payloadSpans.length,
+      resource_type: CONTINUOUS_BEAM_RESOURCE_TYPE,
+      resource_quantity: resources.length,
+      spans: payloadSpans,
+      diagnostics: resources.length || !payloadSpans.length
+        ? []
+        : [{ level: "warning", message: "已识别现浇连续梁联，但 Netlify 演示环境未展开连续梁班组资源。", subject_id: null }],
+    },
+  };
+}
+
+function isContinuousBeamTask(task: Task) {
+  return task.component_type === "cast_in_place_continuous_beam" || task.structure_type === "continuous_beam";
+}
+
+function continuousSpanIdFromTask(task: Task) {
+  const configured = task.properties?.continuous_span_group_id;
+  if (typeof configured === "string" && configured.trim()) return configured.trim();
+  const groupIndex = Number(task.properties?.group_index);
+  if (!task.bridge_id || !task.work_section_id || !Number.isFinite(groupIndex)) return null;
+  return continuousSpanGroupId(task.bridge_id, task.work_section_id, groupIndex);
 }
 
 function milestoneResults(milestones: MilestoneConstraint[], tasks: ScheduledTask[], startDate: string) {

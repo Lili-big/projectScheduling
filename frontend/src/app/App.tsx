@@ -94,6 +94,7 @@ import type {
   ContinuityMetrics,
   ControlPriorityAnalysis,
   ResourceOrganizationAnalysis,
+  ContinuousBeamTeamSpanSummary,
   TaskViewFilters,
   TaskViewRow,
   TaskViewGroup,
@@ -319,17 +320,6 @@ const controlTargetSourceLabels: Record<string, string> = {
   control_chain_predecessor: "控制链前置追溯",
 };
 
-const controlObjectTypeLabels: Record<string, string> = {
-  continuous_beam: "现浇连续梁",
-  main_pier_lower_structure: "主墩下部结构",
-  control_structure: "控制结构",
-};
-
-const controlTaskRoleLabels: Record<string, string> = {
-  control_object_task: "控制对象任务",
-  inherited_control_task: "主墩继承任务",
-};
-
 const editableControlLevelOptions: Array<{ value: ControlLevel; label: string }> = [
   { value: "control", label: "控制性工程" },
   { value: "normal", label: "非控制工程" },
@@ -348,14 +338,6 @@ const planListSortOptions: Array<{ value: PlanListSortMode; label: string }> = [
   { value: "by_structure", label: "按墩台" },
   { value: "by_process", label: "按工艺" },
 ];
-
-type ControlPlanTaskDisplay = {
-  taskId: string;
-  level: ControlLevel;
-  objectName: string;
-  roleLabel: string;
-  sourceLabel: string;
-};
 
 function editableControlLevelValue(value: ControlLevel): ControlLevel {
   return value === "control" || value === "key" ? "control" : "normal";
@@ -1619,11 +1601,8 @@ function ResultsTab({
   const objectiveContributionSummary = objectiveContributionSummaryFromResult(result);
   const refinementSummary = refinementSummaryFromResult(result);
   const controlPriorityAnalysis = controlPriorityAnalysisFromResult(result);
-  const controlPlanDisplayByTaskId = useMemo(
-    () => buildControlPlanDisplayByTaskId(controlPriorityAnalysis),
-    [controlPriorityAnalysis],
-  );
   const resourceOrganization = resourceOrganizationFromResult(result);
+  const continuousBeamTeamSpanSummary = continuousBeamTeamSpanSummaryFromResult(result);
   const strategyConfig = withDefaultScheduleStrategy(scenario?.schedule_strategy);
   const objectiveTerms = strategyConfig.objective_terms ?? defaultObjectiveTermsConfig();
   const enabledObjectiveCount = objectiveTermDefinitions.filter((term) => objectiveTerms[term.id]?.enabled).length;
@@ -2140,102 +2119,7 @@ function ResultsTab({
 
       {!isMvp && controlPriorityAnalysis && (
         <section className="panel full">
-          <PanelTitle title="精排诊断" subtitle="控制对象、对象任务和前置影响任务" />
-          <div className="control-diagnostic-grid refinement-diagnostics">
-            <div className="table-wrap short">
-              <div className="table-caption">控制对象</div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>控制对象</th>
-                    <th>来源</th>
-                    <th>任务数</th>
-                    <th>最小缓冲</th>
-                    <th>最大风险</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {controlPriorityAnalysis.control_objects.slice(0, 8).map((object) => (
-                    <tr key={object.id}>
-                      <td>
-                        <strong>{object.name}</strong>
-                        <span className="muted-cell">{controlObjectTypeLabels[object.object_type] ?? object.object_type}</span>
-                      </td>
-                      <td>{object.source_label || controlTargetSourceLabels[object.source] || object.source}</td>
-                      <td>{object.task_count}</td>
-                      <td>{formatNullableDays(object.remaining_buffer_days)}</td>
-                      <td>{object.buffer_risk_days} 天</td>
-                    </tr>
-                  ))}
-                  {!controlPriorityAnalysis.control_objects.length && (
-                    <tr>
-                      <td colSpan={5}>暂无控制对象</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            <div className="table-wrap short">
-              <div className="table-caption">控制对象任务</div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>任务</th>
-                    <th>所属对象</th>
-                    <th>角色</th>
-                    <th>剩余缓冲</th>
-                    <th>风险</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {controlPriorityAnalysis.control_object_tasks.slice(0, 10).map((task) => (
-                    <tr key={task.task_id}>
-                      <td>{task.task_name}</td>
-                      <td>{task.object_name}</td>
-                      <td>{controlTaskRoleLabels[task.task_role] ?? task.task_role}</td>
-                      <td>{formatNullableDays(task.remaining_buffer_days)}</td>
-                      <td>{task.buffer_risk_days} 天</td>
-                    </tr>
-                  ))}
-                  {!controlPriorityAnalysis.control_object_tasks.length && (
-                    <tr>
-                      <td colSpan={5}>暂无控制对象任务</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            <div className="table-wrap short control-predecessor-table">
-              <div className="table-caption">前置影响任务</div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>任务</th>
-                    <th>影响控制对象</th>
-                    <th>风险来源</th>
-                    <th>剩余缓冲</th>
-                    <th>风险</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {controlPriorityAnalysis.control_chain_predecessors.slice(0, 10).map((task) => (
-                    <tr key={task.task_id}>
-                      <td>{task.task_name}</td>
-                      <td>{task.impacted_control_objects.map((object) => object.name).join("、") || "-"}</td>
-                      <td>{task.source_label || controlTargetSourceLabels[task.source] || task.source}</td>
-                      <td>{formatNullableDays(task.remaining_buffer_days)}</td>
-                      <td>{task.buffer_risk_days} 天</td>
-                    </tr>
-                  ))}
-                  {!controlPriorityAnalysis.control_chain_predecessors.length && (
-                    <tr>
-                      <td colSpan={5}>暂无前置影响任务</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <PanelTitle title="精排诊断" subtitle="资源组织与精排过程诊断" />
           {resourceOrganization && (
             <div className="control-diagnostic-grid refinement-diagnostics">
               <div className="table-wrap short">
@@ -2313,6 +2197,38 @@ function ResultsTab({
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+          {continuousBeamTeamSpanSummary && continuousBeamTeamSpanSummary.spans.length > 0 && (
+            <div className="table-wrap short refinement-path-groups">
+              <div className="table-caption">现浇连续梁班组联级占用</div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>联</th>
+                    <th>工作区</th>
+                    <th>班组</th>
+                    <th>任务数</th>
+                    <th>开始</th>
+                    <th>完成</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {continuousBeamTeamSpanSummary.spans.map((span) => (
+                    <tr key={span.span_id}>
+                      <td>
+                        <strong>{span.span_name}</strong>
+                        <span className="muted-cell">{span.span_id}</span>
+                      </td>
+                      <td>{span.work_section_id ?? "-"}</td>
+                      <td>{span.resource_name ?? "-"}</td>
+                      <td>{span.task_ids.length}</td>
+                      <td>{span.start_date}</td>
+                      <td>{span.finish_date}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
           {controlPriorityAnalysis.path_group_diagnostics.length > 0 && (
@@ -2602,8 +2518,6 @@ function ResultsTab({
               selectedTaskId={selectedPlanTask?.id ?? null}
               onSelectTask={setSelectedPlanTaskId}
               scenario={scenario}
-              workSectionDisplayById={workSectionDisplayById}
-              controlDisplayByTaskId={controlPlanDisplayByTaskId}
               predecessorDetails={predecessorDetails}
               openPredecessorTaskId={openPredecessorTaskId}
               predecessorAnchorRect={predecessorAnchorRect}
@@ -2673,62 +2587,6 @@ function ResultsTab({
       )}
     </div>
   );
-}
-
-function buildControlPlanDisplayByTaskId(analysis: ControlPriorityAnalysis | null): Map<string, ControlPlanTaskDisplay> {
-  const displays = new Map<string, ControlPlanTaskDisplay>();
-  if (!analysis) return displays;
-
-  for (const target of analysis.control_targets) {
-    displays.set(target.task_id, {
-      taskId: target.task_id,
-      level: target.control_level,
-      objectName: "-",
-      roleLabel: "控制目标",
-      sourceLabel: controlTargetSourceLabels[target.source] ?? target.source,
-    });
-  }
-
-  for (const item of analysis.control_object_tasks) {
-    const existing = displays.get(item.task_id);
-    displays.set(item.task_id, {
-      taskId: item.task_id,
-      level: item.control_level,
-      objectName: item.object_name || existing?.objectName || "-",
-      roleLabel: controlTaskRoleLabels[item.task_role] ?? (item.task_role || existing?.roleLabel || "控制对象任务"),
-      sourceLabel: item.source_label || existing?.sourceLabel || "-",
-    });
-  }
-
-  for (const predecessor of analysis.control_chain_predecessors) {
-    if (displays.has(predecessor.task_id)) continue;
-    displays.set(predecessor.task_id, {
-      taskId: predecessor.task_id,
-      level: predecessor.control_level,
-      objectName: predecessor.impacted_control_objects.map((object) => object.name).join("、") || "-",
-      roleLabel: "前置影响任务",
-      sourceLabel: predecessor.source_label || controlTargetSourceLabels[predecessor.source] || predecessor.source,
-    });
-  }
-
-  return displays;
-}
-
-function controlPlanDisplayFromTask(task: ScheduledTask): ControlPlanTaskDisplay | null {
-  const level = task.control_level ?? "normal";
-  if (level !== "control" && level !== "key") return null;
-  return {
-    taskId: task.id,
-    level,
-    objectName: task.structure_name,
-    roleLabel: "任务控制属性",
-    sourceLabel: "任务控制属性",
-  };
-}
-
-function controlPlanRoleText(display: ControlPlanTaskDisplay | null): string {
-  if (!display) return "非控制";
-  return display.roleLabel || controlLevelLabels[display.level] || display.level;
 }
 
 function PlanWorkList({
@@ -2827,8 +2685,6 @@ function PlanTaskDetailTable({
   selectedTaskId,
   onSelectTask,
   scenario,
-  workSectionDisplayById,
-  controlDisplayByTaskId,
   predecessorDetails,
   openPredecessorTaskId,
   predecessorAnchorRect,
@@ -2840,8 +2696,6 @@ function PlanTaskDetailTable({
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
   scenario: ScenarioInput | null;
-  workSectionDisplayById: Map<string, WorkSectionDisplay>;
-  controlDisplayByTaskId: Map<string, ControlPlanTaskDisplay>;
   predecessorDetails: (task: ScheduledTask) => PredecessorDetail[];
   openPredecessorTaskId: string | null;
   predecessorAnchorRect: DOMRect | null;
@@ -2862,26 +2716,22 @@ function PlanTaskDetailTable({
       <div className="plan-detail-table-wrap">
         <table className="plan-detail-table">
           <colgroup>
-            <col className="plan-detail-side-col" />
             <col className="plan-detail-component-col" />
             <col className="plan-detail-expression-col" />
             <col className="plan-detail-duration-col" />
             <col className="plan-detail-date-col" />
             <col className="plan-detail-date-col" />
             <col className="plan-detail-resource-col" />
-            <col className="plan-detail-control-col" />
             <col className="plan-detail-predecessor-col" />
           </colgroup>
           <thead>
             <tr>
-              <th>幅别</th>
               <th>构件</th>
               <th>计划表达式</th>
               <th>工期</th>
               <th>计划开始</th>
               <th>计划完成</th>
               <th>资源</th>
-              <th>控制性</th>
               <th>前置工作</th>
             </tr>
           </thead>
@@ -2890,16 +2740,13 @@ function PlanTaskDetailTable({
               const details = predecessorDetails(task);
               const isOpen = openPredecessorTaskId === task.id;
               const selected = selectedTaskId === task.id;
-              const controlDisplay = controlDisplayByTaskId.get(task.id) ?? controlPlanDisplayFromTask(task);
+              const resourceDisplay = taskResourceDisplay(task);
               return (
                 <tr
                   className={selected ? "selected" : ""}
                   key={task.id}
                   onClick={() => onSelectTask(task.id)}
                 >
-                  <td title={workSectionLabelForTask(task, workSectionDisplayById)}>
-                    <span className="side-tag">{workSectionLabelForTask(task, workSectionDisplayById)}</span>
-                  </td>
                   <td title={componentLabels[task.component_type]}>{componentLabels[task.component_type]}</td>
                   <td className="duration-expression" title={durationExpression(task, scenario)}>
                     {durationExpression(task, scenario)}
@@ -2907,10 +2754,7 @@ function PlanTaskDetailTable({
                   <td>{effectiveTaskDurationDays(task, scenario)} 天</td>
                   <td>{task.start_date}</td>
                   <td>{task.finish_date}</td>
-                  <td title={task.assigned_resource_name ?? "-"}>{task.assigned_resource_name ?? "-"}</td>
-                  <td className="control-plan-deadline-cell" title={controlDisplay?.sourceLabel ?? ""}>
-                    {controlPlanRoleText(controlDisplay)}
-                  </td>
+                  <td title={resourceDisplay}>{resourceDisplay}</td>
                   <td className="predecessor-cell">
                     {details.length > 0 ? (
                       <button
@@ -3119,16 +2963,24 @@ function ResourcePathChart({
 }
 
 function ganttTaskHoverTitle(task: ScheduledTask, sideLabel = "-", resourcePools: ResourcePool[] = []): string {
+  const resourceType = task.assigned_resource_type
+    ?? (task.continuous_span_resource_id ? "cast_in_place_continuous_beam_team" : null);
   return [
     `工作项：${task.name}`,
     `幅别：${sideLabel}`,
     `构件：${componentLabels[task.component_type]}`,
     `计划：${task.start_date} 至 ${task.finish_date}`,
     `工期：${task.duration_days} 天`,
-    `分配资源：${task.assigned_resource_name ?? "-"}`,
-    `资源序列：${task.assigned_resource_id ?? "-"}`,
-    `资源类型：${task.assigned_resource_type ? resourceTypeLabel(task.assigned_resource_type, resourcePools) : "-"}`,
+    `分配资源：${taskResourceDisplay(task)}`,
+    `资源序列：${task.assigned_resource_id ?? task.continuous_span_resource_id ?? "-"}`,
+    `资源类型：${resourceType ? resourceTypeLabel(resourceType, resourcePools) : "-"}`,
   ].join("\n");
+}
+
+function taskResourceDisplay(task: ScheduledTask): string {
+  if (task.assigned_resource_name) return task.assigned_resource_name;
+  if (task.continuous_span_resource_name) return `${task.continuous_span_resource_name}（联级）`;
+  return "-";
 }
 
 function allocationHoverTitle(allocation: ResourceAllocation, resourcePools: ResourcePool[] = []): string {
@@ -4455,6 +4307,41 @@ function resourceOrganizationFromResult(result: ScheduleResult | null): Resource
   };
 }
 
+function continuousBeamTeamSpanSummaryFromResult(result: ScheduleResult | null): ContinuousBeamTeamSpanSummary | null {
+  const raw = result?.stats?.continuous_beam_team_spans ?? result?.objective_breakdown?.continuous_beam_team_spans;
+  if (!isRecord(raw)) return null;
+  const spans = Array.isArray(raw.spans)
+    ? raw.spans.filter(isRecord).map((item) => ({
+        span_id: String(item.span_id ?? item.span_group_id ?? ""),
+        span_name: String(item.span_name ?? item.display_name ?? "-"),
+        bridge_id: typeof item.bridge_id === "string" ? item.bridge_id : null,
+        work_section_id: typeof item.work_section_id === "string" ? item.work_section_id : null,
+        group_index: typeof item.group_index === "string" || typeof item.group_index === "number" ? item.group_index : null,
+        task_ids: Array.isArray(item.task_ids) ? item.task_ids.map(String) : [],
+        start_offset: Number(item.start_offset ?? 0),
+        end_offset: Number(item.end_offset ?? 0),
+        start_date: String(item.start_date ?? "-"),
+        finish_date: String(item.finish_date ?? "-"),
+        resource_id: typeof item.resource_id === "string" ? item.resource_id : null,
+        resource_name: typeof item.resource_name === "string" ? item.resource_name : null,
+      })).filter((item) => item.span_id)
+    : [];
+  const diagnostics = Array.isArray(raw.diagnostics)
+    ? raw.diagnostics.filter(isRecord).map((item) => ({
+        level: ["info", "warning", "error"].includes(String(item.level)) ? String(item.level) as ValidationMessage["level"] : "info",
+        message: String(item.message ?? ""),
+        subject_id: typeof item.subject_id === "string" ? item.subject_id : null,
+      })).filter((item) => item.message)
+    : [];
+  return {
+    enabled: Boolean(raw.enabled),
+    span_count: Number(raw.span_count ?? spans.length),
+    resource_count: Number(raw.resource_count ?? raw.resource_quantity ?? 0),
+    spans,
+    diagnostics,
+  };
+}
+
 function controlPriorityAnalysisFromResult(result: ScheduleResult | null): ControlPriorityAnalysis | null {
   const raw = result?.stats?.control_priority_analysis ?? result?.objective_breakdown?.control_priority_analysis;
   if (!isRecord(raw)) return null;
@@ -4771,10 +4658,6 @@ function nullableNumberFromUnknown(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function formatNullableDays(value: number | null): string {
-  return value === null ? "-" : `${value} 天`;
 }
 
 function formatPercent(value: number): string {

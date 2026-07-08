@@ -866,6 +866,31 @@ class ScheduleInput(BaseModel):
     time_limit_seconds: float = Field(default=20.0, gt=0)
 
 
+class ContinuousBeamTeamSpan(BaseModel):
+    span_group_id: str
+    display_name: str
+    bridge_id: str | None = None
+    work_section_id: str | None = None
+    group_index: int | None = None
+    resource_id: str | None = None
+    resource_name: str | None = None
+    resource_type: str = "cast_in_place_continuous_beam_team"
+    start_offset: int | None = None
+    end_offset: int | None = None
+    start_date: date | None = None
+    finish_date: date | None = None
+    task_ids: list[str] = []
+
+
+class ContinuousBeamTeamSpanSummary(BaseModel):
+    enabled: bool = False
+    span_count: int = 0
+    resource_type: str = "cast_in_place_continuous_beam_team"
+    resource_quantity: int = 0
+    spans: list[ContinuousBeamTeamSpan] = []
+    diagnostics: list[dict[str, Any]] = []
+
+
 class ScheduledTask(Task):
     start_offset: int
     end_offset: int
@@ -874,6 +899,10 @@ class ScheduledTask(Task):
     assigned_resource_id: str | None = None
     assigned_resource_name: str | None = None
     assigned_resource_type: str | None = None
+    continuous_span_group_id: str | None = None
+    continuous_span_group_name: str | None = None
+    continuous_span_resource_id: str | None = None
+    continuous_span_resource_name: str | None = None
     predecessor_ids: list[str] = []
 
 

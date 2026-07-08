@@ -455,6 +455,10 @@ export type ScheduledTask = Task & {
   assigned_resource_id?: string | null;
   assigned_resource_name?: string | null;
   assigned_resource_type?: string | null;
+  continuous_span_group_id?: string | null;
+  continuous_span_group_name?: string | null;
+  continuous_span_resource_id?: string | null;
+  continuous_span_resource_name?: string | null;
   predecessor_ids: string[];
 };
 
@@ -491,6 +495,29 @@ export type ResourceAllocation = {
   end_offset: number;
   start_date: string;
   finish_date: string;
+};
+
+export type ContinuousBeamTeamSpan = {
+  span_id: string;
+  span_name: string;
+  bridge_id?: string | null;
+  work_section_id?: string | null;
+  group_index?: string | number | null;
+  task_ids: string[];
+  start_offset: number;
+  end_offset: number;
+  start_date: string;
+  finish_date: string;
+  resource_id?: string | null;
+  resource_name?: string | null;
+};
+
+export type ContinuousBeamTeamSpanSummary = {
+  enabled: boolean;
+  span_count: number;
+  resource_count: number;
+  spans: ContinuousBeamTeamSpan[];
+  diagnostics: ValidationMessage[];
 };
 
 export type MilestoneResult = MilestoneConstraint & {
