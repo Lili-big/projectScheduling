@@ -213,14 +213,6 @@ const objectiveTermDefinitions: ObjectiveTermDefinition[] = [
     appliesTo: "目标函数排程",
   },
   {
-    id: "resource_path_continuity",
-    label: "同一资源尽量连续推进",
-    group: "资源组织",
-    description: "看同一资源相邻任务是否同幅邻近推进；同幅墩号间隔越大、左右幅切换越多，罚分越高。",
-    defaultWeight: 50_000,
-    appliesTo: "目标函数排程",
-  },
-  {
     id: "resource_idle",
     label: "资源尽量少空等",
     group: "资源组织",
@@ -234,7 +226,7 @@ function defaultObjectiveTermsConfig(): Record<ObjectiveTermId, ObjectiveTermCon
   return Object.fromEntries(
     objectiveTermDefinitions.map((term) => [
       term.id,
-      { enabled: term.defaultEnabled ?? (term.id !== "resource_path_continuity"), weight: term.defaultWeight },
+      { enabled: term.defaultEnabled ?? true, weight: term.defaultWeight },
     ]),
   ) as Record<ObjectiveTermId, ObjectiveTermConfig>;
 }
@@ -4236,11 +4228,7 @@ function resourceOrganizationFromResult(result: ScheduleResult | null): Resource
       "resource_idle",
       String(raw.resource_idle_status ?? "not_evaluated"),
     ),
-    resource_path_status: statusWithObjectiveGate(
-      result,
-      "resource_path_continuity",
-      String(raw.resource_path_status ?? "not_evaluated"),
-    ),
+    resource_path_status: String(raw.resource_path_status ?? "not_evaluated"),
     workload_balance_enabled: Boolean(raw.workload_balance_enabled),
     idle_enabled: Boolean(raw.idle_enabled),
     path_continuity_enabled: Boolean(raw.path_continuity_enabled),
@@ -4379,11 +4367,7 @@ function controlPriorityAnalysisFromResult(result: ScheduleResult | null): Contr
     control_buffer_risks: bufferRisks,
     control_buffer_status: String(raw.control_buffer_status ?? "not_evaluated"),
     normal_balance_status: String(raw.normal_balance_status ?? "not_evaluated"),
-    resource_path_status: statusWithObjectiveGate(
-      result,
-      "resource_path_continuity",
-      String(raw.resource_path_status ?? resourceOrganization?.resource_path_status ?? "not_evaluated"),
-    ),
+    resource_path_status: String(raw.resource_path_status ?? resourceOrganization?.resource_path_status ?? "not_evaluated"),
     resource_balance_status: String(raw.resource_balance_status ?? resourceOrganization?.resource_balance_status ?? "not_evaluated"),
     resource_idle_status: statusWithObjectiveGate(
       result,
@@ -4673,7 +4657,7 @@ function withDefaultScheduleStrategy(config?: ScheduleStrategyConfig | null): Sc
   const objectiveTerms = objectiveTermDefinitions.reduce<Record<ObjectiveTermId, ObjectiveTermConfig>>((next, term) => {
     const incoming = inheritedObjectiveTermConfig(term, incomingTerms);
     next[term.id] = {
-      enabled: incoming?.enabled ?? term.defaultEnabled ?? (term.id !== "resource_path_continuity"),
+      enabled: incoming?.enabled ?? term.defaultEnabled ?? true,
       weight: normalizeObjectiveWeight(incoming?.weight ?? term.defaultWeight),
     };
     return next;
@@ -4748,7 +4732,6 @@ function legacyObjectiveContributionsFromBreakdown(breakdown: Record<string, unk
   const rawPenaltyByTerm: Partial<Record<ObjectiveTermId, number>> = {
     control_node_late: numberFromUnknown(breakdown.control_lateness_days) ?? 0,
     makespan_and_soft_milestone: numberFromUnknown(breakdown.makespan_days) ?? 0,
-    resource_path_continuity: numberFromUnknown(breakdown.resource_path_continuity_penalty) ?? 0,
     resource_idle: numberFromUnknown(breakdown.resource_idle_penalty) ?? 0,
   };
 

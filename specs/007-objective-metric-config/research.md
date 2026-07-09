@@ -1,5 +1,7 @@
 # Phase 0 研究：精排目标指标前端展示与配置
 
+> 当前实现校正（2026-07-09）：`resource_path_continuity` 已从当前目标项体系中移除；旧输入字段仅作为废弃兼容字段被忽略。当前目标项为 `control_node_late`、`makespan_and_soft_milestone`、`resource_idle`。第一阶段路径连续性、无窗口候选路径和资源路径罚分均为历史设计，不再建路径 circuit 或产生路径罚分；机械钻组聚合、组内升序和同组同资源保留为基础规则。
+
 > 当前实现校正（2026-07-08）：当前后端仅保留 4 个可配置目标项：`control_node_late`、`makespan_and_soft_milestone`、`resource_path_continuity`、`resource_idle`。放松目标、槽位均衡、普通工程分布等只能作为诊断或历史兼容字段展示；`unconfigured_normal_balance` 不得提升为可配置目标项。
 
 ## 决策 1：以后端目标指标目录作为权威来源

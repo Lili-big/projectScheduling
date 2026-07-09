@@ -1,5 +1,7 @@
 # 功能规格：resource_path_continuity 候选路径无窗口化
 
+> 当前实现校正（2026-07-09）：`resource_path_continuity` 已从当前目标项体系中移除；旧输入字段仅作为废弃兼容字段被忽略。当前目标项为 `control_node_late`、`makespan_and_soft_milestone`、`resource_idle`。第一阶段路径连续性、无窗口候选路径和资源路径罚分均为历史设计，不再建路径 circuit 或产生路径罚分；机械钻组聚合、组内升序和同组同资源保留为基础规则。
+
 **功能目录/分支**：`021-resource-path-unbounded`
 
 **创建日期**：2026-07-09

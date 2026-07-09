@@ -31,7 +31,6 @@ from .models import (
 CONTINUITY_PRIMARY_WEIGHT = 1_000_000
 CONTROL_NODE_LATE_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["control_node_late"]
 RESOURCE_IDLE_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["resource_idle"]
-RESOURCE_PATH_CONTINUITY_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["resource_path_continuity"]
 CONTROL_MAKESPAN_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["makespan_and_soft_milestone"]
 CONTROL_NECESSARY_BUFFER_DAYS = 7
 CONTROL_BUFFER_NEAR_RISK_DAYS = 3
@@ -49,7 +48,6 @@ TARGET_SOLVE_TIME_LIMIT_SECONDS = 15.0
 MECHANICAL_DRILL_RESOURCE_TYPES = frozenset({"rotary_drill", "circulation_drill", "impact_drill"})
 MECHANICAL_DRILL_PATH_SUPPORT_WINDOW = 2
 MECHANICAL_DRILL_CROSS_SIDE_SUPPORT_WINDOW = 1
-DISABLED_OBJECTIVE_TERM_IDS = frozenset({"resource_path_continuity"})
 
 
 class _SolveBudget:
@@ -115,10 +113,7 @@ class _ContinuousBeamTeamSpanModel:
 
 
 def _objective_weights_for_config(config: Any) -> dict[str, int]:
-    weights = effective_objective_weights(config.objective_terms)
-    for term_id in DISABLED_OBJECTIVE_TERM_IDS:
-        weights[term_id] = 0
-    return weights
+    return effective_objective_weights(config.objective_terms)
 
 
 def _objective_terms_used_for_config(config: Any, weights: dict[str, int]) -> dict[str, dict[str, int | bool]]:
@@ -2310,7 +2305,6 @@ def solve_control_priority_schedule(
     config = schedule_input.schedule_strategy
     objective_weights = _objective_weights_for_config(config)
     objective_terms_used_payload = _objective_terms_used_for_config(config, objective_weights)
-    resource_path_continuity_enabled = _objective_term_enabled(objective_weights, "resource_path_continuity")
     drill_groups = _build_drill_group_nodes(schedule_input.tasks, resource_candidates, enabled_resources)
 
     if _drill_group_stage == "auto" and drill_groups:
@@ -2359,7 +2353,6 @@ def solve_control_priority_schedule(
     objective_terms_used_payload = _objective_terms_used_for_config(config, objective_weights)
     control_node_late_enabled = _objective_term_enabled(objective_weights, "control_node_late")
     resource_idle_enabled = _objective_term_enabled(objective_weights, "resource_idle")
-    resource_path_continuity_enabled = _objective_term_enabled(objective_weights, "resource_path_continuity")
     drill_group_constraints_enabled = _drill_group_stage in {"coarse", "refined"} and bool(drill_groups)
     drill_group_path_circuit_enabled = False
     inherited_stage1_route_metadata = (
@@ -2537,20 +2530,7 @@ def solve_control_priority_schedule(
         path_task_filter_by_resource=_path_task_filter_by_resource,
         path_filter_task_ids=_path_filter_task_ids,
     )
-    drill_group_stage1_route_terms = (
-        _build_drill_group_stage1_route_terms(
-            model,
-            starts,
-            ends,
-            drill_groups,
-            enabled_resources,
-            assignment_vars,
-        )
-        if resource_path_continuity_enabled and drill_group_constraints_enabled and _drill_group_stage == "coarse"
-        else _empty_drill_group_stage1_route_terms(
-            "not_enabled" if not resource_path_continuity_enabled else "not_applicable"
-        )
-    )
+    drill_group_stage1_route_terms = _empty_drill_group_stage1_route_terms("not_enabled")
     if _drill_group_stage == "refined":
         drill_group_stage1_route_terms["metadata"] = inherited_stage1_route_metadata
     relaxed_target_terms = list(relaxed_hard_lateness_vars.values())
@@ -2564,11 +2544,6 @@ def solve_control_priority_schedule(
             "control_node_late": control_node_late_enabled and bool(control_lateness_terms or relaxed_target_terms),
             "makespan_and_soft_milestone": makespan_objective_enabled,
             "resource_idle": resource_idle_enabled and bool(resource_organization_terms["idle_terms"]),
-            "resource_path_continuity": resource_path_continuity_enabled
-            and bool(
-                resource_organization_terms["path_terms"]
-                or drill_group_stage1_route_terms["route_terms"]
-            ),
         }.items()
         if enabled
     }
@@ -2576,17 +2551,10 @@ def solve_control_priority_schedule(
         objective_terms_used_payload,
         modeled_terms=modeled_terms,
     )
-    resource_path_transition_terms = (
-        resource_organization_terms["same_side_gap_terms"]
-        + resource_organization_terms["side_switch_terms"]
-        + drill_group_stage1_route_terms["route_terms"]
-    )
-
     model.Minimize(
         sum(control_lateness_terms) * objective_weights["control_node_late"]
         + sum(relaxed_target_terms) * relaxed_target_weight
         + sum(resource_organization_terms["idle_terms"]) * objective_weights["resource_idle"]
-        + sum(resource_path_transition_terms) * objective_weights["resource_path_continuity"]
         + makespan * (objective_weights["makespan_and_soft_milestone"] if makespan_objective_enabled else 0)
     )
     warm_start_used = _add_schedule_hints(
@@ -2662,9 +2630,6 @@ def solve_control_priority_schedule(
             )
         failed_continuity_objective = {
             "primary_weight": CONTINUITY_PRIMARY_WEIGHT,
-            "resource_path_continuity_weight": objective_weights["resource_path_continuity"],
-            "resource_path_continuity_penalty": 0,
-            "resource_path_transition_penalty": 0,
             "drill_group_adjacent_resource_switch_penalty": 0,
             "drill_group_hole_jump_penalty": 0,
             "stage1_same_side_penalty": 0,
@@ -2805,7 +2770,6 @@ def solve_control_priority_schedule(
         soft_control_lateness_penalty if control_node_late_enabled else 0
     )
     resource_idle_penalty = sum(solver.Value(term) for term in resource_organization_terms["idle_terms"])
-    resource_path_continuity_penalty = sum(solver.Value(term) for term in resource_path_transition_terms)
     drill_group_adjacent_penalty = 0
     drill_group_hole_penalty = 0
     stage1_same_side_penalty = sum(solver.Value(term) for term in drill_group_stage1_route_terms["same_side_terms"])
@@ -2846,14 +2810,11 @@ def solve_control_priority_schedule(
         normal_balance_metrics=normal_balance_metrics,
         resource_organization_analysis=resource_organization_analysis,
         control_buffer_enabled=False,
-        resource_path_continuity_enabled=drill_group_path_circuit_enabled,
+        path_continuity_enabled=drill_group_path_circuit_enabled,
     )
     stats["continuity_metrics"] = continuity_metrics
     stats["continuity_objective"] = {
         "primary_weight": CONTINUITY_PRIMARY_WEIGHT,
-        "resource_path_continuity_weight": objective_weights["resource_path_continuity"],
-        "resource_path_continuity_penalty": resource_path_continuity_penalty,
-        "resource_path_transition_penalty": resource_path_continuity_penalty,
         "drill_group_adjacent_resource_switch_penalty": drill_group_adjacent_penalty,
         "drill_group_hole_jump_penalty": drill_group_hole_penalty,
         "stage1_same_side_penalty": stage1_same_side_penalty,
@@ -2865,12 +2826,10 @@ def solve_control_priority_schedule(
     }
     drill_group_status = "not_applicable"
     if drill_groups:
-        if resource_path_continuity_enabled and _drill_group_stage == "coarse":
-            drill_group_status = "stage1_final"
-        elif not resource_path_continuity_enabled:
-            drill_group_status = "coarse_only"
-        elif _drill_group_stage == "refined":
+        if _drill_group_stage == "refined":
             drill_group_status = "stage2_refined"
+        else:
+            drill_group_status = "coarse_only"
     drill_group_payload = _drill_group_refinement_payload(
         status=drill_group_status,
         groups=drill_groups,
@@ -2896,7 +2855,6 @@ def solve_control_priority_schedule(
         raw_penalties={
             "control_node_late": reported_control_target_lateness_days,
             "makespan_and_soft_milestone": objective_days if makespan_objective_enabled else 0,
-            "resource_path_continuity": resource_path_continuity_penalty,
             "resource_idle": resource_idle_penalty,
         },
         active_terms={
@@ -2959,14 +2917,11 @@ def solve_control_priority_schedule(
             "relaxed_target_weighted_penalty": relaxed_target_penalty_days * relaxed_target_weight,
             "soft_control_lateness_penalty": reported_soft_control_lateness_penalty,
             "resource_idle_penalty": resource_idle_penalty,
-            "resource_path_continuity_penalty": resource_path_continuity_penalty,
-            "resource_path_transition_penalty": resource_path_continuity_penalty,
             "drill_group_adjacent_resource_switch_penalty": drill_group_adjacent_penalty,
             "drill_group_hole_jump_penalty": drill_group_hole_penalty,
             "stage1_same_side_penalty": stage1_same_side_penalty,
             "stage1_cross_side_penalty": stage1_cross_side_penalty,
             "stage1_route_penalty": stage1_route_penalty,
-            "resource_path_continuity_weight": objective_weights["resource_path_continuity"],
             "resource_idle_weight": objective_weights["resource_idle"],
             "soft_milestone_penalty": soft_milestone_penalty,
             "continuity_score": continuity_metrics["continuity_score"],
@@ -3838,7 +3793,7 @@ def _build_resource_organization_terms(
             workload_balance_terms.append(workload_range)
 
     path_terms = (
-        _build_resource_path_continuity_terms(
+        _build_resource_path_diagnostic_terms(
             model,
             path_assignments_by_resource,
             enabled_resources,
@@ -3893,7 +3848,7 @@ def _empty_resource_path_terms(
     }
 
 
-def _build_resource_path_continuity_terms(
+def _build_resource_path_diagnostic_terms(
     model: Any,
     assignments_by_resource: dict[str, list[tuple[Task, Any]]],
     enabled_resources: list[Resource],
@@ -4611,7 +4566,7 @@ def _build_control_priority_analysis(
     normal_balance_metrics: dict[str, Any],
     resource_organization_analysis: dict[str, Any],
     control_buffer_enabled: bool = True,
-    resource_path_continuity_enabled: bool = True,
+    path_continuity_enabled: bool = True,
 ) -> dict[str, Any]:
     baseline_by_id = {task.id: task for task in baseline_result.tasks}
     scheduled_by_id = {task.id: task for task in scheduled_tasks}
@@ -4727,7 +4682,7 @@ def _build_control_priority_analysis(
         "control_buffer_status": _control_buffer_status(control_buffer_risks) if control_buffer_enabled else "not_evaluated",
         "normal_balance_status": _normal_balance_status(normal_balance_metrics),
         "resource_path_status": _resource_path_status(continuity_metrics)
-        if resource_path_continuity_enabled
+        if path_continuity_enabled
         else "not_evaluated",
         "resource_balance_status": resource_organization_analysis.get("resource_balance_status", "not_evaluated"),
         "resource_idle_status": resource_organization_analysis.get("resource_idle_status", "not_evaluated"),

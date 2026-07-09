@@ -37,15 +37,12 @@ def test_schedule_strategy_merges_objective_term_defaults_and_ignores_legacy_bal
     assert set(config.objective_terms) == {
         "control_node_late",
         "resource_idle",
-        "resource_path_continuity",
         "makespan_and_soft_milestone",
     }
     assert set(OBJECTIVE_METRIC_DEFINITIONS) == set(config.objective_terms)
     assert config.enable_balance_objective is False
     assert config.objective_terms["control_node_late"].weight == 10_000_000_000
     assert config.objective_terms["makespan_and_soft_milestone"].weight == 5_000_000
-    assert config.objective_terms["resource_path_continuity"].weight == 50_000
-    assert config.objective_terms["resource_path_continuity"].enabled is False
     assert config.objective_terms["resource_idle"].weight == 50_000
     assert {
         term_id
@@ -76,7 +73,8 @@ def test_schedule_strategy_merges_objective_term_defaults_and_ignores_legacy_bal
         }
     )
     assert inherited_config.objective_terms["control_node_late"].enabled is False
-    assert inherited_config.objective_terms["resource_path_continuity"].weight == 456
+    deprecated_resource_path = ScheduleStrategyConfig(objective_terms={"resource_path_continuity": {"enabled": True, "weight": 456}})
+    assert "resource_path_continuity" not in deprecated_resource_path.objective_terms
 
     legacy_config = ScheduleStrategyConfig(
         enable_balance_objective=True,
@@ -177,14 +175,16 @@ def _objective_terms_with_only(enabled_term: str, weight: int) -> dict[str, dict
     term_ids = [
         "control_node_late",
         "makespan_and_soft_milestone",
-        "resource_path_continuity",
         "resource_idle",
     ]
-    return {
-        term_id: {"enabled": term_id == enabled_term, "weight": weight if term_id == enabled_term else 1}
+    effective_enabled_term = enabled_term if enabled_term in term_ids else "makespan_and_soft_milestone"
+    terms = {
+        term_id: {"enabled": term_id == effective_enabled_term, "weight": weight if term_id == effective_enabled_term else 1}
         for term_id in term_ids
     }
-
+    if enabled_term not in term_ids:
+        terms[enabled_term] = {"enabled": True, "weight": weight}
+    return terms
 
 def test_duration_calculation_uses_fixed_days_per_pile() -> None:
     rotary = next(rule for rule in default_productivity_rules() if rule.id == "pile_rotary_regular")
@@ -1476,7 +1476,6 @@ def test_fixed_resource_minimum_candidate_reruns_refinement_before_display(
     assert alternative.result.status in {"OPTIMAL", "FEASIBLE"}
     assert alternative.result.stats["schedule_source"] == "minimum_resources_control_priority_balanced"
     assert alternative.result.objective_breakdown["minimum_resource_refinement_status"] in {"OPTIMAL", "FEASIBLE"}
-    assert gates["resource_path_continuity"]["modeling_enabled"] is False
     assert alternative.result.stats["continuity_objective"]["resource_path_node_count"] == 0
 
 
@@ -2713,7 +2712,6 @@ def test_resource_path_continuity_groups_mechanical_drill_nodes_without_limit_co
 
     objective = result.stats["continuity_objective"]
     diagnostic = result.stats["drill_group_refinement"]
-    gates = result.objective_breakdown["objective_modeling_gates"]
 
     assert result.status in {"OPTIMAL", "FEASIBLE"}
     assert diagnostic["status"] == "coarse_only"
@@ -2724,10 +2722,10 @@ def test_resource_path_continuity_groups_mechanical_drill_nodes_without_limit_co
     assert objective["stage1_route_node_count"] == 0
     assert objective["stage1_route_candidate_arc_count"] == 0
     assert objective["stage1_route_penalty"] == 0
-    assert objective["resource_path_continuity_weight"] == 0
-    assert gates["resource_path_continuity"]["status"] == "not_enabled"
-    assert gates["resource_path_continuity"]["modeling_enabled"] is False
-    assert result.objective_breakdown["resource_path_continuity_penalty"] == 0
+    assert "resource_path_continuity" not in result.objective_breakdown["objective_weights"]
+    assert "resource_path_continuity" not in result.objective_breakdown["objective_terms_used"]
+    assert "resource_path_continuity" not in result.objective_breakdown["objective_modeling_gates"]
+    assert all(item["term_id"] != "resource_path_continuity" for item in result.objective_breakdown["objective_contributions"])
 
 
 def test_resource_path_continuity_groups_mechanical_nodes_by_structure() -> None:
@@ -2763,8 +2761,6 @@ def test_resource_path_continuity_groups_mechanical_nodes_by_structure() -> None
     assert objective["stage1_route_node_count"] == 0
     assert objective["stage1_route_candidate_arc_count"] == 0
     assert objective["stage1_route_penalty"] == 0
-    assert objective["resource_path_continuity_weight"] == 0
-    assert result.objective_breakdown["resource_path_continuity_penalty"] == 0
 
 
 @pytest.mark.parametrize("resource_type", ["rotary_drill", "circulation_drill", "impact_drill"])
@@ -3229,8 +3225,6 @@ def test_drill_group_stage1_route_diagnostics_report_unbounded_candidate_counts(
     assert objective["stage1_same_side_penalty"] == 0
     assert objective["stage1_cross_side_penalty"] == 0
     assert objective["stage1_route_penalty"] == 0
-    assert objective["resource_path_continuity_weight"] == 0
-    assert result.objective_breakdown["resource_path_continuity_penalty"] == 0
 
 
 def test_drill_group_stage1_unbounded_paths_do_not_fail_on_old_window_case() -> None:
@@ -3888,7 +3882,6 @@ def test_control_priority_resource_path_continuity_does_not_penalize_same_side_g
     )
 
     assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert result.objective_breakdown["resource_path_continuity_penalty"] == 0
     assert result.stats["continuity_objective"]["resource_path_transition_arc_count"] == 0
 
 
@@ -3951,7 +3944,6 @@ def test_control_priority_resource_path_continuity_does_not_penalize_back_and_fo
     )
 
     assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert result.objective_breakdown["resource_path_continuity_penalty"] == 0
     assert result.stats["continuity_objective"]["resource_path_transition_arc_count"] == 0
 
 
@@ -4006,7 +3998,6 @@ def test_configured_resource_normal_work_skips_unconfigured_balance_without_path
     assert metrics["unconfigured_resource_normal_task_count"] == 0
     assert "unconfigured_normal_balance_penalty" not in result.objective_breakdown
     assert "normal_balance_penalty" not in result.objective_breakdown
-    assert result.objective_breakdown["resource_path_continuity_penalty"] == 0
 
 
 def test_unconfigured_resource_normal_work_reports_weekly_diagnostics_without_objective() -> None:
@@ -4175,7 +4166,9 @@ def test_control_priority_reports_configured_objective_terms_used() -> None:
     assert "control_buffer_risk" not in weights
     assert "risk_related_control_wait" not in weights
     assert "same_structure_craft_split" not in weights
+    assert "resource_path_continuity" not in weights
     assert "same_structure_craft_split" not in terms_used
+    assert "resource_path_continuity" not in terms_used
     assert "normal_balance" not in terms_used
     assert "unconfigured_normal_balance" not in terms_used
     assert "control_buffer_risk" not in terms_used
@@ -4193,6 +4186,7 @@ def test_control_priority_reports_configured_objective_terms_used() -> None:
     assert "unconfigured_normal_balance" not in contribution_by_id
     assert "control_buffer_risk" not in contribution_by_id
     assert "risk_related_control_wait" not in contribution_by_id
+    assert "resource_path_continuity" not in contribution_by_id
     assert contribution_by_id["resource_idle"]["enabled"] is False
     assert contribution_by_id["resource_idle"]["weighted_contribution"] == 0
     assert sum(item["weighted_contribution"] for item in contributions) == result.objective_breakdown["weighted_objective"]
@@ -4218,14 +4212,13 @@ def test_control_priority_disabled_resource_objectives_skip_resource_path_modeli
     )
 
     objective = result.stats["continuity_objective"]
-    gates = result.objective_breakdown["objective_modeling_gates"]
     analysis = result.stats["resource_organization_analysis"]
+    gates = result.objective_breakdown["objective_modeling_gates"]
 
     assert result.status in {"OPTIMAL", "FEASIBLE"}
     assert objective["resource_path_node_count"] == 0
     assert objective["resource_path_transition_arc_count"] == 0
-    assert gates["resource_path_continuity"]["modeling_enabled"] is False
-    assert gates["resource_path_continuity"]["status"] == "not_enabled"
+    assert "resource_path_continuity" not in gates
     assert analysis["resource_balance_status"] == "not_evaluated"
     assert analysis["resource_idle_status"] == "not_evaluated"
 

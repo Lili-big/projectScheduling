@@ -147,7 +147,6 @@ type BalanceBucket = "week" | "month";
 type ObjectiveTermId =
   | "control_node_late"
   | "makespan_and_soft_milestone"
-  | "resource_path_continuity"
   | "resource_idle";
 
 type ObjectiveTermConfig = {
@@ -312,7 +311,6 @@ const DEFAULT_RESOURCE_MAX_QUANTITIES: Record<string, number> = {
 const DEFAULT_OBJECTIVE_TERM_WEIGHTS: Record<ObjectiveTermId, number> = {
   control_node_late: 10_000_000_000,
   makespan_and_soft_milestone: 10_000,
-  resource_path_continuity: 3_000,
   resource_idle: 1_000,
 };
 const DEFAULT_SCHEDULE_STRATEGY: Omit<ScheduleStrategyConfig, "objective_terms"> = {
@@ -367,7 +365,7 @@ function normalizeScheduleStrategy(config?: ScheduleStrategyConfig | null): Sche
   const objectiveTerms = Object.fromEntries(
     (Object.keys(DEFAULT_OBJECTIVE_TERM_WEIGHTS) as ObjectiveTermId[]).map((termId) => {
       const incoming = rawTerms[termId];
-      const enabled = incoming?.enabled ?? (termId !== "resource_path_continuity");
+      const enabled = incoming?.enabled ?? true;
       return [
         termId,
         {
@@ -390,13 +388,13 @@ function objectiveTermsUsed(strategy: ScheduleStrategyConfig): Record<ObjectiveT
   const terms = strategy.objective_terms ?? normalizeScheduleStrategy(strategy).objective_terms ?? {};
   return Object.fromEntries(
     (Object.keys(DEFAULT_OBJECTIVE_TERM_WEIGHTS) as ObjectiveTermId[]).map((termId) => {
-      const config = terms[termId] ?? { enabled: termId !== "resource_path_continuity", weight: DEFAULT_OBJECTIVE_TERM_WEIGHTS[termId] };
+      const config = terms[termId] ?? { enabled: true, weight: DEFAULT_OBJECTIVE_TERM_WEIGHTS[termId] };
       return [
         termId,
         {
           enabled: config.enabled,
           weight: config.weight,
-          effective_weight: termId === "resource_path_continuity" ? 0 : (config.enabled ? config.weight : 0),
+          effective_weight: config.enabled ? config.weight : 0,
         },
       ];
     }),

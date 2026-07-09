@@ -81,7 +81,6 @@ AiParameterApplicationStatus = Literal["pending", "partially_applied", "applied"
 ObjectiveTermId = Literal[
     "control_node_late",
     "makespan_and_soft_milestone",
-    "resource_path_continuity",
     "resource_idle",
 ]
 
@@ -94,17 +93,16 @@ DEPRECATED_OBJECTIVE_TERM_IDS = {
     "unconfigured_normal_balance",
     "control_buffer_risk",
     "risk_related_control_wait",
+    "resource_path_continuity",
 }
 DEFAULT_OBJECTIVE_TERM_WEIGHTS: dict[ObjectiveTermId, int] = {
     "control_node_late": 10_000_000_000,
     "makespan_and_soft_milestone": 5_000_000,
-    "resource_path_continuity": 50_000,
     "resource_idle": 50_000,
 }
 DEFAULT_OBJECTIVE_TERM_ENABLED: dict[ObjectiveTermId, bool] = {
     "control_node_late": True,
     "makespan_and_soft_milestone": True,
-    "resource_path_continuity": False,
     "resource_idle": True,
 }
 OBJECTIVE_TERM_IDS = tuple(DEFAULT_OBJECTIVE_TERM_WEIGHTS.keys())
@@ -129,16 +127,6 @@ OBJECTIVE_METRIC_DEFINITIONS: dict[str, dict[str, Any]] = {
         "source": "objective",
         "applies_to": ["control_priority", "balanced_normal", "comprehensive"],
         "legacy_fields": ["makespan_days"],
-    },
-    "resource_path_continuity": {
-        "label": "资源路径连续性",
-        "group": "资源组织",
-        "description": "同一资源相邻任务的同幅邻近推进程度；权重越高，模型越倾向减少空间跳跃和幅别切换。",
-        "default_weight": DEFAULT_OBJECTIVE_TERM_WEIGHTS["resource_path_continuity"],
-        "configurable": True,
-        "source": "objective",
-        "applies_to": ["control_priority", "balanced_normal", "comprehensive"],
-        "legacy_fields": ["resource_path_continuity_penalty"],
     },
     "resource_idle": {
         "label": "资源空闲",

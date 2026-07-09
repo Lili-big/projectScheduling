@@ -23,7 +23,6 @@ export type BalanceBucket = "week" | "month";
 export type ObjectiveTermId =
   | "control_node_late"
   | "makespan_and_soft_milestone"
-  | "resource_path_continuity"
   | "resource_idle";
 export type TabKey = "process" | "logic" | "resources" | "milestones" | "tasks" | "results" | "resultsMvp";
 export type GanttMode = "by_time" | "by_structure" | "by_process";
