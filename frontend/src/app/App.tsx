@@ -48,6 +48,7 @@ import type {
   ObjectiveContribution,
   ObjectiveModelingGate,
   ObjectiveTermId,
+  PressureSearchAttempt,
   TargetAchievement,
   ScheduleStrategyConfig,
   TabKey,
@@ -1588,6 +1589,7 @@ function ResultsTab({
   const resourceRecommendationMessage = resourceRecommendationMessageFromResult(result);
   const resourceUpperBoundCounts = resourceUpperBoundCountsFromResult(result);
   const resourceCapacityLowerBounds = resourceCapacityLowerBoundsFromResult(result);
+  const pressureSearchAttempts = pressureSearchAttemptsFromResult(result);
   const showResourceRecommendation = shouldShowResourceRecommendation(result, recommendedResourceCounts);
   const showResourceRecommendationDiagnostic = shouldShowResourceRecommendationDiagnostic(resourceRecommendationStatus, resourceRecommendationMessage);
   const resourceCostSummary = resourceCostSummaryFromResult(result);
@@ -1978,6 +1980,9 @@ function ResultsTab({
           {refinementSummary.stageDescription && (
             <p>{refinementSummary.stageDescription}</p>
           )}
+          {refinementSummary.optimalityMessage && (
+            <p>{refinementSummary.optimalityMessage}</p>
+          )}
           {refinementSummary.fallbackMessage && (
             <p>{refinementSummary.fallbackMessage}</p>
           )}
@@ -2297,6 +2302,39 @@ function ResultsTab({
               </div>
             ))}
           </div>
+          {pressureSearchAttempts.length > 0 && (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>轮次</th>
+                    <th>内部目标工期</th>
+                    <th>压缩天数</th>
+                    <th>搜索下限</th>
+                    <th>容量候选</th>
+                    <th>原目标复排</th>
+                    <th>停止原因</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pressureSearchAttempts.map((attempt) => (
+                    <tr key={attempt.attempt}>
+                      <td>{attempt.attempt}</td>
+                      <td>
+                        {attempt.pressure_target_days ?? "-"}
+                        {attempt.critical_path_minimum_days ? ` / 下界 ${attempt.critical_path_minimum_days}` : ""}
+                      </td>
+                      <td>{attempt.pressure_compression_days ?? "-"}</td>
+                      <td>{formatQuantityRecord(attempt.search_lower_bounds)}</td>
+                      <td>{formatQuantityRecord(attempt.candidate_quantities)}</td>
+                      <td>{attempt.full_objective_target_status ?? attempt.full_objective_status ?? "-"}</td>
+                      <td>{pressureStopReasonLabel(attempt.stop_reason)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           {resourceUpperBoundCounts.length > 0 && (
             <div className="table-wrap">
               <table>
@@ -4117,6 +4155,7 @@ type RefinementSummary = {
   scheduleSource: string;
   stageLabel: string;
   stageDescription: string;
+  optimalityMessage: string;
   resourcePathStatus: string;
   fallbackReason: string;
   fallbackMessage: string;
@@ -4228,6 +4267,24 @@ function targetFailureIssueText(target: TargetAchievement | null): string {
     target.fixed_duration_overrun_days > 0 ? `固定工期超期 ${target.fixed_duration_overrun_days} 天` : "",
   ].filter(Boolean);
   return issues.join("，") || "业务目标未满足";
+}
+
+function solverStatusDisplay(status: string): string {
+  const normalized = status.toUpperCase();
+  if (normalized === "FEASIBLE") return "可行（未证明最优）";
+  if (normalized === "OPTIMAL") return "最优";
+  return formatScheduleStatus(normalized || status);
+}
+
+function targetOptimalityMessage(target: TargetAchievement | null): string {
+  if (!target) return "";
+  if (target.solver_status.toUpperCase() !== "FEASIBLE") return "";
+  if (!target.business_success || target.target_status === "unconfirmed") return "";
+  if (target.time_budget_exhausted) {
+    const budgetText = target.time_budget_seconds ? `${target.time_budget_seconds} 秒` : "本次";
+    return `已生成满足业务目标的可用排程；${budgetText}求解时限耗尽只表示尚未证明最优。`;
+  }
+  return "已生成满足业务目标的可用排程；FEASIBLE 表示尚未证明最优。";
 }
 
 function targetStatusLabel(target: TargetAchievement | null, resourceRecommendationStatus = ""): string {
@@ -4381,6 +4438,58 @@ function resourceCapacityLowerBoundsFromResult(result: ScheduleResult | null): R
       exceeds_upper_bound: Boolean(item.exceeds_upper_bound),
     }))
     .filter((item) => item.resource_pool_id);
+}
+
+function pressureSearchAttemptsFromResult(result: ScheduleResult | null): PressureSearchAttempt[] {
+  const raw = result?.stats?.pressure_search_attempts ?? result?.objective_breakdown?.pressure_search_attempts;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(isRecord)
+    .map((item) => ({
+      attempt: Number(item.attempt ?? 0),
+      search_lower_bounds: numberRecordFromUnknown(item.search_lower_bounds),
+      candidate_quantities: numberRecordFromUnknown(item.candidate_quantities),
+      pressure_overdue_days: nullableNumberFromUnknown(item.pressure_overdue_days),
+      pressure_compression_days: nullableNumberFromUnknown(item.pressure_compression_days),
+      pressure_original_target_days: nullableNumberFromUnknown(item.pressure_original_target_days),
+      pressure_target_days: nullableNumberFromUnknown(item.pressure_target_days),
+      critical_path_minimum_days: nullableNumberFromUnknown(item.critical_path_minimum_days),
+      pressure_clamped_by_critical_path: Boolean(item.pressure_clamped_by_critical_path),
+      resource_solver_status: stringFromUnknown(item.resource_solver_status) || null,
+      resource_target_status: stringFromUnknown(item.resource_target_status) || null,
+      full_objective_status: stringFromUnknown(item.full_objective_status) || null,
+      full_objective_target_status: stringFromUnknown(item.full_objective_target_status) || null,
+      business_success: typeof item.business_success === "boolean" ? item.business_success : null,
+      stop_reason: stringFromUnknown(item.stop_reason) || null,
+    }))
+    .filter((item) => item.attempt > 0);
+}
+
+function numberRecordFromUnknown(value: unknown): Record<string, number> {
+  if (!isRecord(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, raw]) => [key, Number(raw ?? 0)] as const)
+      .filter(([, raw]) => Number.isFinite(raw)),
+  );
+}
+
+function formatQuantityRecord(value: Record<string, number>): string {
+  const entries = Object.entries(value);
+  if (!entries.length) return "-";
+  return entries.map(([key, count]) => `${key}: ${count}`).join(" / ");
+}
+
+function pressureStopReasonLabel(reason: string | null | undefined): string {
+  const labels: Record<string, string> = {
+    same_as_lower_bounds: "仍为当前下限",
+    critical_path_floor_reached: "已到关键路径下界",
+    capacity_model_unconfirmed: "容量模型未确认",
+    upper_bound_infeasible: "资源上限不可行",
+    full_objective_failed: "原目标复排未通过",
+    candidate_verified: "原目标复排通过",
+  };
+  return reason ? labels[reason] ?? reason : "-";
 }
 
 function resourceOrganizationFromResult(result: ScheduleResult | null): ResourceOrganizationAnalysis | null {
@@ -4637,7 +4746,7 @@ function refinementSummaryFromResult(result: ScheduleResult | null): RefinementS
     recommendedDays: result.objective_days == null ? "-" : `${result.objective_days} 天`,
     baselineDays: Number.isFinite(baselineDays) ? `${baselineDays} 天` : "-",
     businessStatus: targetStatusLabel(targetAchievement, resourceRecommendationStatus),
-    solverStatus: targetAchievement?.solver_status || result.status,
+    solverStatus: solverStatusDisplay(targetAchievement?.solver_status || result.status),
     hardMilestoneLateDays: targetAchievement ? `${targetAchievement.hard_milestone_late_days} 天` : "-",
     fixedDurationOverrunDays: targetAchievement ? `${targetAchievement.fixed_duration_overrun_days} 天` : "-",
     hardMilestoneStatus: hardMilestones.length
@@ -4646,6 +4755,7 @@ function refinementSummaryFromResult(result: ScheduleResult | null): RefinementS
     scheduleSource: scheduleSourceLabels[source] ?? (source || "-"),
     stageLabel: stageSummary.label,
     stageDescription: refinementTargetDescription(targetAchievement, resourceRecommendationStatus) || stageSummary.description,
+    optimalityMessage: targetOptimalityMessage(targetAchievement),
     resourcePathStatus: resourcePathStatusLabels[resourcePathStatus] ?? resourcePathStatus,
     fallbackReason,
     fallbackMessage: refinementFallbackMessage(source, fallbackReason),

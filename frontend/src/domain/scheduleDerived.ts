@@ -10,6 +10,33 @@ export type PlanStatusDisplay = {
   diagnostic?: ValidationMessage;
 };
 
+type TargetAchievementSummary = {
+  businessSuccess: boolean;
+  targetStatus: string;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function targetAchievementFromResult(result: ScheduleResult): TargetAchievementSummary | null {
+  const raw = result.stats.target_achievement ?? result.objective_breakdown.target_achievement;
+  if (!isRecord(raw)) return null;
+  return {
+    businessSuccess: Boolean(raw.business_success),
+    targetStatus: typeof raw.target_status === "string" ? raw.target_status : "",
+  };
+}
+
+function optimalityHint(result: ScheduleResult): string | undefined {
+  if (result.status !== "FEASIBLE") return undefined;
+  const target = targetAchievementFromResult(result);
+  if (target?.businessSuccess && target.targetStatus !== "unconfirmed") {
+    return "目标已达成，未证明最优";
+  }
+  return "未证明最优";
+}
+
 export function derivePlanStatus(result: ScheduleResult | null): PlanStatusDisplay {
   if (!result) {
     return { label: "未求解", tone: "neutral" };
@@ -39,9 +66,10 @@ export function derivePlanStatus(result: ScheduleResult | null): PlanStatusDispl
     ? result.objective_breakdown.solve_mode
     : result.stats.solve_mode;
   const isShortestDurationMode = !solveMode || solveMode === "shortest_duration_fixed_resources";
+  const proofHint = optimalityHint(result);
 
   if (!isShortestDurationMode) {
-    return { label: scheduleStatusLabels[result.status], tone: "ok" };
+    return { label: scheduleStatusLabels[result.status], tone: "ok", hint: proofHint };
   }
 
   if (hardLateCount > 0) {
@@ -61,7 +89,7 @@ export function derivePlanStatus(result: ScheduleResult | null): PlanStatusDispl
     return {
       label: "可行",
       tone: "warn",
-      hint: "弱节点不满足",
+      hint: proofHint ? `弱节点不满足，${proofHint}` : "弱节点不满足",
       diagnostic: {
         level: "warning",
         message: `弱节点不满足：${softLateCount} 个提醒里程碑节点未满足。`,
@@ -70,5 +98,5 @@ export function derivePlanStatus(result: ScheduleResult | null): PlanStatusDispl
     };
   }
 
-  return { label: "可行", tone: "ok", hint: "里程碑均满足" };
+  return { label: "可行", tone: "ok", hint: proofHint ?? "里程碑均满足" };
 }

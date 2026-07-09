@@ -1795,15 +1795,126 @@ def test_fixed_resource_recommendation_retries_candidate_full_objective_up_to_li
 
     solved = solve_scenario(scenario)
 
-    assert lower_bound_calls == [1, 2, 3, 3, 3]
-    assert len(search_limits) == scenario_module.MAX_RESOURCE_RECOMMENDATION_ATTEMPTS
-    assert len(verification_limits) == scenario_module.MAX_RESOURCE_RECOMMENDATION_ATTEMPTS
+    assert lower_bound_calls == [1, 2, 3]
+    assert len(search_limits) == 3
+    assert len(verification_limits) == 2
     assert all(0 < limit <= 5 for limit in search_limits + verification_limits)
-    assert solved.result.objective_breakdown["resource_recommendation_status"] == "candidate_resources_full_objective_failed"
-    assert solved.result.objective_breakdown["resource_recommendation_attempt_count"] == 5
+    assert solved.result.objective_breakdown["resource_recommendation_status"] == "resource_recommendation_unresolved"
+    assert solved.result.objective_breakdown["pressure_search_status"] == "critical_path_floor_reached"
+    assert solved.result.objective_breakdown["resource_recommendation_attempt_count"] == 3
     assert solved.result.objective_breakdown["recommended_resource_counts"][0]["recommended_quantity"] == 3
     assert solved.alternative_results == []
-    assert any("5 次上限" in message.message for message in solved.result.validation)
+
+
+def test_fixed_resource_pressure_search_continues_when_capacity_returns_current_lower_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario = _parallel_fixed_resource_scenario(target_days=8, current_resources=1, max_resources=3)
+    pressure_target_days: list[int] = []
+    candidate_verification_counts: list[int] = []
+
+    def late_current_result(schedule_input: ScheduleInput, **_: object) -> ScheduleResult:
+        milestone = schedule_input.milestones[0]
+        return ScheduleResult(
+            status="FEASIBLE",
+            objective_days=10,
+            plan_start_date=schedule_input.start_date,
+            plan_finish_date=schedule_input.start_date + timedelta(days=9),
+            milestone_results=[
+                MilestoneResult(
+                    **milestone.model_dump(),
+                    actual_date=schedule_input.start_date + timedelta(days=9),
+                    actual_offset=10,
+                    lateness_days=2,
+                    status="late",
+                )
+            ],
+        )
+
+    def fake_min_resources(
+        schedule_input: ScheduleInput,
+        fallback_target_days: int | None = None,
+        minimum_resource_counts: dict[str, int] | None = None,
+        verify_with_full_objective: bool = True,
+    ) -> ScheduleResult:
+        assert fallback_target_days is None
+        assert verify_with_full_objective is False
+        milestone = schedule_input.milestones[0]
+        pressure_target_days.append((milestone.target_date - schedule_input.start_date).days + 1)
+        recommended_quantity = 1 if len(pressure_target_days) == 1 else 2
+        recommended = [{"resource_pool_id": "pool-cap", "recommended_quantity": recommended_quantity}]
+        target = {
+            "target_status": "candidate_resources_target_met",
+            "business_success": False,
+            "hard_milestone_late_days": 0,
+            "fixed_duration_overrun_days": 0,
+        }
+        return ScheduleResult(
+            status="FEASIBLE",
+            plan_start_date=schedule_input.start_date,
+            stats={
+                "recommended_resource_counts": recommended,
+                "capacity_verification_status": "verified",
+                "target_achievement": target,
+            },
+            objective_breakdown={
+                "recommended_resource_counts": recommended,
+                "capacity_verification_status": "verified",
+                "target_achievement": target,
+            },
+        )
+
+    def successful_candidate_result(
+        limited_schedule_input: ScheduleInput,
+        min_resource_result: ScheduleResult,
+        *,
+        budget: object | None = None,
+    ) -> ScheduleResult:
+        resources = [resource for resource in limited_schedule_input.resources if resource.enabled]
+        candidate_verification_counts.append(len(resources))
+        target = {
+            "target_status": "candidate_resources_target_met",
+            "business_success": True,
+            "hard_milestone_late_days": 0,
+            "fixed_duration_overrun_days": 0,
+        }
+        return ScheduleResult(
+            status="FEASIBLE",
+            plan_start_date=limited_schedule_input.start_date,
+            stats={
+                "schedule_source": "minimum_resources_control_priority_balanced",
+                "target_achievement": target,
+            },
+            objective_breakdown={
+                "schedule_source": "minimum_resources_control_priority_balanced",
+                "target_achievement": target,
+            },
+        )
+
+    monkeypatch.setattr(scenario_module, "solve_control_priority_schedule", late_current_result)
+    monkeypatch.setattr(scenario_module, "solve_min_resources_schedule", fake_min_resources)
+    monkeypatch.setattr(scenario_module, "_minimum_resource_candidate_result", successful_candidate_result)
+    monkeypatch.setattr(
+        scenario_module,
+        "_critical_path_schedule",
+        lambda schedule_input: {
+            "status": "OK",
+            "objective_days": 4,
+            "plan_finish_date": schedule_input.start_date + timedelta(days=3),
+            "milestone_results": [],
+        },
+    )
+
+    solved = solve_scenario(scenario)
+
+    attempts = solved.result.objective_breakdown["pressure_search_attempts"]
+    assert pressure_target_days == [6, 4]
+    assert candidate_verification_counts == [2]
+    assert attempts[0]["stop_reason"] == "same_as_lower_bounds"
+    assert attempts[1]["stop_reason"] == "candidate_verified"
+    assert solved.result.objective_breakdown["pressure_search_status"] == "candidate_verified"
+    assert solved.result.objective_breakdown["resource_recommendation_status"] == "recommended_resources_verified"
+    assert solved.result.objective_breakdown["recommended_resource_counts"][0]["added_quantity"] == 1
 
 
 def test_fixed_resource_shortest_does_not_recommend_max_when_upper_bound_is_infeasible() -> None:
@@ -1916,6 +2027,66 @@ def test_fixed_resource_success_uses_direct_refinement_without_capacity_precheck
     assert solved.result.status == "FEASIBLE"
     assert solved.result.objective_breakdown["performance_path"] == "direct_named_refinement"
     assert solved.result.objective_breakdown["capacity_precheck_status"] == "not_run"
+
+
+def test_fixed_resource_feasible_target_met_remains_success_when_time_budget_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario = _parallel_fixed_resource_scenario(target_days=10, current_resources=1, max_resources=2)
+    recommendation_calls = 0
+
+    class ExhaustedBudget:
+        time_limit_seconds = 5.0
+
+        def __init__(self, time_limit_seconds: float) -> None:
+            self.time_limit_seconds = time_limit_seconds
+
+        def with_time_limit(self, schedule_input: ScheduleInput, **_: object) -> ScheduleInput:
+            return schedule_input
+
+        def exhausted(self) -> bool:
+            return True
+
+    def fake_control_priority(schedule_input: ScheduleInput, **_: object) -> ScheduleResult:
+        milestone = schedule_input.milestones[0]
+        return ScheduleResult(
+            status="FEASIBLE",
+            objective_days=5,
+            plan_start_date=schedule_input.start_date,
+            plan_finish_date=schedule_input.start_date + timedelta(days=4),
+            milestone_results=[
+                MilestoneResult(
+                    **milestone.model_dump(),
+                    actual_date=schedule_input.start_date + timedelta(days=4),
+                    actual_offset=5,
+                    lateness_days=0,
+                    status="met",
+                )
+            ],
+            stats={"solver_call_count": 1, "warm_start_used": False},
+        )
+
+    def fail_recommendation(*_: object, **__: object) -> dict[str, object]:
+        nonlocal recommendation_calls
+        recommendation_calls += 1
+        raise AssertionError("met FEASIBLE fixed-resource result should not request resource recommendation")
+
+    monkeypatch.setattr(scenario_module, "_FixedResourceSolveBudget", ExhaustedBudget)
+    monkeypatch.setattr(scenario_module, "solve_control_priority_schedule", fake_control_priority)
+    monkeypatch.setattr(scenario_module, "_fixed_resource_recommendation", fail_recommendation)
+
+    solved = solve_scenario(scenario)
+    target = solved.result.stats["target_achievement"]
+
+    assert solved.result.status == "FEASIBLE"
+    assert target["business_success"] is True
+    assert target["target_status"] == "met"
+    assert target["time_budget_exhausted"] is True
+    assert "time_budget_exhausted" not in target["failure_reasons"]
+    assert solved.result.objective_breakdown["schedule_source"] == "current_resources_control_priority_balanced"
+    assert solved.result.objective_breakdown["resource_recommendation_status"] == "not_needed"
+    assert solved.alternative_results == []
+    assert recommendation_calls == 0
 
 
 def test_soft_milestone_returns_lateness_and_penalty() -> None:

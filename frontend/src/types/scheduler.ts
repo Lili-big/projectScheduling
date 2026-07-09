@@ -130,6 +130,36 @@ export type RecommendedResourcesOutcome = {
   target_achievement?: TargetAchievement | null;
 };
 
+export type PressureSearchAttempt = {
+  attempt: number;
+  search_lower_bounds: Record<string, number>;
+  candidate_quantities: Record<string, number>;
+  pressure_overdue_days?: number | null;
+  pressure_compression_days?: number | null;
+  pressure_original_target_days?: number | null;
+  pressure_target_days?: number | null;
+  critical_path_minimum_days?: number | null;
+  pressure_clamped_by_critical_path?: boolean;
+  resource_solver_status?: string | null;
+  resource_target_status?: string | null;
+  full_objective_status?: string | null;
+  full_objective_target_status?: string | null;
+  business_success?: boolean | null;
+  stop_reason?: string | null;
+};
+
+export type PressureSearchDiagnostics = {
+  pressure_search_status?: string | null;
+  pressure_search_stop_reason?: string | null;
+  pressure_search_overdue_days?: number | null;
+  pressure_search_attempt_count?: number | null;
+  pressure_search_attempt_limit?: number | null;
+  pressure_search_last_target_days?: number | null;
+  pressure_search_original_target_days?: number | null;
+  pressure_search_critical_path_minimum_days?: number | null;
+  pressure_search_attempts?: PressureSearchAttempt[];
+};
+
 export type ObjectiveEvaluationStatus =
   | "enabled"
   | "not_enabled"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import time
 from collections import defaultdict
+from datetime import timedelta
 from typing import Any
 
 from .models import (
@@ -332,6 +333,7 @@ def _solve_fixed_resources_shortest_scenario(
         scenario,
         generated.schedule_input,
         critical_path=critical_path,
+        current_result=final_result,
         budget=_FixedResourceSolveBudget(scenario.time_limit_seconds),
     )
     recommendation_metadata = {
@@ -448,7 +450,7 @@ def _target_status_for_result(
     success_status: str,
     time_budget_exhausted: bool,
 ) -> str:
-    if time_budget_exhausted or result.status == "UNKNOWN":
+    if result.status == "UNKNOWN":
         return "unconfirmed"
     if result.status not in {"OPTIMAL", "FEASIBLE"}:
         return "physical_infeasible"
@@ -475,7 +477,7 @@ def _target_failure_reasons(
         reasons.append("max_resources_target_failed")
     if status == "unconfirmed":
         reasons.append("unconfirmed")
-    if time_budget_exhausted:
+    if status == "unconfirmed" and time_budget_exhausted:
         reasons.append("time_budget_exhausted")
     return list(dict.fromkeys(reasons))
 
@@ -576,6 +578,7 @@ def _fixed_resource_recommendation(
     current_schedule_input: ScheduleInput,
     *,
     critical_path: dict[str, Any] | None = None,
+    current_result: ScheduleResult | None = None,
     budget: _FixedResourceSolveBudget | None = None,
 ) -> dict[str, Any]:
     recommendation_time_limit_seconds = (
@@ -648,17 +651,38 @@ def _fixed_resource_recommendation(
     last_min_resource_result: ScheduleResult | None = None
     last_candidate_result: ScheduleResult | None = None
     last_recommendation: list[dict[str, Any]] = []
+    overdue_days = _target_overdue_days_for_pressure(current_result)
+    last_pressure_context: dict[str, Any] | None = None
+    pressure_stop_reason = "not_started"
+    pressure_status = "not_run"
 
     for attempt_index in range(1, MAX_RESOURCE_RECOMMENDATION_ATTEMPTS + 1):
         search_budget = _FixedResourceSolveBudget(recommendation_time_limit_seconds)
+        pressure_context = _pressure_target_context(
+            max_schedule_input,
+            critical_path=critical_path,
+            overdue_days=overdue_days,
+            attempt_index=attempt_index,
+            current_result=current_result,
+        )
+        last_pressure_context = pressure_context
+        pressure_schedule_input = _schedule_input_with_pressure_target(max_schedule_input, pressure_context)
+        fallback_target_days = (
+            _int_or_none(pressure_context.get("pressure_target_days"))
+            if not pressure_context.get("hard_milestone_count")
+            else None
+        )
         min_resource_result = solve_min_resources_schedule(
-            search_budget.with_time_limit(max_schedule_input),
+            search_budget.with_time_limit(pressure_schedule_input),
+            fallback_target_days=fallback_target_days,
             minimum_resource_counts=minimum_resource_counts,
             verify_with_full_objective=False,
         )
         last_min_resource_result = min_resource_result
 
         if _min_resource_result_is_upper_bound_infeasible(min_resource_result):
+            pressure_status = "upper_bound_infeasible"
+            pressure_stop_reason = "upper_bound_infeasible"
             recommendation_attempts.append(
                 _resource_recommendation_attempt_summary(
                     attempt_index=attempt_index,
@@ -667,6 +691,8 @@ def _fixed_resource_recommendation(
                     fixed_counts={},
                     candidate_result=None,
                     time_limit_seconds=search_budget.time_limit_seconds,
+                    pressure_context=pressure_context,
+                    stop_reason=pressure_stop_reason,
                 )
             )
             return {
@@ -681,6 +707,13 @@ def _fixed_resource_recommendation(
                     "resource_recommendation_attempt_count": len(recommendation_attempts),
                     "resource_recommendation_attempt_limit": MAX_RESOURCE_RECOMMENDATION_ATTEMPTS,
                     "resource_recommendation_attempts": recommendation_attempts,
+                    **_pressure_search_metadata(
+                        status=pressure_status,
+                        stop_reason=pressure_stop_reason,
+                        attempts=recommendation_attempts,
+                        overdue_days=overdue_days,
+                        last_context=last_pressure_context,
+                    ),
                     "recommended_resources": {
                         "candidate_quantities": {},
                         "added_quantities": {},
@@ -699,6 +732,8 @@ def _fixed_resource_recommendation(
             }
 
         if not _min_resource_result_has_capacity_verified_candidate(min_resource_result):
+            pressure_status = "unconfirmed"
+            pressure_stop_reason = "capacity_model_unconfirmed"
             recommendation_attempts.append(
                 _resource_recommendation_attempt_summary(
                     attempt_index=attempt_index,
@@ -707,6 +742,8 @@ def _fixed_resource_recommendation(
                     fixed_counts={},
                     candidate_result=None,
                     time_limit_seconds=search_budget.time_limit_seconds,
+                    pressure_context=pressure_context,
+                    stop_reason=pressure_stop_reason,
                 )
             )
             return {
@@ -721,6 +758,13 @@ def _fixed_resource_recommendation(
                     "resource_recommendation_attempt_count": len(recommendation_attempts),
                     "resource_recommendation_attempt_limit": MAX_RESOURCE_RECOMMENDATION_ATTEMPTS,
                     "resource_recommendation_attempts": recommendation_attempts,
+                    **_pressure_search_metadata(
+                        status=pressure_status,
+                        stop_reason=pressure_stop_reason,
+                        attempts=recommendation_attempts,
+                        overdue_days=overdue_days,
+                        last_context=last_pressure_context,
+                    ),
                     "recommended_resources": {
                         "candidate_quantities": {},
                         "added_quantities": {},
@@ -739,6 +783,29 @@ def _fixed_resource_recommendation(
             }
 
         fixed_counts = _resource_count_map(min_resource_result)
+        if not _resource_counts_exceed_lower_bounds(fixed_counts, minimum_resource_counts):
+            pressure_stop_reason = (
+                "critical_path_floor_reached"
+                if pressure_context.get("clamped_by_critical_path")
+                else "same_as_lower_bounds"
+            )
+            pressure_status = pressure_stop_reason
+            recommendation_attempts.append(
+                _resource_recommendation_attempt_summary(
+                    attempt_index=attempt_index,
+                    minimum_resource_counts=minimum_resource_counts,
+                    min_resource_result=min_resource_result,
+                    fixed_counts=fixed_counts,
+                    candidate_result=None,
+                    time_limit_seconds=search_budget.time_limit_seconds,
+                    pressure_context=pressure_context,
+                    stop_reason=pressure_stop_reason,
+                )
+            )
+            if pressure_context.get("clamped_by_critical_path"):
+                break
+            continue
+
         recommendation = _enriched_resource_counts(
             current_schedule_input=current_schedule_input,
             max_schedule_input=max_schedule_input,
@@ -764,13 +831,19 @@ def _fixed_resource_recommendation(
                 fixed_counts=fixed_counts,
                 candidate_result=candidate_result,
                 time_limit_seconds=verification_budget.time_limit_seconds,
+                pressure_context=pressure_context,
+                stop_reason="candidate_verified" if _result_business_success(candidate_result) else "full_objective_failed",
             )
         )
 
         if not _result_business_success(candidate_result):
+            pressure_status = "candidate_failed"
+            pressure_stop_reason = "full_objective_failed"
             minimum_resource_counts = _next_resource_minimum_counts(minimum_resource_counts, fixed_counts)
             continue
 
+        pressure_status = "candidate_verified"
+        pressure_stop_reason = "candidate_verified"
         recommendation_metadata = {
             "resource_recommendation_status": "recommended_resources_verified",
             "resource_recommendation_message": "已输出固定工期条件下的可行最少资源方案。",
@@ -785,6 +858,13 @@ def _fixed_resource_recommendation(
             "resource_recommendation_attempt_count": len(recommendation_attempts),
             "resource_recommendation_attempt_limit": MAX_RESOURCE_RECOMMENDATION_ATTEMPTS,
             "resource_recommendation_attempts": recommendation_attempts,
+            **_pressure_search_metadata(
+                status=pressure_status,
+                stop_reason=pressure_stop_reason,
+                attempts=recommendation_attempts,
+                overdue_days=overdue_days,
+                last_context=last_pressure_context,
+            ),
             **_min_resource_recommendation_metadata(min_resource_result),
         }
         candidate_result.stats.update(recommendation_metadata)
@@ -836,11 +916,27 @@ def _fixed_resource_recommendation(
         }
     )
 
+    exhausted_without_increment = pressure_status in {"same_as_lower_bounds", "critical_path_floor_reached"}
+    fallback_recommendation_status = (
+        "resource_recommendation_unresolved"
+        if exhausted_without_increment
+        else "candidate_resources_full_objective_failed"
+    )
+    fallback_recommendation_message = (
+        "资源建议压力搜索已达到关键路径下界或循环上限，容量模型仍只返回当前下限，未形成可验证的新增资源候选。"
+        if exhausted_without_increment
+        else (
+            f"候选资源已完成 {len(recommendation_attempts)} 次完整目标函数复排验证，仍未满足硬里程碑或固定工期；"
+            f"已达到 {MAX_RESOURCE_RECOMMENDATION_ATTEMPTS} 次循环上限，排程失败。"
+        )
+    )
+
     return {
         "metadata": {
             **critical_metadata,
-            "resource_recommendation_status": "candidate_resources_full_objective_failed",
-            "resource_recommendation_message": (
+            "resource_recommendation_status": fallback_recommendation_status,
+            "resource_recommendation_message": fallback_recommendation_message,
+            "resource_recommendation_message_legacy": (
                 f"候选资源已完成 {len(recommendation_attempts)} 次完整目标函数复排验证，仍未满足硬里程碑或固定工期；"
                 f"已达到 {MAX_RESOURCE_RECOMMENDATION_ATTEMPTS} 次循环上限，排程失败。"
             ),
@@ -853,6 +949,13 @@ def _fixed_resource_recommendation(
             "resource_recommendation_attempt_count": len(recommendation_attempts),
             "resource_recommendation_attempt_limit": MAX_RESOURCE_RECOMMENDATION_ATTEMPTS,
             "resource_recommendation_attempts": recommendation_attempts,
+            **_pressure_search_metadata(
+                status=pressure_status,
+                stop_reason=pressure_stop_reason,
+                attempts=recommendation_attempts,
+                overdue_days=overdue_days,
+                last_context=last_pressure_context,
+            ),
             "recommended_resources": recommended_resources,
             **(_min_resource_recommendation_metadata(last_min_resource_result) if last_min_resource_result else {}),
         },
@@ -899,6 +1002,163 @@ def _resource_minimum_counts(schedule_input: ScheduleInput) -> dict[str, int]:
     return {
         group["key"]: int(group["max_quantity"])
         for group in _resource_groups([resource for resource in schedule_input.resources if resource.enabled])
+    }
+
+
+def _target_overdue_days_for_pressure(result: ScheduleResult | None) -> int:
+    target = _result_target_achievement(result)
+    overdue_days = max(
+        _target_int(target, "hard_milestone_late_days"),
+        _target_int(target, "fixed_duration_overrun_days"),
+    )
+    if overdue_days > 0:
+        return overdue_days
+    if result is None:
+        return 0
+    late_hard_days = [
+        int(milestone.lateness_days or 0)
+        for milestone in result.milestone_results
+        if milestone.mode == "hard" and int(milestone.lateness_days or 0) > 0
+    ]
+    return max(late_hard_days, default=0)
+
+
+def _milestone_target_days(start_date: Any, milestone: Any) -> int:
+    offset = (milestone.target_date - start_date).days
+    if milestone.target_event == "finish":
+        return offset + 1
+    return offset
+
+
+def _date_from_target_days(start_date: Any, target_event: str, target_days: int) -> Any:
+    offset = target_days - 1 if target_event == "finish" else target_days
+    return start_date + timedelta(days=max(0, offset))
+
+
+def _pressure_target_context(
+    schedule_input: ScheduleInput,
+    *,
+    critical_path: dict[str, Any],
+    overdue_days: int,
+    attempt_index: int,
+    current_result: ScheduleResult | None,
+) -> dict[str, Any]:
+    critical_floor_days = max(1, _int_or_none(critical_path.get("objective_days")) or 1)
+    compression_days = max(0, int(overdue_days or 0) * max(1, int(attempt_index)))
+    hard_milestones = [milestone for milestone in schedule_input.milestones if milestone.mode == "hard"]
+    pressure_milestones: list[dict[str, Any]] = []
+    original_target_days: int | None = None
+    pressure_target_days: int | None = None
+    clamped_by_critical_path = False
+
+    for milestone in hard_milestones:
+        milestone_original_days = max(1, _milestone_target_days(schedule_input.start_date, milestone))
+        milestone_floor_days = min(milestone_original_days, critical_floor_days)
+        raw_days = max(1, milestone_original_days - compression_days)
+        milestone_pressure_days = max(milestone_floor_days, raw_days)
+        if milestone_pressure_days != raw_days:
+            clamped_by_critical_path = True
+        original_target_days = max(original_target_days or 0, milestone_original_days)
+        pressure_target_days = max(pressure_target_days or 0, milestone_pressure_days)
+        pressure_milestones.append(
+            {
+                "id": milestone.id,
+                "name": milestone.name,
+                "original_target_date": milestone.target_date.isoformat(),
+                "pressure_target_date": _date_from_target_days(
+                    schedule_input.start_date,
+                    milestone.target_event,
+                    milestone_pressure_days,
+                ).isoformat(),
+                "original_target_days": milestone_original_days,
+                "pressure_target_days": milestone_pressure_days,
+            }
+        )
+
+    if not hard_milestones:
+        fallback_target = _int_or_none(
+            (current_result.stats.get("max_makespan_days") if current_result else None)
+            or (current_result.objective_breakdown.get("max_makespan_days") if current_result else None)
+        )
+        if fallback_target is not None:
+            original_target_days = max(1, fallback_target)
+            raw_days = max(1, original_target_days - compression_days)
+            pressure_target_days = max(min(original_target_days, critical_floor_days), raw_days)
+            clamped_by_critical_path = pressure_target_days != raw_days
+
+    return {
+        "attempt": attempt_index,
+        "overdue_days": max(0, int(overdue_days or 0)),
+        "compression_days": compression_days,
+        "original_target_days": original_target_days,
+        "pressure_target_days": pressure_target_days,
+        "critical_path_minimum_days": critical_floor_days,
+        "clamped_by_critical_path": clamped_by_critical_path,
+        "hard_milestone_count": len(hard_milestones),
+        "pressure_milestones": pressure_milestones,
+    }
+
+
+def _schedule_input_with_pressure_target(
+    schedule_input: ScheduleInput,
+    pressure_context: dict[str, Any],
+) -> ScheduleInput:
+    pressure_by_id = {
+        str(item["id"]): item
+        for item in pressure_context.get("pressure_milestones", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    if not pressure_by_id:
+        return schedule_input
+    milestones = []
+    for milestone in schedule_input.milestones:
+        pressure = pressure_by_id.get(milestone.id)
+        if pressure is None:
+            milestones.append(milestone)
+            continue
+        target_days = _int_or_none(pressure.get("pressure_target_days"))
+        if target_days is None:
+            milestones.append(milestone)
+            continue
+        milestones.append(
+            milestone.model_copy(
+                update={
+                    "target_date": _date_from_target_days(
+                        schedule_input.start_date,
+                        milestone.target_event,
+                        target_days,
+                    )
+                }
+            )
+        )
+    return schedule_input.model_copy(update={"milestones": milestones})
+
+
+def _resource_counts_exceed_lower_bounds(
+    fixed_counts: dict[str, int],
+    lower_bounds: dict[str, int],
+) -> bool:
+    return any(int(count or 0) > int(lower_bounds.get(key, 0) or 0) for key, count in fixed_counts.items())
+
+
+def _pressure_search_metadata(
+    *,
+    status: str,
+    stop_reason: str,
+    attempts: list[dict[str, Any]],
+    overdue_days: int,
+    last_context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        "pressure_search_status": status,
+        "pressure_search_stop_reason": stop_reason,
+        "pressure_search_overdue_days": overdue_days,
+        "pressure_search_attempt_count": len(attempts),
+        "pressure_search_attempt_limit": MAX_RESOURCE_RECOMMENDATION_ATTEMPTS,
+        "pressure_search_attempts": attempts,
+        "pressure_search_last_target_days": last_context.get("pressure_target_days") if last_context else None,
+        "pressure_search_original_target_days": last_context.get("original_target_days") if last_context else None,
+        "pressure_search_critical_path_minimum_days": last_context.get("critical_path_minimum_days") if last_context else None,
     }
 
 
@@ -999,10 +1259,12 @@ def _resource_recommendation_attempt_summary(
     fixed_counts: dict[str, int],
     candidate_result: ScheduleResult | None,
     time_limit_seconds: float,
+    pressure_context: dict[str, Any] | None = None,
+    stop_reason: str | None = None,
 ) -> dict[str, Any]:
     resource_target = _result_target_achievement(min_resource_result)
     candidate_target = _result_target_achievement(candidate_result)
-    return {
+    summary = {
         "attempt": attempt_index,
         "time_limit_seconds": time_limit_seconds,
         "search_lower_bounds": dict(minimum_resource_counts),
@@ -1021,6 +1283,21 @@ def _resource_recommendation_attempt_summary(
         "full_objective_target_status": candidate_target.get("target_status") if candidate_target else None,
         "business_success": candidate_target.get("business_success") if candidate_target else None,
     }
+    if pressure_context:
+        summary.update(
+            {
+                "pressure_overdue_days": pressure_context.get("overdue_days"),
+                "pressure_compression_days": pressure_context.get("compression_days"),
+                "pressure_original_target_days": pressure_context.get("original_target_days"),
+                "pressure_target_days": pressure_context.get("pressure_target_days"),
+                "critical_path_minimum_days": pressure_context.get("critical_path_minimum_days"),
+                "pressure_clamped_by_critical_path": pressure_context.get("clamped_by_critical_path"),
+                "pressure_milestones": pressure_context.get("pressure_milestones", []),
+            }
+        )
+    if stop_reason:
+        summary["stop_reason"] = stop_reason
+    return summary
 
 
 def _enriched_resource_counts(
