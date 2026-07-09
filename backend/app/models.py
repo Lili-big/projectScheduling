@@ -104,7 +104,7 @@ DEFAULT_OBJECTIVE_TERM_WEIGHTS: dict[ObjectiveTermId, int] = {
 DEFAULT_OBJECTIVE_TERM_ENABLED: dict[ObjectiveTermId, bool] = {
     "control_node_late": True,
     "makespan_and_soft_milestone": True,
-    "resource_path_continuity": True,
+    "resource_path_continuity": False,
     "resource_idle": True,
 }
 OBJECTIVE_TERM_IDS = tuple(DEFAULT_OBJECTIVE_TERM_WEIGHTS.keys())

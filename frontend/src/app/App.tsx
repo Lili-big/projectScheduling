@@ -8,7 +8,6 @@ import {
   ClipboardList,
   Database,
   Flag,
-  GitCompare,
   Loader2,
   Play,
   RotateCcw,
@@ -48,7 +47,6 @@ import type {
   ObjectiveContribution,
   ObjectiveModelingGate,
   ObjectiveTermId,
-  PressureSearchAttempt,
   TargetAchievement,
   ScheduleStrategyConfig,
   TabKey,
@@ -200,23 +198,23 @@ type ObjectiveContributionSummary = {
 const objectiveTermDefinitions: ObjectiveTermDefinition[] = [
   {
     id: "control_node_late",
-    label: "控制节点迟延",
+    label: "控制性里程碑节点尽量不延误",
     group: "控制优先",
-    description: "看控制节点晚于目标日期的天数；每晚 1 天按最高权重计罚，优先压低控制节点迟延。",
+    description: "看控制性里程碑晚于目标日期的天数；每晚 1 天按最高优先级计罚，优先保障关键节点。",
     defaultWeight: 10_000_000_000,
     appliesTo: "目标函数排程",
   },
   {
     id: "makespan_and_soft_milestone",
-    label: "总工期",
+    label: "计划工期尽可能短",
     group: "工期",
-    description: "看项目整体完工跨度；总工期越长，罚分越高。",
+    description: "看项目从开工到完工的整体跨度；计划工期越长，罚分越高。",
     defaultWeight: 5_000_000,
     appliesTo: "目标函数排程",
   },
   {
     id: "resource_path_continuity",
-    label: "资源路径连续性",
+    label: "同一资源尽量连续推进",
     group: "资源组织",
     description: "看同一资源相邻任务是否同幅邻近推进；同幅墩号间隔越大、左右幅切换越多，罚分越高。",
     defaultWeight: 50_000,
@@ -224,7 +222,7 @@ const objectiveTermDefinitions: ObjectiveTermDefinition[] = [
   },
   {
     id: "resource_idle",
-    label: "资源空闲",
+    label: "资源尽量少空等",
     group: "资源组织",
     description: "看单个资源两次任务之间是否长时间停等；中途空闲天数越多，罚分越高。",
     defaultWeight: 50_000,
@@ -236,7 +234,7 @@ function defaultObjectiveTermsConfig(): Record<ObjectiveTermId, ObjectiveTermCon
   return Object.fromEntries(
     objectiveTermDefinitions.map((term) => [
       term.id,
-      { enabled: term.defaultEnabled ?? true, weight: term.defaultWeight },
+      { enabled: term.defaultEnabled ?? (term.id !== "resource_path_continuity"), weight: term.defaultWeight },
     ]),
   ) as Record<ObjectiveTermId, ObjectiveTermConfig>;
 }
@@ -973,9 +971,6 @@ export default function App() {
             onGanttModeChange={setGanttMode}
             onSaveCurrent={saveCurrentResult}
             savedResults={savedResults}
-            comparison={comparison}
-            onCompare={() => void compareSavedResults()}
-            comparing={busy === "comparing"}
           />
         );
       case "resultsMvp":
@@ -997,9 +992,6 @@ export default function App() {
             onGanttModeChange={setGanttMode}
             onSaveCurrent={saveCurrentResult}
             savedResults={savedResults}
-            comparison={comparison}
-            onCompare={() => void compareSavedResults()}
-            comparing={busy === "comparing"}
             workPointOptions={workPointOptions}
             selectedWorkPointId={activeMvpWorkPointId}
             onWorkPointChange={setMvpSelectedWorkPointId}
@@ -1099,9 +1091,6 @@ export default function App() {
             onGanttModeChange={setGanttMode}
             onSaveCurrent={saveCurrentResult}
             savedResults={savedResults}
-            comparison={comparison}
-            onCompare={() => void compareSavedResults()}
-            comparing={busy === "comparing"}
           />
         )}
         {activeTab === "resultsMvp" && (
@@ -1122,9 +1111,6 @@ export default function App() {
             onGanttModeChange={setGanttMode}
             onSaveCurrent={saveCurrentResult}
             savedResults={savedResults}
-            comparison={comparison}
-            onCompare={() => void compareSavedResults()}
-            comparing={busy === "comparing"}
             workPointOptions={workPointOptions}
             selectedWorkPointId={activeMvpWorkPointId}
             onWorkPointChange={setMvpSelectedWorkPointId}
@@ -1536,9 +1522,6 @@ function ResultsTab({
   onGanttModeChange,
   onSaveCurrent,
   savedResults,
-  comparison,
-  onCompare,
-  comparing,
   workPointOptions = [],
   selectedWorkPointId = "",
   onWorkPointChange,
@@ -1557,9 +1540,6 @@ function ResultsTab({
   onGanttModeChange: (mode: GanttMode) => void;
   onSaveCurrent: (result?: ScenarioSolveResult | null) => void;
   savedResults: ScenarioSolveResult[];
-  comparison: CompareResponse | null;
-  onCompare: () => void;
-  comparing: boolean;
   workPointOptions?: WorkPointOption[];
   selectedWorkPointId?: string;
   onWorkPointChange?: (workPointId: string) => void;
@@ -1581,17 +1561,8 @@ function ResultsTab({
   const planStatus = useMemo(() => derivePlanStatus(result), [result]);
   const summary = useMemo(() => buildSummary(scenario, generated, activeSolveResult), [scenario, generated, activeSolveResult]);
   const generatedForDetails = activeSolveResult?.generated ?? generated;
-  const recommendedResourceCounts = filterRecommendedResourceCountsByUsedResources(
-    recommendedResourceCountsFromResult(result),
-    result,
-  );
   const resourceRecommendationStatus = resourceRecommendationStatusFromResult(result);
-  const resourceRecommendationMessage = resourceRecommendationMessageFromResult(result);
-  const resourceUpperBoundCounts = resourceUpperBoundCountsFromResult(result);
-  const resourceCapacityLowerBounds = resourceCapacityLowerBoundsFromResult(result);
-  const pressureSearchAttempts = pressureSearchAttemptsFromResult(result);
-  const showResourceRecommendation = shouldShowResourceRecommendation(result, recommendedResourceCounts);
-  const showResourceRecommendationDiagnostic = shouldShowResourceRecommendationDiagnostic(resourceRecommendationStatus, resourceRecommendationMessage);
+  const alternativeOutput = alternativeOutputFromResult(solveResult?.result ?? result);
   const resourceCostSummary = resourceCostSummaryFromResult(result);
   const continuityMetrics = continuityMetricsFromResult(result);
   const drillGroupRefinement = drillGroupRefinementFromResult(result);
@@ -1830,104 +1801,84 @@ function ResultsTab({
             <div className="objective-config">
               <div className="objective-config-header">
                 <div>
-                  <h3>目标函数配置</h3>
-                  <span>已启用 {enabledObjectiveCount}/{objectiveTermDefinitions.length} 项</span>
+                  <h3>算法倾向选择</h3>
+                  <span>已选择 {enabledObjectiveCount}/{objectiveTermDefinitions.length} 个排程倾向</span>
                 </div>
-                <button className="secondary objective-reset-button" type="button" onClick={restoreDefaultObjectiveTerms}>
-                  <RotateCcw size={15} />
-                  恢复默认
-                </button>
               </div>
-              <div className="objective-table-wrap">
-                <table className="objective-table">
-                  <thead>
-                    <tr>
-                      <th>启用</th>
-                      <th>指标</th>
-                      <th>说明</th>
-                      <th>当前权重</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {objectiveTermDefinitions.map((term) => {
-                      const termConfig = objectiveTerms[term.id];
-                      const keepOneEnabled = termConfig.enabled && enabledObjectiveCount <= 1;
-                      return (
-                        <tr className={termConfig.enabled ? undefined : "objective-row-disabled"} key={term.id}>
-                          <td>
-                            <input
-                              type="checkbox"
-                              checked={termConfig.enabled}
-                              disabled={keepOneEnabled}
-                              aria-label={`启用${term.label}`}
-                              onChange={(event) => updateObjectiveTerm(term.id, { enabled: event.target.checked })}
-                            />
-                          </td>
-                          <td>
-                            <strong>{term.label}</strong>
-                            <span>{term.group}</span>
-                            <span>{term.appliesTo}</span>
-                          </td>
-                          <td className="objective-description">{term.description}</td>
-                          <td>
-                            <input
-                              type="number"
-                              min={1}
-                              max={10_000_000_000}
-                              step={1}
-                              value={termConfig.weight}
-                              disabled={!termConfig.enabled}
-                              onChange={(event) => updateObjectiveTerm(term.id, {
-                                weight: normalizeObjectiveWeight(event.target.value),
-                              })}
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div className="objective-choice-grid">
+                {objectiveTermDefinitions.map((term) => {
+                  const termConfig = objectiveTerms[term.id];
+                  const keepOneEnabled = termConfig.enabled && enabledObjectiveCount <= 1;
+                  return (
+                    <label
+                      className={`objective-choice${termConfig.enabled ? " selected" : ""}${keepOneEnabled ? " locked" : ""}`}
+                      key={term.id}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={termConfig.enabled}
+                        disabled={keepOneEnabled}
+                        aria-label={`选择${term.label}`}
+                        onChange={(event) => updateObjectiveTerm(term.id, { enabled: event.target.checked })}
+                      />
+                      <span className="objective-choice-copy">
+                        <strong>{term.label}</strong>
+                        <span>{term.group}</span>
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
+              <details className="objective-advanced">
+                <summary>高级设置</summary>
+                <div className="objective-advanced-toolbar">
+                  <span>查看说明、调整权重或恢复默认倾向。</span>
+                  <button className="secondary objective-reset-button" type="button" onClick={restoreDefaultObjectiveTerms}>
+                    <RotateCcw size={15} />
+                    恢复默认
+                  </button>
+                </div>
+                <div className="objective-table-wrap">
+                  <table className="objective-table">
+                    <thead>
+                      <tr>
+                        <th>倾向</th>
+                        <th>说明</th>
+                        <th>当前权重</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {objectiveTermDefinitions.map((term) => {
+                        const termConfig = objectiveTerms[term.id];
+                        return (
+                          <tr className={termConfig.enabled ? undefined : "objective-row-disabled"} key={term.id}>
+                            <td>
+                              <strong>{term.label}</strong>
+                              <span>{term.group}</span>
+                              <span>{term.appliesTo}</span>
+                            </td>
+                            <td className="objective-description">{term.description}</td>
+                            <td>
+                              <input
+                                type="number"
+                                min={1}
+                                max={10_000_000_000}
+                                step={1}
+                                value={termConfig.weight}
+                                disabled={!termConfig.enabled}
+                                onChange={(event) => updateObjectiveTerm(term.id, {
+                                  weight: normalizeObjectiveWeight(event.target.value),
+                                })}
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
             </div>
-          )}
-          {!isMvp && (
-            <details className="advanced-schedule-config">
-              <summary>高级排程参数</summary>
-              <div className="form-grid advanced-schedule-grid">
-                <label>
-                  非控制工程最早开始(天)
-                  <input
-                    type="number"
-                    min={0}
-                    value={strategyConfig.normal_earliest_start_offset}
-                    onChange={(event) => updateStrategyConfig({ normal_earliest_start_offset: Math.max(0, Number(event.target.value)) })}
-                  />
-                </label>
-                <label>
-                  非控制工程最晚完成(天)
-                  <input
-                    type="number"
-                    min={1}
-                    value={strategyConfig.normal_latest_finish_offset ?? ""}
-                    placeholder="不限制"
-                    onChange={(event) => updateStrategyConfig({
-                      normal_latest_finish_offset: event.target.value ? Math.max(1, Number(event.target.value)) : null,
-                    })}
-                  />
-                </label>
-                <label>
-                  工区非控制工程最大并行
-                  <input
-                    type="number"
-                    min={1}
-                    value={strategyConfig.max_parallel_normal_per_work_section}
-                    onChange={(event) => updateStrategyConfig({
-                      max_parallel_normal_per_work_section: Math.max(1, Number(event.target.value)),
-                    })}
-                  />
-                </label>
-              </div>
-            </details>
           )}
         </section>
       )}
@@ -2094,14 +2045,16 @@ function ResultsTab({
                 <Save size={15} />
                 保存方案
               </button>
-              <button className="secondary" onClick={onCompare} disabled={!savedResults.length || comparing}>
-                {comparing ? <Loader2 className="spin" size={15} /> : <GitCompare size={15} />}
-                对比
-              </button>
             </div>
           )}
         </div>
         <div className="diagnostics">
+          {alternativeOutput.status === "not_output" && (
+            <div className="diagnostic warning">
+              <strong>方案2未输出</strong>
+              <span>{alternativeOutput.message || "方案2未输出：新增资源分支未形成可展示候选方案。"}</span>
+            </div>
+          )}
           {diagnostics.slice(0, 12).map((message, index) => (
             <div className={`diagnostic ${message.level}`} key={`${message.subject_id ?? "message"}-${index}`}>
               <strong>{diagnosticLevelLabels[message.level]}</strong>
@@ -2284,111 +2237,6 @@ function ResultsTab({
               </table>
             </div>
           )}
-        </section>
-      )}
-
-      {showResourceRecommendationDiagnostic && (
-        <section className="panel full">
-          <PanelTitle title="资源增量诊断" subtitle="当前资源上限探测、最少资源求解和关键路径检查结果" />
-          <div className="diagnostics">
-            <div className={`diagnostic ${resourceRecommendationStatus === "resource_upper_bound_infeasible" || resourceRecommendationStatus === "critical_path_infeasible" ? "error" : "warning"}`}>
-              <strong>{resourceRecommendationDiagnosticTitle(resourceRecommendationStatus)}</strong>
-              <span>{resourceRecommendationMessage}</span>
-            </div>
-            {resourceCapacityLowerBounds.filter((item) => item.exceeds_upper_bound).map((item) => (
-              <div className="diagnostic error" key={item.resource_pool_id}>
-                <strong>瓶颈资源</strong>
-                <span>{item.label} 按目标窗口约需 {item.required_minimum} 个，当前上限 {item.max_quantity} 个。</span>
-              </div>
-            ))}
-          </div>
-          {pressureSearchAttempts.length > 0 && (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>轮次</th>
-                    <th>内部目标工期</th>
-                    <th>压缩天数</th>
-                    <th>搜索下限</th>
-                    <th>容量候选</th>
-                    <th>原目标复排</th>
-                    <th>停止原因</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pressureSearchAttempts.map((attempt) => (
-                    <tr key={attempt.attempt}>
-                      <td>{attempt.attempt}</td>
-                      <td>
-                        {attempt.pressure_target_days ?? "-"}
-                        {attempt.critical_path_minimum_days ? ` / 下界 ${attempt.critical_path_minimum_days}` : ""}
-                      </td>
-                      <td>{attempt.pressure_compression_days ?? "-"}</td>
-                      <td>{formatQuantityRecord(attempt.search_lower_bounds)}</td>
-                      <td>{formatQuantityRecord(attempt.candidate_quantities)}</td>
-                      <td>{attempt.full_objective_target_status ?? attempt.full_objective_status ?? "-"}</td>
-                      <td>{pressureStopReasonLabel(attempt.stop_reason)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {resourceUpperBoundCounts.length > 0 && (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>资源</th>
-                    <th>当前数量</th>
-                    <th>上限数量</th>
-                    <th>可增容量</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {resourceUpperBoundCounts.map((item) => (
-                    <tr key={item.resource_pool_id}>
-                      <td>{item.label}</td>
-                      <td>{item.current_quantity}</td>
-                      <td>{item.upper_bound_quantity}</td>
-                      <td>{item.additional_capacity}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-      )}
-
-      {showResourceRecommendation && (
-        <section className="panel full">
-          <PanelTitle title="资源增量候选建议" subtitle="为满足强制里程碑目标，后端已验证可行的资源候选数量" />
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>资源</th>
-                  <th>当前数量</th>
-                  <th>候选数量</th>
-                  <th>新增数量</th>
-                  <th>最大数量</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recommendedResourceCounts.map((item) => (
-                  <tr key={item.resource_pool_id}>
-                    <td>{item.label}</td>
-                    <td>{item.current_quantity}</td>
-                    <td>{item.recommended_quantity}</td>
-                    <td>{item.added_quantity}</td>
-                    <td>{item.max_quantity}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </section>
       )}
 
@@ -2588,37 +2436,6 @@ function ResultsTab({
         </section>
       )}
 
-      {!isMvp && (
-        <section className="panel full">
-          <PanelTitle title="方案对比" subtitle={`${savedResults.length} 个已保存方案`} />
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>方案</th>
-                  <th>状态</th>
-                  <th>总工期</th>
-                  <th>软节点迟延数</th>
-                  <th>软罚分</th>
-                  <th>综合分</th>
-                </tr>
-              </thead>
-              <tbody>
-                {comparison?.summaries.map((item) => (
-                  <tr key={String(item.scenario_id)}>
-                    <td>{String(item.scenario_name)}</td>
-                    <td>{formatScheduleStatus(item.status)}</td>
-                    <td>{String(item.total_days ?? "-")}</td>
-                    <td>{String(item.soft_late_count ?? 0)}</td>
-                    <td>{String(item.soft_penalty ?? 0)}</td>
-                    <td>{String(item.score ?? "-")}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
     </div>
   );
 }
@@ -4091,20 +3908,6 @@ function continuousPlanGroupKey(task: ScheduledTask): string | null {
   return `${task.bridge_id ?? "-"}:${task.work_section_id ?? "-"}:${groupIndex}`;
 }
 
-function filterRecommendedResourceCountsByUsedResources(
-  counts: RecommendedResourceCount[],
-  result: ScheduleResult | null,
-): RecommendedResourceCount[] {
-  if (!result) return [];
-  const usedResourceTypes = new Set(
-    result.resource_allocations
-      .map((item) => String(item.resource_type ?? ""))
-      .filter((resourceType) => resourceType.trim().length > 0),
-  );
-  if (!usedResourceTypes.size) return [];
-  return counts.filter((item) => usedResourceTypes.has(item.resource_type));
-}
-
 function importComponentCountSummary(summary: Record<string, unknown>): string {
   const lower = summary.lowerComponentCount;
   const upper = summary.upperComponentCount;
@@ -4124,21 +3927,12 @@ type RecommendedResourceCount = {
   max_quantity: number;
 };
 
-type ResourceUpperBoundCount = {
-  resource_pool_id: string;
-  label: string;
-  current_quantity: number;
-  upper_bound_quantity: number;
-  additional_capacity: number;
-  max_quantity: number;
-};
+type AlternativeOutputStatus = "not_applicable" | "output" | "not_output" | "";
 
-type ResourceCapacityLowerBound = {
-  resource_pool_id: string;
-  label: string;
-  required_minimum: number;
-  max_quantity: number;
-  exceeds_upper_bound: boolean;
+type AlternativeOutputState = {
+  status: AlternativeOutputStatus;
+  reason: string;
+  message: string;
 };
 
 type RefinementSummary = {
@@ -4222,9 +4016,17 @@ function resourceRecommendationStatusFromResult(result: ScheduleResult | null): 
   return typeof raw === "string" ? raw : "";
 }
 
-function resourceRecommendationMessageFromResult(result: ScheduleResult | null): string {
-  const raw = result?.stats?.resource_recommendation_message ?? result?.objective_breakdown?.resource_recommendation_message;
-  return typeof raw === "string" ? raw : "";
+function alternativeOutputFromResult(result: ScheduleResult | null): AlternativeOutputState {
+  const rawStatus = stringFromUnknown(result?.stats?.alternative_output_status ?? result?.objective_breakdown?.alternative_output_status);
+  let status: AlternativeOutputStatus = "";
+  if (rawStatus === "not_applicable" || rawStatus === "output" || rawStatus === "not_output") {
+    status = rawStatus;
+  }
+  return {
+    status,
+    reason: stringFromUnknown(result?.stats?.alternative_output_reason ?? result?.objective_breakdown?.alternative_output_reason),
+    message: stringFromUnknown(result?.stats?.alternative_output_message ?? result?.objective_breakdown?.alternative_output_message),
+  };
 }
 
 function targetAchievementFromResult(result: ScheduleResult | null): TargetAchievement | null {
@@ -4307,35 +4109,6 @@ function targetStatusLabel(target: TargetAchievement | null, resourceRecommendat
   return labels[target.target_status] ?? target.target_status;
 }
 
-function shouldShowResourceRecommendation(result: ScheduleResult | null, counts: RecommendedResourceCount[]): boolean {
-  if (!counts.length) return false;
-  const status = resourceRecommendationStatusFromResult(result);
-  if (status) return status === "recommended_resources_verified";
-  const solveMode = result?.objective_breakdown?.solve_mode ?? result?.stats?.solve_mode;
-  return solveMode === "min_resources_fixed_duration";
-}
-
-function shouldShowResourceRecommendationDiagnostic(status: string, message: string): boolean {
-  return Boolean(
-    message
-    && status
-    && !["recommended_resources_verified", "not_needed", "not_evaluated"].includes(status),
-  );
-}
-
-function resourceRecommendationDiagnosticTitle(status: string): string {
-  const labels: Record<string, string> = {
-    resource_recommendation_unresolved: "推荐未确认",
-    unconfirmed: "推荐未确认",
-    critical_path_infeasible: "关键路径不可行",
-    resource_upper_bound_infeasible: "上限不可行",
-    physical_infeasible: "物理不可行",
-    max_resource_generation_error: "上限场景生成失败",
-    candidate_resources_target_failed: "候选资源未满足目标",
-  };
-  return labels[status] ?? "未输出推荐";
-}
-
 function resourceRecommendationOutcomeText(status: string): string {
   const labels: Record<string, string> = {
     recommended_resources_verified: "已找到并验证推荐资源组合。",
@@ -4404,92 +4177,6 @@ function refinementFallbackMessage(source: string, fallbackReason: string): stri
     return "当前资源排程未满足目标，已作为参考排程保留。";
   }
   return `当前资源目标函数排程未作为成功结果展示，已保留参考排程：${reason}。`;
-}
-
-function resourceUpperBoundCountsFromResult(result: ScheduleResult | null): ResourceUpperBoundCount[] {
-  const raw = result?.stats?.resource_upper_bound_counts ?? result?.objective_breakdown?.resource_upper_bound_counts;
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter(isRecord)
-    .map((item) => {
-      const maxQuantity = Number(item.max_quantity ?? item.upper_bound_quantity ?? 0);
-      return {
-        resource_pool_id: String(item.resource_pool_id ?? item.resource_type ?? item.label ?? ""),
-        label: String(item.label ?? item.resource_type ?? "-"),
-        current_quantity: Number(item.current_quantity ?? 0),
-        upper_bound_quantity: Number(item.upper_bound_quantity ?? maxQuantity),
-        additional_capacity: Number(item.additional_capacity ?? Math.max(0, maxQuantity - Number(item.current_quantity ?? 0))),
-        max_quantity: maxQuantity,
-      };
-    })
-    .filter((item) => item.resource_pool_id);
-}
-
-function resourceCapacityLowerBoundsFromResult(result: ScheduleResult | null): ResourceCapacityLowerBound[] {
-  const raw = result?.stats?.resource_capacity_lower_bounds ?? result?.objective_breakdown?.resource_capacity_lower_bounds;
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter(isRecord)
-    .map((item) => ({
-      resource_pool_id: String(item.resource_pool_id ?? item.resource_type ?? item.label ?? ""),
-      label: String(item.label ?? item.resource_type ?? "-"),
-      required_minimum: Number(item.required_minimum ?? 0),
-      max_quantity: Number(item.max_quantity ?? 0),
-      exceeds_upper_bound: Boolean(item.exceeds_upper_bound),
-    }))
-    .filter((item) => item.resource_pool_id);
-}
-
-function pressureSearchAttemptsFromResult(result: ScheduleResult | null): PressureSearchAttempt[] {
-  const raw = result?.stats?.pressure_search_attempts ?? result?.objective_breakdown?.pressure_search_attempts;
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter(isRecord)
-    .map((item) => ({
-      attempt: Number(item.attempt ?? 0),
-      search_lower_bounds: numberRecordFromUnknown(item.search_lower_bounds),
-      candidate_quantities: numberRecordFromUnknown(item.candidate_quantities),
-      pressure_overdue_days: nullableNumberFromUnknown(item.pressure_overdue_days),
-      pressure_compression_days: nullableNumberFromUnknown(item.pressure_compression_days),
-      pressure_original_target_days: nullableNumberFromUnknown(item.pressure_original_target_days),
-      pressure_target_days: nullableNumberFromUnknown(item.pressure_target_days),
-      critical_path_minimum_days: nullableNumberFromUnknown(item.critical_path_minimum_days),
-      pressure_clamped_by_critical_path: Boolean(item.pressure_clamped_by_critical_path),
-      resource_solver_status: stringFromUnknown(item.resource_solver_status) || null,
-      resource_target_status: stringFromUnknown(item.resource_target_status) || null,
-      full_objective_status: stringFromUnknown(item.full_objective_status) || null,
-      full_objective_target_status: stringFromUnknown(item.full_objective_target_status) || null,
-      business_success: typeof item.business_success === "boolean" ? item.business_success : null,
-      stop_reason: stringFromUnknown(item.stop_reason) || null,
-    }))
-    .filter((item) => item.attempt > 0);
-}
-
-function numberRecordFromUnknown(value: unknown): Record<string, number> {
-  if (!isRecord(value)) return {};
-  return Object.fromEntries(
-    Object.entries(value)
-      .map(([key, raw]) => [key, Number(raw ?? 0)] as const)
-      .filter(([, raw]) => Number.isFinite(raw)),
-  );
-}
-
-function formatQuantityRecord(value: Record<string, number>): string {
-  const entries = Object.entries(value);
-  if (!entries.length) return "-";
-  return entries.map(([key, count]) => `${key}: ${count}`).join(" / ");
-}
-
-function pressureStopReasonLabel(reason: string | null | undefined): string {
-  const labels: Record<string, string> = {
-    same_as_lower_bounds: "仍为当前下限",
-    critical_path_floor_reached: "已到关键路径下界",
-    capacity_model_unconfirmed: "容量模型未确认",
-    upper_bound_infeasible: "资源上限不可行",
-    full_objective_failed: "原目标复排未通过",
-    candidate_verified: "原目标复排通过",
-  };
-  return reason ? labels[reason] ?? reason : "-";
 }
 
 function resourceOrganizationFromResult(result: ScheduleResult | null): ResourceOrganizationAnalysis | null {
@@ -4986,7 +4673,7 @@ function withDefaultScheduleStrategy(config?: ScheduleStrategyConfig | null): Sc
   const objectiveTerms = objectiveTermDefinitions.reduce<Record<ObjectiveTermId, ObjectiveTermConfig>>((next, term) => {
     const incoming = inheritedObjectiveTermConfig(term, incomingTerms);
     next[term.id] = {
-      enabled: incoming?.enabled ?? term.defaultEnabled ?? true,
+      enabled: incoming?.enabled ?? term.defaultEnabled ?? (term.id !== "resource_path_continuity"),
       weight: normalizeObjectiveWeight(incoming?.weight ?? term.defaultWeight),
     };
     return next;

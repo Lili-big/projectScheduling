@@ -735,25 +735,6 @@ code {
   justify-content: start;
 }
 
-.advanced-schedule-config {
-  margin: 0 16px 16px;
-  border-top: 1px solid #e2e8f0;
-}
-
-.advanced-schedule-config summary {
-  min-height: 38px;
-  padding: 10px 0 0;
-  cursor: pointer;
-  color: #0f2742;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.advanced-schedule-grid {
-  padding: 8px 0 0;
-  grid-template-columns: repeat(3, minmax(150px, 1fr));
-}
-
 .objective-config {
   margin: 0 16px 14px;
   padding-top: 12px;
@@ -787,7 +768,89 @@ code {
   white-space: nowrap;
 }
 
+.objective-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.objective-choice {
+  min-height: 66px;
+  padding: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 7px;
+  background: #f8fbff;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.objective-choice:hover {
+  border-color: #93c5fd;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.08);
+}
+
+.objective-choice.selected {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.objective-choice.locked {
+  cursor: default;
+}
+
+.objective-choice input {
+  margin-top: 2px;
+}
+
+.objective-choice-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.objective-choice-copy strong {
+  color: #0f2742;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.objective-choice-copy span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.objective-advanced {
+  margin-top: 2px;
+  border-top: 1px dashed #cbd5e1;
+  padding-top: 8px;
+}
+
+.objective-advanced summary {
+  width: fit-content;
+  color: #334155;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.objective-advanced-toolbar {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #64748b;
+  font-size: 12px;
+}
+
 .objective-table-wrap {
+  margin-top: 8px;
   overflow-x: auto;
   border: 1px solid #e2e8f0;
   border-radius: 7px;
@@ -818,23 +881,17 @@ code {
   border-bottom: 0;
 }
 
-.objective-table th:first-child,
 .objective-table td:first-child {
-  width: 56px;
-  text-align: center;
-}
-
-.objective-table td:nth-child(2) {
   min-width: 220px;
 }
 
-.objective-table td:nth-child(2) strong {
+.objective-table td:first-child strong {
   display: block;
   color: #0f2742;
   font-size: 13px;
 }
 
-.objective-table td:nth-child(2) span {
+.objective-table td:first-child span {
   display: block;
   margin-top: 2px;
   color: #64748b;
@@ -855,8 +912,8 @@ code {
   background: #f8fafc;
 }
 
-.objective-row-disabled td:nth-child(2) strong,
-.objective-row-disabled td:nth-child(2) span,
+.objective-row-disabled td:first-child strong,
+.objective-row-disabled td:first-child span,
 .objective-row-disabled .objective-description {
   color: #94a3b8;
 }
@@ -2170,10 +2227,6 @@ code {
 .control-plan-buffer.neutral,
 .control-plan-empty {
   color: #94a3b8;
-}
-
-.comparison-table-wrap table {
-  min-width: 1120px;
 }
 
 .scenario-name-cell {

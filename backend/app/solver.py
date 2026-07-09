@@ -49,6 +49,7 @@ TARGET_SOLVE_TIME_LIMIT_SECONDS = 15.0
 MECHANICAL_DRILL_RESOURCE_TYPES = frozenset({"rotary_drill", "circulation_drill", "impact_drill"})
 MECHANICAL_DRILL_PATH_SUPPORT_WINDOW = 2
 MECHANICAL_DRILL_CROSS_SIDE_SUPPORT_WINDOW = 1
+DISABLED_OBJECTIVE_TERM_IDS = frozenset({"resource_path_continuity"})
 
 
 class _SolveBudget:
@@ -114,7 +115,10 @@ class _ContinuousBeamTeamSpanModel:
 
 
 def _objective_weights_for_config(config: Any) -> dict[str, int]:
-    return effective_objective_weights(config.objective_terms)
+    weights = effective_objective_weights(config.objective_terms)
+    for term_id in DISABLED_OBJECTIVE_TERM_IDS:
+        weights[term_id] = 0
+    return weights
 
 
 def _objective_terms_used_for_config(config: Any, weights: dict[str, int]) -> dict[str, dict[str, int | bool]]:
@@ -797,6 +801,24 @@ def _drill_group_child_sort_key(task: Task) -> tuple[Any, ...]:
     )
 
 
+def _drill_group_node_sort_key(group: _DrillGroupNode) -> tuple[Any, ...]:
+    task = group.representative_task
+    location = _task_location(task)
+    side_rank = {"L": 0, "R": 1, "N": 2}.get(location["side"] or "N", 2)
+    support_index = location["support_index"] if location["support_index"] is not None else 9999
+    return (
+        task.bridge_id or "",
+        group.resource_group_key,
+        group.component_type,
+        group.process_name,
+        support_index,
+        side_rank,
+        task.work_section_id or "",
+        group.sequence_order,
+        group.group_id,
+    )
+
+
 def _pile_sequence_number(task: Task) -> int | None:
     for value in (task.id, task.name):
         match = re.search(r"(?:^|[-_\s])PILE[-_\s]*(\d+)(?:$|[-_\s])", value, flags=re.IGNORECASE)
@@ -869,7 +891,7 @@ def _build_drill_group_nodes(
                 representative_task=representative_task,
             )
         )
-    return sorted(nodes, key=lambda node: (node.sequence_order, node.group_id))
+    return sorted(nodes, key=_drill_group_node_sort_key)
 
 
 def _drill_group_task_ids(groups: list[_DrillGroupNode]) -> set[str]:
@@ -993,6 +1015,7 @@ def _empty_drill_group_stage1_route_terms(status: str = "not_applicable") -> dic
         "cross_side_terms": [],
         "metadata": {
             "stage1_route_status": status,
+            "stage1_route_candidate_mode": None,
             "stage1_route_node_count": 0,
             "stage1_route_unique_group_count": 0,
             "stage1_route_candidate_arc_count": 0,
@@ -1132,32 +1155,19 @@ def _drill_group_stage1_transition_decision(
                 rejection_reason="missing_location",
             )
         sequence_distance = abs(current_position - previous_position)
-        if 0 < sequence_distance <= MECHANICAL_DRILL_PATH_SUPPORT_WINDOW:
-            return _DrillGroupStage1RouteDecision(
-                allowed=True,
-                transition_kind="same_side",
-                penalty=max(0, sequence_distance - 1),
-                same_side_sequence_distance=sequence_distance,
-            )
         return _DrillGroupStage1RouteDecision(
-            allowed=False,
+            allowed=sequence_distance > 0,
             transition_kind="same_side",
-            rejection_reason="same_side_window_exceeded",
+            penalty=0,
+            rejection_reason=None if sequence_distance > 0 else "missing_location",
             same_side_sequence_distance=sequence_distance,
         )
 
     support_gap = abs(current_support_index - previous_support_index)
-    if support_gap <= MECHANICAL_DRILL_CROSS_SIDE_SUPPORT_WINDOW:
-        return _DrillGroupStage1RouteDecision(
-            allowed=True,
-            transition_kind="cross_side",
-            penalty=1,
-            cross_side_support_gap=support_gap,
-        )
     return _DrillGroupStage1RouteDecision(
-        allowed=False,
+        allowed=True,
         transition_kind="cross_side",
-        rejection_reason="cross_side_gap_exceeded",
+        penalty=0,
         cross_side_support_gap=support_gap,
     )
 
@@ -1180,6 +1190,7 @@ def _build_drill_group_stage1_route_terms(
 
     metadata = result["metadata"]
     metadata["stage1_route_status"] = "enabled"
+    metadata["stage1_route_candidate_mode"] = "unbounded"
     metadata["stage1_route_unique_group_count"] = len(routable_groups)
     rejected_counts = metadata["stage1_route_rejected_arc_counts"]
     same_side_terms: list[Any] = []
@@ -2350,7 +2361,7 @@ def solve_control_priority_schedule(
     resource_idle_enabled = _objective_term_enabled(objective_weights, "resource_idle")
     resource_path_continuity_enabled = _objective_term_enabled(objective_weights, "resource_path_continuity")
     drill_group_constraints_enabled = _drill_group_stage in {"coarse", "refined"} and bool(drill_groups)
-    drill_group_path_circuit_enabled = resource_path_continuity_enabled and _drill_group_stage != "coarse"
+    drill_group_path_circuit_enabled = False
     inherited_stage1_route_metadata = (
         _stage1_route_metadata_from_path(warm_start_result.stats.get("continuity_objective"))
         if _drill_group_stage == "refined" and warm_start_result is not None
@@ -2647,7 +2658,7 @@ def solve_control_priority_schedule(
         if _drill_group_stage == "coarse":
             stage1_route_metadata = _with_stage1_route_failure(
                 stage1_route_metadata,
-                "stage1_route_window_infeasible",
+                "stage1_route_infeasible",
             )
         failed_continuity_objective = {
             "primary_weight": CONTINUITY_PRIMARY_WEIGHT,
@@ -2678,14 +2689,14 @@ def solve_control_priority_schedule(
         failure_messages = [
             ValidationMessage(
                 level="error",
-                message="控制性工程优先策略在当前工艺、资源、窗口和工作面约束下未找到可行排程。",
+                message="控制性工程优先策略在当前工艺、资源、里程碑和工作面约束下未找到可行排程。",
             )
         ]
         if stage1_route_metadata.get("stage1_route_status") == "infeasible":
             failure_messages.append(
                 ValidationMessage(
                     level="error",
-                    message="第一阶段钻机组路径窗口未找到可行路径，系统未放开远距离候选转移。",
+                    message="第一阶段钻机组路径未找到可行排程，候选路径已按无顺序罚分模式进入模型。",
                 )
             )
         return ScheduleResult(
@@ -3951,15 +3962,6 @@ def _build_resource_path_continuity_terms(
                 arcs.append((previous_index, current_index, transition))
                 metadata["resource_path_transition_arc_count"] += 1
                 model.Add(current_node["start"] >= previous_node["end"]).OnlyEnforceIf(transition)
-
-                same_side_gap_penalty, side_switch_penalty = _resource_path_transition_penalties(
-                    previous_node["representative_task"],
-                    current_node["representative_task"],
-                )
-                if same_side_gap_penalty:
-                    same_side_gap_terms.append(same_side_gap_penalty * transition)
-                if side_switch_penalty:
-                    side_switch_terms.append(side_switch_penalty * transition)
 
         model.AddCircuit(arcs)
 

@@ -65,6 +65,9 @@ MINIMUM_RESOURCES_REFINED_SOURCE = "minimum_resources_control_priority_balanced"
 MINIMUM_RESOURCES_BEST_EFFORT_SOURCE = "minimum_resources_best_effort_refinement"
 MINIMUM_RESOURCES_FALLBACK_SOURCE = "minimum_resources_refinement_fallback"
 MAX_RESOURCE_RECOMMENDATION_ATTEMPTS = 5
+ALTERNATIVE_OUTPUT_NOT_APPLICABLE = "not_applicable"
+ALTERNATIVE_OUTPUT_OUTPUT = "output"
+ALTERNATIVE_OUTPUT_NOT_OUTPUT = "not_output"
 UPPER_STRUCTURE_LOGIC_RULE_IDS = (
     "cast_in_place_box_beam_after_lower_structure",
     "continuous_beam_zero_block_after_main_pier_lower_structure",
@@ -129,6 +132,44 @@ class _FixedResourceSolveBudget:
         return self.remaining_seconds() <= 0.11
 
 
+def _alternative_output_metadata(status: str, *, reason: str, message: str) -> dict[str, Any]:
+    return {
+        "alternative_output_status": status,
+        "alternative_output_reason": reason,
+        "alternative_output_message": message,
+    }
+
+
+def _alternative_output_not_applicable(reason: str, message: str) -> dict[str, Any]:
+    return _alternative_output_metadata(
+        ALTERNATIVE_OUTPUT_NOT_APPLICABLE,
+        reason=reason,
+        message=message,
+    )
+
+
+def _alternative_output_from_recommendation(
+    recommendation_metadata: dict[str, Any],
+    *,
+    has_alternative: bool,
+) -> dict[str, Any]:
+    reason = str(recommendation_metadata.get("resource_recommendation_status") or "resource_recommendation_unresolved")
+    if has_alternative:
+        return _alternative_output_metadata(
+            ALTERNATIVE_OUTPUT_OUTPUT,
+            reason=reason,
+            message="已输出方案2：新增资源分支形成可展示候选方案。",
+        )
+    detail = str(recommendation_metadata.get("resource_recommendation_message") or "").strip()
+    if not detail:
+        detail = "新增资源分支未形成可展示候选方案。"
+    return _alternative_output_metadata(
+        ALTERNATIVE_OUTPUT_NOT_OUTPUT,
+        reason=reason,
+        message=f"方案2未输出：{detail}",
+    )
+
+
 def generate_schedule_input_from_scenario(scenario: ScenarioInput, *, use_max_resources: bool = False) -> GeneratedScheduleInput:
     validation: list[ValidationMessage] = []
     tasks, generated_links = _build_tasks(scenario, validation)
@@ -191,11 +232,16 @@ def solve_scenario(scenario: ScenarioInput) -> ScenarioSolveResult:
     generated = generate_schedule_input_from_scenario(scenario)
     alternative_results: list[ScenarioAlternativeResult] = []
     if any(message.level == "error" for message in generated.validation):
+        alternative_output = _alternative_output_not_applicable(
+            "scenario_generation_error",
+            "场景生成失败，未进入方案2输出判断。",
+        )
         result = ScheduleResult(
             status="MODEL_INVALID",
             plan_start_date=scenario.project.start_date,
             validation=generated.validation,
-            stats={"reason": "scenario_generation_error"},
+            stats={"reason": "scenario_generation_error", **alternative_output},
+            objective_breakdown=alternative_output,
             milestone_results=[],
         )
     else:
@@ -253,6 +299,10 @@ def _solve_fixed_resources_shortest_scenario(
             warm_start_used=bool(final_result.stats.get("warm_start_used")),
             resource_recommendation_status="not_needed",
             resource_recommendation_message="当前固定资源精排已满足硬里程碑，无需增加资源。",
+            **_alternative_output_not_applicable(
+                "not_needed",
+                "当前固定资源精排已满足硬里程碑，无需进入方案2输出判断。",
+            ),
         )
         return final_result, []
 
@@ -276,6 +326,10 @@ def _solve_fixed_resources_shortest_scenario(
             warm_start_used=bool(final_result.stats.get("warm_start_used")),
             resource_recommendation_status="unconfirmed",
             resource_recommendation_message="当前资源完整目标函数求解在限定时间内无法确认，未进入确定性资源不足判断。",
+            **_alternative_output_not_applicable(
+                "unconfirmed",
+                "当前资源完整目标函数求解未确认，未进入方案2输出判断。",
+            ),
         )
         return result, []
 
@@ -299,6 +353,10 @@ def _solve_fixed_resources_shortest_scenario(
             warm_start_used=bool(final_result.stats.get("warm_start_used")),
             resource_recommendation_status="physical_infeasible",
             resource_recommendation_message="当前资源、施工硬规则或资源覆盖未得到物理可行排程。",
+            **_alternative_output_not_applicable(
+                "physical_infeasible",
+                "当前资源没有物理可行排程，未进入方案2输出判断。",
+            ),
         )
         return result, []
 
@@ -341,6 +399,13 @@ def _solve_fixed_resources_shortest_scenario(
         for key, value in recommendation["metadata"].items()
         if key != "alternative_result"
     }
+    alternative = recommendation.get("alternative_result")
+    recommendation_metadata.update(
+        _alternative_output_from_recommendation(
+            recommendation_metadata,
+            has_alternative=alternative is not None,
+        )
+    )
     _apply_fixed_resource_metadata(
         result,
         baseline_makespan_days=baseline_makespan_days,
@@ -354,7 +419,6 @@ def _solve_fixed_resources_shortest_scenario(
         **recommendation_metadata,
     )
     result.validation.extend(recommendation["validation"])
-    alternative = recommendation.get("alternative_result")
     alternatives = [alternative] if alternative is not None else []
     return result, alternatives
 
