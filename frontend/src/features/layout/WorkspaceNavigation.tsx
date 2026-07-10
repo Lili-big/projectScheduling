@@ -1,4 +1,4 @@
-import { CheckCircle2, ClipboardList, Database, Flag, PanelLeftClose, PanelLeftOpen, Server, Workflow, X } from "lucide-react";
+import { Bot, CheckCircle2, ClipboardList, Database, Flag, PanelLeftClose, PanelLeftOpen, Server, Workflow, X } from "lucide-react";
 import type { ReactNode } from "react";
 import type { TabKey } from "../../types/scheduler";
 
@@ -7,6 +7,7 @@ const tabs: Array<{ key: TabKey; label: string; icon: ReactNode }> = [
   { key: "logic", label: "工艺逻辑", icon: <Workflow size={15} /> },
   { key: "tasks", label: "任务视图", icon: <ClipboardList size={15} /> },
   { key: "resources", label: "资源配置", icon: <Server size={15} /> },
+  { key: "resourceAssistant", label: "AI资源助手", icon: <Bot size={15} /> },
   { key: "milestones", label: "里程碑", icon: <Flag size={15} /> },
   { key: "results", label: "模拟求解", icon: <CheckCircle2 size={15} /> },
   { key: "resultsMvp", label: "模拟求解-MVP", icon: <CheckCircle2 size={15} /> },

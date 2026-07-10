@@ -24,7 +24,15 @@ export type ObjectiveTermId =
   | "control_node_late"
   | "makespan_and_soft_milestone"
   | "resource_idle";
-export type TabKey = "process" | "logic" | "resources" | "milestones" | "tasks" | "results" | "resultsMvp";
+export type TabKey =
+  | "process"
+  | "logic"
+  | "resources"
+  | "milestones"
+  | "tasks"
+  | "results"
+  | "resultsMvp"
+  | "resourceAssistant";
 export type GanttMode = "by_time" | "by_structure" | "by_process";
 export type TaskViewMode = "by_structure" | "by_process";
 export type BusyState =
@@ -37,6 +45,8 @@ export type BusyState =
   | "importing"
   | "nl"
   | "aiParameter"
+  | "resourceAssistantGenerating"
+  | "resourceAssistantSolving"
   | "savingProcessLibrary"
   | "savingLogic"
   | "savingResources"
@@ -660,6 +670,242 @@ export type CompareResponse = {
   summaries: Array<Record<string, unknown>>;
   best_scenario_id?: string | null;
   notes: string[];
+};
+
+export type ResourceAssistantPlanProfile = "economy" | "balanced" | "crash" | "custom";
+export type ResourceAssistantGenerationSource = "llm" | "local_fallback" | "user_adjusted";
+export type ResourceAssistantGenerationMode = "llm_first" | "local_fallback_only";
+export type ResourceAssistantPlanStatus =
+  | "draft"
+  | "ready_to_solve"
+  | "stale"
+  | "solving"
+  | "optimal"
+  | "feasible"
+  | "infeasible"
+  | "unknown"
+  | "failed"
+  | "model_invalid";
+export type ResourceAssistantRecommendationStatus = "recommended" | "no_recommendation" | "insufficient_results";
+export type ResourceAssistantExplanationSource = "local" | "llm";
+export type ResourceAssistantMetricSourceType = "solver_result" | "derived_diagnostic" | "demo_estimate";
+
+export type ResourceAssistantControlPierSummary = {
+  structure_id: string;
+  structure_name: string;
+  bridge_id?: string | null;
+  bridge_name?: string | null;
+  work_section_id?: string | null;
+  work_section_name?: string | null;
+  side: WorkSectionSide;
+  support_no?: string | null;
+  recognition_sources: string[];
+  related_continuous_beam_group_ids: string[];
+};
+
+export type ResourceAssistantReferenceExample = {
+  profile: ResourceAssistantPlanProfile;
+  description: string;
+  resource_quantities: Record<string, number>;
+  is_hard_constraint: boolean;
+};
+
+export type ResourceAssistantProjectProfile = {
+  project_name: string;
+  start_date: string;
+  bridge_count: number;
+  work_section_count: number;
+  structure_count: number;
+  task_count: number;
+  control_piers: ResourceAssistantControlPierSummary[];
+  resource_types: Array<Record<string, unknown>>;
+  continuous_beam_groups: Array<Record<string, unknown>>;
+  critical_path_candidates: Array<Record<string, unknown>>;
+  constraint_hints: string[];
+  reference_examples: ResourceAssistantReferenceExample[];
+  data_quality_messages: ValidationMessage[];
+};
+
+export type ResourceAssistantPlan = {
+  scenario_id: string;
+  scenario_name: string;
+  profile: ResourceAssistantPlanProfile;
+  positioning: string;
+  generation_source: ResourceAssistantGenerationSource;
+  generation_rationale: string;
+  reference_example_used?: string | null;
+  organization_strategy: string;
+  validation_messages: ValidationMessage[];
+  applicable_scenarios: string;
+  expected_risks: string;
+  resource_pools: ResourcePool[];
+  changed_from_standard: boolean;
+  solve_status: ResourceAssistantPlanStatus;
+  stale_reason?: string | null;
+};
+
+export type ResourceAssistantGenerationRecord = {
+  generation_id: string;
+  source: ResourceAssistantGenerationSource;
+  input_fingerprint: string;
+  prompt_summary: string;
+  reference_examples_used: ResourceAssistantReferenceExample[];
+  constraint_hints_used: string[];
+  raw_output_available: boolean;
+  parsed_plan_ids: string[];
+  validation_status: "valid" | "partially_valid" | "invalid";
+  fallback_reason?: string | null;
+};
+
+export type ResourceAssistantLlmConfigStatus = {
+  provider: string;
+  model?: string | null;
+  endpoint_configured: boolean;
+  api_key_configured: boolean;
+  timeout_seconds: number;
+  status: "local_fallback" | "configured" | "failed";
+  warning?: string | null;
+};
+
+export type ResourceAssistantTransferPenalty = {
+  penalty_score: number;
+  jump_pier_count: number;
+  side_switch_count: number;
+  cross_side_jump_count: number;
+  path_group_switch_count: number;
+  max_jump_distance: number;
+  details: Array<Record<string, unknown>>;
+};
+
+export type ResourceAssistantDemoCost = {
+  total_cost: number;
+  work_cost: number;
+  idle_cost: number;
+  mobilization_cost: number;
+  transfer_cost: number;
+  resource_costs: Array<Record<string, unknown>>;
+  price_source: string;
+  disclaimer: string;
+};
+
+export type ResourceAssistantCoreMetrics = {
+  total_days?: number | null;
+  plan_finish_date?: string | null;
+  control_pier_release_dates: Array<Record<string, unknown>>;
+  first_continuous_beam_start_date?: string | null;
+  all_continuous_beams_started_date?: string | null;
+  resource_utilization_by_type: Array<Record<string, unknown>>;
+  average_wait_days?: number | null;
+  max_wait_days?: number | null;
+  control_pier_wait_days?: number | null;
+  continuous_beam_wait_days?: number | null;
+  transfer_penalty: ResourceAssistantTransferPenalty;
+  demo_cost: ResourceAssistantDemoCost;
+  target_status: string;
+  not_available_reasons: string[];
+};
+
+export type ResourceAssistantPlanResult = {
+  scenario_id: string;
+  generated?: GeneratedScheduleInput | null;
+  result?: ScheduleResult | null;
+  metrics: ResourceAssistantCoreMetrics;
+  diagnostics: ValidationMessage[];
+  generated_at: string;
+  input_fingerprint: string;
+};
+
+export type ResourceAssistantMetricRow = {
+  metric_id: string;
+  metric_name: string;
+  unit: string;
+  values: Record<string, { value: unknown; not_available_reasons?: string[] }>;
+  source_type: ResourceAssistantMetricSourceType;
+  description: string;
+};
+
+export type ResourceAssistantComparison = {
+  scenario_columns: Array<Record<string, string>>;
+  metric_rows: ResourceAssistantMetricRow[];
+  best_scenario_id?: string | null;
+  comparison_notes: string[];
+};
+
+export type ResourceAssistantRecommendation = {
+  recommended_scenario_id?: string | null;
+  recommendation_status: ResourceAssistantRecommendationStatus;
+  rule_reason: string;
+  evidence: string[];
+  risk_notes: string[];
+  marginal_benefit_notes: string[];
+  ai_explanation: string;
+  explanation_source: ResourceAssistantExplanationSource;
+  llm_status: ResourceAssistantLlmConfigStatus;
+};
+
+export type ResourceAssistantInitialRequest = {
+  scenario: ScenarioInput;
+  generation_mode?: ResourceAssistantGenerationMode;
+};
+
+export type ResourceAssistantInitialResponse = {
+  project_profile: ResourceAssistantProjectProfile;
+  resource_plans: ResourceAssistantPlan[];
+  plan_generation: ResourceAssistantGenerationRecord;
+  reference_examples: ResourceAssistantReferenceExample[];
+  constraint_hints: string[];
+  llm_config_status: ResourceAssistantLlmConfigStatus;
+  diagnostics: ValidationMessage[];
+};
+
+export type ResourceAssistantUpdatePlanRequest = {
+  plan_id: string;
+  resource_updates: Record<string, number>;
+  resource_plan?: ResourceAssistantPlan | null;
+};
+
+export type ResourceAssistantUpdatePlanResponse = {
+  resource_plan: ResourceAssistantPlan;
+  invalidated_result_ids: string[];
+  generation_source: ResourceAssistantGenerationSource;
+  diagnostics: ValidationMessage[];
+};
+
+export type ResourceAssistantBatchSolveRequest = {
+  scenario: ScenarioInput;
+  resource_plans: ResourceAssistantPlan[];
+  solve_scope?: string;
+};
+
+export type ResourceAssistantBatchSolveResponse = {
+  project_profile: ResourceAssistantProjectProfile;
+  resource_plans: ResourceAssistantPlan[];
+  plan_results: ResourceAssistantPlanResult[];
+  comparison: ResourceAssistantComparison;
+  recommendation: ResourceAssistantRecommendation;
+  diagnostics: ValidationMessage[];
+};
+
+export type ResourceAssistantSingleSolveRequest = {
+  scenario: ScenarioInput;
+  resource_plan: ResourceAssistantPlan;
+};
+
+export type ResourceAssistantSingleSolveResponse = {
+  resource_plan: ResourceAssistantPlan;
+  plan_result: ResourceAssistantPlanResult;
+  diagnostics: ValidationMessage[];
+};
+
+export type ResourceAssistantResultsRequest = {
+  resource_plans: ResourceAssistantPlan[];
+  plan_results: ResourceAssistantPlanResult[];
+};
+
+export type ResourceAssistantRecommendationResponse = {
+  comparison: ResourceAssistantComparison;
+  recommendation: ResourceAssistantRecommendation;
+  diagnostics: ValidationMessage[];
 };
 
 export type ImportBridgeParamsResponse = {

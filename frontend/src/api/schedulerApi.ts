@@ -12,6 +12,17 @@ import type {
   ProjectModel,
   ProjectStructureParamsApplyResponse,
   ProjectStructureParamsResponse,
+  ResourceAssistantBatchSolveRequest,
+  ResourceAssistantBatchSolveResponse,
+  ResourceAssistantComparison,
+  ResourceAssistantInitialRequest,
+  ResourceAssistantInitialResponse,
+  ResourceAssistantRecommendationResponse,
+  ResourceAssistantResultsRequest,
+  ResourceAssistantSingleSolveRequest,
+  ResourceAssistantSingleSolveResponse,
+  ResourceAssistantUpdatePlanRequest,
+  ResourceAssistantUpdatePlanResponse,
   ScenarioInput,
   ScenarioSolveResult,
 } from "../types/scheduler";
@@ -90,6 +101,42 @@ export function solveResourceCost(request: ResourceCostSolveRequest): Promise<Sc
 
 export function compareScenarios(request: ScenarioCompareRequest): Promise<CompareResponse> {
   return apiPost<CompareResponse>("/api/compare-scenarios", request);
+}
+
+export function initializeAiResourceAssistant(
+  request: ResourceAssistantInitialRequest,
+): Promise<ResourceAssistantInitialResponse> {
+  return apiPost<ResourceAssistantInitialResponse>("/api/ai-resource-assistant/initialize", request);
+}
+
+export function updateAiResourceAssistantPlan(
+  request: ResourceAssistantUpdatePlanRequest,
+): Promise<ResourceAssistantUpdatePlanResponse> {
+  return apiPost<ResourceAssistantUpdatePlanResponse>("/api/ai-resource-assistant/update-plan", request);
+}
+
+export function batchSolveAiResourceAssistant(
+  request: ResourceAssistantBatchSolveRequest,
+): Promise<ResourceAssistantBatchSolveResponse> {
+  return apiPost<ResourceAssistantBatchSolveResponse>("/api/ai-resource-assistant/batch-solve", request);
+}
+
+export function solveAiResourceAssistantPlan(
+  request: ResourceAssistantSingleSolveRequest,
+): Promise<ResourceAssistantSingleSolveResponse> {
+  return apiPost<ResourceAssistantSingleSolveResponse>("/api/ai-resource-assistant/solve-plan", request);
+}
+
+export function compareAiResourceAssistantResults(
+  request: ResourceAssistantResultsRequest,
+): Promise<ResourceAssistantComparison> {
+  return apiPost<ResourceAssistantComparison>("/api/ai-resource-assistant/compare-results", request);
+}
+
+export function generateAiResourceAssistantRecommendation(
+  request: ResourceAssistantResultsRequest,
+): Promise<ResourceAssistantRecommendationResponse> {
+  return apiPost<ResourceAssistantRecommendationResponse>("/api/ai-resource-assistant/generate-recommendation", request);
 }
 
 export function uploadBridgeParams(payload: FormData): Promise<ImportBridgeParamsResponse> {

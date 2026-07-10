@@ -168,6 +168,7 @@ import { LogicTab } from "../features/logic/LogicTab";
 import { ResourcesTab } from "../features/resources/ResourcesTab";
 import { MilestonesTab } from "../features/milestones/MilestonesTab";
 import { ParameterAssistantPanel } from "../features/assistant/parameter";
+import { ResourceAssistantPanel } from "../features/resourceAssistant/ResourceAssistantPanel";
 import { Metric } from "../components/common/Metric";
 import { PanelTitle } from "../components/common/PanelTitle";
 import {
@@ -925,6 +926,8 @@ export default function App() {
             localConfigDirty={resourcesDirty}
           />
         ) : null;
+      case "resourceAssistant":
+        return <ResourceAssistantPanel scenario={scenario} />;
       case "milestones":
         return scenario ? <MilestonesTab
             scenario={scenario}
@@ -1046,6 +1049,7 @@ export default function App() {
             localConfigDirty={resourcesDirty}
           />
         )}
+        {activeTab === "resourceAssistant" && <ResourceAssistantPanel scenario={scenario} />}
         {scenario && activeTab === "milestones" && (
           <MilestonesTab
             scenario={scenario}

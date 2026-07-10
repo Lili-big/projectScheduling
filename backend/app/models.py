@@ -77,6 +77,23 @@ AiParameterConflictResolutionStatus = Literal[
 ]
 AiParameterCandidateValidationStatus = Literal["valid", "needs_manual_input", "invalid"]
 AiParameterApplicationStatus = Literal["pending", "partially_applied", "applied", "expired"]
+ResourceAssistantPlanProfile = Literal["economy", "balanced", "crash", "custom"]
+ResourceAssistantGenerationSource = Literal["llm", "local_fallback", "user_adjusted"]
+ResourceAssistantGenerationMode = Literal["llm_first", "local_fallback_only"]
+ResourceAssistantPlanStatus = Literal[
+    "draft",
+    "ready_to_solve",
+    "stale",
+    "solving",
+    "optimal",
+    "feasible",
+    "infeasible",
+    "unknown",
+    "failed",
+    "model_invalid",
+]
+ResourceAssistantRecommendationStatus = Literal["recommended", "no_recommendation", "insufficient_results"]
+ResourceAssistantExplanationSource = Literal["local", "llm"]
 
 ObjectiveTermId = Literal[
     "control_node_late",
@@ -931,6 +948,224 @@ class ScenarioCompareResponse(BaseModel):
     summaries: list[dict[str, Any]]
     best_scenario_id: str | None = None
     notes: list[str] = []
+
+
+class ResourceAssistantControlPierSummary(BaseModel):
+    structure_id: str
+    structure_name: str
+    bridge_id: str | None = None
+    bridge_name: str | None = None
+    work_section_id: str | None = None
+    work_section_name: str | None = None
+    side: WorkSectionSide = "none"
+    support_no: str | None = None
+    recognition_sources: list[str] = Field(default_factory=list)
+    related_continuous_beam_group_ids: list[str] = Field(default_factory=list)
+
+
+class ResourceAssistantReferenceExample(BaseModel):
+    profile: ResourceAssistantPlanProfile
+    description: str
+    resource_quantities: dict[str, int] = Field(default_factory=dict)
+    is_hard_constraint: bool = False
+
+
+class ResourceAssistantProjectProfile(BaseModel):
+    project_name: str
+    start_date: date
+    bridge_count: int = 0
+    work_section_count: int = 0
+    structure_count: int = 0
+    task_count: int = 0
+    control_piers: list[ResourceAssistantControlPierSummary] = Field(default_factory=list)
+    resource_types: list[dict[str, Any]] = Field(default_factory=list)
+    continuous_beam_groups: list[dict[str, Any]] = Field(default_factory=list)
+    critical_path_candidates: list[dict[str, Any]] = Field(default_factory=list)
+    constraint_hints: list[str] = Field(default_factory=list)
+    reference_examples: list[ResourceAssistantReferenceExample] = Field(default_factory=list)
+    data_quality_messages: list[ValidationMessage] = Field(default_factory=list)
+
+
+class ResourceAssistantPlan(BaseModel):
+    scenario_id: str
+    scenario_name: str
+    profile: ResourceAssistantPlanProfile
+    positioning: str
+    generation_source: ResourceAssistantGenerationSource = "local_fallback"
+    generation_rationale: str = ""
+    reference_example_used: str | None = None
+    organization_strategy: str = ""
+    validation_messages: list[ValidationMessage] = Field(default_factory=list)
+    applicable_scenarios: str = ""
+    expected_risks: str = ""
+    resource_pools: list[ResourcePool] = Field(default_factory=list)
+    changed_from_standard: bool = False
+    solve_status: ResourceAssistantPlanStatus = "draft"
+    stale_reason: str | None = None
+
+
+class ResourceAssistantGenerationRecord(BaseModel):
+    generation_id: str
+    source: ResourceAssistantGenerationSource = "local_fallback"
+    input_fingerprint: str
+    prompt_summary: str = ""
+    reference_examples_used: list[ResourceAssistantReferenceExample] = Field(default_factory=list)
+    constraint_hints_used: list[str] = Field(default_factory=list)
+    raw_output_available: bool = False
+    parsed_plan_ids: list[str] = Field(default_factory=list)
+    validation_status: Literal["valid", "partially_valid", "invalid"] = "valid"
+    fallback_reason: str | None = None
+
+
+class ResourceAssistantLlmConfigStatus(BaseModel):
+    provider: str = "local"
+    model: str | None = None
+    endpoint_configured: bool = False
+    api_key_configured: bool = False
+    timeout_seconds: int = 30
+    status: Literal["local_fallback", "configured", "failed"] = "local_fallback"
+    warning: str | None = None
+
+
+class ResourceAssistantTransferPenalty(BaseModel):
+    penalty_score: int = 0
+    jump_pier_count: int = 0
+    side_switch_count: int = 0
+    cross_side_jump_count: int = 0
+    path_group_switch_count: int = 0
+    max_jump_distance: int = 0
+    details: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ResourceAssistantDemoCost(BaseModel):
+    total_cost: float = 0
+    work_cost: float = 0
+    idle_cost: float = 0
+    mobilization_cost: float = 0
+    transfer_cost: float = 0
+    resource_costs: list[dict[str, Any]] = Field(default_factory=list)
+    price_source: str = "demo_default_price"
+    disclaimer: str = "演示默认价格估算，仅用于方案横向比较。"
+
+
+class ResourceAssistantCoreMetrics(BaseModel):
+    total_days: int | None = None
+    plan_finish_date: date | None = None
+    control_pier_release_dates: list[dict[str, Any]] = Field(default_factory=list)
+    first_continuous_beam_start_date: date | None = None
+    all_continuous_beams_started_date: date | None = None
+    resource_utilization_by_type: list[dict[str, Any]] = Field(default_factory=list)
+    average_wait_days: float | None = None
+    max_wait_days: int | None = None
+    control_pier_wait_days: int | None = None
+    continuous_beam_wait_days: int | None = None
+    transfer_penalty: ResourceAssistantTransferPenalty = Field(default_factory=ResourceAssistantTransferPenalty)
+    demo_cost: ResourceAssistantDemoCost = Field(default_factory=ResourceAssistantDemoCost)
+    target_status: str = "not_evaluated"
+    not_available_reasons: list[str] = Field(default_factory=list)
+
+
+class ResourceAssistantPlanResult(BaseModel):
+    scenario_id: str
+    generated: GeneratedScheduleInput | None = None
+    result: ScheduleResult | None = None
+    metrics: ResourceAssistantCoreMetrics = Field(default_factory=ResourceAssistantCoreMetrics)
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+    generated_at: datetime
+    input_fingerprint: str
+
+
+class ResourceAssistantMetricRow(BaseModel):
+    metric_id: str
+    metric_name: str
+    unit: str = ""
+    values: dict[str, Any] = Field(default_factory=dict)
+    source_type: Literal["solver_result", "derived_diagnostic", "demo_estimate"]
+    description: str = ""
+
+
+class ResourceAssistantComparison(BaseModel):
+    scenario_columns: list[dict[str, str]] = Field(default_factory=list)
+    metric_rows: list[ResourceAssistantMetricRow] = Field(default_factory=list)
+    best_scenario_id: str | None = None
+    comparison_notes: list[str] = Field(default_factory=list)
+
+
+class ResourceAssistantRecommendation(BaseModel):
+    recommended_scenario_id: str | None = None
+    recommendation_status: ResourceAssistantRecommendationStatus = "insufficient_results"
+    rule_reason: str = ""
+    evidence: list[str] = Field(default_factory=list)
+    risk_notes: list[str] = Field(default_factory=list)
+    marginal_benefit_notes: list[str] = Field(default_factory=list)
+    ai_explanation: str = ""
+    explanation_source: ResourceAssistantExplanationSource = "local"
+    llm_status: ResourceAssistantLlmConfigStatus = Field(default_factory=ResourceAssistantLlmConfigStatus)
+
+
+class ResourceAssistantInitialRequest(BaseModel):
+    scenario: ScenarioInput
+    generation_mode: ResourceAssistantGenerationMode = "llm_first"
+
+
+class ResourceAssistantInitialResponse(BaseModel):
+    project_profile: ResourceAssistantProjectProfile
+    resource_plans: list[ResourceAssistantPlan]
+    plan_generation: ResourceAssistantGenerationRecord
+    reference_examples: list[ResourceAssistantReferenceExample] = Field(default_factory=list)
+    constraint_hints: list[str] = Field(default_factory=list)
+    llm_config_status: ResourceAssistantLlmConfigStatus
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+
+
+class ResourceAssistantUpdatePlanRequest(BaseModel):
+    plan_id: str
+    resource_updates: dict[str, int] = Field(default_factory=dict)
+    resource_plan: ResourceAssistantPlan | None = None
+
+
+class ResourceAssistantUpdatePlanResponse(BaseModel):
+    resource_plan: ResourceAssistantPlan
+    invalidated_result_ids: list[str] = Field(default_factory=list)
+    generation_source: ResourceAssistantGenerationSource = "user_adjusted"
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+
+
+class ResourceAssistantBatchSolveRequest(BaseModel):
+    scenario: ScenarioInput
+    resource_plans: list[ResourceAssistantPlan]
+    solve_scope: str = "all_plans"
+
+
+class ResourceAssistantBatchSolveResponse(BaseModel):
+    project_profile: ResourceAssistantProjectProfile
+    resource_plans: list[ResourceAssistantPlan]
+    plan_results: list[ResourceAssistantPlanResult]
+    comparison: ResourceAssistantComparison
+    recommendation: ResourceAssistantRecommendation
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+
+
+class ResourceAssistantSingleSolveRequest(BaseModel):
+    scenario: ScenarioInput
+    resource_plan: ResourceAssistantPlan
+
+
+class ResourceAssistantSingleSolveResponse(BaseModel):
+    resource_plan: ResourceAssistantPlan
+    plan_result: ResourceAssistantPlanResult
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+
+
+class ResourceAssistantResultsRequest(BaseModel):
+    resource_plans: list[ResourceAssistantPlan]
+    plan_results: list[ResourceAssistantPlanResult]
+
+
+class ResourceAssistantRecommendationResponse(BaseModel):
+    comparison: ResourceAssistantComparison
+    recommendation: ResourceAssistantRecommendation
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
 
 
 class ImportBridgeParamsResponse(BaseModel):
