@@ -1,4 +1,5 @@
-import { Bot, Loader2, Sparkles } from "lucide-react";
+import { ArrowLeft, Bot, Loader2, Sparkles } from "lucide-react";
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   compareAiResourceAssistantResults,
@@ -11,6 +12,9 @@ import {
   invalidatedAfterPlanChange,
   llmConfigStatusLabel,
   normalizePlanResourceQuantity,
+  resourceAssistantProfileLabels,
+  resourceAssistantStatusLabels,
+  resourceAssistantStatusTone,
   resultByPlanId,
 } from "../../domain/resourceAssistant";
 import type {
@@ -23,17 +27,23 @@ import type {
 } from "../../types/scheduler";
 import { PanelTitle } from "../../components/common/PanelTitle";
 import { MetricComparisonTable } from "./MetricComparisonTable";
-import { PlanVisualTabs } from "./PlanVisualTabs";
 import { RecommendationPanel } from "./RecommendationPanel";
 import { ResourcePlanCard } from "./ResourcePlanCard";
 
-export function ResourceAssistantPanel({ scenario }: { scenario: ScenarioInput | null }) {
+export function ResourceAssistantPanel({
+  scenario,
+  renderPlanDetail,
+}: {
+  scenario: ScenarioInput | null;
+  renderPlanDetail?: (plan: ResourceAssistantPlan, result: ResourceAssistantPlanResult) => ReactNode;
+}) {
   const [initial, setInitial] = useState<ResourceAssistantInitialResponse | null>(null);
   const [plans, setPlans] = useState<ResourceAssistantPlan[]>([]);
   const [planResults, setPlanResults] = useState<ResourceAssistantPlanResult[]>([]);
   const [comparison, setComparison] = useState<ResourceAssistantComparison | null>(null);
   const [recommendation, setRecommendation] = useState<ResourceAssistantRecommendation | null>(null);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const [detailPlanId, setDetailPlanId] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [solvingPlanIds, setSolvingPlanIds] = useState<Record<string, boolean>>({});
   const [recommending, setRecommending] = useState(false);
@@ -74,6 +84,7 @@ export function ResourceAssistantPanel({ scenario }: { scenario: ScenarioInput |
     setComparison(null);
     setRecommendation(null);
     setSelectedPlanId(null);
+    setDetailPlanId(null);
     setGenerating(false);
     setSolvingPlanIds({});
     setRecommending(false);
@@ -83,7 +94,8 @@ export function ResourceAssistantPanel({ scenario }: { scenario: ScenarioInput |
 
   const resultsById = useMemo(() => resultByPlanId(planResults), [planResults]);
   const selectedPlan = plans.find((plan) => plan.scenario_id === selectedPlanId) || plans[0] || null;
-  const selectedResult = selectedPlan ? resultsById[selectedPlan.scenario_id] || null : null;
+  const detailPlan = detailPlanId ? plans.find((plan) => plan.scenario_id === detailPlanId) || null : null;
+  const detailResult = detailPlan ? resultsById[detailPlan.scenario_id] || null : null;
   const completedPlanCount = plans.filter((plan) => Boolean(resultsById[plan.scenario_id])).length;
   const allPlansComplete = plans.length === 3 && completedPlanCount === plans.length;
   const isAnySolving = Object.values(solvingPlanIds).some(Boolean);
@@ -110,6 +122,7 @@ export function ResourceAssistantPanel({ scenario }: { scenario: ScenarioInput |
       replacePlans(response.resource_plans);
       replaceResults([]);
       invalidateComparisonAndRecommendation();
+      setDetailPlanId(null);
       setSelectedPlanId(response.resource_plans[0]?.scenario_id || null);
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "资源方案生成失败");
@@ -174,6 +187,7 @@ export function ResourceAssistantPanel({ scenario }: { scenario: ScenarioInput |
     const optimistic = normalizePlanResourceQuantity(plan, resourceType, quantity);
     replacePlans(plansRef.current.map((item) => (item.scenario_id === planId ? optimistic : item)));
     replaceResults(invalidatedAfterPlanChange(resultsRef.current, planId));
+    if (detailPlanId === planId) setDetailPlanId(null);
     invalidateComparisonAndRecommendation();
     try {
       const response = await updateAiResourceAssistantPlan({
@@ -190,8 +204,29 @@ export function ResourceAssistantPanel({ scenario }: { scenario: ScenarioInput |
   if (!scenario) {
     return (
       <section className="panel full resource-assistant-panel">
-        <PanelTitle title="AI资源配置与排程优化助手" subtitle="待导入项目数据" />
+        <PanelTitle title="AI多方案比选" subtitle="待导入项目数据" />
       </section>
+    );
+  }
+
+  if (detailPlan && detailResult && renderPlanDetail) {
+    return (
+      <div className="resource-assistant resource-assistant-detail">
+        <section className="panel full resource-detail-header">
+          <button className="secondary" type="button" onClick={() => setDetailPlanId(null)}>
+            <ArrowLeft size={15} />
+            返回多方案比选
+          </button>
+          <div className="resource-detail-heading">
+            <span>{resourceAssistantProfileLabels[detailPlan.profile]}</span>
+            <h2>{detailPlan.scenario_name}</h2>
+          </div>
+          <span className={`resource-status-pill ${resourceAssistantStatusTone(detailPlan.solve_status)}`}>
+            {resourceAssistantStatusLabels[detailPlan.solve_status]}
+          </span>
+        </section>
+        {renderPlanDetail(detailPlan, detailResult)}
+      </div>
     );
   }
 
@@ -199,7 +234,7 @@ export function ResourceAssistantPanel({ scenario }: { scenario: ScenarioInput |
     <div className="resource-assistant">
       <section className="panel full resource-assistant-panel">
         <PanelTitle
-          title="AI资源配置与排程优化助手"
+          title="AI多方案比选"
           subtitle={initial ? `${initial.project_profile.project_name} / ${llmConfigStatusLabel(initial.llm_config_status)}` : scenario.scenario_name}
           action={
             <div className="actions">
@@ -236,6 +271,10 @@ export function ResourceAssistantPanel({ scenario }: { scenario: ScenarioInput |
               isSelected={selectedPlan?.scenario_id === plan.scenario_id}
               onSelect={() => setSelectedPlanId(plan.scenario_id)}
               onSolve={() => handleSolvePlan(plan.scenario_id)}
+              onViewDetails={resultsById[plan.scenario_id] && renderPlanDetail ? () => {
+                setSelectedPlanId(plan.scenario_id);
+                setDetailPlanId(plan.scenario_id);
+              } : undefined}
               onQuantityChange={(resourceType, quantity) => handleQuantityChange(plan.scenario_id, resourceType, quantity)}
             />
           ))}
@@ -249,7 +288,6 @@ export function ResourceAssistantPanel({ scenario }: { scenario: ScenarioInput |
         </section>
       )}
 
-      {plans.length > 0 && <PlanVisualTabs plan={selectedPlan} result={selectedResult} />}
       <RecommendationPanel
         recommendation={recommendation}
         plans={plans}

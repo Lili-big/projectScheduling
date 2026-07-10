@@ -25,13 +25,13 @@ export type ObjectiveTermId =
   | "makespan_and_soft_milestone"
   | "resource_idle";
 export type TabKey =
+  | "projectFiles"
   | "process"
   | "logic"
   | "resources"
   | "milestones"
   | "tasks"
   | "results"
-  | "resultsMvp"
   | "resourceAssistant";
 export type GanttMode = "by_time" | "by_structure" | "by_process";
 export type TaskViewMode = "by_structure" | "by_process";

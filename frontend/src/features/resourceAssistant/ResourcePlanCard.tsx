@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, Loader2, Play, SlidersHorizontal } from "lucide-react";
+import { AlertCircle, CheckCircle2, Eye, Loader2, Play, SlidersHorizontal } from "lucide-react";
 import type { ResourceAssistantPlan, ResourceAssistantPlanResult } from "../../types/scheduler";
 import {
   editableResourcePools,
@@ -17,6 +17,7 @@ export function ResourcePlanCard({
   isSelected,
   onSelect,
   onSolve,
+  onViewDetails,
   onQuantityChange,
 }: {
   plan: ResourceAssistantPlan;
@@ -26,6 +27,7 @@ export function ResourcePlanCard({
   isSelected: boolean;
   onSelect: () => void;
   onSolve: () => void;
+  onViewDetails?: () => void;
   onQuantityChange: (resourceType: string, quantity: number) => void;
 }) {
   const statusTone = resourceAssistantStatusTone(plan.solve_status);
@@ -72,10 +74,18 @@ export function ResourcePlanCard({
           </span>
         )}
       </div>
-      <button className="secondary resource-plan-solve" type="button" disabled={disabled} onClick={onSolve}>
-        {solving ? <Loader2 size={14} className="spin" /> : <Play size={14} />}
-        {solving ? "求解中" : `求解${resourceAssistantProfileLabels[plan.profile]}`}
-      </button>
+      <div className="resource-plan-actions">
+        <button className="secondary resource-plan-solve" type="button" disabled={disabled} onClick={onSolve}>
+          {solving ? <Loader2 size={14} className="spin" /> : <Play size={14} />}
+          {solving ? "求解中" : `求解${resourceAssistantProfileLabels[plan.profile]}`}
+        </button>
+        {result && onViewDetails && (
+          <button className="secondary resource-plan-details" type="button" onClick={onViewDetails}>
+            <Eye size={14} />
+            查看方案详情
+          </button>
+        )}
+      </div>
       {plan.stale_reason && <div className="resource-plan-stale">{plan.stale_reason}</div>}
     </article>
   );
