@@ -135,11 +135,143 @@ def test_initial_plans_keep_pile_resources_split_by_process_type(monkeypatch) ->
     economy_quantities = {pool.type: pool.quantity for pool in economy.resource_pools}
     crash_quantities = {pool.type: pool.quantity for pool in crash.resource_pools}
 
-    assert economy_quantities["rotary_drill"] == 4
-    assert economy_quantities["circulation_drill"] == 4
-    assert economy_quantities["impact_drill"] == 4
-    assert crash_quantities["rotary_drill"] == 6
-    assert crash_quantities["impact_drill"] == 6
+    assert economy_quantities["rotary_drill"] > 0
+    assert economy_quantities["manual_pile_team"] > 0
+    assert economy_quantities["circulation_drill"] == 0
+    assert economy_quantities["impact_drill"] == 0
+    assert crash_quantities["rotary_drill"] >= economy_quantities["rotary_drill"]
+    assert crash_quantities["manual_pile_team"] >= economy_quantities["manual_pile_team"]
+    assert crash_quantities["impact_drill"] == 0
+
+
+def test_zero_workload_resources_are_zero_in_all_profiles(monkeypatch) -> None:
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_PROVIDER", "local")
+    scenario = default_scenario_with_process_library()
+
+    response = initialize_resource_assistant(
+        ResourceAssistantInitialRequest(scenario=scenario, generation_mode="local_fallback_only")
+    )
+
+    quantities_by_profile = {
+        plan.profile: {pool.type: pool.quantity for pool in plan.resource_pools}
+        for plan in response.resource_plans
+    }
+    for resource_type in ("circulation_drill", "impact_drill", "cast_in_place_continuous_beam_team"):
+        assert [quantities_by_profile[name][resource_type] for name in ("economy", "balanced", "crash")] == [0, 0, 0]
+
+
+def test_invalid_llm_output_retries_once_then_uses_valid_correction(monkeypatch) -> None:
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_ENDPOINT", "https://example.test/v1/chat/completions")
+    scenario = default_scenario_with_process_library()
+    calls: list[object] = []
+
+    def fake_generation(context, validation_errors=None):
+        calls.append(validation_errors)
+        plans = []
+        for example in context["reference_examples"]:
+            quantities = dict(example["resource_quantities"])
+            if validation_errors is None:
+                quantities["impact_drill"] = 2
+            plans.append(
+                {
+                    "profile": example["profile"],
+                    "positioning": example["description"],
+                    "resource_quantities": quantities,
+                    "organization_strategy": "按项目实际工作量组织资源。",
+                    "generation_rationale": "项目化基线。",
+                    "applicable_scenarios": "当前项目。",
+                    "expected_risks": "关注关键资源等待。",
+                }
+            )
+        return plans, llm_config_status()
+
+    monkeypatch.setattr(assistant_module, "generate_resource_plan_payload", fake_generation)
+    response = initialize_resource_assistant(ResourceAssistantInitialRequest(scenario=scenario, generation_mode="llm_first"))
+
+    assert len(calls) == 2
+    assert calls[0] is None
+    assert any(item["code"] == "ZERO_WORKLOAD_NONZERO" for item in calls[1])
+    assert response.plan_generation.source == "llm"
+
+
+def test_persistent_invalid_llm_output_falls_back_without_expanding_maximum(monkeypatch) -> None:
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_ENDPOINT", "https://example.test/v1/chat/completions")
+    scenario = default_scenario_with_process_library()
+
+    def invalid_generation(context, validation_errors=None):
+        plans = []
+        for example in context["reference_examples"]:
+            quantities = dict(example["resource_quantities"])
+            quantities["rotary_drill"] = 999
+            plans.append(
+                {
+                    "profile": example["profile"],
+                    "resource_quantities": quantities,
+                    "organization_strategy": "无效超限输出。",
+                }
+            )
+        return plans, llm_config_status()
+
+    monkeypatch.setattr(assistant_module, "generate_resource_plan_payload", invalid_generation)
+    response = initialize_resource_assistant(ResourceAssistantInitialRequest(scenario=scenario, generation_mode="llm_first"))
+
+    assert response.plan_generation.source == "local_fallback"
+    assert response.plan_generation.fallback_reason
+    original_max = {pool.type: pool.max_quantity for pool in scenario.resource_pools}
+    for plan in response.resource_plans:
+        assert all(pool.max_quantity == original_max[pool.type] for pool in plan.resource_pools)
+        assert next(pool.quantity for pool in plan.resource_pools if pool.type == "impact_drill") == 0
+
+
+def test_deterministic_baseline_uses_project_workload_and_specialized_rules() -> None:
+    scenario = default_scenario_with_process_library()
+    generated = assistant_module.generate_schedule_input_from_scenario(scenario)
+    profile = assistant_module.build_project_profile(scenario, generated)
+
+    states = assistant_module._resource_workload_states(scenario, profile)
+    baseline = assistant_module._deterministic_resource_baseline(scenario, profile)
+
+    assert states["rotary_drill"]["status"] == "ACTIVE"
+    assert states["manual_pile_team"]["status"] == "ACTIVE"
+    assert states["impact_drill"]["status"] == "UNUSED_OR_UNMAPPED"
+    assert states["circulation_drill"]["status"] == "UNUSED_OR_UNMAPPED"
+    assert states["cast_in_place_continuous_beam_team"]["status"] == "UNUSED_OR_UNMAPPED"
+    assert [baseline[name]["rotary_drill"] for name in ("economy", "balanced", "crash")] == [6, 8, 10]
+    assert [baseline[name]["pier_body_team"] for name in ("economy", "balanced", "crash")] == [6, 8, 9]
+    assert [baseline[name]["cap_team"] for name in ("economy", "balanced", "crash")] == [3, 4, 7]
+    assert [baseline[name]["cap_beam_team"] for name in ("economy", "balanced", "crash")] == [3, 4, 7]
+    assert [baseline[name]["cast_in_place_continuous_beam_team"] for name in ("economy", "balanced", "crash")] == [0, 0, 0]
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected_code"),
+    [
+        (lambda plans: plans[0]["resource_quantities"].update({"unknown_team": 1}), "UNKNOWN_RESOURCE_TYPE"),
+        (lambda plans: plans[0]["resource_quantities"].update({"rotary_drill": -1}), "INVALID_QUANTITY"),
+        (lambda plans: plans[0]["resource_quantities"].update({"rotary_drill": 1.5}), "INVALID_QUANTITY"),
+        (lambda plans: plans[0]["resource_quantities"].update({"rotary_drill": 999}), "MAX_QUANTITY_EXCEEDED"),
+        (lambda plans: plans[0].update({"organization_strategy": {"bad": True}}), "INVALID_STRATEGY_TYPE"),
+    ],
+)
+def test_raw_plan_validation_rejects_invalid_llm_values(mutate, expected_code) -> None:
+    scenario = default_scenario_with_process_library()
+    profile = assistant_module.build_project_profile(scenario)
+    examples = assistant_module.build_reference_examples(scenario, profile)
+    plans = [
+        {
+            "profile": example.profile,
+            "resource_quantities": dict(example.resource_quantities),
+            "organization_strategy": "按项目实际工作量组织资源。",
+        }
+        for example in examples
+    ]
+    mutate(plans)
+
+    issues = assistant_module._validate_raw_plan_payload(plans, scenario, profile)
+
+    assert expected_code in {issue["code"] for issue in issues}
 
 
 def test_update_resource_plan_marks_result_stale_and_normalizes_max_quantity(monkeypatch) -> None:

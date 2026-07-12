@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
@@ -98,7 +99,7 @@ DEMO_MOBILIZATION_COSTS: dict[str, float] = {
 def initialize_resource_assistant(request: ResourceAssistantInitialRequest) -> ResourceAssistantInitialResponse:
     generated = generate_schedule_input_from_scenario(request.scenario)
     profile = build_project_profile(request.scenario, generated)
-    reference_examples = build_reference_examples(request.scenario)
+    reference_examples = build_reference_examples(request.scenario, profile)
     profile.reference_examples = reference_examples
     llm_generation_context = build_llm_generation_context(profile, request.scenario)
 
@@ -108,8 +109,18 @@ def initialize_resource_assistant(request: ResourceAssistantInitialRequest) -> R
     llm_status = llm_config_status()
     if request.generation_mode == "llm_first":
         raw_plan_payload, llm_status = generate_resource_plan_payload(llm_generation_context)
-        if raw_plan_payload:
+        validation_errors = _validate_raw_plan_payload(raw_plan_payload, request.scenario, profile)
+        if raw_plan_payload and validation_errors:
+            raw_plan_payload, llm_status = generate_resource_plan_payload(
+                llm_generation_context,
+                validation_errors=validation_errors,
+            )
+            validation_errors = _validate_raw_plan_payload(raw_plan_payload, request.scenario, profile)
+        if raw_plan_payload and not validation_errors:
             generation_source = "llm"
+        elif raw_plan_payload:
+            raw_plan_payload = None
+            fallback_reason = "LLM 三方案输出在一次纠错后仍不符合资源硬规则，已使用项目确定性基线。"
         elif llm_status.warning:
             fallback_reason = llm_status.warning
 
@@ -291,26 +302,19 @@ def build_project_profile(scenario: ScenarioInput, generated: GeneratedScheduleI
     )
 
 
-def build_reference_examples(scenario: ScenarioInput) -> list[ResourceAssistantReferenceExample]:
-    resource_types = {pool.type for pool in scenario.resource_pools if pool.enabled and pool.resource_mode == "LIMITED"}
-    profile_quantities = {
-        "economy": {"pile": 4, "pier_body_team": 6, "cap_beam_team": 2, CONTINUOUS_BEAM_RESOURCE_TYPE: 2, "cap_team": 2},
-        "balanced": {"pile": 4, "pier_body_team": 8, "cap_beam_team": 2, CONTINUOUS_BEAM_RESOURCE_TYPE: 4, "cap_team": 2},
-        "crash": {"pile": 6, "pier_body_team": 10, "cap_beam_team": 3, CONTINUOUS_BEAM_RESOURCE_TYPE: 4, "cap_team": 3},
-    }
+def build_reference_examples(
+    scenario: ScenarioInput,
+    project_profile: ResourceAssistantProjectProfile | None = None,
+) -> list[ResourceAssistantReferenceExample]:
+    profile = project_profile or build_project_profile(scenario)
+    profile_quantities = _deterministic_resource_baseline(scenario, profile)
     examples: list[ResourceAssistantReferenceExample] = []
     for profile, template in profile_quantities.items():
-        quantities: dict[str, int] = {}
-        for resource_type in sorted(resource_types):
-            if resource_type in PILE_RESOURCE_TYPES:
-                quantities[resource_type] = template["pile"]
-            elif resource_type in template:
-                quantities[resource_type] = template[resource_type]
         examples.append(
             ResourceAssistantReferenceExample(
                 profile=profile,  # type: ignore[arg-type]
                 description=f"{PROFILE_LABELS[profile]}参考样例，供 LLM 理解经济/平衡/抢工投入梯度，不作为固定方案。",
-                resource_quantities=quantities,
+                resource_quantities=template,
                 is_hard_constraint=False,
             )
         )
@@ -540,9 +544,146 @@ def build_llm_generation_context(profile: ResourceAssistantProjectProfile, scena
             "一次性输出 economy、balanced、crash 三套方案。",
             "只能输出 current_resource_pools 中存在的资源类型。",
             "桩机必须按工艺资源类型分别给数量。",
+            "任何实际工作量为零、未映射、禁用或数据异常的资源，economy、balanced、crash 均必须为 0。",
+            "资源数量必须是非负整数，不得超过 current_resource_pools 中的原始 max_quantity。",
+            "同类有效资源数量必须满足 economy <= balanced <= crash。",
+            "organization_strategy 必须是字符串，不得输出 recommended_profile 或求解前最优方案推荐。",
             "不得输出任务起止日期或最终施工计划。",
         ],
     }
+
+
+def _resource_workload_states(
+    scenario: ScenarioInput,
+    profile: ResourceAssistantProjectProfile,
+) -> dict[str, dict[str, Any]]:
+    demand_by_type = {str(item.get("resource_type")): item for item in profile.resource_types}
+    states: dict[str, dict[str, Any]] = {}
+    for pool in scenario.resource_pools:
+        demand = demand_by_type.get(pool.type, {})
+        task_count = int(demand.get("task_count") or 0)
+        duration_days = int(demand.get("duration_days") or 0)
+        if not pool.enabled:
+            status, reason = "DISABLED", "资源池已禁用"
+        elif task_count <= 0 or duration_days <= 0:
+            status, reason = "UNUSED_OR_UNMAPPED", "当前生成任务没有该资源的实际工作量"
+        elif pool.quantity is None or (pool.max_quantity is not None and pool.max_quantity < 0):
+            status, reason = "DATA_INVALID", "资源数量或上限数据无效"
+        elif pool.resource_mode == "UNLIMITED":
+            status, reason = "UNLIMITED", "存在实际工作量且未设置显式数量上限"
+        else:
+            status, reason = "ACTIVE", "存在匹配任务和累计需求工期"
+        states[pool.type] = {
+            "resource_type": pool.type,
+            "status": status,
+            "matched_task_count": task_count,
+            "total_required_days": duration_days,
+            "current_quantity": int(pool.quantity or 0),
+            "max_quantity": pool.max_quantity,
+            "diagnostic_reason": reason,
+        }
+    return states
+
+
+def _deterministic_resource_baseline(
+    scenario: ScenarioInput,
+    profile: ResourceAssistantProjectProfile,
+) -> dict[str, dict[str, int]]:
+    states = _resource_workload_states(scenario, profile)
+    result = {profile_name: {} for profile_name in ("economy", "balanced", "crash")}
+    control_count = len(profile.control_piers)
+    continuous_count = len(profile.continuous_beam_groups)
+    pier_values: tuple[int, int, int] | None = None
+
+    pier_pool = next((pool for pool in scenario.resource_pools if pool.type == "pier_body_team"), None)
+    if pier_pool and states[pier_pool.type]["status"] in {"ACTIVE", "UNLIMITED"}:
+        current = max(1, int(pier_pool.quantity or 0))
+        economy = max(control_count, math.ceil(current * 0.75))
+        balanced = max(economy, current)
+        crash = max(balanced, current + math.ceil(control_count * 0.5))
+        pier_values = (economy, balanced, crash)
+
+    for pool in scenario.resource_pools:
+        state = states[pool.type]
+        if state["status"] not in {"ACTIVE", "UNLIMITED"}:
+            values = (0, 0, 0)
+        else:
+            current = max(1, int(pool.quantity or 0))
+            if pool.type == "pier_body_team" and pier_values is not None:
+                values = pier_values
+            elif pool.type in {"cap_team", "cap_beam_team"} and pier_values is not None:
+                values = (
+                    max(1, math.ceil(pier_values[0] * 0.5)),
+                    max(1, math.ceil(pier_values[1] * 0.5)),
+                    max(1, math.ceil(pier_values[2] * 0.75)),
+                )
+            elif pool.type == CONTINUOUS_BEAM_RESOURCE_TYPE:
+                values = (math.ceil(continuous_count * 0.5), continuous_count, continuous_count)
+            elif pool.type in PILE_RESOURCE_TYPES:
+                values = (math.ceil(current * 0.75), current, math.ceil(current * 1.25))
+            else:
+                values = (math.ceil(current * 0.75), current, math.ceil(current * 1.25))
+
+        limited_values: list[int] = []
+        previous = 0
+        for value in values:
+            normalized = max(previous, int(value))
+            if pool.max_quantity is not None:
+                normalized = min(normalized, int(pool.max_quantity))
+            limited_values.append(normalized)
+            previous = normalized
+        for profile_name, quantity in zip(("economy", "balanced", "crash"), limited_values):
+            result[profile_name][pool.type] = quantity
+    return result
+
+
+def _validate_raw_plan_payload(
+    raw_plans: list[dict[str, Any]] | None,
+    scenario: ScenarioInput,
+    profile: ResourceAssistantProjectProfile,
+) -> list[dict[str, Any]]:
+    if not raw_plans:
+        return []
+    errors: list[dict[str, Any]] = []
+    expected_profiles = ("economy", "balanced", "crash")
+    raw_by_profile = _raw_plans_by_profile(raw_plans)
+    if len(raw_plans) != 3 or set(raw_by_profile) != set(expected_profiles):
+        errors.append({"code": "INVALID_PROFILE_SET", "expected": "恰好包含 economy、balanced、crash 三个唯一方案"})
+        return errors
+    pools = {pool.type: pool for pool in scenario.resource_pools}
+    states = _resource_workload_states(scenario, profile)
+    parsed: dict[str, dict[str, int]] = {}
+    for profile_name in expected_profiles:
+        raw = raw_by_profile[profile_name]
+        quantities = raw.get("resource_quantities")
+        if not isinstance(quantities, dict):
+            errors.append({"code": "INVALID_RESOURCE_MAP", "profile": profile_name, "expected": "resource_quantities 必须是对象"})
+            continue
+        parsed[profile_name] = {}
+        for resource_type, value in quantities.items():
+            if resource_type not in pools:
+                errors.append({"code": "UNKNOWN_RESOURCE_TYPE", "profile": profile_name, "resource_type": resource_type, "actual": value, "expected": "仅允许 current_resource_pools 中的资源类型"})
+                continue
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                errors.append({"code": "INVALID_QUANTITY", "profile": profile_name, "resource_type": resource_type, "actual": value, "expected": "非负整数"})
+                continue
+            parsed[profile_name][resource_type] = value
+            pool = pools[resource_type]
+            if states[resource_type]["status"] not in {"ACTIVE", "UNLIMITED"} and value != 0:
+                errors.append({"code": "ZERO_WORKLOAD_NONZERO", "profile": profile_name, "resource_type": resource_type, "actual": value, "expected": 0})
+            if pool.max_quantity is not None and value > pool.max_quantity:
+                errors.append({"code": "MAX_QUANTITY_EXCEEDED", "profile": profile_name, "resource_type": resource_type, "actual": value, "expected": f"<= {pool.max_quantity}"})
+        missing = set(pools) - set(quantities)
+        for resource_type in sorted(missing):
+            errors.append({"code": "MISSING_RESOURCE_TYPE", "profile": profile_name, "resource_type": resource_type, "expected": "完整输出所有当前资源类型"})
+        if not isinstance(raw.get("organization_strategy"), str):
+            errors.append({"code": "INVALID_STRATEGY_TYPE", "profile": profile_name, "expected": "organization_strategy 必须是字符串"})
+    for resource_type in pools:
+        if all(resource_type in parsed.get(name, {}) for name in expected_profiles):
+            values = [parsed[name][resource_type] for name in expected_profiles]
+            if values != sorted(values):
+                errors.append({"code": "NON_MONOTONIC_QUANTITY", "resource_type": resource_type, "actual": values, "expected": "economy <= balanced <= crash"})
+    return errors
 
 
 def _plans_from_payload_or_fallback(
@@ -621,12 +762,11 @@ def _resource_quantities_from_raw(raw: dict[str, Any]) -> dict[str, int]:
 def _resource_pools_with_quantities(base_pools: list[ResourcePool], quantities: dict[str, int]) -> list[ResourcePool]:
     updated: list[ResourcePool] = []
     for pool in base_pools:
-        if not pool.enabled or pool.resource_mode == "UNLIMITED":
-            updated.append(pool.model_copy(deep=True))
-            continue
-        quantity = quantities.get(pool.type, pool.quantity or 0)
+        quantity = 0 if not pool.enabled else quantities.get(pool.type, pool.quantity or 0)
         quantity = max(0, int(quantity or 0))
-        updated.append(pool.model_copy(deep=True, update={"quantity": quantity, "max_quantity": max(quantity, int(pool.max_quantity or 0))}))
+        if pool.max_quantity is not None:
+            quantity = min(quantity, int(pool.max_quantity))
+        updated.append(pool.model_copy(deep=True, update={"quantity": quantity, "max_quantity": pool.max_quantity}))
     return updated
 
 

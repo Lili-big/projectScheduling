@@ -68,7 +68,10 @@ def llm_config_status(warning: str | None = None) -> ResourceAssistantLlmConfigS
     )
 
 
-def generate_resource_plan_payload(context: dict[str, Any]) -> tuple[list[dict[str, Any]] | None, ResourceAssistantLlmConfigStatus]:
+def generate_resource_plan_payload(
+    context: dict[str, Any],
+    validation_errors: list[dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]] | None, ResourceAssistantLlmConfigStatus]:
     provider = _provider()
     if provider in LOCAL_PROVIDERS:
         return None, llm_config_status()
@@ -76,9 +79,10 @@ def generate_resource_plan_payload(context: dict[str, Any]) -> tuple[list[dict[s
         raw = _call_llm_json(
             instruction=_plan_generation_instruction(),
             payload={
-                "task": "resource_plan_generation",
+                "task": "resource_plan_generation_correction" if validation_errors else "resource_plan_generation",
                 "context": context,
                 "output_schema": _plan_generation_output_schema(),
+                **({"validation_errors": validation_errors} if validation_errors else {}),
             },
             provider=provider,
         )
@@ -284,7 +288,11 @@ def _plan_generation_instruction() -> str:
     return (
         "你是桥梁施工资源配置方案助手。只返回 JSON，不输出 Markdown。"
         "你需要在同一次响应中生成 economy、balanced、crash 三套资源配置初始方案。"
-        "输入中的 reference_examples 只是参考样例，不是硬约束；resource_types 是唯一允许输出的资源类型。"
+        "输入中的 reference_examples 是当前项目的确定性三方案基线；resource_types 是唯一允许输出的资源类型。"
+        "实际工作量为零、未映射、禁用或数据异常的资源在三个方案中都必须输出 0，不得扩充。"
+        "所有数量必须是非负整数，不得超过 current_resource_pools 中原始 max_quantity，"
+        "同类有效资源必须满足 economy 不高于 balanced、balanced 不高于 crash。"
+        "organization_strategy 必须是字符串；如果收到 validation_errors，必须逐项纠正后完整重发三个方案。"
         "不得生成最终施工计划，不得生成任务起止日期，不得判断哪个方案最优。"
         "每个方案必须包含 profile、positioning、resource_quantities、organization_strategy、"
         "generation_rationale、applicable_scenarios、expected_risks。"
