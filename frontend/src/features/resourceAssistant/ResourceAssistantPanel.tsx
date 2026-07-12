@@ -1,4 +1,4 @@
-import { ArrowLeft, Bot, Loader2, Sparkles } from "lucide-react";
+import { ArrowLeft, Bot, Download, Loader2, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -20,6 +20,7 @@ import {
 import type {
   ResourceAssistantComparison,
   ResourceAssistantInitialResponse,
+  ResourceAssistantLlmGenerationContext,
   ResourceAssistantPlan,
   ResourceAssistantPlanResult,
   ResourceAssistantRecommendation,
@@ -29,6 +30,12 @@ import { PanelTitle } from "../../components/common/PanelTitle";
 import { MetricComparisonTable } from "./MetricComparisonTable";
 import { RecommendationPanel } from "./RecommendationPanel";
 import { ResourcePlanCard } from "./ResourcePlanCard";
+
+type LlmContextDownloadSnapshot = {
+  context: ResourceAssistantLlmGenerationContext;
+  projectName: string;
+  generatedAt: Date;
+};
 
 export function ResourceAssistantPanel({
   scenario,
@@ -49,6 +56,8 @@ export function ResourceAssistantPanel({
   const [recommending, setRecommending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recommendationError, setRecommendationError] = useState<string | null>(null);
+  const [llmContextDownload, setLlmContextDownload] = useState<LlmContextDownloadSnapshot | null>(null);
+  const [llmContextDownloadUrl, setLlmContextDownloadUrl] = useState<string | null>(null);
   const plansRef = useRef<ResourceAssistantPlan[]>([]);
   const resultsRef = useRef<ResourceAssistantPlanResult[]>([]);
   const comparisonRequestRef = useRef(0);
@@ -90,7 +99,21 @@ export function ResourceAssistantPanel({
     setRecommending(false);
     setError(null);
     setRecommendationError(null);
+    setLlmContextDownload(null);
   }, [scenarioFingerprint]);
+
+  useEffect(() => {
+    if (!llmContextDownload) {
+      setLlmContextDownloadUrl(null);
+      return;
+    }
+    const blob = new Blob([JSON.stringify(llmContextDownload.context, null, 2)], {
+      type: "application/json;charset=utf-8",
+    });
+    const objectUrl = URL.createObjectURL(blob);
+    setLlmContextDownloadUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [llmContextDownload]);
 
   const resultsById = useMemo(() => resultByPlanId(planResults), [planResults]);
   const selectedPlan = plans.find((plan) => plan.scenario_id === selectedPlanId) || plans[0] || null;
@@ -99,6 +122,10 @@ export function ResourceAssistantPanel({
   const completedPlanCount = plans.filter((plan) => Boolean(resultsById[plan.scenario_id])).length;
   const allPlansComplete = plans.length === 3 && completedPlanCount === plans.length;
   const isAnySolving = Object.values(solvingPlanIds).some(Boolean);
+  const llmContextFileName = useMemo(
+    () => llmContextDownload ? buildLlmContextFileName(llmContextDownload.projectName, llmContextDownload.generatedAt) : "",
+    [llmContextDownload],
+  );
 
   async function refreshComparison(nextPlans: ResourceAssistantPlan[], nextResults: ResourceAssistantPlanResult[]) {
     const requestId = ++comparisonRequestRef.current;
@@ -116,9 +143,15 @@ export function ResourceAssistantPanel({
     if (!scenario) return;
     setGenerating(true);
     setError(null);
+    setLlmContextDownload(null);
     try {
       const response = await initializeAiResourceAssistant({ scenario, generation_mode: "llm_first" });
       setInitial(response);
+      setLlmContextDownload({
+        context: response.llm_generation_context,
+        projectName: response.project_profile.project_name,
+        generatedAt: new Date(),
+      });
       replacePlans(response.resource_plans);
       replaceResults([]);
       invalidateComparisonAndRecommendation();
@@ -242,6 +275,16 @@ export function ResourceAssistantPanel({
                 {generating ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />}
                 生成三方案
               </button>
+              {llmContextDownloadUrl && (
+                <a
+                  className="secondary resource-assistant-context-download"
+                  href={llmContextDownloadUrl}
+                  download={llmContextFileName}
+                >
+                  <Download size={15} />
+                  下载本次 LLM 项目信息 JSON
+                </a>
+              )}
               <button
                 className="primary"
                 type="button"
@@ -297,6 +340,26 @@ export function ResourceAssistantPanel({
       />
     </div>
   );
+}
+
+function buildLlmContextFileName(projectName: string, generatedAt: Date): string {
+  const safeProjectName = projectName
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[.-]+|[.-]+$/g, "") || "project";
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const timestamp = [
+    generatedAt.getFullYear(),
+    pad(generatedAt.getMonth() + 1),
+    pad(generatedAt.getDate()),
+    "-",
+    pad(generatedAt.getHours()),
+    pad(generatedAt.getMinutes()),
+    pad(generatedAt.getSeconds()),
+  ].join("");
+  return `${safeProjectName}-llm-three-plan-context-${timestamp}.json`;
 }
 
 function ProjectProfileStrip({ initial }: { initial: ResourceAssistantInitialResponse }) {

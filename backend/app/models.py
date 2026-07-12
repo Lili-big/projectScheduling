@@ -1114,6 +1114,7 @@ class ResourceAssistantInitialResponse(BaseModel):
     plan_generation: ResourceAssistantGenerationRecord
     reference_examples: list[ResourceAssistantReferenceExample] = Field(default_factory=list)
     constraint_hints: list[str] = Field(default_factory=list)
+    llm_generation_context: dict[str, Any] = Field(default_factory=dict)
     llm_config_status: ResourceAssistantLlmConfigStatus
     diagnostics: list[ValidationMessage] = Field(default_factory=list)
 

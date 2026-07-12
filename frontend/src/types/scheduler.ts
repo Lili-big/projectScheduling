@@ -726,6 +726,15 @@ export type ResourceAssistantProjectProfile = {
   data_quality_messages: ValidationMessage[];
 };
 
+export type ResourceAssistantLlmGenerationContext = {
+  project_profile: ResourceAssistantProjectProfile;
+  resource_types: Array<Record<string, unknown>>;
+  constraint_hints: string[];
+  reference_examples: ResourceAssistantReferenceExample[];
+  current_resource_pools: ResourcePool[];
+  rules: string[];
+};
+
 export type ResourceAssistantPlan = {
   scenario_id: string;
   scenario_name: string;
@@ -854,6 +863,7 @@ export type ResourceAssistantInitialResponse = {
   plan_generation: ResourceAssistantGenerationRecord;
   reference_examples: ResourceAssistantReferenceExample[];
   constraint_hints: string[];
+  llm_generation_context: ResourceAssistantLlmGenerationContext;
   llm_config_status: ResourceAssistantLlmConfigStatus;
   diagnostics: ValidationMessage[];
 };

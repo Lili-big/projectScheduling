@@ -100,13 +100,14 @@ def initialize_resource_assistant(request: ResourceAssistantInitialRequest) -> R
     profile = build_project_profile(request.scenario, generated)
     reference_examples = build_reference_examples(request.scenario)
     profile.reference_examples = reference_examples
+    llm_generation_context = build_llm_generation_context(profile, request.scenario)
 
     generation_source = "local_fallback"
     fallback_reason: str | None = None
     raw_plan_payload: list[dict[str, Any]] | None = None
     llm_status = llm_config_status()
     if request.generation_mode == "llm_first":
-        raw_plan_payload, llm_status = generate_resource_plan_payload(_llm_generation_context(profile, request.scenario))
+        raw_plan_payload, llm_status = generate_resource_plan_payload(llm_generation_context)
         if raw_plan_payload:
             generation_source = "llm"
         elif llm_status.warning:
@@ -143,6 +144,7 @@ def initialize_resource_assistant(request: ResourceAssistantInitialRequest) -> R
         plan_generation=generation,
         reference_examples=reference_examples,
         constraint_hints=profile.constraint_hints,
+        llm_generation_context=llm_generation_context,
         llm_config_status=llm_status,
         diagnostics=list(generated.validation),
     )
@@ -527,7 +529,7 @@ def build_deterministic_recommendation(
     )
 
 
-def _llm_generation_context(profile: ResourceAssistantProjectProfile, scenario: ScenarioInput) -> dict[str, Any]:
+def build_llm_generation_context(profile: ResourceAssistantProjectProfile, scenario: ScenarioInput) -> dict[str, Any]:
     return {
         "project_profile": profile.model_dump(mode="json"),
         "resource_types": profile.resource_types,

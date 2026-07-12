@@ -15,7 +15,6 @@ import {
   Server,
   Sparkles,
   Timer,
-  Upload,
   Workflow,
   X,
 } from "lucide-react";
@@ -833,6 +832,8 @@ export default function App() {
           <ParameterAssistantPanel
             scenario={scenario}
             busy={busy === "aiParameter"}
+            importingBridgeParams={busy === "importing"}
+            onImportBridgeParams={importBridgeParams}
             onParse={parseAiParameterAssistant}
             onApply={applyAiParameterSuggestions}
           />
@@ -905,7 +906,6 @@ export default function App() {
             generated={currentGenerated}
             solveResult={currentSolveResult}
             onGenerateTaskView={generateOnly}
-            onImportBridgeParams={importBridgeParams}
             onUpdateTaskProcess={updateTaskProcessAndGenerate}
             onUpdateStructureControlLevel={updateStructureControlLevel}
             busy={busy}
@@ -940,7 +940,6 @@ function TaskViewTab({
   generated,
   solveResult,
   onGenerateTaskView,
-  onImportBridgeParams,
   onUpdateTaskProcess,
   onUpdateStructureControlLevel,
   busy,
@@ -949,13 +948,11 @@ function TaskViewTab({
   generated: GeneratedScheduleInput | null;
   solveResult: ScenarioSolveResult | null;
   onGenerateTaskView: () => void;
-  onImportBridgeParams: (file: File, targetBridge: string) => void;
   onUpdateTaskProcess: (task: Task, patch: TaskOverride) => void;
   onUpdateStructureControlLevel: (task: Task, controlLevel: ControlLevel) => void;
   busy: BusyState;
 }) {
   const [groupMode, setGroupMode] = useState<TaskViewMode>("by_structure");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [filters, setFilters] = useState<TaskViewFilters>({
     structureText: "",
     processText: "",
@@ -986,9 +983,8 @@ function TaskViewTab({
   const filteredRows = useMemo(() => filterTaskViewRows(rows, filters), [filters, rows]);
   const structureParents = useMemo(() => buildTaskViewStructureParents(filteredRows, scenario), [filteredRows, scenario]);
   const processGroups = useMemo(() => buildTaskViewGroups(filteredRows, "by_process"), [filteredRows]);
-  const importing = busy === "importing";
   const generating = busy === "generating";
-  const refreshingTaskGraph = generating || importing;
+  const refreshingTaskGraph = generating;
 
   useEffect(() => () => {
     clearPredecessorHoverTimers(predecessorHoverOpenTimerRef, predecessorHoverCloseTimerRef);
@@ -1206,22 +1202,6 @@ function TaskViewTab({
           subtitle="调用 OR-Tools CP-SAT 前核验结构物识别、工期计算和工艺逻辑关系"
           action={
             <div className="task-view-title-actions">
-              <div className="task-view-import-action">
-                <input
-                  type="file"
-                  accept=".xlsx,.xlsm"
-                  onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
-                />
-                <button
-                  className="secondary"
-                  type="button"
-                  disabled={!selectedFile || importing}
-                  onClick={() => selectedFile && onImportBridgeParams(selectedFile, "")}
-                >
-                  {importing ? <Loader2 className="spin" size={16} /> : <Upload size={16} />}
-                  导入 Excel
-                </button>
-              </div>
               {generatedForDetails && (
                 <div className="segmented">
                   <button className={groupMode === "by_structure" ? "active" : ""} type="button" onClick={() => setGroupMode("by_structure")}>

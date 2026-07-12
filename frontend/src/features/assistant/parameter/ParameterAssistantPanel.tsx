@@ -33,14 +33,19 @@ const maxFiles = 10;
 export function ParameterAssistantPanel({
   scenario,
   busy,
+  importingBridgeParams,
+  onImportBridgeParams,
   onParse,
   onApply,
 }: {
   scenario: ScenarioInput;
   busy: boolean;
+  importingBridgeParams: boolean;
+  onImportBridgeParams: (file: File, targetBridge: string) => void;
   onParse: (payload: FormData) => Promise<AiParameterParseResponse | null>;
   onApply: (request: AiParameterApplyRequest) => Promise<AiParameterApplyResponse | null>;
 }) {
+  const [bridgeParamsFile, setBridgeParamsFile] = useState<File | null>(null);
   const [textInput, setTextInput] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [parseResult, setParseResult] = useState<AiParameterParseResponse | null>(null);
@@ -135,6 +140,33 @@ export function ParameterAssistantPanel({
           <span><b>3</b> 人工核验建议</span>
           <ArrowRight size={15} />
           <span><b>4</b> 应用到当前方案</span>
+        </div>
+      </section>
+
+      <section className="panel full project-files-bridge-import-card">
+        <div className="project-files-section-title">
+          <div>
+            <strong>导入桥梁结构参数</strong>
+            <span>选择桥梁结构参数 Excel，导入后将更新当前项目数据并重新生成任务视图。</span>
+          </div>
+          <span className="project-files-status"><FileCheck2 size={15} /> 支持 XLSX / XLSM</span>
+        </div>
+        <div className="project-files-bridge-import-action">
+          <input
+            type="file"
+            accept=".xlsx,.xlsm"
+            disabled={busy || importingBridgeParams}
+            onChange={(event) => setBridgeParamsFile(event.target.files?.[0] ?? null)}
+          />
+          <button
+            className="primary"
+            type="button"
+            disabled={!bridgeParamsFile || busy || importingBridgeParams}
+            onClick={() => bridgeParamsFile && onImportBridgeParams(bridgeParamsFile, "")}
+          >
+            {importingBridgeParams ? <Loader2 className="spin" size={16} /> : <Upload size={16} />}
+            {importingBridgeParams ? "正在导入" : "导入 Excel"}
+          </button>
         </div>
       </section>
 

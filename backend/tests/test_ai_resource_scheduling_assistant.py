@@ -62,6 +62,65 @@ def test_initialize_builds_project_profile_and_three_local_plans(monkeypatch) ->
     assert response.project_profile.resource_types
     assert response.reference_examples
     assert all(example.is_hard_constraint is False for example in response.reference_examples)
+    assert set(response.llm_generation_context) == {
+        "project_profile",
+        "resource_types",
+        "constraint_hints",
+        "reference_examples",
+        "current_resource_pools",
+        "rules",
+    }
+
+
+def test_initialize_returns_the_exact_context_passed_to_plan_generation(monkeypatch) -> None:
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_PROVIDER", "local")
+    scenario = default_scenario_with_process_library()
+    captured: dict[str, object] = {}
+
+    def capture_context(context):
+        captured.update(context)
+        return None, llm_config_status()
+
+    monkeypatch.setattr(assistant_module, "generate_resource_plan_payload", capture_context)
+
+    response = initialize_resource_assistant(
+        ResourceAssistantInitialRequest(scenario=scenario, generation_mode="llm_first")
+    )
+
+    assert response.llm_generation_context == captured
+    assert response.llm_generation_context["project_profile"]["project_name"] == scenario.project.project_name
+    assert response.llm_generation_context["resource_types"] == response.project_profile.resource_types
+    assert response.llm_generation_context["constraint_hints"] == response.constraint_hints
+    assert response.llm_generation_context["reference_examples"] == [
+        example.model_dump(mode="json") for example in response.reference_examples
+    ]
+    assert response.llm_generation_context["current_resource_pools"] == [
+        pool.model_dump(mode="json") for pool in scenario.resource_pools
+    ]
+
+
+def test_llm_generation_context_excludes_transport_and_secret_configuration(monkeypatch) -> None:
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_ENDPOINT", "https://secret.example.test/v1/chat/completions")
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_MODEL", "secret-model")
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_API_KEY", "secret-key")
+    scenario = default_scenario_with_process_library()
+    monkeypatch.setattr(
+        assistant_module,
+        "generate_resource_plan_payload",
+        lambda _context: (None, llm_config_status("forced fallback")),
+    )
+
+    response = initialize_resource_assistant(
+        ResourceAssistantInitialRequest(scenario=scenario, generation_mode="llm_first")
+    )
+
+    keys = _nested_mapping_keys(response.llm_generation_context)
+    assert {"api_key", "authorization", "endpoint", "model", "output_schema", "system"}.isdisjoint(keys)
+    serialized = str(response.llm_generation_context)
+    assert "secret.example.test" not in serialized
+    assert "secret-model" not in serialized
+    assert "secret-key" not in serialized
 
 
 def test_initial_plans_keep_pile_resources_split_by_process_type(monkeypatch) -> None:
@@ -236,6 +295,40 @@ def test_llm_generation_failure_falls_back_to_local_plans(monkeypatch) -> None:
     assert response.plan_generation.fallback_reason
     assert response.llm_config_status.status == "failed"
     assert len(response.resource_plans) == 3
+    assert response.llm_generation_context["project_profile"]["project_name"] == scenario.project.project_name
+
+
+def test_external_plan_generation_success_returns_the_context_used(monkeypatch) -> None:
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_ENDPOINT", "https://example.test/v1/chat/completions")
+    scenario = default_scenario_with_process_library()
+    captured: dict[str, object] = {}
+
+    def fake_generation(context):
+        captured.update(context)
+        plans = []
+        for example in context["reference_examples"]:
+            plans.append(
+                {
+                    "profile": example["profile"],
+                    "positioning": example["description"],
+                    "resource_quantities": example["resource_quantities"],
+                    "organization_strategy": "按项目画像组织资源。",
+                    "generation_rationale": "测试外部 LLM 成功返回。",
+                    "applicable_scenarios": "测试场景。",
+                    "expected_risks": "测试风险。",
+                }
+            )
+        return plans, llm_config_status()
+
+    monkeypatch.setattr(assistant_module, "generate_resource_plan_payload", fake_generation)
+
+    response = initialize_resource_assistant(
+        ResourceAssistantInitialRequest(scenario=scenario, generation_mode="llm_first")
+    )
+
+    assert response.plan_generation.source == "llm"
+    assert response.llm_generation_context == captured
 
 
 def test_resource_assistant_reuses_process_nl_llm_config(monkeypatch) -> None:
@@ -543,3 +636,15 @@ def _allocation(
         start_date=start + timedelta(days=start_offset),
         finish_date=start + timedelta(days=end_offset - 1),
     )
+
+
+def _nested_mapping_keys(value: object) -> set[str]:
+    keys: set[str] = set()
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            keys.add(str(key).lower())
+            keys.update(_nested_mapping_keys(nested))
+    elif isinstance(value, list):
+        for nested in value:
+            keys.update(_nested_mapping_keys(nested))
+    return keys

@@ -1,0 +1,31 @@
+{
+  "name": "ai-ppt-system",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "spec": "tsx scripts/outline-to-spec.ts",
+    "marp": "tsx scripts/spec-to-marp.ts",
+    "react": "tsx scripts/spec-to-react.ts",
+    "pptx": "tsx scripts/spec-to-pptx.ts",
+    "export:pdf": "tsx scripts/export-pdf.ts",
+    "export:png": "tsx scripts/export-png.ts",
+    "check": "tsx scripts/check-layout.ts",
+    "all": "npm run marp && npm run react && npm run pptx && npm run export:pdf && npm run export:png && npm run check",
+    "all:from-outline": "npm run spec && npm run all",
+    "marp:pdf": "marp output/marp/slides.md --theme themes/business.css --pdf --output output/marp/slides.pdf",
+    "marp:pptx": "marp output/marp/slides.md --theme themes/business.css --pptx --output output/marp/slides.pptx"
+  },
+  "dependencies": {
+    "@marp-team/marp-cli": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "playwright": "latest",
+    "pptxgenjs": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}
