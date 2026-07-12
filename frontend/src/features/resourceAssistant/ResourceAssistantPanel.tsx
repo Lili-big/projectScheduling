@@ -1,8 +1,9 @@
-import { ArrowLeft, Bot, Download, Loader2, Sparkles } from "lucide-react";
+import { ArrowLeft, Bot, CheckCircle2, Download, Loader2, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   compareAiResourceAssistantResults,
+  createBaselinePlan,
   generateAiResourceAssistantRecommendation,
   initializeAiResourceAssistant,
   solveAiResourceAssistantPlan,
@@ -40,9 +41,11 @@ type LlmContextDownloadSnapshot = {
 export function ResourceAssistantPanel({
   scenario,
   renderPlanDetail,
+  onOpenPlanControl,
 }: {
   scenario: ScenarioInput | null;
   renderPlanDetail?: (plan: ResourceAssistantPlan, result: ResourceAssistantPlanResult) => ReactNode;
+  onOpenPlanControl?: () => void;
 }) {
   const [initial, setInitial] = useState<ResourceAssistantInitialResponse | null>(null);
   const [plans, setPlans] = useState<ResourceAssistantPlan[]>([]);
@@ -54,6 +57,11 @@ export function ResourceAssistantPanel({
   const [generating, setGenerating] = useState(false);
   const [solvingPlanIds, setSolvingPlanIds] = useState<Record<string, boolean>>({});
   const [recommending, setRecommending] = useState(false);
+  const [confirmingBaseline, setConfirmingBaseline] = useState(false);
+  const [baselineVersionNo, setBaselineVersionNo] = useState<number | null>(null);
+  const [baselinePlanId, setBaselinePlanId] = useState<string | null>(null);
+  const [baselineConfirmedBy, setBaselineConfirmedBy] = useState("本地计划工程师");
+  const [baselineReason, setBaselineReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [recommendationError, setRecommendationError] = useState<string | null>(null);
   const [llmContextDownload, setLlmContextDownload] = useState<LlmContextDownloadSnapshot | null>(null);
@@ -97,6 +105,10 @@ export function ResourceAssistantPanel({
     setGenerating(false);
     setSolvingPlanIds({});
     setRecommending(false);
+    setConfirmingBaseline(false);
+    setBaselineVersionNo(null);
+    setBaselinePlanId(null);
+    setBaselineReason("");
     setError(null);
     setRecommendationError(null);
     setLlmContextDownload(null);
@@ -214,6 +226,34 @@ export function ResourceAssistantPanel({
     }
   }
 
+  async function handleConfirmBaseline(planId: string) {
+    if (!scenario || confirmingBaseline) return;
+    const plan = plansRef.current.find((item) => item.scenario_id === planId);
+    const planResult = resultsRef.current.find((item) => item.scenario_id === planId);
+    if (!plan || !planResult || !planResult.result || !["OPTIMAL", "FEASIBLE"].includes(planResult.result.status)) return;
+    if (!baselineConfirmedBy.trim() || !baselineReason.trim()) {
+      setError("请先填写基准确认人和选择原因。");
+      return;
+    }
+    setConfirmingBaseline(true);
+    setError(null);
+    try {
+      const version = await createBaselinePlan({
+        scenario,
+        resource_plan: plan,
+        plan_result: planResult,
+        confirmed_by: baselineConfirmedBy.trim(),
+        confirmation_reason: baselineReason.trim(),
+      });
+      setBaselineVersionNo(version.version_no);
+      setBaselinePlanId(planId);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "基准计划确认失败");
+    } finally {
+      setConfirmingBaseline(false);
+    }
+  }
+
   async function handleQuantityChange(planId: string, resourceType: string, quantity: number) {
     const plan = plansRef.current.find((item) => item.scenario_id === planId);
     if (!plan) return;
@@ -285,6 +325,9 @@ export function ResourceAssistantPanel({
                   下载本次 LLM 项目信息 JSON
                 </a>
               )}
+              {baselineVersionNo && onOpenPlanControl && (
+                <button className="secondary" type="button" onClick={onOpenPlanControl}>进入计划执行（第 {baselineVersionNo} 版）</button>
+              )}
               <button
                 className="primary"
                 type="button"
@@ -299,6 +342,13 @@ export function ResourceAssistantPanel({
           }
         />
         {error && <div className="notice danger">{error}</div>}
+        {plans.length > 0 && (
+          <div className="baseline-confirmation-bar">
+            <label>基准确认人<input value={baselineConfirmedBy} onChange={(event) => setBaselineConfirmedBy(event.target.value)} /></label>
+            <label>选择原因<input value={baselineReason} onChange={(event) => setBaselineReason(event.target.value)} placeholder="例如：工期与资源投入最符合执行目标" /></label>
+            <span>在下方已求解可行方案卡中确认基准。</span>
+          </div>
+        )}
         {initial ? <ProjectProfileStrip initial={initial} /> : <div className="resource-assistant-empty compact">等待生成工程画像和资源方案。</div>}
       </section>
 
@@ -318,6 +368,12 @@ export function ResourceAssistantPanel({
                 setSelectedPlanId(plan.scenario_id);
                 setDetailPlanId(plan.scenario_id);
               } : undefined}
+              onConfirmBaseline={() => {
+                setSelectedPlanId(plan.scenario_id);
+                void handleConfirmBaseline(plan.scenario_id);
+              }}
+              confirmingBaseline={confirmingBaseline && selectedPlanId === plan.scenario_id}
+              baselineVersionNo={baselinePlanId === plan.scenario_id ? baselineVersionNo : null}
               onQuantityChange={(resourceType, quantity) => handleQuantityChange(plan.scenario_id, resourceType, quantity)}
             />
           ))}

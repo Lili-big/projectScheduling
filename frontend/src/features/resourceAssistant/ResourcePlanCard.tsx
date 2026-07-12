@@ -18,6 +18,9 @@ export function ResourcePlanCard({
   onSelect,
   onSolve,
   onViewDetails,
+  onConfirmBaseline,
+  confirmingBaseline,
+  baselineVersionNo,
   onQuantityChange,
 }: {
   plan: ResourceAssistantPlan;
@@ -28,6 +31,9 @@ export function ResourcePlanCard({
   onSelect: () => void;
   onSolve: () => void;
   onViewDetails?: () => void;
+  onConfirmBaseline?: () => void;
+  confirmingBaseline?: boolean;
+  baselineVersionNo?: number | null;
   onQuantityChange: (resourceType: string, quantity: number) => void;
 }) {
   const statusTone = resourceAssistantStatusTone(plan.solve_status);
@@ -83,6 +89,12 @@ export function ResourcePlanCard({
           <button className="secondary resource-plan-details" type="button" onClick={onViewDetails}>
             <Eye size={14} />
             查看方案详情
+          </button>
+        )}
+        {result?.result && ["OPTIMAL", "FEASIBLE"].includes(result.result.status) && onConfirmBaseline && (
+          <button className="secondary" type="button" disabled={disabled || confirmingBaseline} onClick={onConfirmBaseline}>
+            {confirmingBaseline ? <Loader2 size={14} className="spin" /> : <CheckCircle2 size={14} />}
+            {baselineVersionNo ? `已设为基准（第 ${baselineVersionNo} 版）` : "设为基准计划"}
           </button>
         )}
       </div>

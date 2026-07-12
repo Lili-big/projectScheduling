@@ -23,6 +23,14 @@ import type {
   ResourceAssistantSingleSolveResponse,
   ResourceAssistantUpdatePlanRequest,
   ResourceAssistantUpdatePlanResponse,
+  PlanVersion,
+  PlanControlProjectSummary,
+  CreateBaselinePlanRequest,
+  CreateProgressSnapshotRequest,
+  CreateProgressSnapshotResponse,
+  ForecastSchedule,
+  AdjustmentComparisonResponse,
+  AdoptAdjustmentResponse,
   ScenarioInput,
   ScenarioSolveResult,
 } from "../types/scheduler";
@@ -137,6 +145,41 @@ export function generateAiResourceAssistantRecommendation(
   request: ResourceAssistantResultsRequest,
 ): Promise<ResourceAssistantRecommendationResponse> {
   return apiPost<ResourceAssistantRecommendationResponse>("/api/ai-resource-assistant/generate-recommendation", request);
+}
+
+export function createBaselinePlan(request: CreateBaselinePlanRequest): Promise<PlanVersion> {
+  return apiPost<PlanVersion>("/api/plan-control/baselines", request);
+}
+
+export function getPlanControlProject(projectId: string): Promise<PlanControlProjectSummary> {
+  return apiGet<PlanControlProjectSummary>(`/api/plan-control/projects/${encodeURIComponent(projectId)}`);
+}
+
+export function saveProgressSnapshot(request: CreateProgressSnapshotRequest): Promise<CreateProgressSnapshotResponse> {
+  return apiPost<CreateProgressSnapshotResponse>("/api/plan-control/progress-snapshots", request);
+}
+
+export function generateProgressForecast(planVersionId: string, progressSnapshotId: string): Promise<ForecastSchedule> {
+  return apiPost<ForecastSchedule>("/api/plan-control/forecasts", {
+    plan_version_id: planVersionId,
+    progress_snapshot_id: progressSnapshotId,
+  });
+}
+
+export function generateAdjustmentProposals(
+  forecastId: string,
+  maxResourceIncrements: Record<string, number> = {},
+): Promise<AdjustmentComparisonResponse> {
+  return apiPost<AdjustmentComparisonResponse>(`/api/plan-control/forecasts/${encodeURIComponent(forecastId)}/adjustments`, {
+    max_resource_increments: maxResourceIncrements,
+  });
+}
+
+export function adoptAdjustmentProposal(
+  proposalId: string,
+  request: { confirmed_by: string; adoption_reason: string; source_plan_fingerprint: string },
+): Promise<AdoptAdjustmentResponse> {
+  return apiPost<AdoptAdjustmentResponse>(`/api/plan-control/adjustments/${encodeURIComponent(proposalId)}/adopt`, request);
 }
 
 export function uploadBridgeParams(payload: FormData): Promise<ImportBridgeParamsResponse> {

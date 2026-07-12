@@ -1,4 +1,9 @@
 ﻿:root {
+  --accent: #0ea5a4;
+  --border: #dbe3ec;
+  --muted: #64748b;
+  --surface: #fff;
+  --surface-soft: #f7f8fa;
   font-family:
     Inter, "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   color: #18212f;
@@ -131,6 +136,310 @@ code {
 .secondary {
   background: #e7eef6;
   color: #0f2742;
+}
+
+.plan-control-page {
+  display: grid;
+  gap: 16px;
+}
+
+.plan-control-empty {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+  min-height: 150px;
+  text-align: center;
+}
+
+.plan-control-empty.compact {
+  min-height: 88px;
+}
+
+.plan-version-strip {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.plan-version-strip > div {
+  background: var(--surface-soft, #f7f8fa);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+}
+
+.plan-version-strip span,
+.progress-entry-table small,
+.adjustment-card dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.plan-control-toolbar {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(140px, 1fr)) auto;
+  margin-bottom: 14px;
+}
+
+.plan-control-toolbar label {
+  color: var(--muted);
+  display: grid;
+  font-size: 12px;
+  gap: 5px;
+}
+
+.progress-entry-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  max-height: 520px;
+  overflow: auto;
+}
+
+.progress-entry-table {
+  border-collapse: collapse;
+  min-width: 1380px;
+  width: 100%;
+}
+
+.progress-entry-table th,
+.progress-entry-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.progress-entry-table th {
+  background: var(--surface, #fff);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.progress-entry-table td:first-child {
+  display: grid;
+  min-width: 210px;
+}
+
+.progress-entry-table input,
+.progress-entry-table select {
+  min-width: 105px;
+  width: 100%;
+}
+
+.progress-pagination {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.progress-pagination > span {
+  color: var(--muted);
+  margin-right: auto;
+}
+
+.forecast-risk-card {
+  align-items: center;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  border-radius: 12px;
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 14px;
+}
+
+.forecast-risk-card.on_track {
+  background: #f0fdf4;
+  border-color: #86efac;
+}
+
+.forecast-risk-card.late {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+.forecast-risk-card > div {
+  display: grid;
+  gap: 4px;
+}
+
+.forecast-risk-card span,
+.risk-evidence-list {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.risk-evidence-list {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 14px 36px;
+}
+
+.adjustment-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.adjustment-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+}
+
+.adjustment-card.recommended {
+  border-color: var(--accent, #2563eb);
+  box-shadow: 0 0 0 2px rgb(37 99 235 / 10%);
+}
+
+.adjustment-card header,
+.adjustment-card dl > div {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.adjustment-card dl {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.adjustment-card dd {
+  margin: 0;
+}
+
+.adoption-confirm {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.adoption-confirm span {
+  color: #166534;
+  font-size: 12px;
+}
+
+.baseline-confirmation-bar,
+.adjustment-controls {
+  align-items: end;
+  background: var(--surface-soft, #f7f8fa);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.baseline-confirmation-bar label,
+.adjustment-controls label {
+  color: var(--muted);
+  display: grid;
+  flex: 1;
+  font-size: 12px;
+  gap: 5px;
+}
+
+.baseline-confirmation-bar label:nth-child(2) {
+  flex: 2;
+}
+
+.baseline-confirmation-bar > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.plan-history {
+  border-top: 1px solid var(--border);
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+.plan-history summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.plan-history > div {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 90px 90px 1fr 2fr;
+  padding: 9px 0;
+}
+
+.forecast-task-state-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 12px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.forecast-task-state-table {
+  border-collapse: collapse;
+  min-width: 900px;
+  width: 100%;
+}
+
+.forecast-task-state-table th,
+.forecast-task-state-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 8px;
+  text-align: left;
+}
+
+.forecast-task-state-table th {
+  background: var(--surface, #fff);
+  position: sticky;
+  top: 0;
+}
+
+@media (max-width: 1100px) {
+  .plan-version-strip,
+  .adjustment-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .plan-control-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .baseline-confirmation-bar,
+  .adjustment-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .plan-history > div {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .plan-version-strip,
+  .adjustment-grid,
+  .plan-control-toolbar {
+    grid-template-columns: 1fr;
+  }
 }
 
 .resource-assistant-context-download {

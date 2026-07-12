@@ -974,6 +974,54 @@ def _add_fixed_task_resource_constraints(
             model.Add(assignment == (1 if resource.id == fixed_resource_id else 0))
 
 
+def _execution_constraint_validation(
+    schedule_input: ScheduleInput,
+    resource_candidates: dict[str, list[Resource]],
+) -> list[ValidationMessage]:
+    task_ids = {task.id for task in schedule_input.tasks}
+    messages: list[ValidationMessage] = []
+    seen: set[str] = set()
+    for constraint in schedule_input.execution_constraints:
+        if constraint.task_id in seen:
+            messages.append(ValidationMessage(level="error", subject_id=constraint.task_id, message="同一任务存在重复执行约束。"))
+            continue
+        seen.add(constraint.task_id)
+        if constraint.task_id not in task_ids:
+            messages.append(ValidationMessage(level="error", subject_id=constraint.task_id, message="执行约束引用了不存在的任务。"))
+            continue
+        if constraint.fixed_resource_id is not None and constraint.fixed_resource_id not in {
+            resource.id for resource in resource_candidates.get(constraint.task_id, [])
+        }:
+            messages.append(
+                ValidationMessage(
+                    level="error",
+                    subject_id=constraint.task_id,
+                    message=f"固定资源 {constraint.fixed_resource_id} 不是该任务的可用资源。",
+                )
+            )
+    return messages
+
+
+def _add_execution_constraints(
+    model: Any,
+    schedule_input: ScheduleInput,
+    starts: dict[str, Any],
+    resource_candidates: dict[str, list[Resource]],
+    assignment_vars: dict[tuple[str, str], Any],
+) -> None:
+    fixed_resources: dict[str, str] = {}
+    for constraint in schedule_input.execution_constraints:
+        if constraint.task_id not in starts:
+            continue
+        if constraint.earliest_start_offset is not None:
+            model.Add(starts[constraint.task_id] >= constraint.earliest_start_offset)
+        if constraint.fixed_start_offset is not None:
+            model.Add(starts[constraint.task_id] == constraint.fixed_start_offset)
+        if constraint.fixed_resource_id is not None:
+            fixed_resources[constraint.task_id] = constraint.fixed_resource_id
+    _add_fixed_task_resource_constraints(model, resource_candidates, assignment_vars, fixed_resources)
+
+
 def _drill_line_sequences(groups: list[_DrillGroupNode]) -> list[list[_DrillGroupNode]]:
     buckets: dict[tuple[Any, ...], list[_DrillGroupNode]] = defaultdict(list)
     for group in groups:
@@ -1998,6 +2046,7 @@ def solve_shortest_duration_schedule(
     enabled_resources = [resource for resource in schedule_input.resources if resource.enabled]
     resource_candidates = _resource_candidates_by_task(schedule_input.tasks, enabled_resources)
     validation = _validate_resource_coverage(schedule_input.tasks, resource_candidates)
+    validation.extend(_execution_constraint_validation(schedule_input, resource_candidates))
     if any(message.level == "error" for message in validation):
         return ScheduleResult(
             status="INFEASIBLE",
@@ -2046,6 +2095,7 @@ def solve_shortest_duration_schedule(
         resource_candidates=resource_candidates,
         horizon=horizon,
     )
+    _add_execution_constraints(model, schedule_input, starts, resource_candidates, assignment_vars)
     continuous_span_model = _add_named_continuous_beam_team_span_constraints(
         model,
         starts=starts,
@@ -2294,6 +2344,7 @@ def solve_control_priority_schedule(
     enabled_resources = [resource for resource in schedule_input.resources if resource.enabled]
     resource_candidates = _resource_candidates_by_task(schedule_input.tasks, enabled_resources)
     validation = _validate_resource_coverage(schedule_input.tasks, resource_candidates)
+    validation.extend(_execution_constraint_validation(schedule_input, resource_candidates))
     if any(message.level == "error" for message in validation):
         return ScheduleResult(
             status="INFEASIBLE",
@@ -2381,6 +2432,7 @@ def solve_control_priority_schedule(
         resource_candidates=resource_candidates,
         horizon=horizon,
     )
+    _add_execution_constraints(model, schedule_input, starts, resource_candidates, assignment_vars)
     continuous_span_model = _add_named_continuous_beam_team_span_constraints(
         model,
         starts=starts,

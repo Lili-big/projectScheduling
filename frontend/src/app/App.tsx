@@ -170,6 +170,7 @@ import { ResourcesTab } from "../features/resources/ResourcesTab";
 import { MilestonesTab } from "../features/milestones/MilestonesTab";
 import { ParameterAssistantPanel } from "../features/assistant/parameter";
 import { ResourceAssistantPanel } from "../features/resourceAssistant/ResourceAssistantPanel";
+import { PlanControlPanel } from "../features/planControl/PlanControlPanel";
 import { Metric } from "../components/common/Metric";
 import { PanelTitle } from "../components/common/PanelTitle";
 import {
@@ -869,6 +870,7 @@ export default function App() {
         {activeTab === "resourceAssistant" && (
           <ResourceAssistantPanel
             scenario={scenario}
+            onOpenPlanControl={() => openModule("planControl")}
             renderPlanDetail={(plan, planResult) => (
               <ResultsTab
                 mode="readOnly"
@@ -890,6 +892,7 @@ export default function App() {
             )}
           />
         )}
+        {scenario && activeTab === "planControl" && <PlanControlPanel scenario={scenario} />}
         {scenario && activeTab === "milestones" && (
           <MilestonesTab
             scenario={scenario}

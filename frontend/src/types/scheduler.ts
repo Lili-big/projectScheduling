@@ -32,7 +32,8 @@ export type TabKey =
   | "milestones"
   | "tasks"
   | "results"
-  | "resourceAssistant";
+  | "resourceAssistant"
+  | "planControl";
 export type GanttMode = "by_time" | "by_structure" | "by_process";
 export type TaskViewMode = "by_structure" | "by_process";
 export type BusyState =
@@ -621,6 +622,7 @@ export type ScheduleInput = {
   precedence_links: PrecedenceLink[];
   resources: Resource[];
   milestones: MilestoneConstraint[];
+  execution_constraints?: TaskExecutionConstraint[];
   schedule_strategy?: ScheduleStrategyConfig;
   time_limit_seconds: number;
 };
@@ -670,6 +672,14 @@ export type CompareResponse = {
   summaries: Array<Record<string, unknown>>;
   best_scenario_id?: string | null;
   notes: string[];
+};
+
+export type TaskExecutionConstraint = {
+  task_id: string;
+  earliest_start_offset?: number | null;
+  fixed_start_offset?: number | null;
+  fixed_resource_id?: string | null;
+  source: string;
 };
 
 export type ResourceAssistantPlanProfile = "economy" | "balanced" | "crash" | "custom";
@@ -1252,4 +1262,153 @@ export type TaskViewParentGroup = {
   subtitle: string;
   rows: TaskViewRow[];
   groups: TaskViewGroup[];
+};
+
+export type PlanVersionStatus = "draft" | "active" | "superseded";
+export type ProgressTaskStatus = "not_started" | "in_progress" | "completed" | "paused" | "cancelled";
+export type ForecastStrategy = "as_is" | "add_bottleneck_resources" | "prioritize_critical_tasks";
+export type ForecastSolveStatus = "ready" | "solving" | "feasible" | "infeasible" | "failed" | "stale";
+export type ForecastRiskStatus = "on_track" | "at_risk" | "late" | "insufficient_data";
+
+export type PlanVersion = {
+  plan_version_id: string;
+  project_id: string;
+  project_name: string;
+  plan_type: "master";
+  version_no: number;
+  version_kind: "baseline" | "execution";
+  status: PlanVersionStatus;
+  parent_version_id?: string | null;
+  source_scenario_id: string;
+  scenario_snapshot: ScenarioInput;
+  generated_snapshot: GeneratedScheduleInput;
+  schedule_result_snapshot: ScheduleResult;
+  resource_plan_snapshot: ResourceAssistantPlan;
+  input_fingerprint: string;
+  confirmed_by: string;
+  confirmed_at: string;
+  confirmation_reason: string;
+};
+
+export type ProgressEntry = {
+  task_id: string;
+  status: ProgressTaskStatus;
+  actual_start_date?: string | null;
+  actual_finish_date?: string | null;
+  percent_complete: number;
+  completed_quantity?: number | null;
+  remaining_quantity?: number | null;
+  actual_productivity?: number | null;
+  estimated_remaining_days?: number | null;
+  remaining_days: number;
+  remaining_days_source: "calculated" | "manual" | "baseline" | "none";
+  expected_resume_date?: string | null;
+  reason?: string | null;
+  notes: string;
+};
+
+export type ProgressSnapshot = {
+  progress_snapshot_id: string;
+  plan_version_id: string;
+  status_date: string;
+  revision_no: number;
+  is_current: boolean;
+  entries: ProgressEntry[];
+  data_quality_status: "valid" | "warning" | "invalid";
+  validation_messages: ValidationMessage[];
+  submitted_by: string;
+  submitted_at: string;
+  correction_reason?: string | null;
+};
+
+export type ForecastTaskState = {
+  task_id: string;
+  task_name: string;
+  state: "baseline" | "actual" | "predicted";
+  baseline_start_date?: string | null;
+  baseline_finish_date?: string | null;
+  actual_start_date?: string | null;
+  actual_finish_date?: string | null;
+  predicted_start_date?: string | null;
+  predicted_finish_date?: string | null;
+  assigned_resource_type?: string | null;
+  variance_days?: number | null;
+};
+
+export type ForecastSchedule = {
+  forecast_id: string;
+  plan_version_id: string;
+  progress_snapshot_id: string;
+  status_date: string;
+  strategy: ForecastStrategy;
+  status: ForecastSolveStatus;
+  input_fingerprint: string;
+  historical_tasks: ForecastTaskState[];
+  predicted_tasks: ForecastTaskState[];
+  schedule_result?: ScheduleResult | null;
+  risk_status: ForecastRiskStatus;
+  risk_evidence: Array<Record<string, unknown>>;
+  confidence: "high" | "medium" | "low";
+  metrics: Record<string, unknown>;
+  diagnostics: ValidationMessage[];
+  created_at: string;
+};
+
+export type AdjustmentProposal = {
+  proposal_id: string;
+  forecast_id: string;
+  plan_version_id: string;
+  strategy: ForecastStrategy;
+  status: ForecastSolveStatus;
+  strategy_parameters: Record<string, unknown>;
+  forecast: ForecastSchedule;
+  metrics: Record<string, unknown>;
+  recommended: boolean;
+  recommendation_reason: string;
+  explanation: string;
+  diagnostics: ValidationMessage[];
+  created_at: string;
+};
+
+export type PlanControlProjectSummary = {
+  project_id: string;
+  active_plan?: PlanVersion | null;
+  plan_versions: PlanVersion[];
+  current_progress_snapshot?: ProgressSnapshot | null;
+  latest_forecast?: ForecastSchedule | null;
+};
+
+export type CreateBaselinePlanRequest = {
+  scenario: ScenarioInput;
+  resource_plan: ResourceAssistantPlan;
+  plan_result: ResourceAssistantPlanResult;
+  confirmed_by: string;
+  confirmation_reason: string;
+};
+
+export type CreateProgressSnapshotRequest = {
+  plan_version_id: string;
+  status_date: string;
+  entries: ProgressEntry[];
+  submitted_by: string;
+  correction_reason?: string | null;
+  expected_revision_no?: number | null;
+};
+
+export type CreateProgressSnapshotResponse = {
+  progress_snapshot: ProgressSnapshot;
+  stale_forecast_ids: string[];
+  diagnostics: ValidationMessage[];
+};
+
+export type AdjustmentComparisonResponse = {
+  forecast_id: string;
+  proposals: AdjustmentProposal[];
+  recommended_proposal_id?: string | null;
+};
+
+export type AdoptAdjustmentResponse = {
+  new_plan_version: PlanVersion;
+  previous_plan_version: PlanVersion;
+  change_record: Record<string, unknown>;
 };

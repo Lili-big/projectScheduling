@@ -17,6 +17,7 @@ import app.scenario as scenario_module  # noqa: E402
 import app.solver as solver_module  # noqa: E402
 from app.models import ComponentModel, MilestoneConstraint, OBJECTIVE_METRIC_DEFINITIONS, PrecedenceLink, ProcessTemplate, ProductivityOption, ProjectBridge, ProjectModel, Resource, ResourceCostSolveRequest, ResourcePool, ScheduleInput, ScheduleStrategyConfig, ScenarioCompareRequest, ScenarioInput, ScheduledTask, StructureModel, Task, TaskOverride, UpperStructureComponent, UpperStructureLogicRule, ValidationMessage, WorkSection  # noqa: E402
 from app.models import MilestoneResult, ScheduleResult  # noqa: E402
+from app.models import TaskExecutionConstraint  # noqa: E402
 from app.process_library_defaults import upgrade_process_library  # noqa: E402
 from app.sample_data import (  # noqa: E402
     default_bridge,
@@ -129,6 +130,65 @@ def test_default_solve_time_limit_is_fifteen_seconds() -> None:
         precedence_links=[],
         resources=[],
     ).time_limit_seconds == 15
+
+
+def test_execution_constraints_fix_start_and_resource_without_changing_default_behavior() -> None:
+    pytest.importorskip("ortools")
+    base = ScheduleInput(
+        project_name="execution-constraints",
+        start_date=date(2026, 1, 1),
+        tasks=[_solver_task("T1", "任务1", 2, "crew"), _solver_task("T2", "任务2", 2, "crew")],
+        precedence_links=[],
+        resources=[
+            Resource(id="crew-1", name="班组1", type="crew"),
+            Resource(id="crew-2", name="班组2", type="crew"),
+        ],
+        time_limit_seconds=5,
+    )
+    unconstrained = solve_shortest_duration_schedule(base)
+    constrained = solve_shortest_duration_schedule(
+        base.model_copy(
+            update={
+                "execution_constraints": [
+                    TaskExecutionConstraint(task_id="T1", fixed_start_offset=0, fixed_resource_id="crew-2"),
+                    TaskExecutionConstraint(task_id="T2", earliest_start_offset=5),
+                ]
+            }
+        )
+    )
+
+    assert unconstrained.status in {"OPTIMAL", "FEASIBLE"}
+    assert constrained.status in {"OPTIMAL", "FEASIBLE"}
+    by_id = {task.id: task for task in constrained.tasks}
+    assert by_id["T1"].start_offset == 0
+    assert by_id["T1"].assigned_resource_id == "crew-2"
+    assert by_id["T2"].start_offset >= 5
+    assert base.execution_constraints == []
+
+
+@pytest.mark.parametrize(
+    ("constraint", "message"),
+    [
+        (TaskExecutionConstraint(task_id="UNKNOWN", fixed_start_offset=0), "不存在的任务"),
+        (TaskExecutionConstraint(task_id="T1", fixed_resource_id="unknown-resource"), "不是该任务的可用资源"),
+    ],
+)
+def test_execution_constraints_reject_unknown_task_or_resource(constraint, message: str) -> None:
+    pytest.importorskip("ortools")
+    result = solve_shortest_duration_schedule(
+        ScheduleInput(
+            project_name="invalid-execution-constraint",
+            start_date=date(2026, 1, 1),
+            tasks=[_solver_task("T1", "任务1", 2, "crew")],
+            precedence_links=[],
+            resources=[Resource(id="crew-1", name="班组1", type="crew")],
+            execution_constraints=[constraint],
+            time_limit_seconds=5,
+        )
+    )
+
+    assert result.status == "INFEASIBLE"
+    assert any(message in item.message for item in result.validation)
 
 
 def test_schedule_strategy_rejects_invalid_objective_term_config() -> None:

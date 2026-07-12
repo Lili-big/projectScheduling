@@ -1,5 +1,6 @@
 import {
   Bot,
+  ChartNoAxesCombined,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -18,7 +19,11 @@ import { useMemo, useState } from "react";
 import type { TabKey } from "../../types/scheduler";
 
 type NavigationItem = { key: TabKey; label: string; icon: ReactNode };
-type NavigationGroup = { key: "projectParameters" | "prePlanning"; label: string; items: NavigationItem[] };
+type NavigationGroup = {
+  key: "projectParameters" | "prePlanning" | "planExecution";
+  label: string;
+  items: NavigationItem[];
+};
 
 const navigationGroups: NavigationGroup[] = [
   {
@@ -41,6 +46,13 @@ const navigationGroups: NavigationGroup[] = [
       { key: "results", label: "模拟求解", icon: <CheckCircle2 size={15} /> },
     ],
   },
+  {
+    key: "planExecution",
+    label: "计划执行",
+    items: [
+      { key: "planControl", label: "进度反馈与预测", icon: <ChartNoAxesCombined size={15} /> },
+    ],
+  },
 ];
 
 const tabs = navigationGroups.flatMap((group) => group.items);
@@ -61,6 +73,7 @@ export function SideNavigation({
   const [expandedGroups, setExpandedGroups] = useState<Record<NavigationGroup["key"], boolean>>({
     projectParameters: true,
     prePlanning: true,
+    planExecution: true,
   });
   const visibleGroups = useMemo(
     () => navigationGroups.map((group) => ({ ...group, expanded: expandedGroups[group.key] })),
