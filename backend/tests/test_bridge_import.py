@@ -86,6 +86,15 @@ def test_bridge_excel_import_maps_to_schedulable_scenario() -> None:
     assert "middle_tie_beam" in left_1_components
     assert left_1_components["ground_tie_beam"].name == "1#墩-地系梁"
     assert left_1_components["middle_tie_beam"].name == "1#墩-中系梁"
+    assert left_1_components["pile"].structure_parameter_label == "桩基础，桩径2m"
+    assert left_1_components["pile"].quantity_label == "20m"
+    assert left_1_components["ground_tie_beam"].structure_parameter_label == "6.25m × 1.5m × 1.8m"
+    assert left_1_components["ground_tie_beam"].quantity_label == "1个"
+    assert left_1_components["pier_body"].quantity == 10
+    assert left_1_components["pier_body"].quantity_label == "10m"
+    assert "柱径1.8m" in (left_1_components["pier_body"].structure_parameter_label or "")
+    assert "2根" in (left_1_components["pier_body"].structure_parameter_label or "")
+    assert "桩径" not in (left_1_components["pier_body"].structure_parameter_label or "")
     assert [len(section.upper_structures) for section in bridge.work_sections] == [24, 24]
     left_upper = bridge.work_sections[0].upper_structures
     assert left_upper[0].name == "0#台~1#墩-简支T梁"
@@ -100,6 +109,29 @@ def test_bridge_excel_import_maps_to_schedulable_scenario() -> None:
     pier_body_task = next(task for task in generated.schedule_input.tasks if task.component_type == "pier_body")
     assert pier_body_task.process_name == "爬模施工"
     assert pier_body_task.productivity_rule_id == "pier_body_climbing_form:pier_body_climbing_form-default"
+    left_1_body_task = next(task for task in generated.schedule_input.tasks if task.component_id == left_1_components["pier_body"].id)
+    assert left_1_body_task.quantity == 10
+    assert left_1_body_task.quantity_label == "10m"
+    assert left_1_body_task.duration_days == 21
+    assert left_1_body_task.structure_parameter_label == left_1_components["pier_body"].structure_parameter_label
+    generated_by_type = {task.component_type: task for task in generated.schedule_input.tasks}
+    expected_lower_types = {
+        "pile",
+        "cap",
+        "spread_foundation",
+        "ground_tie_beam",
+        "middle_tie_beam",
+        "pier_body",
+        "cap_beam",
+        "abutment_body",
+    }
+    assert expected_lower_types <= generated_by_type.keys()
+    for component_type in expected_lower_types:
+        task = generated_by_type[component_type]
+        assert task.quantity > 0
+        assert task.quantity_label
+        assert "×" not in task.quantity_label
+        assert "高度" not in task.quantity_label
     upper_ids = {upper.id for section in bridge.work_sections for upper in section.upper_structures}
     assert not any(task.component_id in upper_ids for task in generated.schedule_input.tasks)
 
@@ -198,6 +230,7 @@ def test_pile_productivity_group_can_use_count_quantity_source() -> None:
     assert pile_task.quantity == 1
     assert pile_task.quantity_label == "1根"
     assert pile_task.duration_days == 2
+    assert pile_task.structure_parameter_label == "桩基础，桩径2m"
 
 
 def test_process_natural_language_updates_pile_methods(monkeypatch: pytest.MonkeyPatch) -> None:

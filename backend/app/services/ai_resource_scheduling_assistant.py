@@ -62,6 +62,7 @@ LOWER_STRUCTURE_COMPONENT_TYPES = {
 }
 CONTINUOUS_BEAM_COMPONENT_TYPE = "cast_in_place_continuous_beam"
 CONTINUOUS_BEAM_RESOURCE_TYPE = "cast_in_place_continuous_beam_team"
+AI_RESOURCE_PLAN_SOLVE_TIME_LIMIT_SECONDS = 30.0
 
 PROFILE_LABELS: dict[str, str] = {
     "economy": "方案A 经济方案",
@@ -385,18 +386,22 @@ def build_comparison(
     ]
     outcome_values = {
         scenario_id: {
-            "value": plan_result.plan_status or plan_result.metrics.target_status,
-            "not_available_reasons": plan_result.metrics.not_available_reasons,
+            "value": _schedule_outcome_status(plan_result),
+            "not_available_reasons": (
+                ["缺少工期目标，无法评估"]
+                if _schedule_outcome_reason(plan_result) == "target_missing"
+                else plan_result.metrics.not_available_reasons
+            ),
         }
         for scenario_id, plan_result in result_by_id.items()
     }
     rows = [
         ResourceAssistantMetricRow(
-            metric_id="plan_status",
+            metric_id="schedule_outcome_status",
             metric_name="方案目标状态",
             values=outcome_values,
             source_type="solver_result",
-            description="严格固定资源求解的业务结论；只有 met 可参与推荐。",
+            description="严格固定资源求解的三态业务结论；只有工期目标已满足可参与推荐。",
         ),
         _metric_row("total_days", "总工期", "天", "solver_result", "CP-SAT 求解返回的项目完工跨度。", result_by_id, lambda m: m.total_days),
         _metric_row("plan_finish_date", "预计完工日期", "", "solver_result", "CP-SAT 求解返回的计划完成日期。", result_by_id, lambda m: m.plan_finish_date),
@@ -500,8 +505,8 @@ def build_deterministic_recommendation(
         return ResourceAssistantRecommendation(
             recommended_scenario_id=None,
             recommendation_status="insufficient_results",
-            rule_reason="当前没有目标已满足（met）的方案，无法生成正式推荐。",
-            evidence=["not_met、unconfirmed 和 infeasible 方案不进入推荐候选集。"],
+            rule_reason="当前没有工期目标已满足的方案，无法生成正式推荐。",
+            evidence=["工期目标未满足和当前资源未获得可行排程的方案不进入推荐候选集。"],
             risk_notes=["可查看已有排程和延期诊断后手动调整资源，再重新求解。"],
             marginal_benefit_notes=["无可行结果时不计算边际收益。"],
             llm_status=llm_config_status(),
@@ -535,7 +540,7 @@ def build_deterministic_recommendation(
             reason = "经济方案控制墩等待偏长，平衡方案能降低控制链风险。"
 
     metrics = result_by_id[recommended.scenario_id].metrics
-    evidence = _recommendation_evidence(recommended, metrics)
+    evidence = _recommendation_evidence(recommended, metrics, result_by_id[recommended.scenario_id])
     risks = _recommendation_risks(recommended, metrics)
     marginal = _marginal_benefit_notes(recommended, result_by_id, plans)
     return ResourceAssistantRecommendation(
@@ -829,6 +834,7 @@ def _solve_single_plan(
                 "scenario_id": plan.scenario_id,
                 "scenario_name": plan.scenario_name,
                 "resource_pools": plan.resource_pools,
+                "time_limit_seconds": AI_RESOURCE_PLAN_SOLVE_TIME_LIMIT_SECONDS,
             },
         )
         solved = solve_ai_strict_fixed_resource_scenario(plan_scenario)
@@ -840,11 +846,27 @@ def _solve_single_plan(
             plan_status = None
         if plan_status is not None:
             metrics = metrics.model_copy(update={"target_status": plan_status})
+        schedule_outcome_status = str(target.get("schedule_outcome_status")) if isinstance(target, dict) and target.get("schedule_outcome_status") else None
+        if schedule_outcome_status not in {"duration_target_met", "duration_target_not_met", "no_feasible_schedule"}:
+            schedule_outcome_status = None
+        schedule_outcome_reason = str(target.get("schedule_outcome_reason")) if isinstance(target, dict) and target.get("schedule_outcome_reason") else None
+        if schedule_outcome_reason not in {
+            "target_met",
+            "proven_late",
+            "late_unconfirmed",
+            "time_limit_no_schedule",
+            "proven_infeasible",
+            "resource_coverage_missing",
+            "target_missing",
+        }:
+            schedule_outcome_reason = None
         status = _plan_status_from_result(solved.result)
         solved_plan = plan.model_copy(update={"solve_status": status, "stale_reason": None})
         plan_result = ResourceAssistantPlanResult(
             scenario_id=plan.scenario_id,
             plan_status=plan_status,
+            schedule_outcome_status=schedule_outcome_status,
+            schedule_outcome_reason=schedule_outcome_reason,
             solver_status=solved.result.status,
             input_resource_quantities={pool.type: max(0, int(pool.quantity or 0)) for pool in plan.resource_pools},
             resource_expansion_attempted=False,
@@ -864,6 +886,8 @@ def _solve_single_plan(
         failed_result = ResourceAssistantPlanResult(
             scenario_id=plan.scenario_id,
             plan_status=None,
+            schedule_outcome_status=None,
+            schedule_outcome_reason=None,
             solver_status=None,
             input_resource_quantities={pool.type: max(0, int(pool.quantity or 0)) for pool in plan.resource_pools},
             resource_expansion_attempted=False,
@@ -1411,9 +1435,52 @@ def _target_met(metrics: ResourceAssistantCoreMetrics) -> bool:
 
 
 def _plan_result_target_met(plan_result: ResourceAssistantPlanResult) -> bool:
-    if plan_result.plan_status is not None:
-        return plan_result.plan_status == "met"
+    schedule_outcome_status = _schedule_outcome_status(plan_result)
+    if schedule_outcome_status is not None:
+        return schedule_outcome_status == "duration_target_met"
     return _target_met(plan_result.metrics)
+
+
+def _schedule_outcome_status(plan_result: ResourceAssistantPlanResult) -> str | None:
+    if plan_result.schedule_outcome_status is not None:
+        return plan_result.schedule_outcome_status
+    if plan_result.plan_status == "met":
+        return "duration_target_met"
+    if plan_result.plan_status == "not_met":
+        return "duration_target_not_met"
+    if plan_result.plan_status == "infeasible":
+        return "no_feasible_schedule"
+    if plan_result.plan_status == "unconfirmed":
+        target = plan_result.result.stats.get("target_achievement") if plan_result.result is not None else None
+        if isinstance(target, dict) and target.get("target_present") is False:
+            return None
+        if plan_result.result is not None and plan_result.result.tasks:
+            return "duration_target_not_met"
+        return "no_feasible_schedule"
+    if _target_met(plan_result.metrics):
+        return "duration_target_met"
+    return None
+
+
+def _schedule_outcome_reason(plan_result: ResourceAssistantPlanResult) -> str | None:
+    if plan_result.schedule_outcome_reason is not None:
+        return plan_result.schedule_outcome_reason
+    target = plan_result.result.stats.get("target_achievement") if plan_result.result is not None else None
+    if isinstance(target, dict) and target.get("schedule_outcome_reason"):
+        return str(target["schedule_outcome_reason"])
+    if plan_result.plan_status == "met":
+        return "target_met"
+    if plan_result.plan_status == "not_met":
+        return "proven_late"
+    if plan_result.plan_status == "infeasible":
+        return "proven_infeasible"
+    if plan_result.plan_status == "unconfirmed":
+        if isinstance(target, dict) and target.get("target_present") is False:
+            return "target_missing"
+        if plan_result.result is not None and plan_result.result.tasks:
+            return "late_unconfirmed"
+        return "time_limit_no_schedule"
+    return None
 
 
 def _recommendation_score(metrics: ResourceAssistantCoreMetrics) -> float:
@@ -1424,10 +1491,19 @@ def _recommendation_score(metrics: ResourceAssistantCoreMetrics) -> float:
     return duration + cost + wait + target_penalty
 
 
-def _recommendation_evidence(plan: ResourceAssistantPlan, metrics: ResourceAssistantCoreMetrics) -> list[str]:
+def _recommendation_evidence(
+    plan: ResourceAssistantPlan,
+    metrics: ResourceAssistantCoreMetrics,
+    plan_result: ResourceAssistantPlanResult,
+) -> list[str]:
+    outcome_label = {
+        "duration_target_met": "工期目标已满足",
+        "duration_target_not_met": "工期目标未满足",
+        "no_feasible_schedule": "当前资源未获得可行排程",
+    }.get(_schedule_outcome_status(plan_result), "缺少工期目标，无法评估")
     return [
         f"{plan.scenario_name} 总工期 {metrics.total_days if metrics.total_days is not None else '不可用'} 天。",
-        f"节点状态为 {metrics.target_status}。",
+        f"方案目标状态为 {outcome_label}。",
         f"平均等待 {metrics.average_wait_days if metrics.average_wait_days is not None else '不可用'} 天，最大等待 {metrics.max_wait_days if metrics.max_wait_days is not None else '不可用'} 天。",
         f"演示成本约 {round(metrics.demo_cost.total_cost, 0)} 元。",
     ]

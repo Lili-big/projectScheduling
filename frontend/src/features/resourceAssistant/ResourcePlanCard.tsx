@@ -4,8 +4,10 @@ import {
   editableResourcePools,
   metricsSummary,
   resourceAssistantOutcomeDetail,
-  resourceAssistantOutcomeLabels,
   resourceAssistantOutcomeTone,
+  resourceAssistantScheduleOutcomeLabels,
+  resourceAssistantScheduleOutcomeReason,
+  resourceAssistantScheduleOutcomeStatus,
   resourceAssistantResourceLabel,
   resourceAssistantProfileLabels,
   resourceAssistantStatusLabels,
@@ -40,6 +42,8 @@ export function ResourcePlanCard({
   onQuantityChange: (resourceType: string, quantity: number) => void;
 }) {
   const statusTone = resourceAssistantStatusTone(plan.solve_status);
+  const outcomeStatus = resourceAssistantScheduleOutcomeStatus(result);
+  const outcomeReason = resourceAssistantScheduleOutcomeReason(result);
   return (
     <article className={`resource-plan-card ${isSelected ? "is-selected" : ""}`}>
       <button className="resource-plan-card-hit" type="button" onClick={onSelect} aria-label={`查看${plan.scenario_name}`} />
@@ -52,11 +56,13 @@ export function ResourcePlanCard({
       </header>
       <p className="resource-plan-positioning">{plan.positioning}</p>
       <div className="resource-plan-metrics">{metricsSummary(result?.metrics)}</div>
-      {result?.plan_status && (
+      {result && (outcomeStatus || outcomeReason === "target_missing") && (
         <div className="resource-plan-outcome">
-          <span className={`resource-status-pill ${resourceAssistantOutcomeTone(result.plan_status)}`}>
-            {resourceAssistantOutcomeLabels[result.plan_status]}
-          </span>
+          {outcomeStatus && (
+            <span className={`resource-status-pill ${resourceAssistantOutcomeTone(outcomeStatus)}`}>
+              {resourceAssistantScheduleOutcomeLabels[outcomeStatus]}
+            </span>
+          )}
           <small>{resourceAssistantOutcomeDetail(result)}</small>
         </div>
       )}
@@ -103,7 +109,7 @@ export function ResourcePlanCard({
           </button>
         )}
         {result?.result && ["OPTIMAL", "FEASIBLE"].includes(result.result.status) && onConfirmBaseline && (
-          <button className="secondary" type="button" disabled={disabled || confirmingBaseline} onClick={onConfirmBaseline}>
+          <button className="secondary" type="button" disabled={disabled || confirmingBaseline || Boolean(baselineVersionNo)} onClick={onConfirmBaseline}>
             {confirmingBaseline ? <Loader2 size={14} className="spin" /> : <CheckCircle2 size={14} />}
             {baselineVersionNo ? `已设为基准（第 ${baselineVersionNo} 版）` : "设为基准计划"}
           </button>

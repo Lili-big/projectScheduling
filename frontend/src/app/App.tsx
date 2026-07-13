@@ -1121,6 +1121,9 @@ function TaskViewTab({
               <code>-</code>
             )}
           </td>
+          <td className="structure-parameter-cell">
+            {structureParameterLabelForTask(row.task, editableComponent) || "-"}
+          </td>
           <td>{row.task.quantity_label || displayValue(row.task.quantity)}</td>
           <td>{effectiveTaskDurationDays(row.task, scenario)} 天</td>
           <td className="duration-expression" title={durationExpression(row.task, scenario)}>
@@ -1182,6 +1185,7 @@ function TaskViewTab({
                   <th>任务名称</th>
                   <th>工艺</th>
                   <th>工效</th>
+                  <th>结构物参数</th>
                   <th>工程量</th>
                   <th>工期</th>
                   <th>工期计算</th>
@@ -2904,10 +2908,11 @@ function editableComponentForTask(task: Task, scenario: ScenarioInput): Componen
     component_type: task.component_type,
     quantity: task.quantity,
     quantity_label: task.quantity_label,
+    structure_parameter_label: task.structure_parameter_label ?? null,
     method_id: override.method_id ?? process?.method_id ?? process?.id ?? processId ?? null,
     productivity_option_id: override.productivity_option_id ?? optionId ?? null,
     enabled: true,
-    properties: {},
+    properties: task.properties ?? {},
   };
 }
 
@@ -2993,6 +2998,7 @@ function taskWithScenarioProcessPatch(task: Task, scenario: ScenarioInput): Task
     productivity_rule_id: rule.id,
     quantity: quantity.value,
     quantity_label: quantity.label,
+    structure_parameter_label: structureParameterLabelForTask(task, component),
     duration_days: calculateLocalDurationDays(quantity.value, rule),
     compatible_resource_types: [rule.resource_type],
   };
@@ -3047,15 +3053,10 @@ function localQuantityForTask(
   quantitySource: string,
 ): { value: number; label: string } {
   const value = localQuantityValueForTask(component, task, quantitySource);
-  if (quantitySource === "count" && component.component_type === "pile") {
-    return { value, label: displayValue(value) };
-  }
-  if (quantitySource === "count" && isContinuousStandardSegmentQuantity(component, task)) {
-    return { value, label: component.quantity_label || task.quantity_label || displayValue(value) };
-  }
+  if (quantitySource === "count") return { value, label: `${displayValue(value)}${countUnitForTask(component, task)}` };
   return {
     value,
-    label: component.quantity_label || task.quantity_label || `${displayValue(value)}${quantityUnitForSource(quantitySource)}`,
+    label: `${displayValue(value)}${quantityUnitForSource(quantitySource)}`,
   };
 }
 
@@ -3064,7 +3065,8 @@ function localQuantityValueForTask(component: ComponentModel, task: Task, quanti
     if (isContinuousStandardSegmentQuantity(component, task)) {
       return positiveNumber(component.quantity, task.quantity, 1);
     }
-    return 1;
+    if (component.component_type === "pile") return 1;
+    return positiveNumber(component.quantity, task.quantity, 1);
   }
   if (quantitySource === "pile_length_m") {
     return positiveNumber(
@@ -3075,12 +3077,7 @@ function localQuantityValueForTask(component: ComponentModel, task: Task, quanti
     );
   }
   if (quantitySource === "pier_height_m") {
-    return positiveNumber(
-      componentPropertyNumber(component, ["heightM", "height_m", "pierHeightM", "pier_height_m"]),
-      component.quantity,
-      task.quantity,
-      1,
-    );
+    return pierAverageHeightForComponent(component, task);
   }
   if (quantitySource === "deck_length_m") {
     return positiveNumber(
@@ -3180,9 +3177,7 @@ function durationExpression(task: Task, scenario: ScenarioInput | null): string 
     ? { ...option, duration_method: "days_per_unit", quantity_source: "count" }
     : option;
   const quantityName = quantitySourceLabels[effectiveOption.quantity_source] ?? "工程量";
-  const quantityText = isContinuousStandardSegment
-    ? (task.quantity_label || `${displayValue(task.quantity)}块`)
-    : `${quantityName}${displayValue(task.quantity)}${quantityUnitForSource(effectiveOption.quantity_source)}`;
+  const quantityText = `${quantityName}${task.quantity_label || `${displayValue(task.quantity)}${quantityUnitForSource(effectiveOption.quantity_source)}`}`;
   const resultText = `${effectiveTaskDurationDays(task, scenario)}天`;
 
   if (isSectionBasedPierProductivity(effectiveOption)) {
@@ -3239,6 +3234,64 @@ function resourceAssistantDetailScenario(
     scenario_name: plan.scenario_name,
     resource_pools: plan.resource_pools,
   };
+}
+
+function countUnitForTask(component: ComponentModel, task: Task): string {
+  if (component.component_type === "pile") return "根";
+  if (component.component_type === "cast_in_place_box_beam") return "联";
+  if (component.component_type === "cast_in_place_continuous_beam") {
+    const taskType = component.properties.continuous_task_type ?? task.properties?.continuous_task_type;
+    return taskType === "zero_block" || taskType === "standard_segment_batch" ? "块" : "段";
+  }
+  return "个";
+}
+
+function pierAverageHeightForComponent(component: ComponentModel, task: Task): number {
+  const columnHeights = component.properties.column_heights_m;
+  if (Array.isArray(columnHeights)) {
+    const validHeights = columnHeights
+      .map(numberFromUnknown)
+      .filter((value): value is number => value !== null && value > 0);
+    if (validHeights.length) {
+      return validHeights.reduce((total, value) => total + value, 0) / validHeights.length;
+    }
+  }
+  const structuredHeight = componentPropertyNumber(component, ["heightM", "height_m", "pierHeightM", "pier_height_m"]);
+  if (structuredHeight !== null && structuredHeight > 0) return structuredHeight;
+  const count = componentPropertyNumber(component, ["count"]);
+  if (count === null || count <= 1) return positiveNumber(component.quantity, task.quantity, 1);
+  return positiveNumber(task.quantity, 1);
+}
+
+function structureParameterLabelForTask(task: Task, component: ComponentModel): string | null {
+  if (task.structure_parameter_label) return task.structure_parameter_label;
+  if (component.structure_parameter_label) return component.structure_parameter_label;
+
+  const properties = Object.keys(component.properties).length ? component.properties : (task.properties ?? {});
+  const form = typeof properties.form === "string" ? properties.form.trim() : "";
+  const dimensions = properties.dimensions_m;
+  const count = numberFromUnknown(properties.count);
+
+  if (component.component_type === "pile") {
+    const diameter = componentPropertyNumber(component, ["diameterM", "diameter_m"])
+      ?? (isRecord(dimensions) ? numberFromUnknown(dimensions.diameterM) : null);
+    return [form || "桩基础", diameter && diameter > 0 ? `桩径${displayValue(diameter)}m` : ""].filter(Boolean).join("，");
+  }
+  if (component.component_type === "pier_body") {
+    const parts = [form || "墩柱"];
+    if (Array.isArray(dimensions)) {
+      const values = dimensions.map(numberFromUnknown).filter((value): value is number => value !== null && value > 0);
+      if (values.length === 1) parts.push(`柱径${displayValue(values[0])}m`);
+      else if (values.length > 1) parts.push(`截面${values.map((value) => `${displayValue(value)}m`).join(" × ")}`);
+    }
+    if (count !== null && count > 0) parts.push(`${displayValue(count)}根`);
+    return parts.join("，");
+  }
+  if (Array.isArray(dimensions)) {
+    const values = dimensions.map(numberFromUnknown).filter((value): value is number => value !== null && value > 0);
+    if (values.length) return values.map((value) => `${displayValue(value)}m`).join(" × ");
+  }
+  return form || null;
 }
 
 function resourceAssistantDetailSolveResult(

@@ -102,6 +102,20 @@ ResourceAssistantPlanStatus = Literal[
     "model_invalid",
 ]
 ResourceAssistantPlanOutcomeStatus = Literal["met", "not_met", "unconfirmed", "infeasible"]
+ResourceAssistantScheduleOutcomeStatus = Literal[
+    "duration_target_met",
+    "duration_target_not_met",
+    "no_feasible_schedule",
+]
+ResourceAssistantScheduleOutcomeReason = Literal[
+    "target_met",
+    "proven_late",
+    "late_unconfirmed",
+    "time_limit_no_schedule",
+    "proven_infeasible",
+    "resource_coverage_missing",
+    "target_missing",
+]
 ResourceAssistantRecommendationStatus = Literal["recommended", "no_recommendation", "insufficient_results"]
 ResourceAssistantExplanationSource = Literal["local", "llm"]
 
@@ -397,6 +411,7 @@ class Task(BaseModel):
     productivity_rule_id: str
     quantity: float
     quantity_label: str
+    structure_parameter_label: str | None = None
     duration_days: int = Field(ge=1)
     compatible_resource_types: list[str] = Field(default_factory=list)
     properties: dict[str, Any] = {}
@@ -425,6 +440,7 @@ class ComponentModel(BaseModel):
     component_type: ComponentType
     quantity: float = Field(ge=0)
     quantity_label: str = ""
+    structure_parameter_label: str | None = None
     method_id: str | None = None
     productivity_option_id: str | None = None
     enabled: bool = True
@@ -452,6 +468,7 @@ class UpperStructureComponent(BaseModel):
     span_length_m: float
     beam_count_per_span: int | None = None
     span_group_expression: str
+    structure_parameter_label: str | None = None
     control_level: ControlLevel | None = None
     properties: dict[str, Any] = {}
 
@@ -1097,6 +1114,8 @@ class ResourceAssistantCoreMetrics(BaseModel):
 class ResourceAssistantPlanResult(BaseModel):
     scenario_id: str
     plan_status: ResourceAssistantPlanOutcomeStatus | None = None
+    schedule_outcome_status: ResourceAssistantScheduleOutcomeStatus | None = None
+    schedule_outcome_reason: ResourceAssistantScheduleOutcomeReason | None = None
     solver_status: str | None = None
     input_resource_quantities: dict[str, int] = Field(default_factory=dict)
     resource_expansion_attempted: bool = False

@@ -38,6 +38,8 @@ type LlmContextDownloadSnapshot = {
   generatedAt: Date;
 };
 
+const DEFAULT_BASELINE_REASON = "确认为执行基准计划";
+
 export function ResourceAssistantPanel({
   scenario,
   renderPlanDetail,
@@ -61,7 +63,7 @@ export function ResourceAssistantPanel({
   const [baselineVersionNo, setBaselineVersionNo] = useState<number | null>(null);
   const [baselinePlanId, setBaselinePlanId] = useState<string | null>(null);
   const [baselineConfirmedBy, setBaselineConfirmedBy] = useState("本地计划工程师");
-  const [baselineReason, setBaselineReason] = useState("");
+  const [baselineReason, setBaselineReason] = useState(DEFAULT_BASELINE_REASON);
   const [error, setError] = useState<string | null>(null);
   const [recommendationError, setRecommendationError] = useState<string | null>(null);
   const [llmContextDownload, setLlmContextDownload] = useState<LlmContextDownloadSnapshot | null>(null);
@@ -69,6 +71,8 @@ export function ResourceAssistantPanel({
   const plansRef = useRef<ResourceAssistantPlan[]>([]);
   const resultsRef = useRef<ResourceAssistantPlanResult[]>([]);
   const comparisonRequestRef = useRef(0);
+  const baselineConfirmedByInputRef = useRef<HTMLInputElement | null>(null);
+  const baselineReasonInputRef = useRef<HTMLInputElement | null>(null);
   const scenarioFingerprint = useMemo(
     () => (scenario ? `${scenario.scenario_id}:${scenario.project.start_date}:${scenario.resource_pools.length}` : "empty"),
     [scenario],
@@ -108,7 +112,7 @@ export function ResourceAssistantPanel({
     setConfirmingBaseline(false);
     setBaselineVersionNo(null);
     setBaselinePlanId(null);
-    setBaselineReason("");
+    setBaselineReason(DEFAULT_BASELINE_REASON);
     setError(null);
     setRecommendationError(null);
     setLlmContextDownload(null);
@@ -234,8 +238,14 @@ export function ResourceAssistantPanel({
     const plan = plansRef.current.find((item) => item.scenario_id === planId);
     const planResult = resultsRef.current.find((item) => item.scenario_id === planId);
     if (!plan || !planResult || !planResult.result || !["OPTIMAL", "FEASIBLE"].includes(planResult.result.status)) return;
-    if (!baselineConfirmedBy.trim() || !baselineReason.trim()) {
-      setError("请先填写基准确认人和选择原因。");
+    if (!baselineConfirmedBy.trim()) {
+      setError("请先填写基准确认人。");
+      focusBaselineConfirmationInput(baselineConfirmedByInputRef.current);
+      return;
+    }
+    if (!baselineReason.trim()) {
+      setError("请先填写选择原因。");
+      focusBaselineConfirmationInput(baselineReasonInputRef.current);
       return;
     }
     setConfirmingBaseline(true);
@@ -347,8 +357,8 @@ export function ResourceAssistantPanel({
         {error && <div className="notice danger">{error}</div>}
         {plans.length > 0 && (
           <div className="baseline-confirmation-bar">
-            <label>基准确认人<input value={baselineConfirmedBy} onChange={(event) => setBaselineConfirmedBy(event.target.value)} /></label>
-            <label>选择原因<input value={baselineReason} onChange={(event) => setBaselineReason(event.target.value)} placeholder="例如：工期与资源投入最符合执行目标" /></label>
+            <label>基准确认人<input ref={baselineConfirmedByInputRef} required value={baselineConfirmedBy} onChange={(event) => setBaselineConfirmedBy(event.target.value)} /></label>
+            <label>选择原因<input ref={baselineReasonInputRef} required value={baselineReason} onChange={(event) => setBaselineReason(event.target.value)} placeholder="例如：工期与资源投入最符合执行目标" /></label>
             <span>在下方已求解可行方案卡中确认基准。</span>
           </div>
         )}
@@ -399,6 +409,13 @@ export function ResourceAssistantPanel({
       />
     </div>
   );
+}
+
+function focusBaselineConfirmationInput(input: HTMLInputElement | null) {
+  window.requestAnimationFrame(() => {
+    input?.scrollIntoView({ behavior: "smooth", block: "center" });
+    input?.focus({ preventScroll: true });
+  });
 }
 
 function buildLlmContextFileName(projectName: string, generatedAt: Date): string {

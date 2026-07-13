@@ -6,6 +6,8 @@ import type {
   ResourceAssistantPlanOutcomeStatus,
   ResourceAssistantPlanProfile,
   ResourceAssistantPlanResult,
+  ResourceAssistantScheduleOutcomeReason,
+  ResourceAssistantScheduleOutcomeStatus,
   ResourceAssistantPlanStatus,
   ResourceAssistantRecommendation,
   ResourceAssistantLlmConfigStatus,
@@ -57,30 +59,90 @@ export const resourceAssistantOutcomeLabels: Record<ResourceAssistantPlanOutcome
   infeasible: "物理不可行",
 };
 
+export const resourceAssistantScheduleOutcomeLabels: Record<ResourceAssistantScheduleOutcomeStatus, string> = {
+  duration_target_met: "工期目标已满足",
+  duration_target_not_met: "工期目标未满足",
+  no_feasible_schedule: "当前资源未获得可行排程",
+};
+
 export function resourceAssistantOutcomeTone(
-  status?: ResourceAssistantPlanOutcomeStatus | null,
+  status?: ResourceAssistantScheduleOutcomeStatus | null,
 ): "neutral" | "good" | "warning" | "danger" {
-  if (status === "met") return "good";
-  if (status === "not_met" || status === "unconfirmed") return "warning";
-  if (status === "infeasible") return "danger";
+  if (status === "duration_target_met") return "good";
+  if (status === "duration_target_not_met") return "warning";
+  if (status === "no_feasible_schedule") return "danger";
   return "neutral";
 }
 
-export function resourceAssistantOutcomeDetail(result?: ResourceAssistantPlanResult | null): string {
-  if (!result?.plan_status) return "";
+export function resourceAssistantScheduleOutcomeStatus(
+  result?: ResourceAssistantPlanResult | null,
+): ResourceAssistantScheduleOutcomeStatus | null {
+  if (!result) return null;
+  if (result.schedule_outcome_status) return result.schedule_outcome_status;
+  if (result.plan_status === "met") return "duration_target_met";
+  if (result.plan_status === "not_met") return "duration_target_not_met";
+  if (result.plan_status === "infeasible") return "no_feasible_schedule";
+  if (result.plan_status === "unconfirmed") {
+    const raw = result.result?.stats?.target_achievement;
+    const target = isRecord(raw) ? raw : {};
+    if (target.target_present === false) return null;
+    return result.result?.tasks?.length ? "duration_target_not_met" : "no_feasible_schedule";
+  }
+  return null;
+}
+
+export function resourceAssistantScheduleOutcomeReason(
+  result?: ResourceAssistantPlanResult | null,
+): ResourceAssistantScheduleOutcomeReason | null {
+  if (!result) return null;
+  if (result.schedule_outcome_reason) return result.schedule_outcome_reason;
   const raw = result.result?.stats?.target_achievement;
   const target = isRecord(raw) ? raw : {};
-  const hardLate = numberValue(target.hard_milestone_late_days);
-  const durationLate = numberValue(target.fixed_duration_overrun_days);
-  const totalLate = hardLate + durationLate;
-  if (result.plan_status === "met") return "当前资源已满足强制目标，可参与推荐。";
-  if (result.plan_status === "not_met") return `当前最优排程仍延期 ${totalLate} 天，不自动增加资源。`;
-  if (result.plan_status === "unconfirmed") {
-    return result.result?.tasks?.length
-      ? `当前可行排程${totalLate > 0 ? `延期 ${totalLate} 天，` : ""}尚未证明最优。`
-      : "限时内未确认可行排程，不据此判断资源不足。";
+  if (typeof target.schedule_outcome_reason === "string") {
+    return target.schedule_outcome_reason as ResourceAssistantScheduleOutcomeReason;
   }
-  return result.diagnostics[0]?.message || "当前资源覆盖或硬规则无法形成可行排程。";
+  if (result.plan_status === "met") return "target_met";
+  if (result.plan_status === "not_met") return "proven_late";
+  if (result.plan_status === "infeasible") return "proven_infeasible";
+  if (result.plan_status === "unconfirmed") {
+    if (target.target_present === false) return "target_missing";
+    return result.result?.tasks?.length ? "late_unconfirmed" : "time_limit_no_schedule";
+  }
+  return null;
+}
+
+export function resourceAssistantMaxTargetDelayDays(result?: ResourceAssistantPlanResult | null): number {
+  if (!result) return 0;
+  const raw = result.result?.stats?.target_achievement;
+  const target = isRecord(raw) ? raw : {};
+  if (target.max_target_delay_days !== undefined && target.max_target_delay_days !== null) {
+    return Math.max(0, numberValue(target.max_target_delay_days));
+  }
+  const hardMilestoneLateDays = (result.result?.milestone_results ?? [])
+    .filter((milestone) => milestone.mode === "hard")
+    .map((milestone) => Math.max(0, numberValue(milestone.lateness_days)));
+  const fixedDurationOverrunDays = Math.max(0, numberValue(target.fixed_duration_overrun_days));
+  if (hardMilestoneLateDays.length > 0) return Math.max(fixedDurationOverrunDays, ...hardMilestoneLateDays);
+  return Math.max(fixedDurationOverrunDays, numberValue(target.hard_milestone_late_days));
+}
+
+export function resourceAssistantOutcomeDetail(result?: ResourceAssistantPlanResult | null): string {
+  if (!result) return "";
+  const status = resourceAssistantScheduleOutcomeStatus(result);
+  const reason = resourceAssistantScheduleOutcomeReason(result);
+  const maxDelay = resourceAssistantMaxTargetDelayDays(result);
+  if (reason === "target_missing") return "缺少工期目标，无法评估。";
+  if (status === "duration_target_met") return "当前资源已满足强制工期目标，可参与推荐。";
+  if (status === "duration_target_not_met" && reason === "proven_late") {
+    return `当前固定资源下最优排程最大延期 ${maxDelay} 天，不自动增加资源。`;
+  }
+  if (status === "duration_target_not_met") {
+    return `当前排程最大延期 ${maxDelay} 天，尚未证明不存在更优排程。`;
+  }
+  if (status === "no_feasible_schedule" && reason === "time_limit_no_schedule") {
+    return "限时内未获得可行排程，不据此判断资源一定不足。";
+  }
+  return result.diagnostics[0]?.message || "已证明当前资源无法形成可行排程。";
 }
 
 export function llmConfigStatusLabel(status: ResourceAssistantLlmConfigStatus): string {
@@ -94,6 +156,9 @@ export function metricValueDisplay(row: ResourceAssistantMetricRow, scenarioId: 
   if (!payload) return "-";
   const value = payload.value;
   if (value === null || value === undefined || value === "") return unavailableDisplay(payload.not_available_reasons);
+  if (row.metric_id === "schedule_outcome_status" && typeof value === "string") {
+    return resourceAssistantScheduleOutcomeLabels[value as ResourceAssistantScheduleOutcomeStatus] ?? value;
+  }
   if (row.metric_id === "plan_status" && typeof value === "string") {
     return resourceAssistantOutcomeLabels[value as ResourceAssistantPlanOutcomeStatus] ?? value;
   }

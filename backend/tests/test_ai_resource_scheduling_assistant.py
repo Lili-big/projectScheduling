@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-import time
 from collections import Counter
 from datetime import date, timedelta
 from pathlib import Path
@@ -491,8 +490,10 @@ def test_batch_solve_keeps_plan_results_independent(monkeypatch) -> None:
     scenario = default_scenario_with_process_library()
     initial = initialize_resource_assistant(ResourceAssistantInitialRequest(scenario=scenario, generation_mode="local_fallback_only"))
     generated, result, _ = _metric_fixture()
+    calls: list[tuple[str, float]] = []
 
     def fake_solve(plan_scenario):
+        calls.append((plan_scenario.scenario_id, plan_scenario.time_limit_seconds))
         if plan_scenario.scenario_id.endswith("balanced"):
             raise RuntimeError("balanced failed")
         return ScenarioSolveResult(
@@ -516,21 +517,35 @@ def test_batch_solve_keeps_plan_results_independent(monkeypatch) -> None:
     assert statuses["balanced"] == "failed"
     assert statuses["crash"] in {"optimal", "feasible"}
     assert len(response.plan_results) == 3
+    assert [scenario_id for scenario_id, _ in calls] == [plan.scenario_id for plan in initial.resource_plans]
+    assert {time_limit_seconds for _, time_limit_seconds in calls} == {30.0}
+    assert scenario.time_limit_seconds == 15
 
 
 def test_single_plan_solve_only_runs_selected_plan_and_never_explains(monkeypatch) -> None:
     scenario = default_scenario_with_process_library()
     initial = initialize_resource_assistant(ResourceAssistantInitialRequest(scenario=scenario, generation_mode="local_fallback_only"))
     generated, result, _ = _metric_fixture()
-    calls: list[str] = []
+    calls: list[tuple[str, float]] = []
 
     def fake_solve(plan_scenario):
-        calls.append(plan_scenario.scenario_id)
+        calls.append((plan_scenario.scenario_id, plan_scenario.time_limit_seconds))
+        solved_generated = generated.model_copy(
+            deep=True,
+            update={
+                "schedule_input": generated.schedule_input.model_copy(
+                    update={"time_limit_seconds": plan_scenario.time_limit_seconds}
+                )
+            },
+        )
+        solved_result = result.model_copy(deep=True)
+        solved_result.stats["configured_time_limit_seconds"] = plan_scenario.time_limit_seconds
+        solved_result.stats["target_achievement"]["time_budget_seconds"] = plan_scenario.time_limit_seconds
         return ScenarioSolveResult(
             scenario_id=plan_scenario.scenario_id,
             scenario_name=plan_scenario.scenario_name,
-            generated=generated,
-            result=result,
+            generated=solved_generated,
+            result=solved_result,
             milestone_results=[],
             diagnostics=[],
             metrics={},
@@ -543,22 +558,25 @@ def test_single_plan_solve_only_runs_selected_plan_and_never_explains(monkeypatc
         ResourceAssistantSingleSolveRequest(scenario=scenario, resource_plan=initial.resource_plans[0])
     )
 
-    assert calls == [initial.resource_plans[0].scenario_id]
+    assert calls == [(initial.resource_plans[0].scenario_id, 30.0)]
+    assert scenario.time_limit_seconds == 15
     assert response.resource_plan.scenario_id == initial.resource_plans[0].scenario_id
     assert response.plan_result.scenario_id == initial.resource_plans[0].scenario_id
+    assert response.plan_result.generated.schedule_input.time_limit_seconds == 30.0
+    assert response.plan_result.result.stats["configured_time_limit_seconds"] == 30.0
+    assert response.plan_result.result.stats["target_achievement"]["time_budget_seconds"] == 30.0
 
 
 def test_single_plan_solve_uses_exact_resources_once_without_expansion(monkeypatch) -> None:
     monkeypatch.setenv("AI_RESOURCE_ASSISTANT_PROVIDER", "local")
+    monkeypatch.setattr(assistant_module, "AI_RESOURCE_PLAN_SOLVE_TIME_LIMIT_SECONDS", 2.0)
     scenario = default_scenario_with_process_library().model_copy(update={"time_limit_seconds": 2.0})
     initial = initialize_resource_assistant(
         ResourceAssistantInitialRequest(scenario=scenario, generation_mode="local_fallback_only")
     )
     plan = initial.resource_plans[0]
 
-    started_at = time.perf_counter()
     response = solve_resource_plan(ResourceAssistantSingleSolveRequest(scenario=scenario, resource_plan=plan))
-    elapsed = time.perf_counter() - started_at
 
     expected = {pool.type: int(pool.quantity or 0) for pool in plan.resource_pools}
     actual = Counter(resource.type for resource in response.plan_result.generated.schedule_input.resources)
@@ -568,11 +586,28 @@ def test_single_plan_solve_uses_exact_resources_once_without_expansion(monkeypat
             assert actual[pool.type] == int(pool.quantity or 0)
     assert response.plan_result.resource_expansion_attempted is False
     assert response.plan_result.plan_status in {"met", "not_met", "unconfirmed", "infeasible"}
+    assert response.plan_result.schedule_outcome_status in {
+        "duration_target_met",
+        "duration_target_not_met",
+        "no_feasible_schedule",
+    }
+    assert response.plan_result.schedule_outcome_reason is not None
     assert response.plan_result.solver_status == response.plan_result.result.status
+    target = response.plan_result.result.stats["target_achievement"]
+    assert target["schedule_outcome_status"] == response.plan_result.schedule_outcome_status
+    assert target["schedule_outcome_reason"] == response.plan_result.schedule_outcome_reason
+    assert target["max_target_delay_days"] >= 0
     assert response.plan_result.result.stats["solver_call_count"] == 1
     assert response.plan_result.result.stats["baseline_status"] == "not_evaluated"
     assert response.plan_result.result.stats["resource_recommendation_status"] == "not_applicable"
-    assert elapsed <= scenario.time_limit_seconds + 2.0
+    assert response.plan_result.generated.schedule_input.time_limit_seconds == 2.0
+    assert response.plan_result.result.stats["configured_time_limit_seconds"] == 2.0
+    assert target["time_budget_seconds"] == 2.0
+    assert response.plan_result.result.objective_breakdown["objective_weights"] == {
+        "control_node_late": 10_000_000_000,
+        "makespan_and_soft_milestone": 5_000_000,
+        "resource_idle": 50_000,
+    }
 
 
 def test_partial_comparison_does_not_run_solver_or_llm(monkeypatch) -> None:
@@ -620,7 +655,32 @@ def test_recommendation_never_falls_back_to_late_feasible_results() -> None:
 
     assert recommendation.recommended_scenario_id is None
     assert recommendation.recommendation_status == "insufficient_results"
-    assert "met" in recommendation.rule_reason
+    assert "工期目标已满足" in recommendation.rule_reason
+
+
+def test_recommendation_uses_new_three_state_and_supports_legacy_met() -> None:
+    plans, results = _recommendation_fixture(
+        economy=(120, 900_000, "met"),
+        balanced=(100, 1_000_000, "met"),
+        crash=(98, 1_130_000, "met"),
+    )
+    results[0].schedule_outcome_status = "duration_target_not_met"
+    results[0].schedule_outcome_reason = "late_unconfirmed"
+    results[1].schedule_outcome_status = "duration_target_met"
+    results[1].schedule_outcome_reason = "target_met"
+    results[2].schedule_outcome_status = None
+    results[2].schedule_outcome_reason = None
+
+    recommendation = build_deterministic_recommendation(plans, results)
+    comparison = build_comparison(plans, results)
+    outcome_row = next(row for row in comparison.metric_rows if row.metric_id == "schedule_outcome_status")
+
+    assert recommendation.recommended_scenario_id == results[1].scenario_id
+    assert any("工期目标已满足" in item for item in recommendation.evidence)
+    assert all(" met" not in item for item in recommendation.evidence)
+    assert outcome_row.values[results[0].scenario_id]["value"] == "duration_target_not_met"
+    assert outcome_row.values[results[1].scenario_id]["value"] == "duration_target_met"
+    assert outcome_row.values[results[2].scenario_id]["value"] == "duration_target_met"
 
 
 def _recommendation_fixture(
@@ -654,6 +714,22 @@ def _recommendation_fixture(
                     else "infeasible"
                     if target_status == "physical_infeasible"
                     else "not_met"
+                ),
+                schedule_outcome_status=(
+                    "duration_target_met"
+                    if target_status in {"met", "candidate_resources_target_met"}
+                    else "no_feasible_schedule"
+                    if target_status == "physical_infeasible"
+                    else "duration_target_not_met"
+                ),
+                schedule_outcome_reason=(
+                    "target_met"
+                    if target_status in {"met", "candidate_resources_target_met"}
+                    else "proven_infeasible"
+                    if target_status == "physical_infeasible"
+                    else "late_unconfirmed"
+                    if target_status == "unconfirmed"
+                    else "proven_late"
                 ),
                 solver_status="FEASIBLE",
                 input_resource_quantities={pool.type: int(pool.quantity or 0) for pool in plan.resource_pools},

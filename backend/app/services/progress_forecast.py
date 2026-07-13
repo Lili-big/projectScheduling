@@ -203,6 +203,112 @@ def create_progress_snapshot(
     )
 
 
+_PERCENT_COMPLETE_TOLERANCE = 0.011
+
+
+def _quantity_tolerance(total_quantity: float) -> float:
+    return max(1e-6, abs(total_quantity) * 1e-9)
+
+
+def _quantities_are_close(left: float, right: float, total_quantity: float) -> bool:
+    return math.isclose(
+        left,
+        right,
+        rel_tol=1e-9,
+        abs_tol=_quantity_tolerance(total_quantity),
+    )
+
+
+def _normalize_progress_quantities(entry: ProgressEntry, task) -> dict[str, float | None]:
+    total_quantity = float(task.quantity)
+    total_is_valid = math.isfinite(total_quantity) and total_quantity > 0
+    if not total_is_valid:
+        if entry.completed_quantity is not None or entry.remaining_quantity is not None:
+            raise PlanControlValidationError(
+                f"任务 {entry.task_id} 的计划总工程量无效，不能填写已完或剩余工程量。"
+            )
+        return {
+            "percent_complete": entry.percent_complete,
+            "completed_quantity": None,
+            "remaining_quantity": None,
+        }
+
+    completed_quantity = entry.completed_quantity
+    remaining_quantity = entry.remaining_quantity
+
+    if completed_quantity is not None:
+        if not math.isfinite(completed_quantity) or completed_quantity < 0:
+            raise PlanControlValidationError(f"任务 {entry.task_id} 的已完工程量不能为负数或非有限数值。")
+        if completed_quantity > total_quantity and not _quantities_are_close(
+            completed_quantity, total_quantity, total_quantity
+        ):
+            raise PlanControlValidationError(f"任务 {entry.task_id} 的已完工程量超过计划总工程量。")
+        completed_quantity = min(completed_quantity, total_quantity)
+
+    if remaining_quantity is not None:
+        if not math.isfinite(remaining_quantity) or remaining_quantity < 0:
+            raise PlanControlValidationError(f"任务 {entry.task_id} 的剩余工程量不能为负数或非有限数值。")
+        if remaining_quantity > total_quantity and not _quantities_are_close(
+            remaining_quantity, total_quantity, total_quantity
+        ):
+            raise PlanControlValidationError(f"任务 {entry.task_id} 的剩余工程量超过计划总工程量。")
+        remaining_quantity = min(remaining_quantity, total_quantity)
+
+    if entry.status == "not_started":
+        if completed_quantity is not None and not _quantities_are_close(completed_quantity, 0, total_quantity):
+            raise PlanControlValidationError(f"未开始任务 {entry.task_id} 的已完工程量必须为 0。")
+        if remaining_quantity is not None and not _quantities_are_close(
+            remaining_quantity, total_quantity, total_quantity
+        ):
+            raise PlanControlValidationError(f"未开始任务 {entry.task_id} 的剩余工程量必须等于计划总工程量。")
+        return {
+            "percent_complete": 0,
+            "completed_quantity": 0,
+            "remaining_quantity": total_quantity,
+        }
+
+    if entry.status == "completed":
+        if completed_quantity is not None and not _quantities_are_close(
+            completed_quantity, total_quantity, total_quantity
+        ):
+            raise PlanControlValidationError(f"已完成任务 {entry.task_id} 的已完工程量必须等于计划总工程量。")
+        if remaining_quantity is not None and not _quantities_are_close(remaining_quantity, 0, total_quantity):
+            raise PlanControlValidationError(f"已完成任务 {entry.task_id} 的剩余工程量必须为 0。")
+        return {
+            "percent_complete": 100,
+            "completed_quantity": total_quantity,
+            "remaining_quantity": 0,
+        }
+
+    if completed_quantity is None and remaining_quantity is None:
+        completed_quantity = total_quantity * entry.percent_complete / 100
+        remaining_quantity = total_quantity - completed_quantity
+        return {
+            "percent_complete": round(entry.percent_complete, 2),
+            "completed_quantity": completed_quantity,
+            "remaining_quantity": remaining_quantity,
+        }
+
+    if completed_quantity is None:
+        completed_quantity = total_quantity - remaining_quantity
+    expected_percent_complete = round(completed_quantity / total_quantity * 100, 2)
+    if abs(entry.percent_complete - expected_percent_complete) > _PERCENT_COMPLETE_TOLERANCE:
+        raise PlanControlValidationError(f"任务 {entry.task_id} 的完成比例与已完工程量不一致。")
+
+    expected_remaining_quantity = total_quantity - completed_quantity
+    if remaining_quantity is not None and not _quantities_are_close(
+        remaining_quantity, expected_remaining_quantity, total_quantity
+    ):
+        raise PlanControlValidationError(
+            f"任务 {entry.task_id} 的已完工程量与剩余工程量之和不等于计划总工程量。"
+        )
+    return {
+        "percent_complete": expected_percent_complete,
+        "completed_quantity": completed_quantity,
+        "remaining_quantity": expected_remaining_quantity,
+    }
+
+
 def _normalize_progress_entry(entry: ProgressEntry, task, status_date: date) -> ProgressEntry:
     values = entry.model_dump()
     for field in ("actual_start_date", "actual_finish_date"):
@@ -211,10 +317,7 @@ def _normalize_progress_entry(entry: ProgressEntry, task, status_date: date) -> 
             raise PlanControlValidationError(f"任务 {entry.task_id} 的实际日期不能晚于状态日期。")
     if entry.actual_start_date and entry.actual_finish_date and entry.actual_finish_date < entry.actual_start_date:
         raise PlanControlValidationError(f"任务 {entry.task_id} 的实际完成日期不能早于实际开始日期。")
-    if entry.completed_quantity is not None and entry.completed_quantity > task.quantity:
-        raise PlanControlValidationError(f"任务 {entry.task_id} 的已完工程量超过计划工程量。")
-    if entry.remaining_quantity is not None and entry.remaining_quantity > task.quantity:
-        raise PlanControlValidationError(f"任务 {entry.task_id} 的剩余工程量超过计划工程量。")
+    values.update(_normalize_progress_quantities(entry, task))
 
     if entry.status == "not_started":
         if entry.actual_start_date or entry.actual_finish_date or entry.percent_complete != 0:
@@ -223,11 +326,10 @@ def _normalize_progress_entry(entry: ProgressEntry, task, status_date: date) -> 
     elif entry.status == "in_progress":
         if entry.actual_start_date is None or not (0 < entry.percent_complete < 100):
             raise PlanControlValidationError(f"进行中任务 {entry.task_id} 必须填写实际开始日期和 0–100 之间的完成比例。")
-        if entry.completed_quantity is not None and task.quantity > 0:
-            values["percent_complete"] = min(99.99, round(entry.completed_quantity / task.quantity * 100, 2))
-        if entry.remaining_quantity is not None and entry.actual_productivity is not None:
+        normalized_remaining_quantity = values["remaining_quantity"]
+        if normalized_remaining_quantity is not None and entry.actual_productivity is not None:
             values.update(
-                remaining_days=max(1, math.ceil(entry.remaining_quantity / entry.actual_productivity)),
+                remaining_days=max(1, math.ceil(normalized_remaining_quantity / entry.actual_productivity)),
                 remaining_days_source="calculated",
             )
         elif entry.estimated_remaining_days is not None and entry.estimated_remaining_days > 0:
@@ -239,12 +341,16 @@ def _normalize_progress_entry(entry: ProgressEntry, task, status_date: date) -> 
             raise PlanControlValidationError(f"已完成任务 {entry.task_id} 必须填写实际起止日期且完成比例为 100%。")
         values.update(remaining_days=0, remaining_days_source="none")
     elif entry.status == "paused":
+        if not (0 <= values["percent_complete"] < 100):
+            raise PlanControlValidationError(f"暂停任务 {entry.task_id} 的完成比例必须小于 100%。")
         if entry.actual_start_date is None or not (entry.reason or "").strip():
             raise PlanControlValidationError(f"暂停任务 {entry.task_id} 必须填写实际开始日期和暂停原因。")
         if entry.estimated_remaining_days is None or entry.estimated_remaining_days <= 0:
             raise PlanControlValidationError(f"暂停任务 {entry.task_id} 必须填写预计剩余工期。")
         values.update(remaining_days=entry.estimated_remaining_days, remaining_days_source="manual")
     else:
+        if not (0 <= values["percent_complete"] < 100):
+            raise PlanControlValidationError(f"取消任务 {entry.task_id} 的完成比例必须小于 100%。")
         if not (entry.reason or "").strip():
             raise PlanControlValidationError(f"取消任务 {entry.task_id} 必须填写取消原因。")
         values.update(remaining_days=0, remaining_days_source="none")

@@ -16,6 +16,7 @@ import type {
   ProgressEntry,
   ProgressTaskStatus,
   ScenarioInput,
+  Task,
 } from "../../types/scheduler";
 
 const statusLabels: Record<ProgressTaskStatus, string> = {
@@ -43,9 +44,143 @@ function emptyEntry(taskId: string): ProgressEntry {
   };
 }
 
+type ProgressQuantityView = {
+  entry: ProgressEntry;
+  status: "valid" | "derived" | "conflict" | "unavailable";
+  message: string | null;
+};
+
+type ProgressQuantityDraft = {
+  percentComplete?: string;
+  completedQuantity?: string;
+};
+
+const percentTolerance = 0.011;
+
+function roundQuantity(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000;
+}
+
+function roundPercent(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function validTotalQuantity(task: Task): boolean {
+  return Number.isFinite(task.quantity) && task.quantity > 0;
+}
+
+function taskQuantityUnit(task: Task): string {
+  return task.quantity_label.trim().match(/(m³|m²|m|个|根|块|段|联|榀|孔|座|台|处|套|节)$/)?.[1] ?? "";
+}
+
+function quantityTolerance(totalQuantity: number): number {
+  return Math.max(0.000001, Math.abs(totalQuantity) * 0.000000001);
+}
+
+function deriveProgressQuantityView(task: Task, source?: ProgressEntry): ProgressQuantityView {
+  const entry = source ? { ...source } : emptyEntry(task.id);
+  if (!validTotalQuantity(task)) {
+    return {
+      entry: { ...entry, completed_quantity: null, remaining_quantity: null },
+      status: "unavailable",
+      message: "计划总工程量无效，数量联动已停用。",
+    };
+  }
+
+  const totalQuantity = task.quantity;
+  const suppliedCompleted = entry.completed_quantity;
+  const suppliedRemaining = entry.remaining_quantity;
+  let completedQuantity = suppliedCompleted;
+  let remainingQuantity = suppliedRemaining;
+  let derived = false;
+
+  if (completedQuantity == null && remainingQuantity == null) {
+    completedQuantity = totalQuantity * entry.percent_complete / 100;
+    remainingQuantity = totalQuantity - completedQuantity;
+    derived = source !== undefined;
+  } else if (completedQuantity == null) {
+    completedQuantity = totalQuantity - (remainingQuantity ?? 0);
+    derived = true;
+  } else if (remainingQuantity == null) {
+    remainingQuantity = totalQuantity - completedQuantity;
+    derived = true;
+  }
+
+  const normalizedCompletedQuantity = completedQuantity ?? totalQuantity * entry.percent_complete / 100;
+  const normalizedRemainingQuantity = remainingQuantity ?? totalQuantity - normalizedCompletedQuantity;
+  const expectedPercent = roundPercent((normalizedCompletedQuantity / totalQuantity) * 100);
+  const hasConflict =
+    !Number.isFinite(normalizedCompletedQuantity) ||
+    !Number.isFinite(normalizedRemainingQuantity) ||
+    normalizedCompletedQuantity < 0 ||
+    normalizedRemainingQuantity < 0 ||
+    normalizedCompletedQuantity > totalQuantity + quantityTolerance(totalQuantity) ||
+    normalizedRemainingQuantity > totalQuantity + quantityTolerance(totalQuantity) ||
+    Math.abs(entry.percent_complete - expectedPercent) > percentTolerance ||
+    Math.abs(normalizedCompletedQuantity + normalizedRemainingQuantity - totalQuantity) > quantityTolerance(totalQuantity);
+
+  return {
+    entry: {
+      ...entry,
+      completed_quantity: roundQuantity(normalizedCompletedQuantity),
+      remaining_quantity: roundQuantity(normalizedRemainingQuantity),
+    },
+    status: hasConflict ? "conflict" : derived ? "derived" : "valid",
+    message: hasConflict
+      ? "历史进度的比例、已完量和剩余量不一致，请更正后保存新修订。"
+      : derived
+        ? "历史进度缺少工程量，当前仅按已有值派生展示。"
+        : null,
+  };
+}
+
+function entryForStatus(task: Task, entry: ProgressEntry, status: ProgressTaskStatus): ProgressEntry {
+  const totalQuantity = validTotalQuantity(task) ? task.quantity : null;
+  if (status === "not_started") {
+    return {
+      ...entry,
+      status,
+      actual_start_date: null,
+      actual_finish_date: null,
+      percent_complete: 0,
+      completed_quantity: totalQuantity === null ? null : 0,
+      remaining_quantity: totalQuantity,
+      actual_productivity: null,
+      estimated_remaining_days: null,
+      expected_resume_date: null,
+      reason: null,
+    };
+  }
+  if (status === "completed") {
+    return {
+      ...entry,
+      status,
+      percent_complete: 100,
+      completed_quantity: totalQuantity,
+      remaining_quantity: totalQuantity === null ? null : 0,
+      actual_productivity: null,
+      estimated_remaining_days: null,
+      expected_resume_date: null,
+      reason: null,
+    };
+  }
+  if (entry.status === "not_started" || entry.status === "completed") {
+    return {
+      ...entry,
+      status,
+      actual_finish_date: null,
+      percent_complete: 0,
+      completed_quantity: totalQuantity === null ? null : 0,
+      remaining_quantity: totalQuantity,
+    };
+  }
+  return { ...entry, status, actual_finish_date: null };
+}
+
 export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null }) {
   const [summary, setSummary] = useState<PlanControlProjectSummary | null>(null);
   const [entries, setEntries] = useState<Record<string, ProgressEntry>>({});
+  const [quantityDrafts, setQuantityDrafts] = useState<Record<string, ProgressQuantityDraft>>({});
   const [statusDate, setStatusDate] = useState(new Date().toISOString().slice(0, 10));
   const [submittedBy, setSubmittedBy] = useState("本地计划工程师");
   const [correctionReason, setCorrectionReason] = useState("");
@@ -70,6 +205,7 @@ export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null 
       setForecast(next.latest_forecast ?? null);
       const restored = Object.fromEntries((next.current_progress_snapshot?.entries ?? []).map((item) => [item.task_id, item]));
       setEntries(restored);
+      setQuantityDrafts({});
       if (next.current_progress_snapshot) setStatusDate(next.current_progress_snapshot.status_date);
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "计划管控数据加载失败");
@@ -83,6 +219,7 @@ export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null 
     setForecast(null);
     setAdjustments(null);
     setEntries({});
+    setQuantityDrafts({});
     void reload();
   }, [scenario?.scenario_id]);
 
@@ -106,19 +243,84 @@ export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null 
     setPage(1);
   }, [query, scenario?.scenario_id]);
 
-  function patchEntry(taskId: string, patch: Partial<ProgressEntry>) {
+  const quantityIssueCount = useMemo(
+    () => tasks.filter((task) => {
+      const status = deriveProgressQuantityView(task, entries[task.id]).status;
+      return status === "conflict" || status === "unavailable";
+    }).length,
+    [entries, tasks],
+  );
+
+  function patchEntry(task: Task, patch: Partial<ProgressEntry>) {
+    if (patch.status) {
+      setQuantityDrafts((current) => {
+        const next = { ...current };
+        delete next[task.id];
+        return next;
+      });
+    }
     setEntries((current) => {
-      const base = current[taskId] ?? emptyEntry(taskId);
-      const next = { ...base, ...patch };
-      if (patch.status === "completed") next.percent_complete = 100;
-      if (patch.status === "not_started") next.percent_complete = 0;
-      return { ...current, [taskId]: next };
+      const base = deriveProgressQuantityView(task, current[task.id]).entry;
+      const next = patch.status ? entryForStatus(task, base, patch.status) : { ...base, ...patch };
+      return { ...current, [task.id]: next };
+    });
+  }
+
+  function patchPercentComplete(task: Task, rawValue: string) {
+    setQuantityDrafts((current) => ({ ...current, [task.id]: { percentComplete: rawValue } }));
+    if (rawValue === "") return;
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) return;
+    const percentComplete = value;
+    setEntries((current) => {
+      const base = deriveProgressQuantityView(task, current[task.id]).entry;
+      const completedQuantity = validTotalQuantity(task)
+        ? roundQuantity(task.quantity * percentComplete / 100)
+        : null;
+      return {
+        ...current,
+        [task.id]: {
+          ...base,
+          percent_complete: roundPercent(percentComplete),
+          completed_quantity: completedQuantity,
+          remaining_quantity: completedQuantity === null ? null : roundQuantity(task.quantity - completedQuantity),
+        },
+      };
+    });
+  }
+
+  function patchCompletedQuantity(task: Task, rawValue: string) {
+    if (!validTotalQuantity(task)) return;
+    setQuantityDrafts((current) => ({ ...current, [task.id]: { completedQuantity: rawValue } }));
+    if (rawValue === "") return;
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) return;
+    const completedQuantity = value;
+    setEntries((current) => {
+      const base = deriveProgressQuantityView(task, current[task.id]).entry;
+      return {
+        ...current,
+        [task.id]: {
+          ...base,
+          percent_complete: roundPercent(completedQuantity / task.quantity * 100),
+          completed_quantity: roundQuantity(completedQuantity),
+          remaining_quantity: roundQuantity(task.quantity - completedQuantity),
+        },
+      };
     });
   }
 
   async function handleSave() {
     const plan = summary?.active_plan;
     if (!plan) return;
+    const incompleteTaskId = Object.entries(quantityDrafts).find(([, draft]) =>
+      draft.percentComplete === "" || draft.completedQuantity === ""
+    )?.[0];
+    if (incompleteTaskId) {
+      const taskName = tasks.find((task) => task.id === incompleteTaskId)?.name ?? incompleteTaskId;
+      setError(`任务 ${taskName} 的实际完成比例或实际已完工程量已清空，请补充有效值后再保存。`);
+      return;
+    }
     setBusy("saving");
     setError(null);
     setMessage(null);
@@ -131,6 +333,8 @@ export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null 
         correction_reason: summary?.current_progress_snapshot ? correctionReason || null : null,
         expected_revision_no: summary?.current_progress_snapshot?.revision_no ?? null,
       });
+      setEntries(Object.fromEntries(response.progress_snapshot.entries.map((item) => [item.task_id, item])));
+      setQuantityDrafts({});
       setSummary((current) => current ? { ...current, current_progress_snapshot: response.progress_snapshot, latest_forecast: null } : current);
       setForecast(null);
       setAdjustments(null);
@@ -258,26 +462,41 @@ export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null 
               {busy === "saving" ? <Loader2 className="spin" size={15} /> : <Save size={15} />}保存进度
             </button>
           </div>
+          {quantityIssueCount > 0 && (
+            <div className="notice warning">
+              有 {quantityIssueCount} 个任务的计划总工程量不可用或历史进度数量不一致；请按行提示核验后再保存。
+            </div>
+          )}
           <div className="progress-entry-table-wrap">
             <table className="progress-entry-table">
-              <thead><tr><th>任务</th><th>状态</th><th>完成比例</th><th>已完工程量</th><th>实际开始</th><th>实际完成</th><th>剩余工程量</th><th>实际工效</th><th>人工剩余天数</th><th>恢复日期</th><th>计算结果</th><th>原因/备注</th></tr></thead>
+              <thead><tr><th>任务</th><th>状态</th><th>总工程量</th><th>实际完成比例</th><th>实际已完工程量</th><th>剩余工程量</th><th>实际开始</th><th>实际完成</th><th>实际工效</th><th>人工剩余天数</th><th>恢复日期</th><th>计算结果</th><th>原因/备注</th></tr></thead>
               <tbody>
                 {visibleTasks.map((task) => {
-                  const entry = entries[task.id] ?? emptyEntry(task.id);
+                  const quantityView = deriveProgressQuantityView(task, entries[task.id]);
+                  const entry = quantityView.entry;
+                  const quantityDraft = quantityDrafts[task.id];
+                  const quantityUnit = taskQuantityUnit(task);
+                  const physicalProgressEditable = !(["completed", "not_started"] as ProgressTaskStatus[]).includes(entry.status);
+                  const quantityInputEnabled = physicalProgressEditable && validTotalQuantity(task);
                   return (
-                    <tr key={task.id}>
-                      <td><strong>{task.name}</strong><small>{task.structure_name} / {task.process_name}</small></td>
-                      <td><select value={entry.status} onChange={(event) => patchEntry(task.id, { status: event.target.value as ProgressTaskStatus })}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
-                      <td><input type="number" min="0" max="100" value={entry.percent_complete} disabled={entry.status === "completed" || entry.status === "not_started"} onChange={(event) => patchEntry(task.id, { percent_complete: Number(event.target.value) })} /></td>
-                      <td><input type="number" min="0" max={task.quantity} value={entry.completed_quantity ?? ""} disabled={entry.status !== "in_progress"} onChange={(event) => patchEntry(task.id, { completed_quantity: event.target.value ? Number(event.target.value) : null })} /></td>
-                      <td><input type="date" value={entry.actual_start_date ?? ""} disabled={!(["in_progress", "completed", "paused"] as ProgressTaskStatus[]).includes(entry.status)} onChange={(event) => patchEntry(task.id, { actual_start_date: event.target.value || null })} /></td>
-                      <td><input type="date" value={entry.actual_finish_date ?? ""} disabled={entry.status !== "completed"} onChange={(event) => patchEntry(task.id, { actual_finish_date: event.target.value || null })} /></td>
-                      <td><input type="number" min="0" max={task.quantity} value={entry.remaining_quantity ?? ""} disabled={entry.status !== "in_progress"} onChange={(event) => patchEntry(task.id, { remaining_quantity: event.target.value ? Number(event.target.value) : null })} /></td>
-                      <td><input type="number" min="0" step="0.01" value={entry.actual_productivity ?? ""} disabled={entry.status !== "in_progress"} onChange={(event) => patchEntry(task.id, { actual_productivity: event.target.value ? Number(event.target.value) : null })} /></td>
-                      <td><input type="number" min="0" value={entry.estimated_remaining_days ?? ""} disabled={!(["in_progress", "paused"] as ProgressTaskStatus[]).includes(entry.status)} onChange={(event) => patchEntry(task.id, { estimated_remaining_days: event.target.value ? Number(event.target.value) : null })} /></td>
-                      <td><input type="date" value={entry.expected_resume_date ?? ""} disabled={entry.status !== "paused"} onChange={(event) => patchEntry(task.id, { expected_resume_date: event.target.value || null })} /></td>
+                    <tr key={task.id} className={quantityView.status === "conflict" ? "quantity-conflict-row" : undefined}>
+                      <td>
+                        <strong>{task.name}</strong>
+                        <small>{task.structure_name} / {task.process_name}</small>
+                        {quantityView.message && <small className={`quantity-status ${quantityView.status}`}>{quantityView.message}</small>}
+                      </td>
+                      <td><select value={entry.status} onChange={(event) => patchEntry(task, { status: event.target.value as ProgressTaskStatus })}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
+                      <td><span className="quantity-readonly total" title={`计划任务数量：${task.quantity}`}>{task.quantity_label}</span></td>
+                      <td><div className="quantity-input-with-unit"><input type="number" min="0" max={physicalProgressEditable ? "99.99" : "100"} step="0.01" value={quantityDraft?.percentComplete ?? entry.percent_complete} disabled={!physicalProgressEditable} onChange={(event) => patchPercentComplete(task, event.target.value)} /><span>%</span></div></td>
+                      <td><div className="quantity-input-with-unit"><input type="number" min="0" max={task.quantity} step="any" value={quantityDraft?.completedQuantity ?? entry.completed_quantity ?? ""} disabled={!quantityInputEnabled} onChange={(event) => patchCompletedQuantity(task, event.target.value)} />{quantityUnit && <span>{quantityUnit}</span>}</div></td>
+                      <td><span className="quantity-readonly">{entry.remaining_quantity ?? "—"}{entry.remaining_quantity != null ? quantityUnit : ""}</span></td>
+                      <td><input type="date" value={entry.actual_start_date ?? ""} disabled={!(["in_progress", "completed", "paused"] as ProgressTaskStatus[]).includes(entry.status)} onChange={(event) => patchEntry(task, { actual_start_date: event.target.value || null })} /></td>
+                      <td><input type="date" value={entry.actual_finish_date ?? ""} disabled={entry.status !== "completed"} onChange={(event) => patchEntry(task, { actual_finish_date: event.target.value || null })} /></td>
+                      <td><input type="number" min="0" step="0.01" value={entry.actual_productivity ?? ""} disabled={entry.status !== "in_progress"} onChange={(event) => patchEntry(task, { actual_productivity: event.target.value ? Number(event.target.value) : null })} /></td>
+                      <td><input type="number" min="0" value={entry.estimated_remaining_days ?? ""} disabled={!(["in_progress", "paused"] as ProgressTaskStatus[]).includes(entry.status)} onChange={(event) => patchEntry(task, { estimated_remaining_days: event.target.value ? Number(event.target.value) : null })} /></td>
+                      <td><input type="date" value={entry.expected_resume_date ?? ""} disabled={entry.status !== "paused"} onChange={(event) => patchEntry(task, { expected_resume_date: event.target.value || null })} /></td>
                       <td><small>{entry.remaining_days_source === "none" ? "保存后计算" : `${entry.remaining_days} 天 / ${remainingSourceLabel(entry.remaining_days_source)}`}</small></td>
-                      <td><input value={entry.reason ?? entry.notes} onChange={(event) => patchEntry(task.id, { reason: event.target.value, notes: event.target.value })} /></td>
+                      <td><input value={entry.reason ?? entry.notes} onChange={(event) => patchEntry(task, { reason: event.target.value, notes: event.target.value })} /></td>
                     </tr>
                   );
                 })}

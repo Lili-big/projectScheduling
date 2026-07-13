@@ -60,6 +60,7 @@ export type ComponentModel = {
   component_type: ComponentType;
   quantity: number;
   quantity_label: string;
+  structure_parameter_label?: string | null;
   method_id?: string | null;
   productivity_option_id?: string | null;
   enabled: boolean;
@@ -114,12 +115,15 @@ export type TargetStatus =
 export type TargetAchievement = {
   business_success: boolean;
   target_status: TargetStatus;
+  schedule_outcome_status?: ResourceAssistantScheduleOutcomeStatus | null;
+  schedule_outcome_reason?: ResourceAssistantScheduleOutcomeReason | null;
   solver_status: string;
   target_present?: boolean;
   has_schedule?: boolean;
   optimality_proven?: boolean;
   hard_milestone_late_days: number;
   fixed_duration_overrun_days: number;
+  max_target_delay_days?: number;
   failure_reasons: string[];
   time_budget_seconds?: number;
   time_budget_exhausted?: boolean;
@@ -211,6 +215,7 @@ export type UpperStructureModel = {
   span_length_m: number;
   beam_count_per_span?: number | null;
   span_group_expression: string;
+  structure_parameter_label?: string | null;
   control_level?: ControlLevel | null;
   properties: Record<string, unknown>;
 };
@@ -526,6 +531,7 @@ export type Task = {
   productivity_rule_id: string;
   quantity: number;
   quantity_label: string;
+  structure_parameter_label?: string | null;
   duration_days: number;
   compatible_resource_types: string[];
   properties?: Record<string, unknown>;
@@ -700,6 +706,18 @@ export type ResourceAssistantPlanStatus =
   | "failed"
   | "model_invalid";
 export type ResourceAssistantPlanOutcomeStatus = "met" | "not_met" | "unconfirmed" | "infeasible";
+export type ResourceAssistantScheduleOutcomeStatus =
+  | "duration_target_met"
+  | "duration_target_not_met"
+  | "no_feasible_schedule";
+export type ResourceAssistantScheduleOutcomeReason =
+  | "target_met"
+  | "proven_late"
+  | "late_unconfirmed"
+  | "time_limit_no_schedule"
+  | "proven_infeasible"
+  | "resource_coverage_missing"
+  | "target_missing";
 export type ResourceAssistantRecommendationStatus = "recommended" | "no_recommendation" | "insufficient_results";
 export type ResourceAssistantExplanationSource = "local" | "llm";
 export type ResourceAssistantMetricSourceType = "solver_result" | "derived_diagnostic" | "demo_estimate";
@@ -831,6 +849,8 @@ export type ResourceAssistantCoreMetrics = {
 export type ResourceAssistantPlanResult = {
   scenario_id: string;
   plan_status?: ResourceAssistantPlanOutcomeStatus | null;
+  schedule_outcome_status?: ResourceAssistantScheduleOutcomeStatus | null;
+  schedule_outcome_reason?: ResourceAssistantScheduleOutcomeReason | null;
   solver_status?: string | null;
   input_resource_quantities: Record<string, number>;
   resource_expansion_attempted: boolean;

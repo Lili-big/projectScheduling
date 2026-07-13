@@ -318,12 +318,14 @@ def solve_ai_strict_fixed_resource_scenario(scenario: ScenarioInput) -> Scenario
 
 
 def _apply_ai_strict_target_achievement(result: ScheduleResult, schedule_input: ScheduleInput) -> dict[str, Any]:
-    hard_milestone_late_days = sum(
-        int(milestone.lateness_days or 0)
+    hard_milestone_lateness = [
+        max(0, int(milestone.lateness_days or 0))
         for milestone in result.milestone_results
         if milestone.mode == "hard"
-    )
+    ]
+    hard_milestone_late_days = sum(hard_milestone_lateness)
     fixed_duration_overrun_days = _fixed_duration_overrun_days(result)
+    max_target_delay_days = max([fixed_duration_overrun_days, *hard_milestone_lateness], default=0)
     target_present = any(milestone.mode == "hard" for milestone in schedule_input.milestones)
     has_schedule = bool(result.tasks)
     optimality_proven = result.status == "OPTIMAL"
@@ -343,6 +345,13 @@ def _apply_ai_strict_target_achievement(result: ScheduleResult, schedule_input: 
     else:
         plan_status = "unconfirmed"
 
+    schedule_outcome_status, schedule_outcome_reason = _ai_strict_schedule_outcome(
+        result,
+        target_present=target_present,
+        has_schedule=has_schedule,
+        max_target_delay_days=max_target_delay_days,
+    )
+
     failure_reasons: list[str] = []
     if hard_milestone_late_days > 0:
         failure_reasons.append("hard_milestone_late")
@@ -360,12 +369,15 @@ def _apply_ai_strict_target_achievement(result: ScheduleResult, schedule_input: 
     payload = {
         "business_success": plan_status == "met",
         "target_status": plan_status,
+        "schedule_outcome_status": schedule_outcome_status,
+        "schedule_outcome_reason": schedule_outcome_reason,
         "solver_status": result.status,
         "target_present": target_present,
         "has_schedule": has_schedule,
         "optimality_proven": optimality_proven,
         "hard_milestone_late_days": hard_milestone_late_days,
         "fixed_duration_overrun_days": fixed_duration_overrun_days,
+        "max_target_delay_days": max_target_delay_days,
         "failure_reasons": list(dict.fromkeys(failure_reasons)),
         "time_budget_seconds": schedule_input.time_limit_seconds,
         "time_budget_exhausted": result.status in {"FEASIBLE", "UNKNOWN"},
@@ -375,8 +387,10 @@ def _apply_ai_strict_target_achievement(result: ScheduleResult, schedule_input: 
     result.objective_breakdown["target_achievement"] = payload
     result.stats["hard_milestone_late_days"] = hard_milestone_late_days
     result.stats["fixed_duration_overrun_days"] = fixed_duration_overrun_days
+    result.stats["max_target_delay_days"] = max_target_delay_days
     result.objective_breakdown["hard_milestone_late_days"] = hard_milestone_late_days
     result.objective_breakdown["fixed_duration_overrun_days"] = fixed_duration_overrun_days
+    result.objective_breakdown["max_target_delay_days"] = max_target_delay_days
 
     if plan_status == "not_met":
         result.validation.append(
@@ -395,6 +409,32 @@ def _apply_ai_strict_target_achievement(result: ScheduleResult, schedule_input: 
     elif plan_status == "unconfirmed" and not target_present:
         result.validation.append(ValidationMessage(level="warning", message="当前方案缺少可评估的强制目标，无法判断目标是否满足。"))
     return payload
+
+
+def _ai_strict_schedule_outcome(
+    result: ScheduleResult,
+    *,
+    target_present: bool,
+    has_schedule: bool,
+    max_target_delay_days: int,
+) -> tuple[str | None, str | None]:
+    if result.status in {"OPTIMAL", "FEASIBLE"} and has_schedule:
+        if not target_present:
+            return None, "target_missing"
+        if max_target_delay_days == 0:
+            return "duration_target_met", "target_met"
+        if result.status == "OPTIMAL":
+            return "duration_target_not_met", "proven_late"
+        return "duration_target_not_met", "late_unconfirmed"
+    if result.status == "UNKNOWN" or (result.status in {"OPTIMAL", "FEASIBLE"} and not has_schedule):
+        return "no_feasible_schedule", "time_limit_no_schedule"
+    if result.status == "INFEASIBLE":
+        reason = str(result.stats.get("reason") or "").lower()
+        messages = " ".join(item.message for item in result.validation).lower()
+        resource_markers = ("resource_coverage", "missing_resource", "compatible_resource", "resource_type", "资源", "兼容")
+        outcome_reason = "resource_coverage_missing" if any(marker in f"{reason} {messages}" for marker in resource_markers) else "proven_infeasible"
+        return "no_feasible_schedule", outcome_reason
+    return None, None
 
 
 def _solve_fixed_resources_shortest_scenario(
@@ -2065,18 +2105,9 @@ def _structure_pier_height(structure: StructureModel) -> float | None:
     for component in structure.components:
         if component.component_type != "pier_body":
             continue
-        for key in ("height_m", "heightM", "pier_height_m", "pierHeightM"):
-            raw_value = component.properties.get(key)
-            if isinstance(raw_value, (int, float)):
-                heights.append(float(raw_value))
-        dimensions = component.properties.get("dimensions_m")
-        if isinstance(dimensions, dict):
-            for key in ("heightM", "height_m"):
-                raw_value = dimensions.get(key)
-                if isinstance(raw_value, (int, float)):
-                    heights.append(float(raw_value))
-        if component.quantity > 0:
-            heights.append(float(component.quantity))
+        height = _pier_average_height(component)
+        if height is not None:
+            heights.append(height)
     return max(heights) if heights else None
 
 
@@ -2148,7 +2179,10 @@ def _task_from_component(
             )
         )
         return None
-    if component.quantity <= 0:
+    rule = _process_to_productivity_rule(process, component)
+    if component.quantity <= 0 and not (
+        component.component_type == "pier_body" and rule.quantity_source == "pier_height_m"
+    ):
         validation.append(
             ValidationMessage(
                 level="warning",
@@ -2157,9 +2191,26 @@ def _task_from_component(
             )
         )
         return None
-
-    rule = _process_to_productivity_rule(process, component)
-    quantity, quantity_label = _quantity_for_process(component, rule.quantity_source)
+    try:
+        quantity, quantity_label = _quantity_for_process(component, rule.quantity_source)
+    except ValueError as exc:
+        validation.append(
+            ValidationMessage(
+                level="error",
+                subject_id=component.id,
+                message=f"构件“{component.name}”{exc}",
+            )
+        )
+        return None
+    if quantity <= 0:
+        validation.append(
+            ValidationMessage(
+                level="warning",
+                subject_id=component.id,
+                message=f"构件“{component.name}”的工程量为 0，已跳过。",
+            )
+        )
+        return None
     return Task(
         id=component.id,
         name=component.name,
@@ -2176,6 +2227,7 @@ def _task_from_component(
         productivity_rule_id=rule.id,
         quantity=quantity,
         quantity_label=quantity_label,
+        structure_parameter_label=_structure_parameter_label_for_component(component),
         duration_days=calculate_duration(quantity, rule),
         compatible_resource_types=[process.resource_type],
         properties=component.properties,
@@ -2312,6 +2364,8 @@ def _build_cast_in_place_box_beam_tasks(
         span_indices = [upper.span_index for upper in uppers]
         first_span = min(span_indices)
         last_span = max(span_indices)
+        group_properties = _upper_group_properties(uppers)
+        structure_parameter_label = _upper_group_parameter_label(uppers)
         control_level = _upper_group_control_level(uppers, inferred_levels, default="normal")
         task = _append_upper_task(
             tasks=tasks,
@@ -2320,6 +2374,7 @@ def _build_cast_in_place_box_beam_tasks(
             component_type="cast_in_place_box_beam",
             quantity=1,
             quantity_label="1联",
+            structure_parameter_label=structure_parameter_label,
             bridge_id=bridge.id,
             work_section_id=section.id,
             sequence_order=95000 + group_index,
@@ -2330,6 +2385,7 @@ def _build_cast_in_place_box_beam_tasks(
             task_overrides=task_overrides,
             control_level=control_level,
             properties={
+                **group_properties,
                 "upper_structure_ids": [upper.id for upper in uppers],
                 "span_start_index": first_span,
                 "span_end_index": last_span,
@@ -2358,6 +2414,7 @@ def _append_upper_task(
     component_type: ComponentType,
     quantity: float,
     quantity_label: str,
+    structure_parameter_label: str | None = None,
     bridge_id: str,
     work_section_id: str,
     sequence_order: int,
@@ -2376,6 +2433,7 @@ def _append_upper_task(
         component_type=component_type,
         quantity=quantity,
         quantity_label=quantity_label,
+        structure_parameter_label=structure_parameter_label,
         method_id=method_id,
         properties=properties,
     ), task_overrides or {})
@@ -2585,6 +2643,37 @@ def _upper_group_index(uppers: list[UpperStructureComponent]) -> int:
         return uppers[0].span_index
 
 
+def _upper_group_properties(uppers: list[UpperStructureComponent]) -> dict[str, Any]:
+    ordered = sorted(uppers, key=lambda item: item.span_index)
+    structure_types = list(dict.fromkeys(upper.structure_type for upper in ordered if upper.structure_type))
+    expressions = list(dict.fromkeys(upper.span_group_expression for upper in ordered if upper.span_group_expression))
+    return {
+        "upper_structure_type": " / ".join(structure_types),
+        "support_range": _upper_group_support_range(ordered),
+        "span_group_expression": " / ".join(expressions),
+        "span_lengths_m": [upper.span_length_m for upper in ordered],
+    }
+
+
+def _upper_group_support_range(uppers: list[UpperStructureComponent]) -> str:
+    if not uppers:
+        return ""
+    first_parts = uppers[0].support_range.split("~")
+    last_parts = uppers[-1].support_range.split("~")
+    return f"{first_parts[0]}~{last_parts[-1]}"
+
+
+def _upper_group_parameter_label(uppers: list[UpperStructureComponent], segment_type: str | None = None) -> str:
+    context = _upper_group_properties(uppers)
+    parts = [
+        context["upper_structure_type"],
+        context["support_range"],
+        context["span_group_expression"],
+        segment_type or "",
+    ]
+    return "，".join(str(part) for part in parts if part)
+
+
 def _build_continuous_beam_tasks(
     *,
     bridge: ProjectBridge,
@@ -2672,6 +2761,7 @@ def _build_continuous_beam_group_tasks(
     side_label = _side_label(section.side)
     prefix = f"{bridge.id}-{side_code}-CB-G{group_index:02d}"
     group_label = f"{side_label}连续梁" if side_label else "连续梁"
+    group_properties = _upper_group_properties(uppers)
     base_order = 100000 + group_index * 10000
     tasks: list[Task] = []
     links: list[PrecedenceLink] = []
@@ -2717,6 +2807,7 @@ def _build_continuous_beam_group_tasks(
             task_overrides=task_overrides,
             control_level=control_level,
             properties={
+                **group_properties,
                 "continuous_task_type": "zero_block",
                 "group_index": group_index,
                 "support_index": support_index,
@@ -2756,6 +2847,7 @@ def _build_continuous_beam_group_tasks(
                 task_overrides=task_overrides,
                 control_level=control_level,
                 properties={
+                    **group_properties,
                     "continuous_task_type": "standard_segment_batch",
                     "group_index": group_index,
                     "support_index": support_index,
@@ -2783,6 +2875,7 @@ def _build_continuous_beam_group_tasks(
                 task_overrides=task_overrides,
                 control_level=control_level,
                 properties={
+                    **group_properties,
                     "continuous_task_type": "standard_segment_batch",
                     "group_index": group_index,
                     "support_index": support_index,
@@ -2819,7 +2912,7 @@ def _build_continuous_beam_group_tasks(
         validation=validation,
         task_overrides=task_overrides,
         control_level=control_level,
-        properties={"continuous_task_type": "side_straight_segment", "group_index": group_index, "side": "left"},
+        properties={**group_properties, "continuous_task_type": "side_straight_segment", "group_index": group_index, "side": "left"},
     )
     left_closure = _append_continuous_task(
         tasks=tasks,
@@ -2836,7 +2929,7 @@ def _build_continuous_beam_group_tasks(
         validation=validation,
         task_overrides=task_overrides,
         control_level=control_level,
-        properties={"continuous_task_type": "side_closure_segment", "group_index": group_index, "side": "left"},
+        properties={**group_properties, "continuous_task_type": "side_closure_segment", "group_index": group_index, "side": "left"},
     )
     right_straight = _append_continuous_task(
         tasks=tasks,
@@ -2853,7 +2946,7 @@ def _build_continuous_beam_group_tasks(
         validation=validation,
         task_overrides=task_overrides,
         control_level=control_level,
-        properties={"continuous_task_type": "side_straight_segment", "group_index": group_index, "side": "right"},
+        properties={**group_properties, "continuous_task_type": "side_straight_segment", "group_index": group_index, "side": "right"},
     )
     right_closure = _append_continuous_task(
         tasks=tasks,
@@ -2870,7 +2963,7 @@ def _build_continuous_beam_group_tasks(
         validation=validation,
         task_overrides=task_overrides,
         control_level=control_level,
-        properties={"continuous_task_type": "side_closure_segment", "group_index": group_index, "side": "right"},
+        properties={**group_properties, "continuous_task_type": "side_closure_segment", "group_index": group_index, "side": "right"},
     )
     add_link(left_straight, left_closure, "continuous_beam_side_closure")
     left_boundary_refs = _edge_support_refs(uppers, edge="left")
@@ -2921,6 +3014,7 @@ def _build_continuous_beam_group_tasks(
             task_overrides=task_overrides,
             control_level=control_level,
             properties={
+                **group_properties,
                 "continuous_task_type": "middle_closure_segment",
                 "group_index": group_index,
                 "closure_index": closure_index,
@@ -2979,6 +3073,7 @@ def _append_continuous_task(
         component_type=CONTINUOUS_BEAM_COMPONENT_TYPE,
         quantity=quantity,
         quantity_label=quantity_label,
+        structure_parameter_label=_continuous_parameter_label(enriched_properties),
         method_id=method_id,
         properties=enriched_properties,
     ), task_overrides or {})
@@ -2999,6 +3094,24 @@ def _append_continuous_task(
             task.compatible_resource_types = []
         tasks.append(task)
     return task
+
+
+def _continuous_parameter_label(properties: dict[str, Any]) -> str | None:
+    segment_labels = {
+        "zero_block": "0号块",
+        "standard_segment_batch": "标准段",
+        "side_straight_segment": "边跨连续段",
+        "side_closure_segment": "边跨合龙段",
+        "middle_closure_segment": "中跨合龙段",
+    }
+    parts = [
+        properties.get("upper_structure_type"),
+        properties.get("support_range"),
+        properties.get("span_group_expression"),
+        segment_labels.get(str(properties.get("continuous_task_type"))),
+    ]
+    label = "，".join(str(part) for part in parts if part)
+    return label or None
 
 
 def _continuous_span_group_id(bridge_id: str, work_section_id: str, group_index: Any) -> str:
@@ -3210,31 +3323,108 @@ def _default_productivity_option(process: ProcessTemplate) -> ProductivityOption
 def _quantity_for_process(component: ComponentModel, quantity_source: str) -> tuple[float, str]:
     if quantity_source == "count":
         if component.component_type == CONTINUOUS_BEAM_COMPONENT_TYPE and component.method_id == "standard_segment":
-            return float(component.quantity), component.quantity_label or f"{component.quantity:g}块"
+            return float(component.quantity), f"{component.quantity:g}块"
+        if component.component_type == CONTINUOUS_BEAM_COMPONENT_TYPE:
+            unit = "块" if component.properties.get("continuous_task_type") == "zero_block" else "段"
+            return float(component.quantity), f"{component.quantity:g}{unit}"
+        if component.component_type == "cast_in_place_box_beam":
+            return float(component.quantity), f"{component.quantity:g}联"
         if component.component_type == "pile":
             return 1.0, "1根"
-        return 1.0, component.quantity_label or ("1根" if component.component_type == "pile" else "1个")
+        return float(component.quantity), f"{component.quantity:g}个"
     if quantity_source == "pile_length_m":
-        length = _dimension_value(component, "lengthM") or component.quantity
-        return float(length), component.quantity_label or f"{length:g}m"
+        length = _dimension_value(component, "lengthM") or _property_number(component, "length_m") or component.quantity
+        return float(length), f"{float(length):g}m"
     if quantity_source == "pier_height_m":
-        height = _dimension_value(component, "heightM") or component.quantity
-        return float(height), component.quantity_label or f"{height:g}m"
+        height = _pier_average_height(component)
+        if height is None:
+            raise ValueError("缺少有效墩高，无法计算工程量和工期。")
+        return height, f"{height:g}m"
     if quantity_source == "deck_length_m":
         length = (
             _dimension_value(component, "lengthM")
             or _dimension_value(component, "totalLengthM")
+            or _property_number(component, "length_m")
+            or _property_number(component, "total_length_m")
             or component.quantity
         )
-        return float(length), component.quantity_label or f"{length:g}m"
-    return component.quantity, component.quantity_label
+        return float(length), f"{float(length):g}m"
+    return float(component.quantity), f"{component.quantity:g}个"
 
 
 def _dimension_value(component: ComponentModel, key: str) -> float | None:
     dimensions = component.properties.get("dimensions_m")
     if isinstance(dimensions, dict) and dimensions.get(key) is not None:
-        return float(dimensions[key])
+        return _positive_number(dimensions[key])
     return None
+
+
+def _property_number(component: ComponentModel, key: str) -> float | None:
+    return _positive_number(component.properties.get(key))
+
+
+def _positive_number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _pier_average_height(component: ComponentModel) -> float | None:
+    column_heights = component.properties.get("column_heights_m")
+    if isinstance(column_heights, list):
+        valid_heights = [height for value in column_heights if (height := _positive_number(value)) is not None]
+        if valid_heights:
+            return sum(valid_heights) / len(valid_heights)
+
+    for key in ("height_m", "heightM", "pier_height_m", "pierHeightM"):
+        if (height := _property_number(component, key)) is not None:
+            return height
+    for key in ("heightM", "height_m"):
+        if (height := _dimension_value(component, key)) is not None:
+            return height
+
+    count = _property_number(component, "count") or 1
+    if count <= 1 and component.quantity > 0:
+        return float(component.quantity)
+    return None
+
+
+def _structure_parameter_label_for_component(component: ComponentModel) -> str | None:
+    if component.structure_parameter_label:
+        return component.structure_parameter_label
+
+    properties = component.properties
+    form = properties.get("form")
+    form_label = str(form).strip() if form is not None else ""
+    dimensions = properties.get("dimensions_m")
+    count = _property_number(component, "count")
+
+    if component.component_type == "pile":
+        diameter = _property_number(component, "diameter_m") or _dimension_value(component, "diameterM")
+        parts = [form_label or "桩基础"]
+        if diameter is not None:
+            parts.append(f"桩径{diameter:g}m")
+        return "，".join(parts)
+
+    if component.component_type == "pier_body":
+        parts = [form_label or "墩柱"]
+        if isinstance(dimensions, list) and dimensions:
+            values = [value for raw in dimensions if (value := _positive_number(raw)) is not None]
+            if len(values) == 1:
+                parts.append(f"柱径{values[0]:g}m")
+            elif values:
+                parts.append("截面" + " × ".join(f"{value:g}m" for value in values))
+        if count is not None:
+            parts.append(f"{count:g}根")
+        return "，".join(parts)
+
+    if isinstance(dimensions, list):
+        values = [value for raw in dimensions if (value := _positive_number(raw)) is not None]
+        if values:
+            return " × ".join(f"{value:g}m" for value in values)
+    return form_label or None
 
 
 def _build_structure_sequence_links(
