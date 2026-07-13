@@ -4270,6 +4270,19 @@ tbody tr:hover {
   font-weight: 700;
 }
 
+.resource-plan-outcome {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.resource-plan-outcome small {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .resource-plan-resources {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

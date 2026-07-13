@@ -6159,6 +6159,73 @@ def _min_resource_test_input(max_resources: int) -> ScheduleInput:
     )
 
 
+def test_ai_strict_full_objective_skips_baseline_and_keeps_objective_terms(monkeypatch) -> None:
+    scenario = _parallel_fixed_resource_scenario(target_days=10, current_resources=1, max_resources=3)
+    generated = generate_schedule_input_from_scenario(scenario)
+    monkeypatch.setattr(
+        solver_module,
+        "solve_shortest_duration_schedule",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("AI 严格求解不应运行基础排程")),
+    )
+
+    result = solver_module.solve_control_priority_schedule_once(
+        generated.schedule_input,
+        enforce_hard_milestones=True,
+        relax_target_constraints=True,
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.stats["solver_call_count"] == 1
+    assert result.stats["baseline_status"] == "not_evaluated"
+    assert result.stats["performance_path"] == "ai_strict_fixed_resource_one_pass"
+    assert result.objective_breakdown["baseline_makespan_days"] is None
+    assert {item["term_id"] for item in result.objective_breakdown["objective_contributions"]} == {
+        "control_node_late",
+        "makespan_and_soft_milestone",
+        "resource_idle",
+    }
+
+
+def test_ai_strict_target_status_matrix() -> None:
+    scenario = _parallel_fixed_resource_scenario(target_days=5, current_resources=1, max_resources=3)
+    schedule_input = generate_schedule_input_from_scenario(scenario).schedule_input
+    milestone = schedule_input.milestones[0]
+
+    def classified(solver_status: str, lateness_days: int, *, with_target: bool = True) -> dict[str, Any]:
+        result = ScheduleResult(
+            status=solver_status,
+            plan_start_date=schedule_input.start_date,
+            milestone_results=[
+                MilestoneResult(
+                    id=milestone.id,
+                    name=milestone.name,
+                    level=milestone.level,
+                    mode=milestone.mode,
+                    scope_type=milestone.scope_type,
+                    scope_id=milestone.scope_id,
+                    target_event=milestone.target_event,
+                    target_date=milestone.target_date,
+                    actual_date=milestone.target_date + timedelta(days=lateness_days),
+                    actual_offset=4 + lateness_days,
+                    lateness_days=lateness_days,
+                    status="late" if lateness_days else "met",
+                )
+            ] if with_target else [],
+        )
+        target_input = schedule_input if with_target else schedule_input.model_copy(update={"milestones": []})
+        return scenario_module._apply_ai_strict_target_achievement(result, target_input)
+
+    assert classified("OPTIMAL", 0)["target_status"] == "met"
+    assert classified("FEASIBLE", 0)["target_status"] == "met"
+    assert classified("OPTIMAL", 3)["target_status"] == "not_met"
+    feasible_late = classified("FEASIBLE", 3)
+    assert feasible_late["target_status"] == "unconfirmed"
+    assert "optimality_unproven" in feasible_late["failure_reasons"]
+    assert classified("UNKNOWN", 0)["target_status"] == "unconfirmed"
+    assert classified("INFEASIBLE", 0)["target_status"] == "infeasible"
+    assert classified("OPTIMAL", 0, with_target=False)["target_status"] == "unconfirmed"
+
+
 def _parallel_fixed_resource_scenario(
     *,
     target_days: int,

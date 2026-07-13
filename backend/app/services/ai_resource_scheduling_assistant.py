@@ -41,7 +41,7 @@ from ..models import (
     ValidationMessage,
     WorkSectionSide,
 )
-from ..scenario import generate_schedule_input_from_scenario, solve_scenario
+from ..scenario import generate_schedule_input_from_scenario, solve_ai_strict_fixed_resource_scenario
 from .ai_resource_explainer import (
     explain_recommendation,
     generate_resource_plan_payload,
@@ -197,7 +197,7 @@ def update_resource_plan(request: ResourceAssistantUpdatePlanRequest) -> Resourc
 
 
 def batch_solve_resource_plans(request: ResourceAssistantBatchSolveRequest) -> ResourceAssistantBatchSolveResponse:
-    profile = build_project_profile(request.scenario, generate_schedule_input_from_scenario(request.scenario))
+    profile: ResourceAssistantProjectProfile | None = None
     selected_plan_ids = _selected_plan_ids(request)
     solved_plans: list[ResourceAssistantPlan] = []
     plan_results: list[ResourceAssistantPlanResult] = []
@@ -211,6 +211,11 @@ def batch_solve_resource_plans(request: ResourceAssistantBatchSolveRequest) -> R
         solved_plans.append(solved_plan)
         plan_results.append(plan_result)
         diagnostics.extend(plan_diagnostics)
+        if profile is None and plan_result.generated is not None:
+            profile = build_project_profile(request.scenario, plan_result.generated)
+
+    if profile is None:
+        profile = build_project_profile(request.scenario, generate_schedule_input_from_scenario(request.scenario))
 
     comparison = build_comparison(solved_plans, plan_results)
     recommendation = build_deterministic_recommendation(solved_plans, plan_results)
@@ -227,8 +232,7 @@ def batch_solve_resource_plans(request: ResourceAssistantBatchSolveRequest) -> R
 
 
 def solve_resource_plan(request: ResourceAssistantSingleSolveRequest) -> ResourceAssistantSingleSolveResponse:
-    profile = build_project_profile(request.scenario, generate_schedule_input_from_scenario(request.scenario))
-    solved_plan, plan_result, diagnostics = _solve_single_plan(request.scenario, request.resource_plan, profile)
+    solved_plan, plan_result, diagnostics = _solve_single_plan(request.scenario, request.resource_plan, None)
     return ResourceAssistantSingleSolveResponse(
         resource_plan=solved_plan,
         plan_result=plan_result,
@@ -379,7 +383,21 @@ def build_comparison(
         }
         for plan in _ordered_plans(plans)
     ]
+    outcome_values = {
+        scenario_id: {
+            "value": plan_result.plan_status or plan_result.metrics.target_status,
+            "not_available_reasons": plan_result.metrics.not_available_reasons,
+        }
+        for scenario_id, plan_result in result_by_id.items()
+    }
     rows = [
+        ResourceAssistantMetricRow(
+            metric_id="plan_status",
+            metric_name="方案目标状态",
+            values=outcome_values,
+            source_type="solver_result",
+            description="严格固定资源求解的业务结论；只有 met 可参与推荐。",
+        ),
         _metric_row("total_days", "总工期", "天", "solver_result", "CP-SAT 求解返回的项目完工跨度。", result_by_id, lambda m: m.total_days),
         _metric_row("plan_finish_date", "预计完工日期", "", "solver_result", "CP-SAT 求解返回的计划完成日期。", result_by_id, lambda m: m.plan_finish_date),
         _metric_row(
@@ -476,22 +494,20 @@ def build_deterministic_recommendation(
         if plan.scenario_id in result_by_id
         and result_by_id[plan.scenario_id].result is not None
         and result_by_id[plan.scenario_id].result.status in {"OPTIMAL", "FEASIBLE"}
+        and _plan_result_target_met(result_by_id[plan.scenario_id])
     ]
     if not feasible:
         return ResourceAssistantRecommendation(
             recommended_scenario_id=None,
             recommendation_status="insufficient_results",
-            rule_reason="三个方案均未得到可比较的可行求解结果。",
-            evidence=["无可行 CP-SAT 排程结果。"],
-            risk_notes=["需先检查资源覆盖、工艺逻辑或求解时间限制。"],
+            rule_reason="当前没有目标已满足（met）的方案，无法生成正式推荐。",
+            evidence=["not_met、unconfirmed 和 infeasible 方案不进入推荐候选集。"],
+            risk_notes=["可查看已有排程和延期诊断后手动调整资源，再重新求解。"],
             marginal_benefit_notes=["无可行结果时不计算边际收益。"],
             llm_status=llm_config_status(),
         )
 
-    pass_target = [
-        plan for plan in feasible if _target_met(result_by_id[plan.scenario_id].metrics)
-    ]
-    candidates = pass_target or feasible
+    candidates = feasible
     by_profile = {plan.profile: plan for plan in candidates}
     economy = by_profile.get("economy")
     balanced = by_profile.get("balanced")
@@ -803,7 +819,7 @@ def _plan_validation_status(plans: list[ResourceAssistantPlan]) -> str:
 def _solve_single_plan(
     scenario: ScenarioInput,
     plan: ResourceAssistantPlan,
-    profile: ResourceAssistantProjectProfile,
+    profile: ResourceAssistantProjectProfile | None,
 ) -> tuple[ResourceAssistantPlan, ResourceAssistantPlanResult, list[ValidationMessage]]:
     diagnostics: list[ValidationMessage] = []
     try:
@@ -815,12 +831,23 @@ def _solve_single_plan(
                 "resource_pools": plan.resource_pools,
             },
         )
-        solved = solve_scenario(plan_scenario)
-        metrics = summarize_core_metrics(solved.generated, solved.result, profile)
+        solved = solve_ai_strict_fixed_resource_scenario(plan_scenario)
+        active_profile = profile or build_project_profile(scenario, solved.generated)
+        metrics = summarize_core_metrics(solved.generated, solved.result, active_profile)
+        target = solved.result.stats.get("target_achievement")
+        plan_status = str(target.get("target_status")) if isinstance(target, dict) else None
+        if plan_status not in {"met", "not_met", "unconfirmed", "infeasible"}:
+            plan_status = None
+        if plan_status is not None:
+            metrics = metrics.model_copy(update={"target_status": plan_status})
         status = _plan_status_from_result(solved.result)
         solved_plan = plan.model_copy(update={"solve_status": status, "stale_reason": None})
         plan_result = ResourceAssistantPlanResult(
             scenario_id=plan.scenario_id,
+            plan_status=plan_status,
+            solver_status=solved.result.status,
+            input_resource_quantities={pool.type: max(0, int(pool.quantity or 0)) for pool in plan.resource_pools},
+            resource_expansion_attempted=False,
             generated=solved.generated,
             result=solved.result,
             metrics=metrics,
@@ -836,6 +863,10 @@ def _solve_single_plan(
         failed_plan = plan.model_copy(update={"solve_status": "failed"})
         failed_result = ResourceAssistantPlanResult(
             scenario_id=plan.scenario_id,
+            plan_status=None,
+            solver_status=None,
+            input_resource_quantities={pool.type: max(0, int(pool.quantity or 0)) for pool in plan.resource_pools},
+            resource_expansion_attempted=False,
             generated=None,
             result=None,
             metrics=ResourceAssistantCoreMetrics(target_status="failed", not_available_reasons=[str(exc)]),
@@ -1376,9 +1407,13 @@ def _metric_row(
 
 
 def _target_met(metrics: ResourceAssistantCoreMetrics) -> bool:
-    return metrics.target_status in {"met", "candidate_resources_target_met"} or (
-        metrics.total_days is not None and not metrics.not_available_reasons
-    )
+    return metrics.target_status in {"met", "candidate_resources_target_met"}
+
+
+def _plan_result_target_met(plan_result: ResourceAssistantPlanResult) -> bool:
+    if plan_result.plan_status is not None:
+        return plan_result.plan_status == "met"
+    return _target_met(plan_result.metrics)
 
 
 def _recommendation_score(metrics: ResourceAssistantCoreMetrics) -> float:

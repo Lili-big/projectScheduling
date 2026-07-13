@@ -42,6 +42,7 @@ from .solver import (
     _resource_groups,
     solve_capacity_shortest_schedule,
     solve_control_priority_schedule,
+    solve_control_priority_schedule_once,
     solve_min_resources_schedule,
     solve_resource_cost_schedule,
 )
@@ -262,6 +263,138 @@ def solve_scenario(scenario: ScenarioInput) -> ScenarioSolveResult:
         metrics=_scenario_metrics(generated, result),
         alternative_results=alternative_results,
     )
+
+
+def solve_ai_strict_fixed_resource_scenario(scenario: ScenarioInput) -> ScenarioSolveResult:
+    """Solve one AI plan with its exact named resources and no expansion branch."""
+    started_at = time.perf_counter()
+    generated = generate_schedule_input_from_scenario(scenario)
+    generation_errors = [message.message for message in generated.validation if message.level == "error"]
+    if generation_errors:
+        raise ValueError("；".join(generation_errors))
+
+    result = solve_control_priority_schedule_once(
+        generated.schedule_input,
+        enforce_hard_milestones=True,
+        relax_target_constraints=True,
+    )
+    if result.status == "MODEL_INVALID":
+        detail = next((message.message for message in result.validation if message.level == "error"), "模型构建失败。")
+        raise RuntimeError(detail)
+
+    _apply_ai_strict_target_achievement(result, generated.schedule_input)
+    result.stats.update(
+        {
+            "schedule_source": "ai_strict_fixed_resources",
+            "recommended_schedule_source": "ai_strict_fixed_resources",
+            "resource_recommendation_status": "not_applicable",
+            "resource_recommendation_message": "AI 方案严格按当前资源求解，不进入新增资源分支。",
+            "alternative_output_status": ALTERNATIVE_OUTPUT_NOT_APPLICABLE,
+            "alternative_output_reason": "ai_strict_fixed_resources",
+            "alternative_output_message": "AI 方案严格按当前资源求解，不输出新增资源候选。",
+            "resource_expansion_attempted": False,
+        }
+    )
+    result.objective_breakdown.update(
+        {
+            "schedule_source": "ai_strict_fixed_resources",
+            "recommended_schedule_source": "ai_strict_fixed_resources",
+            "resource_recommendation_status": "not_applicable",
+            "resource_expansion_attempted": False,
+        }
+    )
+    _apply_request_timing(result, started_at)
+    diagnostics = _build_diagnostics(generated.validation, result)
+    return ScenarioSolveResult(
+        scenario_id=scenario.scenario_id,
+        scenario_name=scenario.scenario_name,
+        generated=generated,
+        result=result,
+        milestone_results=result.milestone_results,
+        diagnostics=diagnostics,
+        metrics=_scenario_metrics(generated, result),
+        alternative_results=[],
+    )
+
+
+def _apply_ai_strict_target_achievement(result: ScheduleResult, schedule_input: ScheduleInput) -> dict[str, Any]:
+    hard_milestone_late_days = sum(
+        int(milestone.lateness_days or 0)
+        for milestone in result.milestone_results
+        if milestone.mode == "hard"
+    )
+    fixed_duration_overrun_days = _fixed_duration_overrun_days(result)
+    target_present = any(milestone.mode == "hard" for milestone in schedule_input.milestones)
+    has_schedule = bool(result.tasks)
+    optimality_proven = result.status == "OPTIMAL"
+
+    if result.status == "INFEASIBLE":
+        plan_status = "infeasible"
+    elif result.status == "UNKNOWN":
+        plan_status = "unconfirmed"
+    elif result.status not in {"OPTIMAL", "FEASIBLE"}:
+        plan_status = "infeasible"
+    elif not target_present:
+        plan_status = "unconfirmed"
+    elif hard_milestone_late_days == 0 and fixed_duration_overrun_days == 0:
+        plan_status = "met"
+    elif optimality_proven:
+        plan_status = "not_met"
+    else:
+        plan_status = "unconfirmed"
+
+    failure_reasons: list[str] = []
+    if hard_milestone_late_days > 0:
+        failure_reasons.append("hard_milestone_late")
+    if fixed_duration_overrun_days > 0:
+        failure_reasons.append("fixed_duration_overrun")
+    if not target_present and result.status in {"OPTIMAL", "FEASIBLE"}:
+        failure_reasons.append("target_missing")
+    if plan_status == "unconfirmed" and result.status == "FEASIBLE" and hard_milestone_late_days > 0:
+        failure_reasons.append("optimality_unproven")
+    if result.status == "UNKNOWN":
+        failure_reasons.extend(["unconfirmed", "time_budget_exhausted"])
+    if plan_status == "infeasible":
+        failure_reasons.append(str(result.stats.get("reason") or "physical_infeasible"))
+
+    payload = {
+        "business_success": plan_status == "met",
+        "target_status": plan_status,
+        "solver_status": result.status,
+        "target_present": target_present,
+        "has_schedule": has_schedule,
+        "optimality_proven": optimality_proven,
+        "hard_milestone_late_days": hard_milestone_late_days,
+        "fixed_duration_overrun_days": fixed_duration_overrun_days,
+        "failure_reasons": list(dict.fromkeys(failure_reasons)),
+        "time_budget_seconds": schedule_input.time_limit_seconds,
+        "time_budget_exhausted": result.status in {"FEASIBLE", "UNKNOWN"},
+        "evaluated_at_source": "ai_strict_fixed_resources",
+    }
+    result.stats["target_achievement"] = payload
+    result.objective_breakdown["target_achievement"] = payload
+    result.stats["hard_milestone_late_days"] = hard_milestone_late_days
+    result.stats["fixed_duration_overrun_days"] = fixed_duration_overrun_days
+    result.objective_breakdown["hard_milestone_late_days"] = hard_milestone_late_days
+    result.objective_breakdown["fixed_duration_overrun_days"] = fixed_duration_overrun_days
+
+    if plan_status == "not_met":
+        result.validation.append(
+            ValidationMessage(
+                level="warning",
+                message=f"当前固定资源的已证明最优排程仍延期 {hard_milestone_late_days + fixed_duration_overrun_days} 天，不自动增加资源。",
+            )
+        )
+    elif plan_status == "unconfirmed" and result.status == "FEASIBLE":
+        result.validation.append(
+            ValidationMessage(
+                level="warning",
+                message="当前限时内已有可行排程但尚未证明最优，不据此断言资源不足。",
+            )
+        )
+    elif plan_status == "unconfirmed" and not target_present:
+        result.validation.append(ValidationMessage(level="warning", message="当前方案缺少可评估的强制目标，无法判断目标是否满足。"))
+    return payload
 
 
 def _solve_fixed_resources_shortest_scenario(

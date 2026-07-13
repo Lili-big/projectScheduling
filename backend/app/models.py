@@ -101,6 +101,7 @@ ResourceAssistantPlanStatus = Literal[
     "failed",
     "model_invalid",
 ]
+ResourceAssistantPlanOutcomeStatus = Literal["met", "not_met", "unconfirmed", "infeasible"]
 ResourceAssistantRecommendationStatus = Literal["recommended", "no_recommendation", "insufficient_results"]
 ResourceAssistantExplanationSource = Literal["local", "llm"]
 
@@ -1095,6 +1096,10 @@ class ResourceAssistantCoreMetrics(BaseModel):
 
 class ResourceAssistantPlanResult(BaseModel):
     scenario_id: str
+    plan_status: ResourceAssistantPlanOutcomeStatus | None = None
+    solver_status: str | None = None
+    input_resource_quantities: dict[str, int] = Field(default_factory=dict)
+    resource_expansion_attempted: bool = False
     generated: GeneratedScheduleInput | None = None
     result: ScheduleResult | None = None
     metrics: ResourceAssistantCoreMetrics = Field(default_factory=ResourceAssistantCoreMetrics)

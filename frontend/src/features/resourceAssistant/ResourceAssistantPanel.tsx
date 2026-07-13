@@ -131,7 +131,7 @@ export function ResourceAssistantPanel({
   const selectedPlan = plans.find((plan) => plan.scenario_id === selectedPlanId) || plans[0] || null;
   const detailPlan = detailPlanId ? plans.find((plan) => plan.scenario_id === detailPlanId) || null : null;
   const detailResult = detailPlan ? resultsById[detailPlan.scenario_id] || null : null;
-  const completedPlanCount = plans.filter((plan) => Boolean(resultsById[plan.scenario_id])).length;
+  const completedPlanCount = plans.filter((plan) => Boolean(resultsById[plan.scenario_id]?.plan_status)).length;
   const allPlansComplete = plans.length === 3 && completedPlanCount === plans.length;
   const isAnySolving = Object.values(solvingPlanIds).some(Boolean);
   const llmContextFileName = useMemo(
@@ -181,6 +181,9 @@ export function ResourceAssistantPanel({
     const targetPlan = plansRef.current.find((plan) => plan.scenario_id === planId);
     if (!targetPlan) return;
     setError(null);
+    replaceResults(resultsRef.current.filter((result) => result.scenario_id !== planId));
+    if (detailPlanId === planId) setDetailPlanId(null);
+    invalidateComparisonAndRecommendation();
     setSolvingPlanIds((current) => ({ ...current, [planId]: true }));
     replacePlans(
       plansRef.current.map((plan) =>

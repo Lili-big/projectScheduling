@@ -2315,6 +2315,43 @@ def solve_schedule(schedule_input: ScheduleInput, *, enforce_hard_milestones: bo
     return solve_control_priority_schedule(schedule_input, enforce_hard_milestones=enforce_hard_milestones)
 
 
+def solve_control_priority_schedule_once(
+    schedule_input: ScheduleInput,
+    *,
+    enforce_hard_milestones: bool = False,
+    max_makespan_days: int | None = None,
+    relax_target_constraints: bool = False,
+) -> ScheduleResult:
+    """Run the full control-priority objective once without a baseline CP-SAT solve."""
+    result = solve_control_priority_schedule(
+        schedule_input,
+        enforce_hard_milestones=enforce_hard_milestones,
+        max_makespan_days=max_makespan_days,
+        relax_target_constraints=relax_target_constraints,
+        _use_baseline=False,
+    )
+    result.stats.update(
+        {
+            "solver_call_count": 1,
+            "baseline_status": "not_evaluated",
+            "performance_path": "ai_strict_fixed_resource_one_pass",
+            "resource_expansion_attempted": False,
+        }
+    )
+    result.objective_breakdown.update(
+        {
+            "solver_call_count": 1,
+            "baseline_status": "not_evaluated",
+            "performance_path": "ai_strict_fixed_resource_one_pass",
+            "resource_expansion_attempted": False,
+        }
+    )
+    analysis = result.stats.get("control_priority_analysis")
+    if isinstance(analysis, dict):
+        analysis["resource_increment_suggestions"] = []
+    return result
+
+
 def solve_control_priority_schedule(
     schedule_input: ScheduleInput,
     *,
@@ -2327,11 +2364,12 @@ def solve_control_priority_schedule(
     _fixed_resource_by_task_id: dict[str, str] | None = None,
     _path_task_filter_by_resource: dict[str, set[str]] | None = None,
     _path_filter_task_ids: set[str] | None = None,
+    _use_baseline: bool = True,
 ) -> ScheduleResult:
     started_at = time.perf_counter()
-    if baseline_result is None:
+    if baseline_result is None and _use_baseline:
         baseline_result = solve_shortest_duration_schedule(schedule_input)
-    if baseline_result.status not in {"OPTIMAL", "FEASIBLE"}:
+    if baseline_result is not None and baseline_result.status not in {"OPTIMAL", "FEASIBLE"}:
         baseline_result.objective_breakdown.setdefault("solve_mode", "control_priority_baseline_failed")
         baseline_result.validation.append(
             ValidationMessage(
@@ -2367,6 +2405,7 @@ def solve_control_priority_schedule(
             warm_start_result=warm_start_result,
             relax_target_constraints=relax_target_constraints,
             _drill_group_stage="coarse",
+            _use_baseline=_use_baseline,
         )
         if coarse_result.status not in {"OPTIMAL", "FEASIBLE"}:
             return coarse_result
@@ -2636,7 +2675,8 @@ def solve_control_priority_schedule(
         "random_seed": SCHEDULER_RANDOM_SEED,
         "search_workers": _scheduler_search_workers(),
         "solve_mode": "control_priority",
-        "baseline_objective_days": baseline_result.objective_days,
+        "baseline_objective_days": baseline_result.objective_days if baseline_result is not None else None,
+        "baseline_status": baseline_result.status if baseline_result is not None else "not_evaluated",
         "warm_start_used": warm_start_used,
         "relax_target_constraints": relax_target_constraints,
         "objective_modeling_gates": objective_modeling_gates,
@@ -2959,7 +2999,7 @@ def solve_control_priority_schedule(
         objective_breakdown={
             "solve_mode": "control_priority",
             "makespan_days": objective_days,
-            "baseline_makespan_days": baseline_result.objective_days,
+            "baseline_makespan_days": baseline_result.objective_days if baseline_result is not None else None,
             "control_lateness_days": reported_control_lateness_days,
             "control_target_lateness_days": reported_control_target_lateness_days,
             "relaxed_hard_milestone_lateness_days": relaxed_hard_milestone_lateness_days,
@@ -4608,7 +4648,7 @@ def _worst_resource_status(statuses: list[str]) -> str:
 def _build_control_priority_analysis(
     *,
     schedule_input: ScheduleInput,
-    baseline_result: ScheduleResult,
+    baseline_result: ScheduleResult | None,
     scheduled_tasks: list[ScheduledTask],
     allocations: list[ResourceAllocation],
     milestone_results: list[MilestoneResult],
@@ -4620,7 +4660,7 @@ def _build_control_priority_analysis(
     control_buffer_enabled: bool = True,
     path_continuity_enabled: bool = True,
 ) -> dict[str, Any]:
-    baseline_by_id = {task.id: task for task in baseline_result.tasks}
+    baseline_by_id = {task.id: task for task in baseline_result.tasks} if baseline_result is not None else {}
     scheduled_by_id = {task.id: task for task in scheduled_tasks}
     target_ids = _control_target_task_ids(schedule_input)
     level_counts: dict[str, int] = defaultdict(int)
@@ -4744,12 +4784,12 @@ def _build_control_priority_analysis(
         "bottleneck_resources": bottlenecks[:10],
         "resource_increment_suggestions": resource_increment_suggestions,
         "adjustment_explanations": explanations,
-        "baseline_objective_days": baseline_result.objective_days,
-        "baseline_finish_date": baseline_result.plan_finish_date,
+        "baseline_objective_days": baseline_result.objective_days if baseline_result is not None else None,
+        "baseline_finish_date": baseline_result.plan_finish_date if baseline_result is not None else None,
         "strategy_task_finish_delta_days": (
             max((task.end_offset for task in scheduled_tasks), default=0)
             - (baseline_result.objective_days or 0)
-        ),
+        ) if baseline_result is not None else None,
         "control_task_ids": sorted(control_chain_task_ids),
         "scheduled_control_tasks": [
             {

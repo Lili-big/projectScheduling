@@ -115,6 +115,9 @@ export type TargetAchievement = {
   business_success: boolean;
   target_status: TargetStatus;
   solver_status: string;
+  target_present?: boolean;
+  has_schedule?: boolean;
+  optimality_proven?: boolean;
   hard_milestone_late_days: number;
   fixed_duration_overrun_days: number;
   failure_reasons: string[];
@@ -696,6 +699,7 @@ export type ResourceAssistantPlanStatus =
   | "unknown"
   | "failed"
   | "model_invalid";
+export type ResourceAssistantPlanOutcomeStatus = "met" | "not_met" | "unconfirmed" | "infeasible";
 export type ResourceAssistantRecommendationStatus = "recommended" | "no_recommendation" | "insufficient_results";
 export type ResourceAssistantExplanationSource = "local" | "llm";
 export type ResourceAssistantMetricSourceType = "solver_result" | "derived_diagnostic" | "demo_estimate";
@@ -826,6 +830,10 @@ export type ResourceAssistantCoreMetrics = {
 
 export type ResourceAssistantPlanResult = {
   scenario_id: string;
+  plan_status?: ResourceAssistantPlanOutcomeStatus | null;
+  solver_status?: string | null;
+  input_resource_quantities: Record<string, number>;
+  resource_expansion_attempted: boolean;
   generated?: GeneratedScheduleInput | null;
   result?: ScheduleResult | null;
   metrics: ResourceAssistantCoreMetrics;

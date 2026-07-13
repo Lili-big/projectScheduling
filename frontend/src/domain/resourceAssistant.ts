@@ -3,6 +3,7 @@ import type {
   ResourceAssistantCoreMetrics,
   ResourceAssistantMetricRow,
   ResourceAssistantPlan,
+  ResourceAssistantPlanOutcomeStatus,
   ResourceAssistantPlanProfile,
   ResourceAssistantPlanResult,
   ResourceAssistantPlanStatus,
@@ -49,6 +50,39 @@ export function resourceAssistantStatusTone(status: ResourceAssistantPlanStatus)
   return "neutral";
 }
 
+export const resourceAssistantOutcomeLabels: Record<ResourceAssistantPlanOutcomeStatus, string> = {
+  met: "目标已满足",
+  not_met: "已证明延期",
+  unconfirmed: "限时未确认",
+  infeasible: "物理不可行",
+};
+
+export function resourceAssistantOutcomeTone(
+  status?: ResourceAssistantPlanOutcomeStatus | null,
+): "neutral" | "good" | "warning" | "danger" {
+  if (status === "met") return "good";
+  if (status === "not_met" || status === "unconfirmed") return "warning";
+  if (status === "infeasible") return "danger";
+  return "neutral";
+}
+
+export function resourceAssistantOutcomeDetail(result?: ResourceAssistantPlanResult | null): string {
+  if (!result?.plan_status) return "";
+  const raw = result.result?.stats?.target_achievement;
+  const target = isRecord(raw) ? raw : {};
+  const hardLate = numberValue(target.hard_milestone_late_days);
+  const durationLate = numberValue(target.fixed_duration_overrun_days);
+  const totalLate = hardLate + durationLate;
+  if (result.plan_status === "met") return "当前资源已满足强制目标，可参与推荐。";
+  if (result.plan_status === "not_met") return `当前最优排程仍延期 ${totalLate} 天，不自动增加资源。`;
+  if (result.plan_status === "unconfirmed") {
+    return result.result?.tasks?.length
+      ? `当前可行排程${totalLate > 0 ? `延期 ${totalLate} 天，` : ""}尚未证明最优。`
+      : "限时内未确认可行排程，不据此判断资源不足。";
+  }
+  return result.diagnostics[0]?.message || "当前资源覆盖或硬规则无法形成可行排程。";
+}
+
 export function llmConfigStatusLabel(status: ResourceAssistantLlmConfigStatus): string {
   if (status.status === "configured") return `${status.provider}${status.model ? ` / ${status.model}` : ""}`;
   if (status.status === "failed") return `已回退：${status.warning || "外部模型调用失败"}`;
@@ -60,6 +94,9 @@ export function metricValueDisplay(row: ResourceAssistantMetricRow, scenarioId: 
   if (!payload) return "-";
   const value = payload.value;
   if (value === null || value === undefined || value === "") return unavailableDisplay(payload.not_available_reasons);
+  if (row.metric_id === "plan_status" && typeof value === "string") {
+    return resourceAssistantOutcomeLabels[value as ResourceAssistantPlanOutcomeStatus] ?? value;
+  }
   if (row.metric_id === "demo_cost" && isRecord(value)) {
     return currencyDisplay(numberValue(value.total_cost));
   }

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import time
+from collections import Counter
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -503,7 +505,7 @@ def test_batch_solve_keeps_plan_results_independent(monkeypatch) -> None:
             metrics={},
         )
 
-    monkeypatch.setattr(assistant_module, "solve_scenario", fake_solve)
+    monkeypatch.setattr(assistant_module, "solve_ai_strict_fixed_resource_scenario", fake_solve)
 
     response = batch_solve_resource_plans(
         ResourceAssistantBatchSolveRequest(scenario=scenario, resource_plans=initial.resource_plans)
@@ -534,7 +536,7 @@ def test_single_plan_solve_only_runs_selected_plan_and_never_explains(monkeypatc
             metrics={},
         )
 
-    monkeypatch.setattr(assistant_module, "solve_scenario", fake_solve)
+    monkeypatch.setattr(assistant_module, "solve_ai_strict_fixed_resource_scenario", fake_solve)
     monkeypatch.setattr(assistant_module, "explain_recommendation", lambda *_: (_ for _ in ()).throw(AssertionError("不应调用解释")))
 
     response = solve_resource_plan(
@@ -546,13 +548,40 @@ def test_single_plan_solve_only_runs_selected_plan_and_never_explains(monkeypatc
     assert response.plan_result.scenario_id == initial.resource_plans[0].scenario_id
 
 
+def test_single_plan_solve_uses_exact_resources_once_without_expansion(monkeypatch) -> None:
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_PROVIDER", "local")
+    scenario = default_scenario_with_process_library().model_copy(update={"time_limit_seconds": 2.0})
+    initial = initialize_resource_assistant(
+        ResourceAssistantInitialRequest(scenario=scenario, generation_mode="local_fallback_only")
+    )
+    plan = initial.resource_plans[0]
+
+    started_at = time.perf_counter()
+    response = solve_resource_plan(ResourceAssistantSingleSolveRequest(scenario=scenario, resource_plan=plan))
+    elapsed = time.perf_counter() - started_at
+
+    expected = {pool.type: int(pool.quantity or 0) for pool in plan.resource_pools}
+    actual = Counter(resource.type for resource in response.plan_result.generated.schedule_input.resources)
+    assert response.plan_result.input_resource_quantities == expected
+    for pool in plan.resource_pools:
+        if pool.enabled and pool.resource_mode == "LIMITED":
+            assert actual[pool.type] == int(pool.quantity or 0)
+    assert response.plan_result.resource_expansion_attempted is False
+    assert response.plan_result.plan_status in {"met", "not_met", "unconfirmed", "infeasible"}
+    assert response.plan_result.solver_status == response.plan_result.result.status
+    assert response.plan_result.result.stats["solver_call_count"] == 1
+    assert response.plan_result.result.stats["baseline_status"] == "not_evaluated"
+    assert response.plan_result.result.stats["resource_recommendation_status"] == "not_applicable"
+    assert elapsed <= scenario.time_limit_seconds + 2.0
+
+
 def test_partial_comparison_does_not_run_solver_or_llm(monkeypatch) -> None:
     plans, results = _recommendation_fixture(
         economy=(120, 900_000, "current_resources_target_failed"),
         balanced=(100, 1_000_000, "met"),
         crash=(98, 1_130_000, "met"),
     )
-    monkeypatch.setattr(assistant_module, "solve_scenario", lambda *_: (_ for _ in ()).throw(AssertionError("不应求解")))
+    monkeypatch.setattr(assistant_module, "solve_ai_strict_fixed_resource_scenario", lambda *_: (_ for _ in ()).throw(AssertionError("不应求解")))
     monkeypatch.setattr(assistant_module, "explain_recommendation", lambda *_: (_ for _ in ()).throw(AssertionError("不应解释")))
 
     comparison = compare_resource_plan_results(
@@ -580,6 +609,20 @@ def test_recommendation_requires_all_three_results_and_falls_back_locally(monkey
     assert response.recommendation.ai_explanation == "本地解释"
 
 
+def test_recommendation_never_falls_back_to_late_feasible_results() -> None:
+    plans, results = _recommendation_fixture(
+        economy=(120, 900_000, "current_resources_target_failed"),
+        balanced=(110, 1_000_000, "current_resources_target_failed"),
+        crash=(105, 1_130_000, "unconfirmed"),
+    )
+
+    recommendation = build_deterministic_recommendation(plans, results)
+
+    assert recommendation.recommended_scenario_id is None
+    assert recommendation.recommendation_status == "insufficient_results"
+    assert "met" in recommendation.rule_reason
+
+
 def _recommendation_fixture(
     *,
     economy: tuple[int, int, str],
@@ -603,6 +646,18 @@ def _recommendation_fixture(
         results.append(
             ResourceAssistantPlanResult(
                 scenario_id=plan.scenario_id,
+                plan_status=(
+                    "met"
+                    if target_status in {"met", "candidate_resources_target_met"}
+                    else "unconfirmed"
+                    if target_status == "unconfirmed"
+                    else "infeasible"
+                    if target_status == "physical_infeasible"
+                    else "not_met"
+                ),
+                solver_status="FEASIBLE",
+                input_resource_quantities={pool.type: int(pool.quantity or 0) for pool in plan.resource_pools},
+                resource_expansion_attempted=False,
                 generated=None,
                 result=ScheduleResult(
                     status="FEASIBLE",

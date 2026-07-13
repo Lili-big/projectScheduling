@@ -3,6 +3,9 @@ import type { ResourceAssistantPlan, ResourceAssistantPlanResult } from "../../t
 import {
   editableResourcePools,
   metricsSummary,
+  resourceAssistantOutcomeDetail,
+  resourceAssistantOutcomeLabels,
+  resourceAssistantOutcomeTone,
   resourceAssistantResourceLabel,
   resourceAssistantProfileLabels,
   resourceAssistantStatusLabels,
@@ -49,6 +52,14 @@ export function ResourcePlanCard({
       </header>
       <p className="resource-plan-positioning">{plan.positioning}</p>
       <div className="resource-plan-metrics">{metricsSummary(result?.metrics)}</div>
+      {result?.plan_status && (
+        <div className="resource-plan-outcome">
+          <span className={`resource-status-pill ${resourceAssistantOutcomeTone(result.plan_status)}`}>
+            {resourceAssistantOutcomeLabels[result.plan_status]}
+          </span>
+          <small>{resourceAssistantOutcomeDetail(result)}</small>
+        </div>
+      )}
       <div className="resource-plan-resources">
         {editableResourcePools(plan).map((pool) => (
           <label className="resource-plan-resource" key={pool.id}>
