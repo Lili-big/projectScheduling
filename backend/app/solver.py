@@ -48,6 +48,138 @@ TARGET_SOLVE_TIME_LIMIT_SECONDS = 15.0
 MECHANICAL_DRILL_RESOURCE_TYPES = frozenset({"rotary_drill", "circulation_drill", "impact_drill"})
 MECHANICAL_DRILL_PATH_SUPPORT_WINDOW = 2
 MECHANICAL_DRILL_CROSS_SIDE_SUPPORT_WINDOW = 1
+RESOURCE_PATH_NEIGHBOR_WINDOW = 1
+
+
+def _ai_max_target_delay_days(
+    hard_milestone_lateness_days: list[int],
+    fixed_duration_overrun_days: int | None,
+) -> int | None:
+    values = [max(0, int(value or 0)) for value in hard_milestone_lateness_days]
+    if fixed_duration_overrun_days is not None:
+        values.append(max(0, int(fixed_duration_overrun_days or 0)))
+    return max(values) if values else None
+
+
+def _ai_continuity_scope_key(
+    task: Task,
+    location: dict[str, Any],
+    *,
+    resource_type: str,
+    include_side: bool,
+) -> tuple[Any, ...]:
+    return (
+        task.bridge_id or "",
+        (task.work_section_id or "") if include_side else "",
+        location["side"] if include_side else "*",
+        location["structure_type"],
+        task.component_type,
+        task.process_name,
+        resource_type,
+    )
+
+
+def _ai_continuity_location_orders(
+    tasks: list[Task],
+    resource_type: str,
+) -> dict[tuple[Any, ...], dict[str, int]]:
+    buckets: dict[tuple[Any, ...], dict[str, tuple[Any, ...]]] = defaultdict(dict)
+    for task in tasks:
+        location = _task_location(task)
+        if location["structure_type"] != "pier" or location["support_index"] is None:
+            continue
+        for include_side in (True, False):
+            scope_key = _ai_continuity_scope_key(
+                task,
+                location,
+                resource_type=resource_type,
+                include_side=include_side,
+            )
+            buckets[scope_key][task.structure_id] = _continuity_location_sort_key(
+                task,
+                location,
+                include_side=include_side,
+            )
+    return {
+        scope_key: {
+            structure_id: index
+            for index, structure_id in enumerate(
+                sorted(structure_sort_keys, key=lambda item: (structure_sort_keys[item], item))
+            )
+        }
+        for scope_key, structure_sort_keys in buckets.items()
+    }
+
+
+def _ai_path_group_key(task: Task, resource_type: str) -> tuple[Any, ...]:
+    location = _task_location(task)
+    return (
+        task.bridge_id or "",
+        task.work_section_id or "",
+        location["side"] or "N",
+        resource_type,
+        task.component_type,
+        task.process_name,
+    )
+
+
+def _ai_continuity_transition_penalties(
+    previous: Task,
+    current: Task,
+    all_tasks: list[Task],
+    resource_type: str,
+    location_orders: dict[tuple[Any, ...], dict[str, int]] | None = None,
+) -> dict[str, int]:
+    path_group_switch = int(_ai_path_group_key(previous, resource_type) != _ai_path_group_key(current, resource_type))
+    jump_pier = 0
+    side_switch = 0
+    cross_side_jump = 0
+    if previous.structure_id != current.structure_id:
+        previous_location = _task_location(previous)
+        current_location = _task_location(current)
+        previous_side = previous_location["side"]
+        current_side = current_location["side"]
+        side_switch = int(
+            previous_side is not None
+            and current_side is not None
+            and previous_side != current_side
+        )
+        if (
+            previous_location["structure_type"] == "pier"
+            and current_location["structure_type"] == "pier"
+            and previous_location["support_index"] is not None
+            and current_location["support_index"] is not None
+        ):
+            include_side = not bool(side_switch)
+            previous_scope = _ai_continuity_scope_key(
+                previous,
+                previous_location,
+                resource_type=resource_type,
+                include_side=include_side,
+            )
+            current_scope = _ai_continuity_scope_key(
+                current,
+                current_location,
+                resource_type=resource_type,
+                include_side=include_side,
+            )
+            if previous_scope == current_scope:
+                ranks = (location_orders or _ai_continuity_location_orders(all_tasks, resource_type)).get(
+                    previous_scope,
+                    {},
+                )
+                previous_rank = ranks.get(previous.structure_id)
+                current_rank = ranks.get(current.structure_id)
+                if previous_rank is not None and current_rank is not None:
+                    jump_pier = int(abs(current_rank - previous_rank) > 1)
+        cross_side_jump = int(bool(side_switch) and bool(jump_pier))
+    return {
+        "jump_pier": jump_pier,
+        "side_switch": side_switch,
+        "cross_side_jump": cross_side_jump,
+        "path_group_switch": path_group_switch,
+        "score": jump_pier * 4 + side_switch * 2 + cross_side_jump * 6 + path_group_switch,
+    }
 
 
 class _SolveBudget:
@@ -2321,6 +2453,8 @@ def solve_control_priority_schedule_once(
     enforce_hard_milestones: bool = False,
     max_makespan_days: int | None = None,
     relax_target_constraints: bool = False,
+    optimization_stage: str = "legacy",
+    warm_start_result: ScheduleResult | None = None,
 ) -> ScheduleResult:
     """Run the full control-priority objective once without a baseline CP-SAT solve."""
     result = solve_control_priority_schedule(
@@ -2328,13 +2462,19 @@ def solve_control_priority_schedule_once(
         enforce_hard_milestones=enforce_hard_milestones,
         max_makespan_days=max_makespan_days,
         relax_target_constraints=relax_target_constraints,
+        warm_start_result=warm_start_result,
+        _optimization_stage=optimization_stage,
         _use_baseline=False,
     )
     result.stats.update(
         {
             "solver_call_count": 1,
             "baseline_status": "not_evaluated",
-            "performance_path": "ai_strict_fixed_resource_one_pass",
+            "performance_path": (
+                "ai_strict_fixed_resource_single_stage"
+                if optimization_stage == "primary"
+                else "ai_strict_fixed_resource_one_pass"
+            ),
             "resource_expansion_attempted": False,
         }
     )
@@ -2342,7 +2482,11 @@ def solve_control_priority_schedule_once(
         {
             "solver_call_count": 1,
             "baseline_status": "not_evaluated",
-            "performance_path": "ai_strict_fixed_resource_one_pass",
+            "performance_path": (
+                "ai_strict_fixed_resource_single_stage"
+                if optimization_stage == "primary"
+                else "ai_strict_fixed_resource_one_pass"
+            ),
             "resource_expansion_attempted": False,
         }
     )
@@ -2365,6 +2509,7 @@ def solve_control_priority_schedule(
     _path_task_filter_by_resource: dict[str, set[str]] | None = None,
     _path_filter_task_ids: set[str] | None = None,
     _use_baseline: bool = True,
+    _optimization_stage: str = "legacy",
 ) -> ScheduleResult:
     started_at = time.perf_counter()
     if baseline_result is None and _use_baseline:
@@ -2405,6 +2550,7 @@ def solve_control_priority_schedule(
             warm_start_result=warm_start_result,
             relax_target_constraints=relax_target_constraints,
             _drill_group_stage="coarse",
+            _optimization_stage=_optimization_stage,
             _use_baseline=_use_baseline,
         )
         if coarse_result.status not in {"OPTIMAL", "FEASIBLE"}:
@@ -2441,8 +2587,11 @@ def solve_control_priority_schedule(
     config = schedule_input.schedule_strategy
     objective_weights = _objective_weights_for_config(config)
     objective_terms_used_payload = _objective_terms_used_for_config(config, objective_weights)
-    control_node_late_enabled = _objective_term_enabled(objective_weights, "control_node_late")
-    resource_idle_enabled = _objective_term_enabled(objective_weights, "resource_idle")
+    ai_primary_stage = _optimization_stage == "primary"
+    control_node_late_enabled = (
+        False if ai_primary_stage else _objective_term_enabled(objective_weights, "control_node_late")
+    )
+    resource_idle_enabled = not ai_primary_stage and _objective_term_enabled(objective_weights, "resource_idle")
     drill_group_constraints_enabled = _drill_group_stage in {"coarse", "refined"} and bool(drill_groups)
     drill_group_path_circuit_enabled = False
     inherited_stage1_route_metadata = (
@@ -2450,7 +2599,11 @@ def solve_control_priority_schedule(
         if _drill_group_stage == "refined" and warm_start_result is not None
         else _empty_drill_group_stage1_route_terms("not_applicable")["metadata"]
     )
-    makespan_objective_enabled = _objective_term_enabled(objective_weights, "makespan_and_soft_milestone")
+    makespan_objective_enabled = (
+        True
+        if ai_primary_stage
+        else _objective_term_enabled(objective_weights, "makespan_and_soft_milestone")
+    )
     control_chain_task_ids = _control_chain_task_ids(schedule_input)
     normal_tasks = _normal_balance_tasks(schedule_input.tasks, control_chain_task_ids)
     normal_resource_groups = _split_normal_tasks_by_resource_configuration(normal_tasks, resource_candidates)
@@ -2585,7 +2738,7 @@ def solve_control_priority_schedule(
                 relaxed_hard_lateness_vars[milestone.id] = lateness_var
             else:
                 model.Add(event_var <= target_offset)
-        else:
+        elif not ai_primary_stage:
             lateness_upper = max(horizon - target_offset, horizon) + 365
             is_control_soft_milestone = _is_soft_control_milestone(milestone)
             if (is_control_soft_milestone and control_node_late_enabled) or (
@@ -2620,6 +2773,8 @@ def solve_control_priority_schedule(
         include_slot_balance=False,
         path_task_filter_by_resource=_path_task_filter_by_resource,
         path_filter_task_ids=_path_filter_task_ids,
+        warm_start_result=None,
+        force_task_path_granularity=False,
     )
     drill_group_stage1_route_terms = _empty_drill_group_stage1_route_terms("not_enabled")
     if _drill_group_stage == "refined":
@@ -2627,6 +2782,10 @@ def solve_control_priority_schedule(
     relaxed_target_terms = list(relaxed_hard_lateness_vars.values())
     if fixed_duration_overrun_var is not None:
         relaxed_target_terms.append(fixed_duration_overrun_var)
+    max_target_delay_var: Any | None = None
+    if relaxed_target_terms:
+        max_target_delay_var = model.NewIntVar(0, horizon + 365, "max_target_delay")
+        model.AddMaxEquality(max_target_delay_var, relaxed_target_terms)
     relaxed_target_enabled = relax_target_constraints and bool(relaxed_target_terms)
     relaxed_target_weight = objective_weights["control_node_late"]
     modeled_terms = {
@@ -2642,12 +2801,16 @@ def solve_control_priority_schedule(
         objective_terms_used_payload,
         modeled_terms=modeled_terms,
     )
-    model.Minimize(
-        sum(control_lateness_terms) * objective_weights["control_node_late"]
-        + sum(relaxed_target_terms) * relaxed_target_weight
-        + sum(resource_organization_terms["idle_terms"]) * objective_weights["resource_idle"]
-        + makespan * (objective_weights["makespan_and_soft_milestone"] if makespan_objective_enabled else 0)
-    )
+    if ai_primary_stage:
+        primary_delay_expr = max_target_delay_var if max_target_delay_var is not None else 0
+        model.Minimize(primary_delay_expr * (horizon + 1) + makespan)
+    else:
+        model.Minimize(
+            sum(control_lateness_terms) * objective_weights["control_node_late"]
+            + sum(relaxed_target_terms) * relaxed_target_weight
+            + sum(resource_organization_terms["idle_terms"]) * objective_weights["resource_idle"]
+            + makespan * (objective_weights["makespan_and_soft_milestone"] if makespan_objective_enabled else 0)
+        )
     warm_start_used = _add_schedule_hints(
         model,
         starts=starts,
@@ -2680,6 +2843,7 @@ def solve_control_priority_schedule(
         "warm_start_used": warm_start_used,
         "relax_target_constraints": relax_target_constraints,
         "objective_modeling_gates": objective_modeling_gates,
+        "optimization_stage": _optimization_stage,
     }
     if max_makespan_days is not None:
         stats["max_makespan_days"] = max_makespan_days
@@ -2862,6 +3026,12 @@ def solve_control_priority_schedule(
         soft_control_lateness_penalty if control_node_late_enabled else 0
     )
     resource_idle_penalty = sum(solver.Value(term) for term in resource_organization_terms["idle_terms"])
+    modeled_continuity_penalty = sum(
+        solver.Value(term) for term in resource_organization_terms["continuity_terms"]
+    )
+    solved_max_target_delay_days = (
+        solver.Value(max_target_delay_var) if max_target_delay_var is not None else None
+    )
     drill_group_adjacent_penalty = 0
     drill_group_hole_penalty = 0
     stage1_same_side_penalty = sum(solver.Value(term) for term in drill_group_stage1_route_terms["same_side_terms"])
@@ -2935,6 +3105,11 @@ def solve_control_priority_schedule(
     stats["control_priority_analysis"] = control_priority_analysis
     stats["objective_modeling_gates"] = objective_modeling_gates
     stats["continuous_beam_team_spans"] = continuous_span_payload
+    if ai_primary_stage:
+        stats["max_target_delay_days"] = solved_max_target_delay_days
+        stats["resource_idle_days"] = resource_idle_penalty
+        stats["continuity_penalty"] = modeled_continuity_penalty
+        stats["continuity_upper_bound"] = int(resource_organization_terms["continuity_upper_bound"] or 0)
     if relax_target_constraints:
         stats["relaxed_target_constraints"] = {
             "relaxed_hard_milestone_lateness_days": relaxed_hard_milestone_lateness_days,
@@ -3009,6 +3184,9 @@ def solve_control_priority_schedule(
             "relaxed_target_weighted_penalty": relaxed_target_penalty_days * relaxed_target_weight,
             "soft_control_lateness_penalty": reported_soft_control_lateness_penalty,
             "resource_idle_penalty": resource_idle_penalty,
+            "max_target_delay_days": solved_max_target_delay_days,
+            "modeled_continuity_penalty": modeled_continuity_penalty,
+            "optimization_stage": _optimization_stage,
             "drill_group_adjacent_resource_switch_penalty": drill_group_adjacent_penalty,
             "drill_group_hole_jump_penalty": drill_group_hole_penalty,
             "stage1_same_side_penalty": stage1_same_side_penalty,
@@ -3788,7 +3966,9 @@ def _build_resource_organization_terms(
     include_slot_balance: bool = True,
     path_task_filter_by_resource: dict[str, set[str]] | None = None,
     path_filter_task_ids: set[str] | None = None,
-) -> dict[str, list[Any]]:
+    warm_start_result: ScheduleResult | None = None,
+    force_task_path_granularity: bool = False,
+) -> dict[str, Any]:
     assignments_by_resource: dict[str, list[tuple[Task, Any]]] = defaultdict(list)
     for task in tasks:
         for resource in resource_candidates.get(task.id, []):
@@ -3817,6 +3997,8 @@ def _build_resource_organization_terms(
             "spatial_gap_terms": [],
             "same_side_gap_terms": [],
             "side_switch_terms": [],
+            "continuity_terms": [],
+            "continuity_upper_bound": 0,
             "path_metadata": empty_path_terms["path_metadata"],
         }
 
@@ -3894,6 +4076,9 @@ def _build_resource_organization_terms(
             ends,
             horizon,
             include_slot_balance=include_slot_balance,
+            all_tasks=tasks,
+            warm_start_result=warm_start_result,
+            force_task_granularity=force_task_path_granularity,
         )
         if include_path_continuity
         else empty_path_terms
@@ -3908,6 +4093,8 @@ def _build_resource_organization_terms(
         "spatial_gap_terms": path_terms["spatial_gap_terms"],
         "same_side_gap_terms": path_terms["same_side_gap_terms"],
         "side_switch_terms": path_terms["side_switch_terms"],
+        "continuity_terms": path_terms["continuity_terms"],
+        "continuity_upper_bound": path_terms["continuity_upper_bound"],
         "path_metadata": path_terms["path_metadata"],
     }
 
@@ -3923,6 +4110,8 @@ def _empty_resource_path_terms(
         "same_side_gap_terms": [],
         "side_switch_terms": [],
         "slot_balance_terms": [],
+        "continuity_terms": [],
+        "continuity_upper_bound": 0,
         "path_metadata": {
             "resource_path_granularity_counts": {
                 "task": 0,
@@ -3950,9 +4139,19 @@ def _build_resource_path_diagnostic_terms(
     horizon: int,
     *,
     include_slot_balance: bool = True,
+    all_tasks: list[Task] | None = None,
+    warm_start_result: ScheduleResult | None = None,
+    force_task_granularity: bool = False,
 ) -> dict[str, Any]:
     same_side_gap_terms: list[Any] = []
     side_switch_terms: list[Any] = []
+    continuity_terms: list[Any] = []
+    continuity_upper_bound = 0
+    all_tasks = all_tasks or [task for items in assignments_by_resource.values() for task, _ in items]
+    location_orders_by_resource_type = {
+        resource.type: _ai_continuity_location_orders(all_tasks, resource.type)
+        for resource in enabled_resources
+    }
     slot_balance_terms: list[Any] = []
     resources_by_id = {resource.id: resource for resource in enabled_resources}
     limits_by_group_key = _resource_path_parallel_limits_by_group(enabled_resources)
@@ -3984,6 +4183,7 @@ def _build_resource_path_diagnostic_terms(
             starts,
             ends,
             horizon,
+            force_task_granularity=force_task_granularity,
         )
         for node in nodes:
             metadata["resource_path_granularity_counts"][node["granularity"]] += 1
@@ -3992,23 +4192,51 @@ def _build_resource_path_diagnostic_terms(
             continue
 
         indexed_assignments = list(enumerate(nodes, start=1))
+        incumbent_node_path = _ai_incumbent_resource_node_path(resource_id, nodes, warm_start_result)
+        incumbent_transition_pairs = set(zip(incumbent_node_path, incumbent_node_path[1:]))
+        incumbent_node_indexes = set(incumbent_node_path)
+        incumbent_start = incumbent_node_path[0] if incumbent_node_path else None
+        incumbent_end = incumbent_node_path[-1] if incumbent_node_path else None
         arcs = [(0, 0, resource_used.Not())]
+        model.AddHint(resource_used, 1 if incumbent_node_path else 0)
         for node_index, node in indexed_assignments:
             arcs.append((node_index, node_index, node["presence"].Not()))
-            arcs.append((0, node_index, model.NewBoolVar(f"resource_path_start_{_safe(resource_id)}_{node_index}")))
-            arcs.append((node_index, 0, model.NewBoolVar(f"resource_path_end_{_safe(resource_id)}_{node_index}")))
+            if len(node.get("task_ids", ())) > 1:
+                model.AddHint(node["presence"], 1 if node_index in incumbent_node_indexes else 0)
+            start_arc = model.NewBoolVar(f"resource_path_start_{_safe(resource_id)}_{node_index}")
+            end_arc = model.NewBoolVar(f"resource_path_end_{_safe(resource_id)}_{node_index}")
+            arcs.append((0, node_index, start_arc))
+            arcs.append((node_index, 0, end_arc))
+            model.AddHint(start_arc, 1 if node_index == incumbent_start else 0)
+            model.AddHint(end_arc, 1 if node_index == incumbent_end else 0)
 
-        allowed_transition_pairs = _resource_path_allowed_transition_pairs(resource, indexed_assignments)
-        for previous_index, previous_node in indexed_assignments:
-            for current_index, current_node in indexed_assignments:
-                if (previous_index, current_index) not in allowed_transition_pairs:
-                    continue
-                transition = model.NewBoolVar(
-                    f"resource_path_arc_{_safe(resource_id)}_{previous_index}_{current_index}"
-                )
-                arcs.append((previous_index, current_index, transition))
-                metadata["resource_path_transition_arc_count"] += 1
-                model.Add(current_node["start"] >= previous_node["end"]).OnlyEnforceIf(transition)
+        allowed_transition_pairs = _ai_sparse_resource_path_transition_pairs(
+            resource,
+            indexed_assignments,
+            warm_start_result=warm_start_result,
+            incumbent_transition_pairs=incumbent_transition_pairs,
+        )
+        node_by_index = dict(indexed_assignments)
+        for previous_index, current_index in sorted(allowed_transition_pairs):
+            previous_node = node_by_index[previous_index]
+            current_node = node_by_index[current_index]
+            transition = model.NewBoolVar(
+                f"resource_path_arc_{_safe(resource_id)}_{previous_index}_{current_index}"
+            )
+            arcs.append((previous_index, current_index, transition))
+            metadata["resource_path_transition_arc_count"] += 1
+            model.Add(current_node["start"] >= previous_node["end"]).OnlyEnforceIf(transition)
+            transition_score = _ai_continuity_transition_penalties(
+                previous_node["representative_task"],
+                current_node["representative_task"],
+                all_tasks,
+                resource.type,
+                location_orders_by_resource_type.get(resource.type),
+            )["score"]
+            if transition_score:
+                continuity_terms.append(transition_score * transition)
+                continuity_upper_bound += transition_score
+            model.AddHint(transition, 1 if (previous_index, current_index) in incumbent_transition_pairs else 0)
 
         model.AddCircuit(arcs)
 
@@ -4031,6 +4259,8 @@ def _build_resource_path_diagnostic_terms(
         "same_side_gap_terms": same_side_gap_terms,
         "side_switch_terms": side_switch_terms,
         "slot_balance_terms": slot_balance_terms,
+        "continuity_terms": continuity_terms,
+        "continuity_upper_bound": continuity_upper_bound,
         "path_metadata": metadata,
     }
 
@@ -4068,8 +4298,12 @@ def _resource_path_nodes_for_resource(
     starts: dict[str, Any],
     ends: dict[str, Any],
     horizon: int,
+    *,
+    force_task_granularity: bool = False,
 ) -> list[dict[str, Any]]:
     granularity, _ = _resource_path_granularity(resource, limits_by_group_key)
+    if force_task_granularity:
+        granularity = "task"
     if granularity == "task":
         return [
             {
@@ -4077,6 +4311,7 @@ def _resource_path_nodes_for_resource(
                 "start": starts[task.id],
                 "end": ends[task.id],
                 "representative_task": task,
+                "task_ids": (task.id,),
                 "granularity": "task",
             }
             for task, assignment in task_assignments
@@ -4133,6 +4368,7 @@ def _resource_path_nodes_for_resource(
                 "start": node_start,
                 "end": node_end,
                 "representative_task": representative_task,
+                "task_ids": tuple(task.id for task, _ in grouped_assignments),
                 "granularity": granularity,
             }
         )
@@ -4213,6 +4449,94 @@ def _build_same_structure_slot_balance_terms(
                 model.Add(active_difference == 0).OnlyEnforceIf(both_selected.Not())
                 terms.append(active_difference)
     return terms
+
+
+def _ai_incumbent_resource_node_path(
+    resource_id: str,
+    nodes: list[dict[str, Any]],
+    warm_start_result: ScheduleResult | None,
+) -> list[int]:
+    if warm_start_result is None or warm_start_result.status not in {"OPTIMAL", "FEASIBLE"}:
+        return []
+    node_index_by_task_id = {
+        task_id: node_index
+        for node_index, node in enumerate(nodes, start=1)
+        for task_id in node.get("task_ids", ())
+    }
+    ordered_tasks = sorted(
+        (
+            task
+            for task in warm_start_result.tasks
+            if task.assigned_resource_id == resource_id and task.id in node_index_by_task_id
+        ),
+        key=lambda task: (task.start_offset, task.end_offset, task.id),
+    )
+    path: list[int] = []
+    seen: set[int] = set()
+    for task in ordered_tasks:
+        node_index = node_index_by_task_id[task.id]
+        if node_index in seen:
+            continue
+        path.append(node_index)
+        seen.add(node_index)
+    return path
+
+
+def _ai_sparse_resource_path_transition_pairs(
+    resource: Resource,
+    indexed_nodes: list[tuple[int, dict[str, Any]]],
+    *,
+    warm_start_result: ScheduleResult | None,
+    incumbent_transition_pairs: set[tuple[int, int]],
+) -> set[tuple[int, int]]:
+    if len(indexed_nodes) <= 1:
+        return set()
+    node_by_index = {node_index: node for node_index, node in indexed_nodes}
+    candidate_pairs: set[tuple[int, int]] = set(incumbent_transition_pairs)
+
+    def add_window(order: list[int]) -> None:
+        for position, previous_index in enumerate(order):
+            lower = max(0, position - RESOURCE_PATH_NEIGHBOR_WINDOW)
+            upper = min(len(order), position + RESOURCE_PATH_NEIGHBOR_WINDOW + 1)
+            for current_index in order[lower:upper]:
+                if previous_index != current_index:
+                    candidate_pairs.add((previous_index, current_index))
+
+    spatial_order = [
+        node_index
+        for node_index, _ in sorted(
+            indexed_nodes,
+            key=lambda item: (*_task_spatial_sort_key(item[1]["representative_task"]), item[0]),
+        )
+    ]
+    add_window(spatial_order)
+
+    if warm_start_result is not None and warm_start_result.status in {"OPTIMAL", "FEASIBLE"}:
+        warm_task_by_id = {task.id: task for task in warm_start_result.tasks}
+
+        def warm_order_key(item: tuple[int, dict[str, Any]]) -> tuple[Any, ...]:
+            warm_tasks = [warm_task_by_id[task_id] for task_id in item[1].get("task_ids", ()) if task_id in warm_task_by_id]
+            if warm_tasks:
+                first = min(warm_tasks, key=lambda task: (task.start_offset, task.end_offset, task.id))
+                return (0, first.start_offset, first.end_offset, first.id, item[0])
+            return (1, *_task_spatial_sort_key(item[1]["representative_task"]), item[0])
+
+        add_window([node_index for node_index, _ in sorted(indexed_nodes, key=warm_order_key)])
+
+    if resource.type in MECHANICAL_DRILL_RESOURCE_TYPES:
+        visible_support_context = _resource_path_visible_support_context(indexed_nodes)
+        candidate_pairs = {
+            pair
+            for pair in candidate_pairs
+            if pair in incumbent_transition_pairs
+            or _resource_path_transition_candidate_allowed(
+                resource,
+                node_by_index[pair[0]],
+                node_by_index[pair[1]],
+                visible_support_context,
+            )
+        }
+    return candidate_pairs
 
 
 def _resource_path_allowed_transition_pairs(

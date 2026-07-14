@@ -23,6 +23,7 @@ from ..models import (
     ResourceAssistantPlan,
     ResourceAssistantPlanProfile,
     ResourceAssistantPlanResult,
+    ResourceAssistantOptimizationStages,
     ResourceAssistantProjectProfile,
     ResourceAssistantRecommendation,
     ResourceAssistantRecommendationResponse,
@@ -62,7 +63,7 @@ LOWER_STRUCTURE_COMPONENT_TYPES = {
 }
 CONTINUOUS_BEAM_COMPONENT_TYPE = "cast_in_place_continuous_beam"
 CONTINUOUS_BEAM_RESOURCE_TYPE = "cast_in_place_continuous_beam_team"
-AI_RESOURCE_PLAN_SOLVE_TIME_LIMIT_SECONDS = 30.0
+AI_RESOURCE_PLAN_SOLVE_TIME_LIMIT_SECONDS = 15.0
 
 PROFILE_LABELS: dict[str, str] = {
     "economy": "方案A 经济方案",
@@ -862,6 +863,12 @@ def _solve_single_plan(
             schedule_outcome_reason = None
         status = _plan_status_from_result(solved.result)
         solved_plan = plan.model_copy(update={"solve_status": status, "stale_reason": None})
+        raw_optimization_stages = solved.result.stats.get("optimization_stages")
+        optimization_stages = (
+            ResourceAssistantOptimizationStages.model_validate(raw_optimization_stages)
+            if isinstance(raw_optimization_stages, dict)
+            else None
+        )
         plan_result = ResourceAssistantPlanResult(
             scenario_id=plan.scenario_id,
             plan_status=plan_status,
@@ -870,6 +877,7 @@ def _solve_single_plan(
             solver_status=solved.result.status,
             input_resource_quantities={pool.type: max(0, int(pool.quantity or 0)) for pool in plan.resource_pools},
             resource_expansion_attempted=False,
+            optimization_stages=optimization_stages,
             generated=solved.generated,
             result=solved.result,
             metrics=metrics,

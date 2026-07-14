@@ -4,6 +4,7 @@ import {
   editableResourcePools,
   metricsSummary,
   resourceAssistantOutcomeDetail,
+  resourceAssistantOptimizationDetails,
   resourceAssistantOutcomeTone,
   resourceAssistantScheduleOutcomeLabels,
   resourceAssistantScheduleOutcomeReason,
@@ -44,6 +45,7 @@ export function ResourcePlanCard({
   const statusTone = resourceAssistantStatusTone(plan.solve_status);
   const outcomeStatus = resourceAssistantScheduleOutcomeStatus(result);
   const outcomeReason = resourceAssistantScheduleOutcomeReason(result);
+  const optimizationDetails = resourceAssistantOptimizationDetails(result);
   return (
     <article className={`resource-plan-card ${isSelected ? "is-selected" : ""}`}>
       <button className="resource-plan-card-hit" type="button" onClick={onSelect} aria-label={`查看${plan.scenario_name}`} />
@@ -64,6 +66,12 @@ export function ResourcePlanCard({
             </span>
           )}
           <small>{resourceAssistantOutcomeDetail(result)}</small>
+        </div>
+      )}
+      {optimizationDetails && (
+        <div className="resource-plan-outcome">
+          <small>{optimizationDetails.duration}</small>
+          {optimizationDetails.organization && <small>{optimizationDetails.organization}</small>}
         </div>
       )}
       <div className="resource-plan-resources">

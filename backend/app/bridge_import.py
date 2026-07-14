@@ -28,6 +28,19 @@ from .scenario_data import apply_resource_max_quantity_defaults, sync_bridge_com
 
 ONTOLOGY_PATH = Path(__file__).resolve().parent / "ontology" / "bridge_structure_ontology.v1.json"
 SUPPORTED_SUFFIXES = {".xlsx", ".xlsm"}
+DEFAULT_LOCAL_BRIDGE_WORKBOOK_NAME = "渠溪河特大桥结构设计表.xlsx"
+
+
+def default_local_bridge_workbook(project_root: Path) -> Path | None:
+    preferred = project_root / DEFAULT_LOCAL_BRIDGE_WORKBOOK_NAME
+    if preferred.is_file():
+        return preferred
+    workbooks = sorted(
+        path
+        for path in project_root.glob("*.xlsx")
+        if not path.name.startswith("~$")
+    )
+    return workbooks[0] if workbooks else None
 DEFAULT_HEADER_DEPTH = 3
 
 

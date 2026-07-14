@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import math
 import sys
 from collections import Counter
 from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -24,7 +26,10 @@ from app.models import (  # noqa: E402
     ResourceAssistantInitialRequest,
     ResourceAssistantPlan,
     ResourceAssistantPlanResult,
+    ResourceAssistantOptimizationStages,
+    ResourceAssistantPrimaryStageSummary,
     ResourceAssistantProjectProfile,
+    ResourceAssistantSecondaryStageSummary,
     ResourceAssistantUpdatePlanRequest,
     ScheduleInput,
     ScheduleResult,
@@ -45,6 +50,78 @@ from app.services.ai_resource_scheduling_assistant import (  # noqa: E402
     update_resource_plan,
 )
 from app.services.process_library_service import default_scenario_with_process_library  # noqa: E402
+
+
+def test_plan_result_optimization_stages_are_optional_and_backward_compatible() -> None:
+    legacy_payload = {
+        "scenario_id": "legacy-plan",
+        "input_resource_quantities": {"rotary_drill": 2},
+        "resource_expansion_attempted": False,
+        "generated_at": "2026-07-14T00:00:00Z",
+        "input_fingerprint": "legacy",
+    }
+
+    legacy = ResourceAssistantPlanResult.model_validate(legacy_payload)
+
+    assert legacy.optimization_stages is None
+
+    stages = ResourceAssistantOptimizationStages(
+        primary=ResourceAssistantPrimaryStageSummary(
+            solver_status="OPTIMAL",
+            max_target_delay_days=0,
+            makespan_days=579,
+            optimality_proven=True,
+            elapsed_seconds=18.6,
+            configured_budget_seconds=30.0,
+        ),
+        secondary=ResourceAssistantSecondaryStageSummary(
+            attempted=True,
+            solver_status="FEASIBLE",
+            resource_idle_days=980,
+            continuity_penalty=420,
+            elapsed_seconds=10.8,
+            configured_budget_seconds=11.4,
+        ),
+        selected_stage="secondary",
+        total_budget_seconds=30.0,
+        total_elapsed_seconds=29.4,
+    )
+    current = ResourceAssistantPlanResult.model_validate({**legacy_payload, "optimization_stages": stages})
+    serialized = current.model_dump(mode="json")
+
+    assert serialized["optimization_stages"]["primary"]["makespan_days"] == 579
+    assert serialized["optimization_stages"]["secondary"]["resource_idle_days"] == 980
+    assert serialized["optimization_stages"]["selected_stage"] == "secondary"
+
+    single_stage = ResourceAssistantOptimizationStages(
+        primary=ResourceAssistantPrimaryStageSummary(
+            solver_status="OPTIMAL",
+            max_target_delay_days=0,
+            makespan_days=579,
+            optimality_proven=True,
+            elapsed_seconds=24.0,
+            configured_budget_seconds=60.0,
+        ),
+        secondary=ResourceAssistantSecondaryStageSummary(skipped_reason="not_applicable"),
+        selected_stage="primary",
+        total_budget_seconds=60.0,
+        total_elapsed_seconds=24.0,
+    )
+    current_single_stage = ResourceAssistantPlanResult.model_validate(
+        {**legacy_payload, "optimization_stages": single_stage}
+    )
+    assert current_single_stage.optimization_stages is not None
+    assert current_single_stage.optimization_stages.secondary.attempted is False
+    assert current_single_stage.optimization_stages.secondary.skipped_reason == "not_applicable"
+    assert current_single_stage.optimization_stages.selected_stage == "primary"
+
+    idle_already_zero = ResourceAssistantSecondaryStageSummary(skipped_reason="idle_already_zero")
+    assert idle_already_zero.skipped_reason == "idle_already_zero"
+
+    with pytest.raises(ValidationError):
+        ResourceAssistantSecondaryStageSummary(skipped_reason="no_remaining_budget")
+    with pytest.raises(ValidationError):
+        ResourceAssistantSecondaryStageSummary(validation_failure_reason="secondary_no_schedule")
 
 
 def test_initialize_builds_project_profile_and_three_local_plans(monkeypatch) -> None:
@@ -239,10 +316,35 @@ def test_deterministic_baseline_uses_project_workload_and_specialized_rules() ->
     assert states["impact_drill"]["status"] == "UNUSED_OR_UNMAPPED"
     assert states["circulation_drill"]["status"] == "UNUSED_OR_UNMAPPED"
     assert states["cast_in_place_continuous_beam_team"]["status"] == "UNUSED_OR_UNMAPPED"
-    assert [baseline[name]["rotary_drill"] for name in ("economy", "balanced", "crash")] == [6, 8, 10]
-    assert [baseline[name]["pier_body_team"] for name in ("economy", "balanced", "crash")] == [6, 8, 9]
-    assert [baseline[name]["cap_team"] for name in ("economy", "balanced", "crash")] == [3, 4, 7]
-    assert [baseline[name]["cap_beam_team"] for name in ("economy", "balanced", "crash")] == [3, 4, 7]
+    pool_by_type = {pool.type: pool for pool in scenario.resource_pools}
+    rotary = pool_by_type["rotary_drill"]
+    rotary_current = int(rotary.quantity or 0)
+    rotary_max = int(rotary.max_quantity or rotary_current)
+    expected_rotary = [
+        min(rotary_max, math.ceil(rotary_current * 0.75)),
+        min(rotary_max, rotary_current),
+        min(rotary_max, math.ceil(rotary_current * 1.25)),
+    ]
+    control_count = len(profile.control_piers)
+    pier = pool_by_type["pier_body_team"]
+    pier_current = int(pier.quantity or 0)
+    raw_pier = [
+        max(control_count, math.ceil(pier_current * 0.75)),
+        max(control_count, math.ceil(pier_current * 0.75), pier_current),
+        max(pier_current, math.ceil(pier_current * 0.75), pier_current + math.ceil(control_count * 0.5)),
+    ]
+    expected_pier = [min(int(pier.max_quantity or value), value) for value in raw_pier]
+    assert [baseline[name]["rotary_drill"] for name in ("economy", "balanced", "crash")] == expected_rotary
+    assert [baseline[name]["pier_body_team"] for name in ("economy", "balanced", "crash")] == expected_pier
+    for resource_type in ("cap_team", "cap_beam_team"):
+        pool = pool_by_type[resource_type]
+        raw_values = [
+            max(1, math.ceil(raw_pier[0] * 0.5)),
+            max(1, math.ceil(raw_pier[1] * 0.5)),
+            max(1, math.ceil(raw_pier[2] * 0.75)),
+        ]
+        expected = [min(int(pool.max_quantity or value), value) for value in raw_values]
+        assert [baseline[name][resource_type] for name in ("economy", "balanced", "crash")] == expected
     assert [baseline[name]["cast_in_place_continuous_beam_team"] for name in ("economy", "balanced", "crash")] == [0, 0, 0]
 
 
@@ -295,6 +397,46 @@ def test_update_resource_plan_marks_result_stale_and_normalizes_max_quantity(mon
     assert response.resource_plan.solve_status == "stale"
     assert response.resource_plan.generation_source == "user_adjusted"
     assert response.invalidated_result_ids == [plan.scenario_id]
+
+
+def test_user_adjusted_plan_solve_uses_default_15_second_budget(monkeypatch) -> None:
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_PROVIDER", "local")
+    scenario = default_scenario_with_process_library()
+    initial = initialize_resource_assistant(
+        ResourceAssistantInitialRequest(scenario=scenario, generation_mode="local_fallback_only")
+    )
+    plan = next(item for item in initial.resource_plans if item.profile == "balanced")
+    updated = update_resource_plan(
+        ResourceAssistantUpdatePlanRequest(
+            plan_id=plan.scenario_id,
+            resource_plan=plan,
+            resource_updates={"cap_team": 6},
+        )
+    ).resource_plan
+    generated, result, _ = _metric_fixture()
+    calls: list[float] = []
+
+    def fake_solve(plan_scenario):
+        calls.append(plan_scenario.time_limit_seconds)
+        return ScenarioSolveResult(
+            scenario_id=plan_scenario.scenario_id,
+            scenario_name=plan_scenario.scenario_name,
+            generated=generated,
+            result=result,
+            milestone_results=[],
+            diagnostics=[],
+            metrics={},
+        )
+
+    monkeypatch.setattr(assistant_module, "solve_ai_strict_fixed_resource_scenario", fake_solve)
+
+    response = solve_resource_plan(
+        ResourceAssistantSingleSolveRequest(scenario=scenario, resource_plan=updated)
+    )
+
+    assert updated.generation_source == "user_adjusted"
+    assert calls == [15.0]
+    assert response.plan_result.resource_expansion_attempted is False
 
 
 def test_summarize_core_metrics_covers_duration_control_wait_utilization_and_cost() -> None:
@@ -518,7 +660,7 @@ def test_batch_solve_keeps_plan_results_independent(monkeypatch) -> None:
     assert statuses["crash"] in {"optimal", "feasible"}
     assert len(response.plan_results) == 3
     assert [scenario_id for scenario_id, _ in calls] == [plan.scenario_id for plan in initial.resource_plans]
-    assert {time_limit_seconds for _, time_limit_seconds in calls} == {30.0}
+    assert {time_limit_seconds for _, time_limit_seconds in calls} == {15.0}
     assert scenario.time_limit_seconds == 15
 
 
@@ -558,13 +700,13 @@ def test_single_plan_solve_only_runs_selected_plan_and_never_explains(monkeypatc
         ResourceAssistantSingleSolveRequest(scenario=scenario, resource_plan=initial.resource_plans[0])
     )
 
-    assert calls == [(initial.resource_plans[0].scenario_id, 30.0)]
+    assert calls == [(initial.resource_plans[0].scenario_id, 15.0)]
     assert scenario.time_limit_seconds == 15
     assert response.resource_plan.scenario_id == initial.resource_plans[0].scenario_id
     assert response.plan_result.scenario_id == initial.resource_plans[0].scenario_id
-    assert response.plan_result.generated.schedule_input.time_limit_seconds == 30.0
-    assert response.plan_result.result.stats["configured_time_limit_seconds"] == 30.0
-    assert response.plan_result.result.stats["target_achievement"]["time_budget_seconds"] == 30.0
+    assert response.plan_result.generated.schedule_input.time_limit_seconds == 15.0
+    assert response.plan_result.result.stats["configured_time_limit_seconds"] == 15.0
+    assert response.plan_result.result.stats["target_achievement"]["time_budget_seconds"] == 15.0
 
 
 def test_single_plan_solve_uses_exact_resources_once_without_expansion(monkeypatch) -> None:
@@ -585,6 +727,12 @@ def test_single_plan_solve_uses_exact_resources_once_without_expansion(monkeypat
         if pool.enabled and pool.resource_mode == "LIMITED":
             assert actual[pool.type] == int(pool.quantity or 0)
     assert response.plan_result.resource_expansion_attempted is False
+    assert response.plan_result.optimization_stages is not None
+    assert response.plan_result.optimization_stages.total_budget_seconds == 2.0
+    assert response.plan_result.optimization_stages.primary.attempted is True
+    assert response.plan_result.optimization_stages.secondary.attempted is False
+    assert response.plan_result.optimization_stages.secondary.skipped_reason == "not_applicable"
+    assert response.plan_result.optimization_stages.selected_stage == "primary"
     assert response.plan_result.plan_status in {"met", "not_met", "unconfirmed", "infeasible"}
     assert response.plan_result.schedule_outcome_status in {
         "duration_target_met",
@@ -598,6 +746,7 @@ def test_single_plan_solve_uses_exact_resources_once_without_expansion(monkeypat
     assert target["schedule_outcome_reason"] == response.plan_result.schedule_outcome_reason
     assert target["max_target_delay_days"] >= 0
     assert response.plan_result.result.stats["solver_call_count"] == 1
+    assert response.plan_result.result.stats["performance_path"] == "ai_strict_fixed_resource_single_stage"
     assert response.plan_result.result.stats["baseline_status"] == "not_evaluated"
     assert response.plan_result.result.stats["resource_recommendation_status"] == "not_applicable"
     assert response.plan_result.generated.schedule_input.time_limit_seconds == 2.0

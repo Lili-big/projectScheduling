@@ -11,7 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from app import process_nl  # noqa: E402
-from app.bridge_import import BridgeImportConfigError, get_bridge_import_adapter, import_bridge_parameters  # noqa: E402
+from app.bridge_import import BridgeImportConfigError, default_local_bridge_workbook, get_bridge_import_adapter, import_bridge_parameters  # noqa: E402
 from app.main import apply_process_natural_language_endpoint, import_bridge_params_endpoint, import_local_bridge_params_endpoint  # noqa: E402
 from app.models import ProcessNlRequest, ProductivityOption  # noqa: E402
 from app.project_structure_params import (  # noqa: E402
@@ -24,10 +24,19 @@ from app.scenario_data import default_scenario  # noqa: E402
 
 
 def sample_workbook_path() -> Path:
-    matches = [path for path in PROJECT_ROOT.glob("*.xlsx") if not path.name.startswith("~$")]
-    if not matches:
+    workbook = default_local_bridge_workbook(PROJECT_ROOT)
+    if workbook is None:
         pytest.fail("sample workbook is missing")
-    return matches[0]
+    return workbook
+
+
+def test_default_local_bridge_workbook_prefers_quxi_structure_design(tmp_path: Path) -> None:
+    fallback = tmp_path / "A-other.xlsx"
+    preferred = tmp_path / "渠溪河特大桥结构设计表.xlsx"
+    fallback.write_bytes(b"fallback")
+    preferred.write_bytes(b"preferred")
+
+    assert default_local_bridge_workbook(tmp_path) == preferred
 
 
 def test_bridge_excel_import_understands_sample_workbook() -> None:

@@ -18,7 +18,14 @@ from app.main import (  # noqa: E402
     create_progress_snapshot_endpoint,
     get_plan_control_project_endpoint,
 )
-from app.models import CreateForecastRequest, CreateProgressSnapshotRequest, ProgressEntry  # noqa: E402
+from app.models import (  # noqa: E402
+    CreateForecastRequest,
+    CreateProgressSnapshotRequest,
+    ProgressEntry,
+    ResourceAssistantOptimizationStages,
+    ResourceAssistantPrimaryStageSummary,
+    ResourceAssistantSecondaryStageSummary,
+)
 from app.services.plan_control_repository import (  # noqa: E402
     PlanControlConflictError,
     default_plan_control_repository,
@@ -52,6 +59,39 @@ def test_plan_control_baseline_and_project_summary_api(tmp_path: Path, monkeypat
     assert summary_task.quantity_label == planned_task.quantity_label
     if summary_task.structure_parameter_label:
         assert summary_task.structure_parameter_label not in summary_task.quantity_label
+
+
+def test_plan_control_accepts_two_stage_plan_result_without_changing_snapshot_contract(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(default_plan_control_repository, "path", tmp_path / "plan-control-two-stage.json")
+    request = solved_baseline_request()
+    request.plan_result.optimization_stages = ResourceAssistantOptimizationStages(
+        primary=ResourceAssistantPrimaryStageSummary(
+            solver_status="OPTIMAL",
+            max_target_delay_days=0,
+            makespan_days=request.plan_result.result.objective_days,
+            optimality_proven=True,
+            elapsed_seconds=3.0,
+            configured_budget_seconds=30.0,
+        ),
+        secondary=ResourceAssistantSecondaryStageSummary(
+            attempted=True,
+            solver_status="FEASIBLE",
+            resource_idle_days=10,
+            continuity_penalty=4,
+            elapsed_seconds=20.0,
+            configured_budget_seconds=25.0,
+        ),
+        selected_stage="secondary",
+        total_budget_seconds=30.0,
+        total_elapsed_seconds=23.0,
+    )
+
+    baseline = create_baseline_plan_endpoint(request)
+    summary = get_plan_control_project_endpoint(request.scenario.scenario_id)
+
+    assert baseline.version_no == 1
+    assert summary.active_plan is not None
+    assert summary.active_plan.schedule_result_snapshot.objective_days == request.plan_result.result.objective_days
 
 
 def _progress_status_date(baseline) -> date:

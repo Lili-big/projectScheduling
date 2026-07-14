@@ -846,6 +846,37 @@ export type ResourceAssistantCoreMetrics = {
   not_available_reasons: string[];
 };
 
+export type ResourceAssistantPrimaryStageSummary = {
+  attempted: boolean;
+  solver_status?: string | null;
+  max_target_delay_days?: number | null;
+  makespan_days?: number | null;
+  optimality_proven: boolean;
+  elapsed_seconds: number;
+  configured_budget_seconds: number;
+};
+
+export type ResourceAssistantSecondaryStageSummary = {
+  attempted: boolean;
+  solver_status?: string | null;
+  resource_idle_days?: number | null;
+  continuity_penalty?: number | null;
+  optimality_proven: boolean;
+  elapsed_seconds: number;
+  configured_budget_seconds: number;
+  skipped_reason?: "primary_no_schedule" | "time_budget_exhausted" | "insufficient_remaining_budget" | "idle_already_zero" | "not_applicable" | null;
+  validation_failure_reason?: "primary_bounds_exceeded" | "resource_snapshot_changed" | "task_set_changed" | "no_secondary_improvement" | "model_error" | null;
+};
+
+export type ResourceAssistantOptimizationStages = {
+  primary: ResourceAssistantPrimaryStageSummary;
+  secondary: ResourceAssistantSecondaryStageSummary;
+  selected_stage: "primary" | "secondary";
+  fallback_reason?: string | null;
+  total_budget_seconds: number;
+  total_elapsed_seconds: number;
+};
+
 export type ResourceAssistantPlanResult = {
   scenario_id: string;
   plan_status?: ResourceAssistantPlanOutcomeStatus | null;
@@ -854,6 +885,7 @@ export type ResourceAssistantPlanResult = {
   solver_status?: string | null;
   input_resource_quantities: Record<string, number>;
   resource_expansion_attempted: boolean;
+  optimization_stages?: ResourceAssistantOptimizationStages | null;
   generated?: GeneratedScheduleInput | null;
   result?: ScheduleResult | null;
   metrics: ResourceAssistantCoreMetrics;

@@ -356,6 +356,11 @@ export function ResourceAssistantPanel({
         />
         {error && <div className="notice danger">{error}</div>}
         {plans.length > 0 && (
+          <div className="notice">
+            单方案固定资源求解最长 15 秒：目标为最大延期优先、总工期其次；资源空闲与连续性仅按最终排程诊断。
+          </div>
+        )}
+        {plans.length > 0 && (
           <div className="baseline-confirmation-bar">
             <label>基准确认人<input ref={baselineConfirmedByInputRef} required value={baselineConfirmedBy} onChange={(event) => setBaselineConfirmedBy(event.target.value)} /></label>
             <label>选择原因<input ref={baselineReasonInputRef} required value={baselineReason} onChange={(event) => setBaselineReason(event.target.value)} placeholder="例如：工期与资源投入最符合执行目标" /></label>

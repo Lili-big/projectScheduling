@@ -1111,6 +1111,49 @@ class ResourceAssistantCoreMetrics(BaseModel):
     not_available_reasons: list[str] = Field(default_factory=list)
 
 
+class ResourceAssistantPrimaryStageSummary(BaseModel):
+    attempted: bool = True
+    solver_status: str | None = None
+    max_target_delay_days: int | None = Field(default=None, ge=0)
+    makespan_days: int | None = Field(default=None, ge=0)
+    optimality_proven: bool = False
+    elapsed_seconds: float = Field(default=0.0, ge=0)
+    configured_budget_seconds: float = Field(default=0.0, ge=0)
+
+
+class ResourceAssistantSecondaryStageSummary(BaseModel):
+    attempted: bool = False
+    solver_status: str | None = None
+    resource_idle_days: int | None = Field(default=None, ge=0)
+    continuity_penalty: int | None = Field(default=None, ge=0)
+    optimality_proven: bool = False
+    elapsed_seconds: float = Field(default=0.0, ge=0)
+    configured_budget_seconds: float = Field(default=0.0, ge=0)
+    skipped_reason: Literal[
+        "primary_no_schedule",
+        "time_budget_exhausted",
+        "insufficient_remaining_budget",
+        "idle_already_zero",
+        "not_applicable",
+    ] | None = None
+    validation_failure_reason: Literal[
+        "primary_bounds_exceeded",
+        "resource_snapshot_changed",
+        "task_set_changed",
+        "no_secondary_improvement",
+        "model_error",
+    ] | None = None
+
+
+class ResourceAssistantOptimizationStages(BaseModel):
+    primary: ResourceAssistantPrimaryStageSummary
+    secondary: ResourceAssistantSecondaryStageSummary
+    selected_stage: Literal["primary", "secondary"] = "primary"
+    fallback_reason: str | None = None
+    total_budget_seconds: float = Field(default=0.0, ge=0)
+    total_elapsed_seconds: float = Field(default=0.0, ge=0)
+
+
 class ResourceAssistantPlanResult(BaseModel):
     scenario_id: str
     plan_status: ResourceAssistantPlanOutcomeStatus | None = None
@@ -1119,6 +1162,7 @@ class ResourceAssistantPlanResult(BaseModel):
     solver_status: str | None = None
     input_resource_quantities: dict[str, int] = Field(default_factory=dict)
     resource_expansion_attempted: bool = False
+    optimization_stages: ResourceAssistantOptimizationStages | None = None
     generated: GeneratedScheduleInput | None = None
     result: ScheduleResult | None = None
     metrics: ResourceAssistantCoreMetrics = Field(default_factory=ResourceAssistantCoreMetrics)

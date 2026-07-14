@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from ..bridge_import import import_bridge_parameters
+from ..bridge_import import default_local_bridge_workbook, import_bridge_parameters
 from ..models import ImportBridgeParamsResponse, ScenarioInput
 
 
@@ -44,10 +44,7 @@ def import_local_bridge_params(scenario: ScenarioInput) -> ImportBridgeParamsRes
 
 def local_workbook_path() -> Path:
     project_root = Path(__file__).resolve().parents[3]
-    workbooks = sorted(
-        path for path in project_root.glob("*.xlsx")
-        if not path.name.startswith("~$")
-    )
-    if not workbooks:
+    workbook = default_local_bridge_workbook(project_root)
+    if workbook is None:
         raise HTTPException(status_code=404, detail="椤圭洰鐩綍涓嬫湭鎵惧埌鍙鍏ョ殑 Excel 宸ヤ綔绨裤€?")
-    return workbooks[0]
+    return workbook

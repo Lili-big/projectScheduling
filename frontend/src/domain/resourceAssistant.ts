@@ -145,6 +145,54 @@ export function resourceAssistantOutcomeDetail(result?: ResourceAssistantPlanRes
   return result.diagnostics[0]?.message || "已证明当前资源无法形成可行排程。";
 }
 
+const optimizationFallbackLabels: Record<string, string> = {
+  primary_no_schedule: "工期阶段未获得排程",
+  time_budget_exhausted: "工期阶段已用完共享预算",
+  insufficient_remaining_budget: "剩余预算不足以安全启动资源空闲优化",
+  idle_already_zero: "第一阶段累计资源空闲已为 0，无需继续优化",
+  secondary_no_schedule: "资源空闲优化阶段限时内未获得排程",
+  model_error: "资源空闲优化阶段求解失败",
+  primary_bounds_exceeded: "候选排程突破工期上限",
+  resource_snapshot_changed: "候选排程资源快照不一致",
+  task_set_changed: "候选排程任务集合不完整",
+  no_secondary_improvement: "累计资源空闲没有严格改善",
+};
+
+export function resourceAssistantOptimizationDetails(result?: ResourceAssistantPlanResult | null): {
+  duration: string;
+  organization: string | null;
+} | null {
+  const stages = result?.optimization_stages;
+  if (!stages) return null;
+  const duration = stages.primary.optimality_proven
+    ? "工期排程：已证明当前最大延期与总工期最优"
+    : stages.primary.solver_status === "FEASIBLE"
+      ? "工期排程：已获得限时可行结果，尚未证明最优"
+      : `工期排程：${stages.primary.solver_status || "未获得结果"}`;
+  if (
+    stages.selected_stage === "primary"
+    && !stages.secondary.attempted
+    && stages.secondary.skipped_reason === "not_applicable"
+  ) {
+    return { duration, organization: null };
+  }
+  if (stages.selected_stage === "secondary") {
+    return {
+      duration,
+      organization: stages.secondary.optimality_proven
+        ? "资源空闲：已改善并证明最优"
+        : "资源空闲：已改善，尚未证明最优",
+    };
+  }
+  const reason = stages.secondary.validation_failure_reason || stages.secondary.skipped_reason || stages.fallback_reason;
+  return {
+    duration,
+    organization: stages.secondary.attempted
+      ? `资源空闲：已回退第一阶段（${optimizationFallbackLabels[reason || ""] || reason || "未通过采用校验"}）`
+      : `资源空闲：未执行（${optimizationFallbackLabels[reason || ""] || reason || "无剩余预算"}）`,
+  };
+}
+
 export function llmConfigStatusLabel(status: ResourceAssistantLlmConfigStatus): string {
   if (status.status === "configured") return `${status.provider}${status.model ? ` / ${status.model}` : ""}`;
   if (status.status === "failed") return `已回退：${status.warning || "外部模型调用失败"}`;

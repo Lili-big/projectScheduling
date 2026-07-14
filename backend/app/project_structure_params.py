@@ -5,7 +5,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from .bridge_import import import_bridge_parameters
+from .bridge_import import default_local_bridge_workbook, import_bridge_parameters
 from .models import ProjectModel, ProjectStructureParamsResponse, ScenarioInput
 from .scenario_data import apply_resource_max_quantity_defaults, default_scenario, sync_bridge_completion_milestones
 
@@ -82,5 +82,4 @@ def _read_project(path: Path) -> ProjectModel:
 
 
 def _first_project_workbook() -> Path | None:
-    workbooks = sorted(path for path in PROJECT_ROOT.glob("*.xlsx") if not path.name.startswith("~$"))
-    return workbooks[0] if workbooks else None
+    return default_local_bridge_workbook(PROJECT_ROOT)

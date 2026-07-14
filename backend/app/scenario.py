@@ -266,21 +266,83 @@ def solve_scenario(scenario: ScenarioInput) -> ScenarioSolveResult:
 
 
 def solve_ai_strict_fixed_resource_scenario(scenario: ScenarioInput) -> ScenarioSolveResult:
-    """Solve one AI plan with its exact named resources and no expansion branch."""
+    """Solve one AI plan once with exact named resources and no expansion branch."""
     started_at = time.perf_counter()
     generated = generate_schedule_input_from_scenario(scenario)
     generation_errors = [message.message for message in generated.validation if message.level == "error"]
     if generation_errors:
         raise ValueError("；".join(generation_errors))
 
-    result = solve_control_priority_schedule_once(
-        generated.schedule_input,
+    total_budget_seconds = max(0.1, float(scenario.time_limit_seconds))
+    stages_started_at = time.perf_counter()
+    primary_input = generated.schedule_input.model_copy(update={"time_limit_seconds": total_budget_seconds})
+    primary_result = solve_control_priority_schedule_once(
+        primary_input,
         enforce_hard_milestones=True,
         relax_target_constraints=True,
+        optimization_stage="primary",
     )
-    if result.status == "MODEL_INVALID":
-        detail = next((message.message for message in result.validation if message.level == "error"), "模型构建失败。")
+    if primary_result.status == "MODEL_INVALID":
+        detail = next((message.message for message in primary_result.validation if message.level == "error"), "模型构建失败。")
         raise RuntimeError(detail)
+
+    primary_elapsed_seconds = max(0.0, time.perf_counter() - stages_started_at)
+    primary_max_target_delay_days = _ai_result_max_target_delay_days(primary_result)
+    primary_makespan_days = primary_result.objective_days
+    primary_idle_days = _ai_result_resource_idle_days(primary_result)
+    primary_continuity_penalty = _ai_result_continuity_penalty(primary_result)
+    primary_summary = {
+        "attempted": True,
+        "solver_status": primary_result.status,
+        "max_target_delay_days": primary_max_target_delay_days,
+        "makespan_days": primary_makespan_days,
+        "optimality_proven": primary_result.status == "OPTIMAL",
+        "elapsed_seconds": primary_elapsed_seconds,
+        "configured_budget_seconds": total_budget_seconds,
+    }
+    secondary_summary: dict[str, Any] = {
+        "attempted": False,
+        "solver_status": None,
+        "resource_idle_days": None,
+        "continuity_penalty": None,
+        "optimality_proven": False,
+        "elapsed_seconds": 0.0,
+        "configured_budget_seconds": 0.0,
+        "skipped_reason": "not_applicable",
+        "validation_failure_reason": None,
+    }
+
+    total_elapsed_seconds = max(0.0, time.perf_counter() - stages_started_at)
+    optimization_stages = {
+        "primary": primary_summary,
+        "secondary": secondary_summary,
+        "selected_stage": "primary",
+        "fallback_reason": None,
+        "total_budget_seconds": total_budget_seconds,
+        "total_elapsed_seconds": total_elapsed_seconds,
+    }
+    result = primary_result
+    solver_call_count = 1
+    result.stats.update(
+        {
+            "optimization_stages": optimization_stages,
+            "primary_solver_status": primary_result.status,
+            "primary_max_target_delay_days": primary_max_target_delay_days,
+            "primary_makespan_days": primary_makespan_days,
+            "primary_resource_idle_days": primary_idle_days,
+            "primary_continuity_penalty": primary_continuity_penalty,
+            "solver_call_count": solver_call_count,
+            "performance_path": "ai_strict_fixed_resource_single_stage",
+        }
+    )
+    result.objective_breakdown.update(
+        {
+            "optimization_stages": optimization_stages,
+            "primary_solver_status": primary_result.status,
+            "solver_call_count": solver_call_count,
+            "performance_path": "ai_strict_fixed_resource_single_stage",
+        }
+    )
 
     _apply_ai_strict_target_achievement(result, generated.schedule_input)
     result.stats.update(
@@ -317,6 +379,45 @@ def solve_ai_strict_fixed_resource_scenario(scenario: ScenarioInput) -> Scenario
     )
 
 
+def _ai_result_max_target_delay_days(result: ScheduleResult) -> int | None:
+    hard_lateness = [
+        max(0, int(milestone.lateness_days or 0))
+        for milestone in result.milestone_results
+        if milestone.mode == "hard" and milestone.status != "not_evaluated"
+    ]
+    fixed_duration_overrun = _fixed_duration_overrun_days(result)
+    target_present = bool(hard_lateness) or _int_or_none(result.stats.get("max_makespan_days")) is not None
+    if not target_present:
+        return None
+    return max([fixed_duration_overrun, *hard_lateness], default=0)
+
+
+def _ai_result_resource_idle_days(result: ScheduleResult) -> int:
+    analysis = result.stats.get("resource_organization_analysis")
+    if not isinstance(analysis, dict):
+        return 0
+    resources = analysis.get("resources")
+    if not isinstance(resources, list):
+        return 0
+    return sum(
+        max(0, int(item.get("idle_days") or 0))
+        for item in resources
+        if isinstance(item, dict) and int(item.get("task_count") or 0) > 0
+    )
+
+
+def _ai_result_continuity_penalty(result: ScheduleResult) -> int:
+    continuity = result.stats.get("continuity_metrics")
+    if not isinstance(continuity, dict):
+        return 0
+    return (
+        max(0, int(continuity.get("jump_pier_count") or 0)) * 4
+        + max(0, int(continuity.get("side_switch_count") or 0)) * 2
+        + max(0, int(continuity.get("cross_side_jump_count") or 0)) * 6
+        + max(0, int(continuity.get("path_group_switch_count") or 0))
+    )
+
+
 def _apply_ai_strict_target_achievement(result: ScheduleResult, schedule_input: ScheduleInput) -> dict[str, Any]:
     hard_milestone_lateness = [
         max(0, int(milestone.lateness_days or 0))
@@ -328,13 +429,14 @@ def _apply_ai_strict_target_achievement(result: ScheduleResult, schedule_input: 
     max_target_delay_days = max([fixed_duration_overrun_days, *hard_milestone_lateness], default=0)
     target_present = any(milestone.mode == "hard" for milestone in schedule_input.milestones)
     has_schedule = bool(result.tasks)
-    optimality_proven = result.status == "OPTIMAL"
+    primary_solver_status = str(result.stats.get("primary_solver_status") or result.status)
+    optimality_proven = primary_solver_status == "OPTIMAL"
 
-    if result.status == "INFEASIBLE":
+    if primary_solver_status == "INFEASIBLE":
         plan_status = "infeasible"
-    elif result.status == "UNKNOWN":
+    elif primary_solver_status == "UNKNOWN":
         plan_status = "unconfirmed"
-    elif result.status not in {"OPTIMAL", "FEASIBLE"}:
+    elif primary_solver_status not in {"OPTIMAL", "FEASIBLE"}:
         plan_status = "infeasible"
     elif not target_present:
         plan_status = "unconfirmed"
@@ -350,6 +452,7 @@ def _apply_ai_strict_target_achievement(result: ScheduleResult, schedule_input: 
         target_present=target_present,
         has_schedule=has_schedule,
         max_target_delay_days=max_target_delay_days,
+        solver_status=primary_solver_status,
     )
 
     failure_reasons: list[str] = []
@@ -357,11 +460,11 @@ def _apply_ai_strict_target_achievement(result: ScheduleResult, schedule_input: 
         failure_reasons.append("hard_milestone_late")
     if fixed_duration_overrun_days > 0:
         failure_reasons.append("fixed_duration_overrun")
-    if not target_present and result.status in {"OPTIMAL", "FEASIBLE"}:
+    if not target_present and primary_solver_status in {"OPTIMAL", "FEASIBLE"}:
         failure_reasons.append("target_missing")
-    if plan_status == "unconfirmed" and result.status == "FEASIBLE" and hard_milestone_late_days > 0:
+    if plan_status == "unconfirmed" and primary_solver_status == "FEASIBLE" and hard_milestone_late_days > 0:
         failure_reasons.append("optimality_unproven")
-    if result.status == "UNKNOWN":
+    if primary_solver_status == "UNKNOWN":
         failure_reasons.extend(["unconfirmed", "time_budget_exhausted"])
     if plan_status == "infeasible":
         failure_reasons.append(str(result.stats.get("reason") or "physical_infeasible"))
@@ -371,7 +474,8 @@ def _apply_ai_strict_target_achievement(result: ScheduleResult, schedule_input: 
         "target_status": plan_status,
         "schedule_outcome_status": schedule_outcome_status,
         "schedule_outcome_reason": schedule_outcome_reason,
-        "solver_status": result.status,
+        "solver_status": primary_solver_status,
+        "selected_schedule_solver_status": result.status,
         "target_present": target_present,
         "has_schedule": has_schedule,
         "optimality_proven": optimality_proven,
@@ -380,7 +484,7 @@ def _apply_ai_strict_target_achievement(result: ScheduleResult, schedule_input: 
         "max_target_delay_days": max_target_delay_days,
         "failure_reasons": list(dict.fromkeys(failure_reasons)),
         "time_budget_seconds": schedule_input.time_limit_seconds,
-        "time_budget_exhausted": result.status in {"FEASIBLE", "UNKNOWN"},
+        "time_budget_exhausted": primary_solver_status in {"FEASIBLE", "UNKNOWN"},
         "evaluated_at_source": "ai_strict_fixed_resources",
     }
     result.stats["target_achievement"] = payload
@@ -399,7 +503,7 @@ def _apply_ai_strict_target_achievement(result: ScheduleResult, schedule_input: 
                 message=f"当前固定资源的已证明最优排程仍延期 {hard_milestone_late_days + fixed_duration_overrun_days} 天，不自动增加资源。",
             )
         )
-    elif plan_status == "unconfirmed" and result.status == "FEASIBLE":
+    elif plan_status == "unconfirmed" and primary_solver_status == "FEASIBLE":
         result.validation.append(
             ValidationMessage(
                 level="warning",
@@ -417,18 +521,20 @@ def _ai_strict_schedule_outcome(
     target_present: bool,
     has_schedule: bool,
     max_target_delay_days: int,
+    solver_status: str | None = None,
 ) -> tuple[str | None, str | None]:
-    if result.status in {"OPTIMAL", "FEASIBLE"} and has_schedule:
+    effective_status = solver_status or result.status
+    if effective_status in {"OPTIMAL", "FEASIBLE"} and has_schedule:
         if not target_present:
             return None, "target_missing"
         if max_target_delay_days == 0:
             return "duration_target_met", "target_met"
-        if result.status == "OPTIMAL":
+        if effective_status == "OPTIMAL":
             return "duration_target_not_met", "proven_late"
         return "duration_target_not_met", "late_unconfirmed"
-    if result.status == "UNKNOWN" or (result.status in {"OPTIMAL", "FEASIBLE"} and not has_schedule):
+    if effective_status == "UNKNOWN" or (effective_status in {"OPTIMAL", "FEASIBLE"} and not has_schedule):
         return "no_feasible_schedule", "time_limit_no_schedule"
-    if result.status == "INFEASIBLE":
+    if effective_status == "INFEASIBLE":
         reason = str(result.stats.get("reason") or "").lower()
         messages = " ".join(item.message for item in result.validation).lower()
         resource_markers = ("resource_coverage", "missing_resource", "compatible_resource", "resource_type", "资源", "兼容")
