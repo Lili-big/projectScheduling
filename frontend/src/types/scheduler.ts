@@ -24,7 +24,17 @@ export type ObjectiveTermId =
   | "control_node_late"
   | "makespan_and_soft_milestone"
   | "resource_idle";
-export type TabKey = "process" | "logic" | "resources" | "milestones" | "tasks" | "results" | "resultsMvp";
+export type TabKey =
+  | "projectFiles"
+  | "process"
+  | "logic"
+  | "resources"
+  | "milestones"
+  | "tasks"
+  | "results"
+  | "resourceAssistant"
+  | "planControl"
+  | "progressVisualization";
 export type GanttMode = "by_time" | "by_structure" | "by_process";
 export type TaskViewMode = "by_structure" | "by_process";
 export type BusyState =
@@ -37,6 +47,8 @@ export type BusyState =
   | "importing"
   | "nl"
   | "aiParameter"
+  | "resourceAssistantGenerating"
+  | "resourceAssistantSolving"
   | "savingProcessLibrary"
   | "savingLogic"
   | "savingResources"
@@ -49,6 +61,7 @@ export type ComponentModel = {
   component_type: ComponentType;
   quantity: number;
   quantity_label: string;
+  structure_parameter_label?: string | null;
   method_id?: string | null;
   productivity_option_id?: string | null;
   enabled: boolean;
@@ -103,9 +116,15 @@ export type TargetStatus =
 export type TargetAchievement = {
   business_success: boolean;
   target_status: TargetStatus;
+  schedule_outcome_status?: ResourceAssistantScheduleOutcomeStatus | null;
+  schedule_outcome_reason?: ResourceAssistantScheduleOutcomeReason | null;
   solver_status: string;
+  target_present?: boolean;
+  has_schedule?: boolean;
+  optimality_proven?: boolean;
   hard_milestone_late_days: number;
   fixed_duration_overrun_days: number;
+  max_target_delay_days?: number;
   failure_reasons: string[];
   time_budget_seconds?: number;
   time_budget_exhausted?: boolean;
@@ -197,6 +216,7 @@ export type UpperStructureModel = {
   span_length_m: number;
   beam_count_per_span?: number | null;
   span_group_expression: string;
+  structure_parameter_label?: string | null;
   control_level?: ControlLevel | null;
   properties: Record<string, unknown>;
 };
@@ -512,6 +532,7 @@ export type Task = {
   productivity_rule_id: string;
   quantity: number;
   quantity_label: string;
+  structure_parameter_label?: string | null;
   duration_days: number;
   compatible_resource_types: string[];
   properties?: Record<string, unknown>;
@@ -611,6 +632,7 @@ export type ScheduleInput = {
   precedence_links: PrecedenceLink[];
   resources: Resource[];
   milestones: MilestoneConstraint[];
+  execution_constraints?: TaskExecutionConstraint[];
   schedule_strategy?: ScheduleStrategyConfig;
   time_limit_seconds: number;
 };
@@ -660,6 +682,311 @@ export type CompareResponse = {
   summaries: Array<Record<string, unknown>>;
   best_scenario_id?: string | null;
   notes: string[];
+};
+
+export type TaskExecutionConstraint = {
+  task_id: string;
+  earliest_start_offset?: number | null;
+  fixed_start_offset?: number | null;
+  fixed_resource_id?: string | null;
+  source: string;
+};
+
+export type ResourceAssistantPlanProfile = "economy" | "balanced" | "crash" | "custom";
+export type ResourceAssistantGenerationSource = "llm" | "local_fallback" | "user_adjusted";
+export type ResourceAssistantGenerationMode = "llm_first" | "local_fallback_only";
+export type ResourceAssistantPlanStatus =
+  | "draft"
+  | "ready_to_solve"
+  | "stale"
+  | "solving"
+  | "optimal"
+  | "feasible"
+  | "infeasible"
+  | "unknown"
+  | "failed"
+  | "model_invalid";
+export type ResourceAssistantPlanOutcomeStatus = "met" | "not_met" | "unconfirmed" | "infeasible";
+export type ResourceAssistantScheduleOutcomeStatus =
+  | "duration_target_met"
+  | "duration_target_not_met"
+  | "no_feasible_schedule";
+export type ResourceAssistantScheduleOutcomeReason =
+  | "target_met"
+  | "proven_late"
+  | "late_unconfirmed"
+  | "time_limit_no_schedule"
+  | "proven_infeasible"
+  | "resource_coverage_missing"
+  | "target_missing";
+export type ResourceAssistantRecommendationStatus = "recommended" | "no_recommendation" | "insufficient_results";
+export type ResourceAssistantExplanationSource = "local" | "llm";
+export type ResourceAssistantMetricSourceType = "solver_result" | "derived_diagnostic" | "demo_estimate";
+
+export type ResourceAssistantControlPierSummary = {
+  structure_id: string;
+  structure_name: string;
+  bridge_id?: string | null;
+  bridge_name?: string | null;
+  work_section_id?: string | null;
+  work_section_name?: string | null;
+  side: WorkSectionSide;
+  support_no?: string | null;
+  recognition_sources: string[];
+  related_continuous_beam_group_ids: string[];
+};
+
+export type ResourceAssistantReferenceExample = {
+  profile: ResourceAssistantPlanProfile;
+  description: string;
+  resource_quantities: Record<string, number>;
+  is_hard_constraint: boolean;
+};
+
+export type ResourceAssistantProjectProfile = {
+  project_name: string;
+  start_date: string;
+  bridge_count: number;
+  work_section_count: number;
+  structure_count: number;
+  task_count: number;
+  control_piers: ResourceAssistantControlPierSummary[];
+  resource_types: Array<Record<string, unknown>>;
+  continuous_beam_groups: Array<Record<string, unknown>>;
+  critical_path_candidates: Array<Record<string, unknown>>;
+  constraint_hints: string[];
+  reference_examples: ResourceAssistantReferenceExample[];
+  data_quality_messages: ValidationMessage[];
+};
+
+export type ResourceAssistantLlmGenerationContext = {
+  project_profile: ResourceAssistantProjectProfile;
+  resource_types: Array<Record<string, unknown>>;
+  constraint_hints: string[];
+  reference_examples: ResourceAssistantReferenceExample[];
+  current_resource_pools: ResourcePool[];
+  rules: string[];
+};
+
+export type ResourceAssistantPlan = {
+  scenario_id: string;
+  scenario_name: string;
+  profile: ResourceAssistantPlanProfile;
+  positioning: string;
+  generation_source: ResourceAssistantGenerationSource;
+  generation_rationale: string;
+  reference_example_used?: string | null;
+  organization_strategy: string;
+  validation_messages: ValidationMessage[];
+  applicable_scenarios: string;
+  expected_risks: string;
+  resource_pools: ResourcePool[];
+  changed_from_standard: boolean;
+  solve_status: ResourceAssistantPlanStatus;
+  stale_reason?: string | null;
+};
+
+export type ResourceAssistantGenerationRecord = {
+  generation_id: string;
+  source: ResourceAssistantGenerationSource;
+  input_fingerprint: string;
+  prompt_summary: string;
+  reference_examples_used: ResourceAssistantReferenceExample[];
+  constraint_hints_used: string[];
+  raw_output_available: boolean;
+  parsed_plan_ids: string[];
+  validation_status: "valid" | "partially_valid" | "invalid";
+  fallback_reason?: string | null;
+};
+
+export type ResourceAssistantLlmConfigStatus = {
+  provider: string;
+  model?: string | null;
+  endpoint_configured: boolean;
+  api_key_configured: boolean;
+  timeout_seconds: number;
+  status: "local_fallback" | "configured" | "failed";
+  warning?: string | null;
+};
+
+export type ResourceAssistantTransferPenalty = {
+  penalty_score: number;
+  jump_pier_count: number;
+  side_switch_count: number;
+  cross_side_jump_count: number;
+  path_group_switch_count: number;
+  max_jump_distance: number;
+  details: Array<Record<string, unknown>>;
+};
+
+export type ResourceAssistantDemoCost = {
+  total_cost: number;
+  work_cost: number;
+  idle_cost: number;
+  mobilization_cost: number;
+  transfer_cost: number;
+  resource_costs: Array<Record<string, unknown>>;
+  price_source: string;
+  disclaimer: string;
+};
+
+export type ResourceAssistantCoreMetrics = {
+  total_days?: number | null;
+  plan_finish_date?: string | null;
+  control_pier_release_dates: Array<Record<string, unknown>>;
+  first_continuous_beam_start_date?: string | null;
+  all_continuous_beams_started_date?: string | null;
+  resource_utilization_by_type: Array<Record<string, unknown>>;
+  average_wait_days?: number | null;
+  max_wait_days?: number | null;
+  control_pier_wait_days?: number | null;
+  continuous_beam_wait_days?: number | null;
+  transfer_penalty: ResourceAssistantTransferPenalty;
+  demo_cost: ResourceAssistantDemoCost;
+  target_status: string;
+  not_available_reasons: string[];
+};
+
+export type ResourceAssistantPrimaryStageSummary = {
+  attempted: boolean;
+  solver_status?: string | null;
+  max_target_delay_days?: number | null;
+  makespan_days?: number | null;
+  optimality_proven: boolean;
+  elapsed_seconds: number;
+  configured_budget_seconds: number;
+};
+
+export type ResourceAssistantSecondaryStageSummary = {
+  attempted: boolean;
+  solver_status?: string | null;
+  resource_idle_days?: number | null;
+  continuity_penalty?: number | null;
+  optimality_proven: boolean;
+  elapsed_seconds: number;
+  configured_budget_seconds: number;
+  skipped_reason?: "primary_no_schedule" | "time_budget_exhausted" | "insufficient_remaining_budget" | "idle_already_zero" | "not_applicable" | null;
+  validation_failure_reason?: "primary_bounds_exceeded" | "resource_snapshot_changed" | "task_set_changed" | "no_secondary_improvement" | "model_error" | null;
+};
+
+export type ResourceAssistantOptimizationStages = {
+  primary: ResourceAssistantPrimaryStageSummary;
+  secondary: ResourceAssistantSecondaryStageSummary;
+  selected_stage: "primary" | "secondary";
+  fallback_reason?: string | null;
+  total_budget_seconds: number;
+  total_elapsed_seconds: number;
+};
+
+export type ResourceAssistantPlanResult = {
+  scenario_id: string;
+  plan_status?: ResourceAssistantPlanOutcomeStatus | null;
+  schedule_outcome_status?: ResourceAssistantScheduleOutcomeStatus | null;
+  schedule_outcome_reason?: ResourceAssistantScheduleOutcomeReason | null;
+  solver_status?: string | null;
+  input_resource_quantities: Record<string, number>;
+  resource_expansion_attempted: boolean;
+  optimization_stages?: ResourceAssistantOptimizationStages | null;
+  generated?: GeneratedScheduleInput | null;
+  result?: ScheduleResult | null;
+  metrics: ResourceAssistantCoreMetrics;
+  diagnostics: ValidationMessage[];
+  generated_at: string;
+  input_fingerprint: string;
+};
+
+export type ResourceAssistantMetricRow = {
+  metric_id: string;
+  metric_name: string;
+  unit: string;
+  values: Record<string, { value: unknown; not_available_reasons?: string[] }>;
+  source_type: ResourceAssistantMetricSourceType;
+  description: string;
+};
+
+export type ResourceAssistantComparison = {
+  scenario_columns: Array<Record<string, string>>;
+  metric_rows: ResourceAssistantMetricRow[];
+  best_scenario_id?: string | null;
+  comparison_notes: string[];
+};
+
+export type ResourceAssistantRecommendation = {
+  recommended_scenario_id?: string | null;
+  recommendation_status: ResourceAssistantRecommendationStatus;
+  rule_reason: string;
+  evidence: string[];
+  risk_notes: string[];
+  marginal_benefit_notes: string[];
+  ai_explanation: string;
+  explanation_source: ResourceAssistantExplanationSource;
+  llm_status: ResourceAssistantLlmConfigStatus;
+};
+
+export type ResourceAssistantInitialRequest = {
+  scenario: ScenarioInput;
+  generation_mode?: ResourceAssistantGenerationMode;
+};
+
+export type ResourceAssistantInitialResponse = {
+  project_profile: ResourceAssistantProjectProfile;
+  resource_plans: ResourceAssistantPlan[];
+  plan_generation: ResourceAssistantGenerationRecord;
+  reference_examples: ResourceAssistantReferenceExample[];
+  constraint_hints: string[];
+  llm_generation_context: ResourceAssistantLlmGenerationContext;
+  llm_config_status: ResourceAssistantLlmConfigStatus;
+  diagnostics: ValidationMessage[];
+};
+
+export type ResourceAssistantUpdatePlanRequest = {
+  plan_id: string;
+  resource_updates: Record<string, number>;
+  resource_plan?: ResourceAssistantPlan | null;
+};
+
+export type ResourceAssistantUpdatePlanResponse = {
+  resource_plan: ResourceAssistantPlan;
+  invalidated_result_ids: string[];
+  generation_source: ResourceAssistantGenerationSource;
+  diagnostics: ValidationMessage[];
+};
+
+export type ResourceAssistantBatchSolveRequest = {
+  scenario: ScenarioInput;
+  resource_plans: ResourceAssistantPlan[];
+  solve_scope?: string;
+};
+
+export type ResourceAssistantBatchSolveResponse = {
+  project_profile: ResourceAssistantProjectProfile;
+  resource_plans: ResourceAssistantPlan[];
+  plan_results: ResourceAssistantPlanResult[];
+  comparison: ResourceAssistantComparison;
+  recommendation: ResourceAssistantRecommendation;
+  diagnostics: ValidationMessage[];
+};
+
+export type ResourceAssistantSingleSolveRequest = {
+  scenario: ScenarioInput;
+  resource_plan: ResourceAssistantPlan;
+};
+
+export type ResourceAssistantSingleSolveResponse = {
+  resource_plan: ResourceAssistantPlan;
+  plan_result: ResourceAssistantPlanResult;
+  diagnostics: ValidationMessage[];
+};
+
+export type ResourceAssistantResultsRequest = {
+  resource_plans: ResourceAssistantPlan[];
+  plan_results: ResourceAssistantPlanResult[];
+};
+
+export type ResourceAssistantRecommendationResponse = {
+  comparison: ResourceAssistantComparison;
+  recommendation: ResourceAssistantRecommendation;
+  diagnostics: ValidationMessage[];
 };
 
 export type ImportBridgeParamsResponse = {
@@ -996,4 +1323,201 @@ export type TaskViewParentGroup = {
   subtitle: string;
   rows: TaskViewRow[];
   groups: TaskViewGroup[];
+};
+
+export type PlanVersionStatus = "draft" | "active" | "superseded";
+export type ProgressTaskStatus = "not_started" | "in_progress" | "completed" | "paused" | "cancelled";
+export type ForecastStrategy = "as_is" | "add_bottleneck_resources" | "prioritize_critical_tasks";
+export type ForecastSolveStatus = "ready" | "solving" | "feasible" | "infeasible" | "failed" | "stale";
+export type ForecastRiskStatus = "on_track" | "at_risk" | "late" | "insufficient_data";
+export type ForecastTaskExecutionState =
+  | "completed_locked"
+  | "cancelled_excluded"
+  | "in_progress_remaining"
+  | "paused_remaining"
+  | "not_started_future";
+export type CriticalNodeDateSource = "actual" | "predicted" | "combined" | "unavailable";
+
+export type PlanVersion = {
+  plan_version_id: string;
+  project_id: string;
+  project_name: string;
+  plan_type: "master";
+  version_no: number;
+  version_kind: "baseline" | "execution";
+  status: PlanVersionStatus;
+  parent_version_id?: string | null;
+  source_scenario_id: string;
+  scenario_snapshot: ScenarioInput;
+  generated_snapshot: GeneratedScheduleInput;
+  schedule_result_snapshot: ScheduleResult;
+  resource_plan_snapshot: ResourceAssistantPlan;
+  input_fingerprint: string;
+  confirmed_by: string;
+  confirmed_at: string;
+  confirmation_reason: string;
+};
+
+export type ProgressEntry = {
+  task_id: string;
+  status: ProgressTaskStatus;
+  actual_start_date?: string | null;
+  actual_finish_date?: string | null;
+  percent_complete: number;
+  completed_quantity?: number | null;
+  remaining_quantity?: number | null;
+  actual_productivity?: number | null;
+  estimated_remaining_days?: number | null;
+  remaining_days: number;
+  remaining_days_source: "calculated" | "manual" | "baseline" | "none";
+  expected_resume_date?: string | null;
+  reason?: string | null;
+  notes: string;
+};
+
+export type ProgressSnapshot = {
+  progress_snapshot_id: string;
+  plan_version_id: string;
+  status_date: string;
+  revision_no: number;
+  is_current: boolean;
+  entries: ProgressEntry[];
+  data_quality_status: "valid" | "warning" | "invalid";
+  validation_messages: ValidationMessage[];
+  submitted_by: string;
+  submitted_at: string;
+  correction_reason?: string | null;
+};
+
+export type ForecastTaskState = {
+  task_id: string;
+  task_name: string;
+  state: "baseline" | "actual" | "predicted";
+  baseline_start_date?: string | null;
+  baseline_finish_date?: string | null;
+  actual_start_date?: string | null;
+  actual_finish_date?: string | null;
+  predicted_start_date?: string | null;
+  predicted_finish_date?: string | null;
+  assigned_resource_type?: string | null;
+  assigned_resource_id?: string | null;
+  progress_status?: ProgressTaskStatus | null;
+  execution_state?: ForecastTaskExecutionState | null;
+  remaining_days?: number | null;
+  related_diagnostics: string[];
+  variance_days?: number | null;
+};
+
+export type ForecastExecutionSummary = {
+  completed_locked_count: number;
+  cancelled_excluded_count: number;
+  in_progress_remaining_count: number;
+  paused_remaining_count: number;
+  not_started_future_count: number;
+  resource_policy: "baseline_fixed" | "bottleneck_expanded";
+  sequence_policy: "baseline_order" | "critical_priority";
+};
+
+export type CriticalNodeEvidence = {
+  type: "driving_task" | "bottleneck_resource" | "precedence_wait" | "data_quality" | "solver";
+  message: string;
+  task_ids: string[];
+  resource_types: string[];
+  variance_days?: number | null;
+};
+
+export type CriticalNodeForecast = {
+  node_id: string;
+  name: string;
+  node_type: "project_finish" | "milestone";
+  level?: MilestoneConstraint["level"] | null;
+  mode?: MilestoneConstraint["mode"] | null;
+  target_date: string;
+  evaluated_date?: string | null;
+  date_source: CriticalNodeDateSource;
+  variance_days?: number | null;
+  buffer_days?: number | null;
+  status: ForecastRiskStatus;
+  related_task_ids: string[];
+  evidence: CriticalNodeEvidence[];
+};
+
+export type ForecastSchedule = {
+  forecast_id: string;
+  plan_version_id: string;
+  progress_snapshot_id: string;
+  status_date: string;
+  strategy: ForecastStrategy;
+  status: ForecastSolveStatus;
+  input_fingerprint: string;
+  historical_tasks: ForecastTaskState[];
+  predicted_tasks: ForecastTaskState[];
+  schedule_result?: ScheduleResult | null;
+  execution_summary: ForecastExecutionSummary;
+  critical_nodes: CriticalNodeForecast[];
+  risk_status: ForecastRiskStatus;
+  risk_evidence: Array<Record<string, unknown>>;
+  confidence: "high" | "medium" | "low";
+  metrics: Record<string, unknown>;
+  diagnostics: ValidationMessage[];
+  created_at: string;
+};
+
+export type AdjustmentProposal = {
+  proposal_id: string;
+  forecast_id: string;
+  plan_version_id: string;
+  strategy: ForecastStrategy;
+  status: ForecastSolveStatus;
+  strategy_parameters: Record<string, unknown>;
+  forecast: ForecastSchedule;
+  metrics: Record<string, unknown>;
+  recommended: boolean;
+  recommendation_reason: string;
+  explanation: string;
+  diagnostics: ValidationMessage[];
+  created_at: string;
+};
+
+export type PlanControlProjectSummary = {
+  project_id: string;
+  active_plan?: PlanVersion | null;
+  plan_versions: PlanVersion[];
+  current_progress_snapshot?: ProgressSnapshot | null;
+  latest_forecast?: ForecastSchedule | null;
+};
+
+export type CreateBaselinePlanRequest = {
+  scenario: ScenarioInput;
+  resource_plan: ResourceAssistantPlan;
+  plan_result: ResourceAssistantPlanResult;
+  confirmed_by: string;
+  confirmation_reason: string;
+};
+
+export type CreateProgressSnapshotRequest = {
+  plan_version_id: string;
+  status_date: string;
+  entries: ProgressEntry[];
+  submitted_by: string;
+  correction_reason?: string | null;
+  expected_revision_no?: number | null;
+};
+
+export type CreateProgressSnapshotResponse = {
+  progress_snapshot: ProgressSnapshot;
+  stale_forecast_ids: string[];
+  diagnostics: ValidationMessage[];
+};
+
+export type AdjustmentComparisonResponse = {
+  forecast_id: string;
+  proposals: AdjustmentProposal[];
+  recommended_proposal_id?: string | null;
+};
+
+export type AdoptAdjustmentResponse = {
+  new_plan_version: PlanVersion;
+  previous_plan_version: PlanVersion;
+  change_record: Record<string, unknown>;
 };

@@ -27,6 +27,17 @@ from .models import (
     ProjectStructureParamsApplyResponse,
     ProjectStructureParamsResponse,
     ProjectStructureParamsSaveRequest,
+    ResourceAssistantBatchSolveRequest,
+    ResourceAssistantBatchSolveResponse,
+    ResourceAssistantComparison,
+    ResourceAssistantInitialRequest,
+    ResourceAssistantInitialResponse,
+    ResourceAssistantRecommendationResponse,
+    ResourceAssistantResultsRequest,
+    ResourceAssistantSingleSolveRequest,
+    ResourceAssistantSingleSolveResponse,
+    ResourceAssistantUpdatePlanRequest,
+    ResourceAssistantUpdatePlanResponse,
     ResourceCostSolveRequest,
     ScheduleInput,
     ScenarioCompareRequest,
@@ -35,6 +46,17 @@ from .models import (
     ScenarioSolveResult,
     WbsRequest,
     WbsResponse,
+    AdoptAdjustmentRequest,
+    AdoptAdjustmentResponse,
+    AdjustmentComparisonResponse,
+    CreateAdjustmentRequest,
+    CreateBaselinePlanRequest,
+    CreateForecastRequest,
+    CreateProgressSnapshotRequest,
+    CreateProgressSnapshotResponse,
+    ForecastSchedule,
+    PlanControlProjectSummary,
+    PlanVersion,
 )
 from .api.multipart import parse_multipart_request
 from .bridge_import import BridgeImportConfigError, BridgeImportError
@@ -58,11 +80,28 @@ from .services.bridge_import_service import import_local_bridge_params, import_u
 from .services.ai_parameter_ai_client import AiParameterAssistantConfigError
 from .services.ai_parameter_assistant import AiParameterAssistantError, apply_ai_parameter_suggestions, parse_ai_parameter_assistant
 from .services.ai_parameter_materials import AiParameterMaterialError
+from .services.ai_resource_scheduling_assistant import (
+    batch_solve_resource_plans,
+    compare_resource_plan_results,
+    generate_resource_plan_recommendation,
+    initialize_resource_assistant,
+    solve_resource_plan,
+    update_resource_plan,
+)
 from .services.process_library_service import (
     default_scenario_with_process_library,
     get_process_library,
     persist_local_scenario_config,
     persist_process_library,
+)
+from .services.plan_control_repository import PlanControlRepositoryError, default_plan_control_repository
+from .services.progress_forecast import (
+    PlanControlValidationError,
+    adopt_adjustment,
+    create_adjustment_proposals,
+    create_baseline_plan,
+    create_forecast,
+    create_progress_snapshot,
 )
 from .wbs import generate_wbs
 
@@ -220,6 +259,108 @@ def solve_resource_cost_endpoint(request: ResourceCostSolveRequest) -> ScenarioS
 @app.post("/api/compare-scenarios", response_model=ScenarioCompareResponse)
 def compare_scenarios_endpoint(request: ScenarioCompareRequest) -> ScenarioCompareResponse:
     return compare_scenarios(request)
+
+
+@app.post("/api/ai-resource-assistant/initialize", response_model=ResourceAssistantInitialResponse)
+def initialize_resource_assistant_endpoint(request: ResourceAssistantInitialRequest) -> ResourceAssistantInitialResponse:
+    try:
+        return initialize_resource_assistant(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/ai-resource-assistant/update-plan", response_model=ResourceAssistantUpdatePlanResponse)
+def update_resource_plan_endpoint(request: ResourceAssistantUpdatePlanRequest) -> ResourceAssistantUpdatePlanResponse:
+    try:
+        return update_resource_plan(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/ai-resource-assistant/batch-solve", response_model=ResourceAssistantBatchSolveResponse)
+def batch_solve_resource_plans_endpoint(request: ResourceAssistantBatchSolveRequest) -> ResourceAssistantBatchSolveResponse:
+    return batch_solve_resource_plans(request)
+
+
+@app.post("/api/ai-resource-assistant/solve-plan", response_model=ResourceAssistantSingleSolveResponse)
+def solve_resource_plan_endpoint(request: ResourceAssistantSingleSolveRequest) -> ResourceAssistantSingleSolveResponse:
+    return solve_resource_plan(request)
+
+
+@app.post("/api/ai-resource-assistant/compare-results", response_model=ResourceAssistantComparison)
+def compare_resource_plan_results_endpoint(request: ResourceAssistantResultsRequest) -> ResourceAssistantComparison:
+    try:
+        return compare_resource_plan_results(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/ai-resource-assistant/generate-recommendation", response_model=ResourceAssistantRecommendationResponse)
+def generate_resource_plan_recommendation_endpoint(
+    request: ResourceAssistantResultsRequest,
+) -> ResourceAssistantRecommendationResponse:
+    try:
+        return generate_resource_plan_recommendation(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def _plan_control_http_error(exc: Exception) -> HTTPException:
+    return HTTPException(status_code=int(getattr(exc, "status_code", 503)), detail=str(exc))
+
+
+@app.post("/api/plan-control/baselines", response_model=PlanVersion)
+def create_baseline_plan_endpoint(request: CreateBaselinePlanRequest) -> PlanVersion:
+    try:
+        return create_baseline_plan(request)
+    except (PlanControlValidationError, PlanControlRepositoryError) as exc:
+        raise _plan_control_http_error(exc) from exc
+
+
+@app.get("/api/plan-control/projects/{project_id}", response_model=PlanControlProjectSummary)
+def get_plan_control_project_endpoint(project_id: str) -> PlanControlProjectSummary:
+    try:
+        return default_plan_control_repository.project_summary(project_id)
+    except PlanControlRepositoryError as exc:
+        raise _plan_control_http_error(exc) from exc
+
+
+@app.post("/api/plan-control/progress-snapshots", response_model=CreateProgressSnapshotResponse)
+def create_progress_snapshot_endpoint(request: CreateProgressSnapshotRequest) -> CreateProgressSnapshotResponse:
+    try:
+        return create_progress_snapshot(request)
+    except (PlanControlValidationError, PlanControlRepositoryError) as exc:
+        raise _plan_control_http_error(exc) from exc
+
+
+@app.post("/api/plan-control/forecasts", response_model=ForecastSchedule)
+def create_forecast_endpoint(request: CreateForecastRequest) -> ForecastSchedule:
+    try:
+        return create_forecast(request)
+    except (PlanControlValidationError, PlanControlRepositoryError) as exc:
+        raise _plan_control_http_error(exc) from exc
+
+
+@app.post(
+    "/api/plan-control/forecasts/{forecast_id}/adjustments",
+    response_model=AdjustmentComparisonResponse,
+)
+def create_adjustment_proposals_endpoint(
+    forecast_id: str,
+    request: CreateAdjustmentRequest,
+) -> AdjustmentComparisonResponse:
+    try:
+        return create_adjustment_proposals(forecast_id, request.max_resource_increments)
+    except (PlanControlValidationError, PlanControlRepositoryError) as exc:
+        raise _plan_control_http_error(exc) from exc
+
+
+@app.post("/api/plan-control/adjustments/{proposal_id}/adopt", response_model=AdoptAdjustmentResponse)
+def adopt_adjustment_endpoint(proposal_id: str, request: AdoptAdjustmentRequest) -> AdoptAdjustmentResponse:
+    try:
+        return adopt_adjustment(proposal_id, request)
+    except (PlanControlValidationError, PlanControlRepositoryError) as exc:
+        raise _plan_control_http_error(exc) from exc
 
 
 @app.post("/api/apply-process-natural-language", response_model=ProcessNlResponse)

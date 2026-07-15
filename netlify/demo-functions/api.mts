@@ -25,6 +25,7 @@ type ComponentModel = {
   component_type: ComponentType;
   quantity: number;
   quantity_label: string;
+  structure_parameter_label?: string | null;
   method_id?: string | null;
   productivity_option_id?: string | null;
   enabled: boolean;
@@ -105,6 +106,7 @@ type UpperStructureModel = {
   span_length_m: number;
   beam_count_per_span?: number | null;
   span_group_expression: string;
+  structure_parameter_label?: string | null;
   properties: Record<string, unknown>;
 };
 
@@ -239,6 +241,7 @@ type Task = {
   productivity_rule_id: string;
   quantity: number;
   quantity_label: string;
+  structure_parameter_label?: string | null;
   duration_days: number;
   compatible_resource_types: string[];
   properties?: Record<string, unknown>;
@@ -1090,7 +1093,7 @@ function parseWorkbook(workbookSheets: WorkbookSheet[], fileName: string, target
       const bodyHeight = extractNumber(rowMap, joined, ["墩高", "柱高", "台高", "高度", "height"]) ?? (support.type === "pier" ? 8 : 5);
       const hasCap = includesAny(rowMap, joined, ["承台"]) || Boolean(pileLength);
       const hasCapBeam = support.type === "pier" && !includesAny(rowMap, joined, ["无盖梁", "不设盖梁"]);
-      const components = [
+      const components: ComponentModel[] = [
         ...pileComponents(support.id, support.name, pileCount, pileLength ?? 30, "rotary_drill").map((item) => ({
           ...item,
           properties: { ...item.properties, diameter_m: pileDiameter, source_trace: { sheet: sheetName, row: rowIndex + 1 } },
@@ -1400,6 +1403,7 @@ function buildTasks(scenario: ScenarioInput): { tasks: Task[]; generatedLinks: P
           if (!selected) return;
           const effectiveProcess = effectiveProcessForComponent(selected, item);
           const quantity = quantityForProcess(item, effectiveProcess.quantity_source);
+          if (quantity === null || quantity <= 0) return;
           tasks.push({
             id: item.id,
             name: item.name,
@@ -1414,9 +1418,11 @@ function buildTasks(scenario: ScenarioInput): { tasks: Task[]; generatedLinks: P
             process_name: effectiveProcess.process_name,
             productivity_rule_id: effectiveProcess.id,
             quantity,
-            quantity_label: item.quantity_label,
+            quantity_label: quantityLabelForProcess(item, effectiveProcess.quantity_source, quantity),
+            structure_parameter_label: structureParameterLabelForComponent(item),
             duration_days: calculateDuration(quantity, effectiveProcess),
             compatible_resource_types: [effectiveProcess.resource_type],
+            properties: item.properties,
           });
         });
       }
@@ -1540,12 +1546,14 @@ function buildCastInPlaceBoxBeamTasks(
   for (const uppers of castInPlaceBoxBeamGroups(section.upper_structures ?? [])) {
     const groupIndex = upperGroupIndex(uppers[0]);
     const spanIndices = uppers.map((upper) => upper.span_index);
+    const groupProperties = upperGroupProperties(uppers);
     const task = appendUpperTask(tasks, {
       componentId: `${bridgeId}-${sideCode}-BOX-G${String(groupIndex).padStart(2, "0")}-CAST`,
       name: `${sideLabel}第${groupIndex}联现浇箱梁`,
       componentType: "cast_in_place_box_beam",
       quantity: 1,
       quantityLabel: "1联",
+      structureParameterLabel: upperGroupParameterLabel(uppers),
       bridgeId,
       workSectionId: section.id,
       sequenceOrder: 95000 + groupIndex,
@@ -1554,6 +1562,7 @@ function buildCastInPlaceBoxBeamTasks(
       processLibrary,
       taskOverrides,
       properties: {
+        ...groupProperties,
         upper_structure_ids: uppers.map((upper) => upper.id),
         span_start_index: Math.min(...spanIndices),
         span_end_index: Math.max(...spanIndices),
@@ -1583,6 +1592,7 @@ function appendUpperTask(
     componentType: ComponentType;
     quantity: number;
     quantityLabel: string;
+    structureParameterLabel?: string | null;
     bridgeId: string;
     workSectionId: string;
     sequenceOrder: number;
@@ -1601,6 +1611,7 @@ function appendUpperTask(
     component_type: input.componentType,
     quantity: input.quantity,
     quantity_label: input.quantityLabel,
+    structure_parameter_label: input.structureParameterLabel ?? null,
     method_id: input.methodId ?? null,
     productivity_option_id: null,
     enabled: true,
@@ -1610,6 +1621,7 @@ function appendUpperTask(
   if (!selected) return null;
   const effectiveProcess = effectiveProcessForComponent(selected, component);
   const quantity = quantityForProcess(component, effectiveProcess.quantity_source);
+  if (quantity === null || quantity <= 0) return null;
   const task: Task = {
     id: component.id,
     name: component.name,
@@ -1624,9 +1636,11 @@ function appendUpperTask(
     process_name: effectiveProcess.process_name,
     productivity_rule_id: effectiveProcess.id,
     quantity,
-    quantity_label: component.quantity_label,
+    quantity_label: quantityLabelForProcess(component, effectiveProcess.quantity_source, quantity),
+    structure_parameter_label: structureParameterLabelForComponent(component),
     duration_days: calculateDuration(quantity, effectiveProcess),
     compatible_resource_types: [effectiveProcess.resource_type],
+    properties: component.properties,
   };
   tasks.push(task);
   return task;
@@ -1794,6 +1808,28 @@ function upperGroupIndex(upper: UpperStructureModel) {
   return Number.isFinite(value) ? Math.trunc(value) : upper.span_index;
 }
 
+function upperGroupProperties(uppers: UpperStructureModel[]): Record<string, unknown> {
+  const ordered = [...uppers].sort((a, b) => a.span_index - b.span_index);
+  const structureTypes = [...new Set(ordered.map((upper) => upper.structure_type).filter(Boolean))];
+  const expressions = [...new Set(ordered.map((upper) => upper.span_group_expression).filter(Boolean))];
+  const firstSupport = ordered[0]?.support_range.split("~")[0] ?? "";
+  const lastParts = ordered[ordered.length - 1]?.support_range.split("~") ?? [];
+  const lastSupport = lastParts[lastParts.length - 1] ?? "";
+  return {
+    upper_structure_type: structureTypes.join(" / "),
+    support_range: firstSupport && lastSupport ? `${firstSupport}~${lastSupport}` : "",
+    span_group_expression: expressions.join(" / "),
+    span_lengths_m: ordered.map((upper) => upper.span_length_m),
+  };
+}
+
+function upperGroupParameterLabel(uppers: UpperStructureModel[], segmentType?: string): string {
+  const context = upperGroupProperties(uppers);
+  return [context.upper_structure_type, context.support_range, context.span_group_expression, segmentType]
+    .filter(Boolean)
+    .join("，");
+}
+
 function buildContinuousBeamTasks(
   bridgeId: string,
   section: WorkSectionModel,
@@ -1839,6 +1875,7 @@ function buildContinuousBeamTasks(
     const prefix = `${bridgeId}-${sideCode}-CB-G${String(groupIndex).padStart(2, "0")}`;
     const groupLabel = sideLabel ? `${sideLabel}连续梁` : "连续梁";
     const baseOrder = 100000 + groupIndex * 10000;
+    const groupProperties = upperGroupProperties(uppers);
     const tCompletionTasks: Array<Task | null> = [];
 
     mainSupports.forEach((supportIndex, supportOffset) => {
@@ -1858,6 +1895,8 @@ function buildContinuousBeamTasks(
         structureName,
         processLibrary,
         taskOverrides,
+        groupProperties,
+        segmentType: "0号块",
       });
       const zeroBlockLinks = buildLowerToUpperLinks({
         successor: previous,
@@ -1885,6 +1924,8 @@ function buildContinuousBeamTasks(
           structureName,
           processLibrary,
           taskOverrides,
+          groupProperties,
+          segmentType: "标准段",
         });
         addLink(previous, current, "continuous_beam_t_chain");
         if (current) previous = current;
@@ -1908,6 +1949,8 @@ function buildContinuousBeamTasks(
       structureName: leftEdgeStructureName,
       processLibrary,
       taskOverrides,
+      groupProperties,
+      segmentType: "边跨连续段",
     });
     const leftClosure = appendContinuousTask(tasks, {
       componentId: `${prefix}-LEFT-CLOSURE`,
@@ -1922,6 +1965,8 @@ function buildContinuousBeamTasks(
       structureName: leftEdgeStructureName,
       processLibrary,
       taskOverrides,
+      groupProperties,
+      segmentType: "边跨合龙段",
     });
     const rightStraight = appendContinuousTask(tasks, {
       componentId: `${prefix}-RIGHT-STRAIGHT`,
@@ -1936,6 +1981,8 @@ function buildContinuousBeamTasks(
       structureName: rightEdgeStructureName,
       processLibrary,
       taskOverrides,
+      groupProperties,
+      segmentType: "边跨连续段",
     });
     const rightClosure = appendContinuousTask(tasks, {
       componentId: `${prefix}-RIGHT-CLOSURE`,
@@ -1950,6 +1997,8 @@ function buildContinuousBeamTasks(
       structureName: rightEdgeStructureName,
       processLibrary,
       taskOverrides,
+      groupProperties,
+      segmentType: "边跨合龙段",
     });
     addLink(leftStraight, leftClosure, "continuous_beam_side_closure");
     const leftStraightLinks = buildLowerToUpperLinks({
@@ -1996,6 +2045,8 @@ function buildContinuousBeamTasks(
         structureName: `${groupLabel}${leftSupport}#墩-${rightSupport}#墩中跨`,
         processLibrary,
         taskOverrides,
+        groupProperties,
+        segmentType: "中跨合龙段",
       });
       addLink(tCompletionTasks[index], midClosure, "continuous_beam_middle_closure");
       addLink(tCompletionTasks[index + 1], midClosure, "continuous_beam_middle_closure");
@@ -2038,6 +2089,8 @@ function appendContinuousTask(
     structureName: string;
     processLibrary: ProcessTemplate[];
     taskOverrides?: Record<string, TaskOverride>;
+    groupProperties: Record<string, unknown>;
+    segmentType: string;
   },
 ) {
   const component = applyTaskOverride({
@@ -2046,11 +2099,19 @@ function appendContinuousTask(
     component_type: "cast_in_place_continuous_beam",
     quantity: input.quantity ?? 1,
     quantity_label: input.quantityLabel,
+    structure_parameter_label: [
+      input.groupProperties.upper_structure_type,
+      input.groupProperties.support_range,
+      input.groupProperties.span_group_expression,
+      input.segmentType,
+    ].filter(Boolean).join("，"),
     method_id: input.methodId,
     productivity_option_id: null,
     enabled: true,
     properties: {
+      ...input.groupProperties,
       group_index: input.groupIndex,
+      continuous_task_type: input.segmentType,
       continuous_span_group_id: continuousSpanGroupId(input.bridgeId, input.workSectionId, input.groupIndex),
       continuous_span_group_name: continuousSpanGroupName(input.structureName, input.groupIndex),
     },
@@ -2059,6 +2120,7 @@ function appendContinuousTask(
   if (!selected) return null;
   const effectiveProcess = effectiveProcessForComponent(selected, component);
   const quantity = quantityForProcess(component, effectiveProcess.quantity_source);
+  if (quantity === null || quantity <= 0) return null;
   const task: Task = {
     id: component.id,
     name: component.name,
@@ -2073,7 +2135,8 @@ function appendContinuousTask(
     process_name: effectiveProcess.process_name,
     productivity_rule_id: effectiveProcess.id,
     quantity,
-    quantity_label: component.quantity_label,
+    quantity_label: quantityLabelForProcess(component, effectiveProcess.quantity_source, quantity),
+    structure_parameter_label: structureParameterLabelForComponent(component),
     duration_days: calculateDuration(quantity, effectiveProcess),
     compatible_resource_types: [effectiveProcess.resource_type],
     properties: component.properties,
@@ -2260,19 +2323,108 @@ function selectedProductivityOption(componentModel: ComponentModel, processTempl
   return options.find((option) => option.is_default) ?? options[0] ?? null;
 }
 
-function quantityForProcess(componentModel: ComponentModel, quantitySource: string) {
+function quantityForProcess(componentModel: ComponentModel, quantitySource: string): number | null {
   if (quantitySource === "count") {
     if (componentModel.component_type === "cast_in_place_continuous_beam" && componentModel.method_id === "standard_segment") {
       return componentModel.quantity;
     }
-    return 1;
+    if (componentModel.component_type === "pile") return 1;
+    return componentModel.quantity;
   }
-  if (quantitySource === "pile_length_m") return Number(componentModel.properties.length_m ?? componentModel.quantity);
-  if (quantitySource === "pier_height_m") return Number(componentModel.properties.height_m ?? componentModel.quantity);
+  if (quantitySource === "pile_length_m") {
+    return positiveNumberValue(componentModel.properties.length_m)
+      ?? positiveNumberValue(componentModel.properties.lengthM)
+      ?? positiveNumberValue(componentModel.quantity);
+  }
+  if (quantitySource === "pier_height_m") return pierAverageHeight(componentModel);
   if (quantitySource === "deck_length_m") {
-    return Number(componentModel.properties.length_m ?? componentModel.properties.total_length_m ?? componentModel.quantity);
+    return positiveNumberValue(componentModel.properties.length_m)
+      ?? positiveNumberValue(componentModel.properties.total_length_m)
+      ?? positiveNumberValue(componentModel.quantity);
   }
-  return componentModel.quantity;
+  return positiveNumberValue(componentModel.quantity);
+}
+
+function quantityLabelForProcess(componentModel: ComponentModel, quantitySource: string, quantity: number): string {
+  const value = formatQuantityNumber(quantity);
+  if (quantitySource === "count") {
+    if (componentModel.component_type === "pile") return `${value}根`;
+    if (componentModel.component_type === "cast_in_place_box_beam") return `${value}联`;
+    if (componentModel.component_type === "cast_in_place_continuous_beam") {
+      return `${value}${componentModel.method_id === "zero_block" || componentModel.method_id === "standard_segment" ? "块" : "段"}`;
+    }
+    return `${value}个`;
+  }
+  if (quantitySource.endsWith("_m")) return `${value}m`;
+  return `${value}个`;
+}
+
+function pierAverageHeight(componentModel: ComponentModel): number | null {
+  const individualHeights = componentModel.properties.column_heights_m;
+  if (Array.isArray(individualHeights)) {
+    const valid = individualHeights
+      .map(positiveNumberValue)
+      .filter((value): value is number => value !== null);
+    if (valid.length) return valid.reduce((total, value) => total + value, 0) / valid.length;
+  }
+  for (const key of ["height_m", "heightM", "pier_height_m", "pierHeightM"]) {
+    const value = positiveNumberValue(componentModel.properties[key]);
+    if (value !== null) return value;
+  }
+  const dimensions = componentModel.properties.dimensions_m;
+  if (isRecord(dimensions)) {
+    for (const key of ["height_m", "heightM"]) {
+      const value = positiveNumberValue(dimensions[key]);
+      if (value !== null) return value;
+    }
+  }
+  const count = positiveNumberValue(componentModel.properties.count) ?? 1;
+  return count <= 1 ? positiveNumberValue(componentModel.quantity) : null;
+}
+
+function structureParameterLabelForComponent(componentModel: ComponentModel): string | null {
+  if (componentModel.structure_parameter_label) return componentModel.structure_parameter_label;
+  const properties = componentModel.properties;
+  const form = typeof properties.form === "string" ? properties.form.trim() : "";
+  const dimensions = properties.dimensions_m;
+  const count = positiveNumberValue(properties.count);
+  if (componentModel.component_type === "pile") {
+    const nestedDiameter = isRecord(dimensions) ? positiveNumberValue(dimensions.diameterM) : null;
+    const diameter = positiveNumberValue(properties.diameter_m) ?? nestedDiameter;
+    return [form || "桩基础", diameter ? `桩径${formatQuantityNumber(diameter)}m` : ""].filter(Boolean).join("，");
+  }
+  if (componentModel.component_type === "pier_body") {
+    const parts = [form || "墩柱"];
+    if (Array.isArray(dimensions)) {
+      const values = dimensions.map(positiveNumberValue).filter((value): value is number => value !== null);
+      if (values.length === 1) parts.push(`柱径${formatQuantityNumber(values[0])}m`);
+      else if (values.length > 1) parts.push(`截面${values.map((value) => `${formatQuantityNumber(value)}m`).join(" × ")}`);
+    }
+    if (count) parts.push(`${formatQuantityNumber(count)}根`);
+    return parts.join("，");
+  }
+  if (Array.isArray(dimensions)) {
+    const values = dimensions.map(positiveNumberValue).filter((value): value is number => value !== null);
+    if (values.length) return values.map((value) => `${formatQuantityNumber(value)}m`).join(" × ");
+  }
+  const fallbackLabels: Partial<Record<ComponentType, string>> = {
+    cap: "承台",
+    spread_foundation: "扩大基础",
+    ground_tie_beam: "地系梁",
+    middle_tie_beam: "中系梁",
+    cap_beam: "盖梁",
+    abutment_body: "桥台台身",
+  };
+  return form || fallbackLabels[componentModel.component_type] || null;
+}
+
+function positiveNumberValue(value: unknown): number | null {
+  const number = typeof value === "number" ? value : (typeof value === "string" && value.trim() ? Number(value) : Number.NaN);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function formatQuantityNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(4).replace(/\.?0+$/, "");
 }
 
 function calculateDuration(quantity: number, processTemplate: ProcessTemplate) {

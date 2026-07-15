@@ -17,6 +17,7 @@ import app.scenario as scenario_module  # noqa: E402
 import app.solver as solver_module  # noqa: E402
 from app.models import ComponentModel, MilestoneConstraint, OBJECTIVE_METRIC_DEFINITIONS, PrecedenceLink, ProcessTemplate, ProductivityOption, ProjectBridge, ProjectModel, Resource, ResourceCostSolveRequest, ResourcePool, ScheduleInput, ScheduleStrategyConfig, ScenarioCompareRequest, ScenarioInput, ScheduledTask, StructureModel, Task, TaskOverride, UpperStructureComponent, UpperStructureLogicRule, ValidationMessage, WorkSection  # noqa: E402
 from app.models import MilestoneResult, ScheduleResult  # noqa: E402
+from app.models import TaskExecutionConstraint  # noqa: E402
 from app.process_library_defaults import upgrade_process_library  # noqa: E402
 from app.sample_data import (  # noqa: E402
     default_bridge,
@@ -29,6 +30,86 @@ from app.scenario_data import apply_resource_max_quantity_defaults, default_scen
 from app.services.bridge_import_service import import_local_bridge_params  # noqa: E402
 from app.solver import _resource_path_metrics, _task_ids_for_milestone, solve_capacity_shortest_schedule, solve_min_resources_schedule, solve_resource_cost_schedule, solve_schedule, solve_shortest_duration_schedule  # noqa: E402
 from app.wbs import calculate_duration, generate_wbs  # noqa: E402
+
+
+def test_ai_primary_target_delay_helper() -> None:
+    assert solver_module._ai_max_target_delay_days([0, 12, 5], 8) == 12
+    assert solver_module._ai_max_target_delay_days([0, 0], 0) == 0
+    assert solver_module._ai_max_target_delay_days([], None) is None
+
+
+def test_ai_continuity_transition_penalty_matches_page_transfer_weights() -> None:
+    def task(task_id: str, side: str, pier_no: int, *, process_name: str = "pile") -> Task:
+        return Task(
+            id=task_id,
+            name=task_id,
+            bridge_id="B1",
+            work_section_id=f"WS-{side}",
+            sequence_order=pier_no,
+            structure_id=f"B1-{side}-P{pier_no:02d}",
+            structure_name=f"{pier_no}# pier",
+            structure_type="pier",
+            component_type="pile",
+            process_name=process_name,
+            productivity_rule_id="pile",
+            quantity=1,
+            quantity_label="1",
+            duration_days=1,
+            compatible_resource_types=["rotary_drill"],
+        )
+
+    left_1 = task("L1", "L", 1)
+    left_2 = task("L2", "L", 2)
+    left_3 = task("L3", "L", 3)
+    right_1 = task("R1", "R", 1)
+    right_2 = task("R2", "R", 2)
+    right_3 = task("R3", "R", 3)
+    all_tasks = [left_1, left_2, left_3, right_1, right_2, right_3]
+
+    jump = solver_module._ai_continuity_transition_penalties(left_1, left_3, all_tasks, "rotary_drill")
+    side_switch = solver_module._ai_continuity_transition_penalties(left_1, right_1, all_tasks, "rotary_drill")
+    cross_side_jump = solver_module._ai_continuity_transition_penalties(left_1, right_3, all_tasks, "rotary_drill")
+    group_switch_only = solver_module._ai_continuity_transition_penalties(
+        left_1,
+        left_1.model_copy(update={"id": "L1-other", "process_name": "other"}),
+        all_tasks,
+        "rotary_drill",
+    )
+
+    assert jump == {"jump_pier": 1, "side_switch": 0, "cross_side_jump": 0, "path_group_switch": 0, "score": 4}
+    assert side_switch["side_switch"] == 1
+    assert side_switch["score"] == 3  # 换幅 2 + 路径组切换 1
+    assert cross_side_jump["cross_side_jump"] == 1
+    assert cross_side_jump["score"] == 13  # 跨墩 4 + 换幅 2 + 跨幅跳墩 6 + 路径组 1
+    assert group_switch_only["score"] == 1
+
+    missing_location = left_1.model_copy(
+        update={
+            "id": "missing-location",
+            "structure_id": "unknown",
+            "structure_name": "unknown",
+            "structure_type": "abutment",
+        }
+    )
+    assert solver_module._ai_continuity_transition_penalties(
+        missing_location,
+        missing_location.model_copy(update={"id": "missing-location-2"}),
+        [missing_location],
+        "rotary_drill",
+    )["score"] == 0
+
+    resource = Resource(id="rotary_1", name="Rotary 1", type="rotary_drill")
+    indexed_nodes = [
+        (1, {"representative_task": left_1}),
+        (2, {"representative_task": left_3.model_copy(update={"structure_id": "B1-L-P09"})}),
+    ]
+    sparse_pairs = solver_module._ai_sparse_resource_path_transition_pairs(
+        resource,
+        indexed_nodes,
+        warm_start_result=None,
+        incumbent_transition_pairs={(1, 2)},
+    )
+    assert (1, 2) in sparse_pairs
 
 
 def test_schedule_strategy_merges_objective_term_defaults_and_ignores_legacy_balance_target() -> None:
@@ -129,6 +210,65 @@ def test_default_solve_time_limit_is_fifteen_seconds() -> None:
         precedence_links=[],
         resources=[],
     ).time_limit_seconds == 15
+
+
+def test_execution_constraints_fix_start_and_resource_without_changing_default_behavior() -> None:
+    pytest.importorskip("ortools")
+    base = ScheduleInput(
+        project_name="execution-constraints",
+        start_date=date(2026, 1, 1),
+        tasks=[_solver_task("T1", "任务1", 2, "crew"), _solver_task("T2", "任务2", 2, "crew")],
+        precedence_links=[],
+        resources=[
+            Resource(id="crew-1", name="班组1", type="crew"),
+            Resource(id="crew-2", name="班组2", type="crew"),
+        ],
+        time_limit_seconds=5,
+    )
+    unconstrained = solve_shortest_duration_schedule(base)
+    constrained = solve_shortest_duration_schedule(
+        base.model_copy(
+            update={
+                "execution_constraints": [
+                    TaskExecutionConstraint(task_id="T1", fixed_start_offset=0, fixed_resource_id="crew-2"),
+                    TaskExecutionConstraint(task_id="T2", earliest_start_offset=5),
+                ]
+            }
+        )
+    )
+
+    assert unconstrained.status in {"OPTIMAL", "FEASIBLE"}
+    assert constrained.status in {"OPTIMAL", "FEASIBLE"}
+    by_id = {task.id: task for task in constrained.tasks}
+    assert by_id["T1"].start_offset == 0
+    assert by_id["T1"].assigned_resource_id == "crew-2"
+    assert by_id["T2"].start_offset >= 5
+    assert base.execution_constraints == []
+
+
+@pytest.mark.parametrize(
+    ("constraint", "message"),
+    [
+        (TaskExecutionConstraint(task_id="UNKNOWN", fixed_start_offset=0), "不存在的任务"),
+        (TaskExecutionConstraint(task_id="T1", fixed_resource_id="unknown-resource"), "不是该任务的可用资源"),
+    ],
+)
+def test_execution_constraints_reject_unknown_task_or_resource(constraint, message: str) -> None:
+    pytest.importorskip("ortools")
+    result = solve_shortest_duration_schedule(
+        ScheduleInput(
+            project_name="invalid-execution-constraint",
+            start_date=date(2026, 1, 1),
+            tasks=[_solver_task("T1", "任务1", 2, "crew")],
+            precedence_links=[],
+            resources=[Resource(id="crew-1", name="班组1", type="crew")],
+            execution_constraints=[constraint],
+            time_limit_seconds=5,
+        )
+    )
+
+    assert result.status == "INFEASIBLE"
+    assert any(message in item.message for item in result.validation)
 
 
 def test_schedule_strategy_rejects_invalid_objective_term_config() -> None:
@@ -539,6 +679,9 @@ def test_continuous_beam_upper_structures_generate_t_groups_and_closure_logic() 
     assert sum(1 for task in standard_tasks if "右侧标准段" in task.name) == 4
     assert {task.quantity for task in standard_tasks} == {2}
     assert {task.quantity_label for task in standard_tasks} == {"2块"}
+    assert all(task.structure_parameter_label for task in continuous_tasks)
+    assert all("40+40+40+40+40" in (task.structure_parameter_label or "") for task in continuous_tasks)
+    assert all("标准段" in (task.structure_parameter_label or "") for task in standard_tasks)
     assert {task.duration_days for task in standard_tasks} == {20}
     assert sum(1 for task in continuous_tasks if "边跨连续段" in task.name) == 2
     assert sum(1 for task in continuous_tasks if "边跨合龙段" in task.name) == 2
@@ -710,6 +853,10 @@ def test_cast_in_place_box_beam_waits_for_corresponding_lower_structures() -> No
     )
     generated = generate_schedule_input_from_scenario(scenario)
     box_task = next(task for task in generated.schedule_input.tasks if task.component_type == "cast_in_place_box_beam")
+    assert box_task.quantity == 1
+    assert box_task.quantity_label == "1联"
+    assert "现浇箱梁" in (box_task.structure_parameter_label or "")
+    assert "1#墩~2#墩" in (box_task.structure_parameter_label or "")
     links = [
         link
         for link in generated.schedule_input.precedence_links
@@ -1275,6 +1422,102 @@ def test_pier_body_days_per_section_uses_standard_section_height() -> None:
     assert task.quantity == p01_body.quantity
     assert task.quantity_label == p01_body.quantity_label
     assert task.duration_days == math.ceil(p01_body.quantity / 4.5) * 7
+
+
+def test_pier_body_uniform_height_is_average_quantity_not_column_total() -> None:
+    scenario = default_scenario()
+    body = next(
+        component
+        for bridge in scenario.project.bridges
+        for section in bridge.work_sections
+        for structure in section.structures
+        for component in structure.components
+        if component.component_type == "pier_body"
+    )
+    body.method_id = "climbing_form"
+    body.quantity = 20
+    body.quantity_label = "2根，高度10m"
+    body.structure_parameter_label = None
+    body.properties = {"height_m": 10, "count": 2, "form": "柱式墩", "dimensions_m": [1.8]}
+
+    generated = generate_schedule_input_from_scenario(scenario)
+    task = next(task for task in generated.schedule_input.tasks if task.component_id == body.id)
+
+    assert task.quantity == 10
+    assert task.quantity_label == "10m"
+    assert task.duration_days == 21
+    assert "柱径1.8m" in (task.structure_parameter_label or "")
+    assert "桩径" not in (task.structure_parameter_label or "")
+
+
+def test_pier_body_individual_heights_use_average_and_ignore_legacy_total() -> None:
+    scenario = default_scenario()
+    body = next(
+        component
+        for bridge in scenario.project.bridges
+        for section in bridge.work_sections
+        for structure in section.structures
+        for component in structure.components
+        if component.component_type == "pier_body"
+    )
+    body.method_id = "climbing_form"
+    body.quantity = 30
+    body.quantity_label = "3根，总高30m"
+    body.properties = {"column_heights_m": [8, "10", 12, 0, "bad"], "count": 3}
+
+    generated = generate_schedule_input_from_scenario(scenario)
+    task = next(task for task in generated.schedule_input.tasks if task.component_id == body.id)
+
+    assert task.quantity == 10
+    assert task.quantity_label == "10m"
+    assert task.duration_days == 21
+
+
+def test_pier_body_legacy_single_column_quantity_remains_compatible() -> None:
+    scenario = default_scenario()
+    body = next(
+        component
+        for bridge in scenario.project.bridges
+        for section in bridge.work_sections
+        for structure in section.structures
+        for component in structure.components
+        if component.component_type == "pier_body"
+    )
+    body.method_id = "climbing_form"
+    body.quantity = 10
+    body.quantity_label = "旧标签不得参与计算"
+    body.properties = {"count": 1}
+
+    generated = generate_schedule_input_from_scenario(scenario)
+    task = next(task for task in generated.schedule_input.tasks if task.component_id == body.id)
+
+    assert task.quantity == 10
+    assert task.quantity_label == "10m"
+    assert task.duration_days == 21
+
+
+def test_pier_body_multi_column_without_valid_height_is_rejected() -> None:
+    scenario = default_scenario()
+    body = next(
+        component
+        for bridge in scenario.project.bridges
+        for section in bridge.work_sections
+        for structure in section.structures
+        for component in structure.components
+        if component.component_type == "pier_body"
+    )
+    body.method_id = "climbing_form"
+    body.quantity = 20
+    body.quantity_label = "2根，总高20m"
+    body.properties = {"count": 2}
+
+    generated = generate_schedule_input_from_scenario(scenario)
+
+    assert not any(task.component_id == body.id for task in generated.schedule_input.tasks)
+    assert any(
+        message.level == "error" and message.subject_id == body.id and "有效墩高" in message.message
+        for message in generated.validation
+    )
 
 
 def test_pier_body_section_height_can_be_overridden_per_productivity_group() -> None:
@@ -6097,6 +6340,317 @@ def _min_resource_test_input(max_resources: int) -> ScheduleInput:
         ],
         time_limit_seconds=5,
     )
+
+
+def test_ai_strict_full_objective_skips_baseline_and_keeps_objective_terms(monkeypatch) -> None:
+    scenario = _parallel_fixed_resource_scenario(target_days=10, current_resources=1, max_resources=3)
+    generated = generate_schedule_input_from_scenario(scenario)
+    monkeypatch.setattr(
+        solver_module,
+        "solve_shortest_duration_schedule",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("AI 严格求解不应运行基础排程")),
+    )
+
+    result = solver_module.solve_control_priority_schedule_once(
+        generated.schedule_input,
+        enforce_hard_milestones=True,
+        relax_target_constraints=True,
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.stats["solver_call_count"] == 1
+    assert result.stats["baseline_status"] == "not_evaluated"
+    assert result.stats["performance_path"] == "ai_strict_fixed_resource_one_pass"
+    assert result.objective_breakdown["baseline_makespan_days"] is None
+    assert {item["term_id"] for item in result.objective_breakdown["objective_contributions"]} == {
+        "control_node_late",
+        "makespan_and_soft_milestone",
+        "resource_idle",
+    }
+
+
+def test_ai_single_stage_solver_uses_duration_objective_without_resource_idle_terms() -> None:
+    pytest.importorskip("ortools")
+    scenario = _parallel_fixed_resource_scenario(target_days=5, current_resources=1, max_resources=3)
+    schedule_input = generate_schedule_input_from_scenario(scenario).schedule_input.model_copy(
+        update={"time_limit_seconds": 5.0}
+    )
+
+    primary = solver_module.solve_control_priority_schedule_once(
+        schedule_input,
+        enforce_hard_milestones=True,
+        relax_target_constraints=True,
+        optimization_stage="primary",
+    )
+
+    assert primary.status in {"OPTIMAL", "FEASIBLE"}
+    assert primary.stats["optimization_stage"] == "primary"
+    assert primary.stats["objective_modeling_gates"]["resource_idle"]["modeling_enabled"] is False
+    assert primary.objective_breakdown["resource_idle_penalty"] == 0
+    assert primary.stats["max_target_delay_days"] is not None
+    assert primary.stats["performance_path"] == "ai_strict_fixed_resource_single_stage"
+    assert primary.stats["solver_call_count"] == 1
+
+
+@pytest.mark.parametrize("time_limit_seconds", [15.0, 60.0])
+def test_ai_single_stage_scenario_uses_full_budget_and_keeps_duration_proof(
+    monkeypatch,
+    time_limit_seconds: float,
+) -> None:
+    scenario = _parallel_fixed_resource_scenario(target_days=10, current_resources=2, max_resources=3).model_copy(
+        update={"time_limit_seconds": time_limit_seconds}
+    )
+    calls: list[tuple[str, float, ScheduleResult | None]] = []
+
+    def fake_solve(schedule_input: ScheduleInput, **kwargs: Any) -> ScheduleResult:
+        stage = str(kwargs.get("optimization_stage"))
+        warm = kwargs.get("warm_start_result")
+        calls.append((stage, schedule_input.time_limit_seconds, warm))
+        resource_by_type = {resource.type: resource for resource in schedule_input.resources if resource.enabled}
+        scheduled_tasks = []
+        for task in schedule_input.tasks:
+            resource = resource_by_type[task.compatible_resource_types[0]]
+            scheduled_tasks.append(
+                ScheduledTask(
+                    **task.model_dump(),
+                    start_offset=0,
+                    end_offset=task.duration_days,
+                    start_date=schedule_input.start_date,
+                    finish_date=schedule_input.start_date + timedelta(days=task.duration_days - 1),
+                    assigned_resource_id=resource.id,
+                    assigned_resource_name=resource.name,
+                    assigned_resource_type=resource.type,
+                )
+            )
+        milestone_results = [
+            MilestoneResult(
+                id=milestone.id,
+                name=milestone.name,
+                level=milestone.level,
+                mode=milestone.mode,
+                scope_type=milestone.scope_type,
+                scope_id=milestone.scope_id,
+                target_event=milestone.target_event,
+                target_date=milestone.target_date,
+                actual_date=milestone.target_date,
+                actual_offset=0,
+                lateness_days=0,
+                status="met",
+            )
+            for milestone in schedule_input.milestones
+        ]
+        idle_days = 10
+        continuity_penalty = 25
+        return ScheduleResult(
+            status="OPTIMAL",
+            objective_days=5,
+            plan_start_date=schedule_input.start_date,
+            plan_finish_date=schedule_input.start_date + timedelta(days=4),
+            tasks=scheduled_tasks,
+            milestone_results=milestone_results,
+            stats={
+                "configured_time_limit_seconds": schedule_input.time_limit_seconds,
+                "baseline_status": "not_evaluated",
+                "resource_organization_analysis": {
+                    "resources": [{"task_count": len(scheduled_tasks), "idle_days": idle_days}]
+                },
+                "continuity_metrics": {
+                    "jump_pier_count": continuity_penalty // 5,
+                    "side_switch_count": 0,
+                    "cross_side_jump_count": 0,
+                    "path_group_switch_count": 0,
+                },
+            },
+        )
+
+    monkeypatch.setattr(scenario_module, "solve_control_priority_schedule_once", fake_solve)
+
+    solved = scenario_module.solve_ai_strict_fixed_resource_scenario(scenario)
+    stages = solved.result.stats["optimization_stages"]
+
+    assert [stage for stage, _, _ in calls] == ["primary"]
+    assert calls[0][1] == time_limit_seconds
+    assert calls[0][2] is None
+    assert stages["total_budget_seconds"] == time_limit_seconds
+    assert stages["primary"]["configured_budget_seconds"] == time_limit_seconds
+    assert stages["secondary"]["attempted"] is False
+    assert stages["secondary"]["configured_budget_seconds"] == 0.0
+    assert stages["secondary"]["skipped_reason"] == "not_applicable"
+    assert stages["selected_stage"] == "primary"
+    assert stages["fallback_reason"] is None
+    assert stages["primary"]["solver_status"] == "OPTIMAL"
+    assert stages["secondary"]["solver_status"] is None
+    assert solved.result.stats["primary_resource_idle_days"] == 10
+    assert solved.result.stats["primary_continuity_penalty"] == 20
+    assert solved.result.stats["target_achievement"]["optimality_proven"] is True
+    assert solved.result.stats["solver_call_count"] == 1
+    assert solved.result.stats["performance_path"] == "ai_strict_fixed_resource_single_stage"
+    assert solved.result.stats["resource_expansion_attempted"] is False
+
+
+def test_ai_single_stage_never_retries_when_primary_idle_is_zero(monkeypatch) -> None:
+    scenario = _parallel_fixed_resource_scenario(target_days=10, current_resources=2, max_resources=3).model_copy(
+        update={"time_limit_seconds": 60.0}
+    )
+    calls: list[str] = []
+
+    def fake_solve(schedule_input: ScheduleInput, **kwargs: Any) -> ScheduleResult:
+        stage = str(kwargs.get("optimization_stage"))
+        calls.append(stage)
+        assert stage == "primary"
+        resource = next(resource for resource in schedule_input.resources if resource.enabled)
+        scheduled_tasks = [
+            ScheduledTask(
+                **task.model_dump(),
+                start_offset=0,
+                end_offset=task.duration_days,
+                start_date=schedule_input.start_date,
+                finish_date=schedule_input.start_date + timedelta(days=task.duration_days - 1),
+                assigned_resource_id=resource.id,
+                assigned_resource_name=resource.name,
+                assigned_resource_type=resource.type,
+            )
+            for task in schedule_input.tasks
+        ]
+        return ScheduleResult(
+            status="OPTIMAL",
+            objective_days=max(task.duration_days for task in schedule_input.tasks),
+            plan_start_date=schedule_input.start_date,
+            tasks=scheduled_tasks,
+            stats={
+                "resource_organization_analysis": {
+                    "resources": [{"task_count": len(scheduled_tasks), "idle_days": 0}]
+                },
+                "continuity_metrics": {},
+            },
+        )
+
+    monkeypatch.setattr(scenario_module, "solve_control_priority_schedule_once", fake_solve)
+
+    solved = scenario_module.solve_ai_strict_fixed_resource_scenario(scenario)
+    stages = solved.result.stats["optimization_stages"]
+
+    assert calls == ["primary"]
+    assert stages["selected_stage"] == "primary"
+    assert stages["secondary"]["attempted"] is False
+    assert stages["secondary"]["skipped_reason"] == "not_applicable"
+    assert solved.result.stats["solver_call_count"] == 1
+
+
+def test_ai_strict_target_status_matrix() -> None:
+    scenario = _parallel_fixed_resource_scenario(target_days=5, current_resources=1, max_resources=3)
+    schedule_input = generate_schedule_input_from_scenario(scenario).schedule_input
+    milestone = schedule_input.milestones[0]
+    scheduled_task = ScheduledTask(
+        **schedule_input.tasks[0].model_dump(),
+        start_offset=0,
+        end_offset=schedule_input.tasks[0].duration_days,
+        start_date=schedule_input.start_date,
+        finish_date=schedule_input.start_date + timedelta(days=schedule_input.tasks[0].duration_days - 1),
+    )
+
+    def classified(solver_status: str, lateness_days: int, *, with_target: bool = True) -> dict[str, Any]:
+        result = ScheduleResult(
+            status=solver_status,
+            plan_start_date=schedule_input.start_date,
+            tasks=[scheduled_task] if solver_status in {"OPTIMAL", "FEASIBLE"} else [],
+            milestone_results=[
+                MilestoneResult(
+                    id=milestone.id,
+                    name=milestone.name,
+                    level=milestone.level,
+                    mode=milestone.mode,
+                    scope_type=milestone.scope_type,
+                    scope_id=milestone.scope_id,
+                    target_event=milestone.target_event,
+                    target_date=milestone.target_date,
+                    actual_date=milestone.target_date + timedelta(days=lateness_days),
+                    actual_offset=4 + lateness_days,
+                    lateness_days=lateness_days,
+                    status="late" if lateness_days else "met",
+                )
+            ] if with_target else [],
+        )
+        target_input = schedule_input if with_target else schedule_input.model_copy(update={"milestones": []})
+        return scenario_module._apply_ai_strict_target_achievement(result, target_input)
+
+    optimal_met = classified("OPTIMAL", 0)
+    assert optimal_met["target_status"] == "met"
+    assert optimal_met["schedule_outcome_status"] == "duration_target_met"
+    assert optimal_met["schedule_outcome_reason"] == "target_met"
+    assert classified("FEASIBLE", 0)["schedule_outcome_status"] == "duration_target_met"
+    optimal_late = classified("OPTIMAL", 3)
+    assert optimal_late["target_status"] == "not_met"
+    assert optimal_late["schedule_outcome_status"] == "duration_target_not_met"
+    assert optimal_late["schedule_outcome_reason"] == "proven_late"
+    feasible_late = classified("FEASIBLE", 3)
+    assert feasible_late["target_status"] == "unconfirmed"
+    assert feasible_late["schedule_outcome_status"] == "duration_target_not_met"
+    assert feasible_late["schedule_outcome_reason"] == "late_unconfirmed"
+    assert "optimality_unproven" in feasible_late["failure_reasons"]
+    unknown = classified("UNKNOWN", 0)
+    assert unknown["target_status"] == "unconfirmed"
+    assert unknown["schedule_outcome_status"] == "no_feasible_schedule"
+    assert unknown["schedule_outcome_reason"] == "time_limit_no_schedule"
+    infeasible = classified("INFEASIBLE", 0)
+    assert infeasible["target_status"] == "infeasible"
+    assert infeasible["schedule_outcome_status"] == "no_feasible_schedule"
+    assert infeasible["schedule_outcome_reason"] == "proven_infeasible"
+    target_missing = classified("OPTIMAL", 0, with_target=False)
+    assert target_missing["target_status"] == "unconfirmed"
+    assert target_missing["schedule_outcome_status"] is None
+    assert target_missing["schedule_outcome_reason"] == "target_missing"
+
+
+def test_ai_strict_max_target_delay_uses_largest_single_target_and_keeps_sum() -> None:
+    scenario = _parallel_fixed_resource_scenario(target_days=5, current_resources=1, max_resources=3)
+    schedule_input = generate_schedule_input_from_scenario(scenario).schedule_input
+    milestone = schedule_input.milestones[0]
+    scheduled_task = ScheduledTask(
+        **schedule_input.tasks[0].model_dump(),
+        start_offset=0,
+        end_offset=schedule_input.tasks[0].duration_days,
+        start_date=schedule_input.start_date,
+        finish_date=schedule_input.start_date + timedelta(days=schedule_input.tasks[0].duration_days - 1),
+    )
+
+    def milestone_result(index: int, lateness: int, *, mode: str = "hard") -> MilestoneResult:
+        return MilestoneResult(
+            id=f"{milestone.id}-{index}",
+            name=f"{milestone.name}-{index}",
+            level=milestone.level,
+            mode=mode,
+            scope_type=milestone.scope_type,
+            scope_id=milestone.scope_id,
+            target_event=milestone.target_event,
+            target_date=milestone.target_date,
+            actual_date=milestone.target_date + timedelta(days=lateness),
+            actual_offset=4 + lateness,
+            lateness_days=lateness,
+            status="late" if lateness else "met",
+        )
+
+    result = ScheduleResult(
+        status="FEASIBLE",
+        plan_start_date=schedule_input.start_date,
+        tasks=[scheduled_task],
+        milestone_results=[
+            milestone_result(1, 0),
+            milestone_result(2, 12),
+            milestone_result(3, 5),
+            milestone_result(4, 99, mode="soft"),
+        ],
+        objective_breakdown={"fixed_duration_overrun_days": 8},
+    )
+
+    target = scenario_module._apply_ai_strict_target_achievement(result, schedule_input)
+
+    assert target["max_target_delay_days"] == 12
+    assert target["hard_milestone_late_days"] == 17
+    assert target["fixed_duration_overrun_days"] == 8
+    assert target["schedule_outcome_status"] == "duration_target_not_met"
+    assert result.stats["max_target_delay_days"] == 12
+    assert result.objective_breakdown["max_target_delay_days"] == 12
 
 
 def _parallel_fixed_resource_scenario(

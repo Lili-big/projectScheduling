@@ -77,6 +77,63 @@ AiParameterConflictResolutionStatus = Literal[
 ]
 AiParameterCandidateValidationStatus = Literal["valid", "needs_manual_input", "invalid"]
 AiParameterApplicationStatus = Literal["pending", "partially_applied", "applied", "expired"]
+ResourceAssistantPlanProfile = Literal["economy", "balanced", "crash", "custom"]
+PlanVersionKind = Literal["baseline", "execution"]
+PlanVersionStatus = Literal["draft", "active", "superseded"]
+ProgressTaskStatus = Literal["not_started", "in_progress", "completed", "paused", "cancelled"]
+ProgressDataQualityStatus = Literal["valid", "warning", "invalid"]
+RemainingDaysSource = Literal["calculated", "manual", "baseline", "none"]
+ForecastStrategy = Literal["as_is", "add_bottleneck_resources", "prioritize_critical_tasks"]
+ForecastSolveStatus = Literal["ready", "solving", "feasible", "infeasible", "failed", "stale"]
+ForecastRiskStatus = Literal["on_track", "at_risk", "late", "insufficient_data"]
+ForecastConfidence = Literal["high", "medium", "low"]
+ForecastTaskExecutionState = Literal[
+    "completed_locked",
+    "cancelled_excluded",
+    "in_progress_remaining",
+    "paused_remaining",
+    "not_started_future",
+]
+CriticalNodeType = Literal["project_finish", "milestone"]
+CriticalNodeDateSource = Literal["actual", "predicted", "combined", "unavailable"]
+CriticalNodeEvidenceType = Literal[
+    "driving_task",
+    "bottleneck_resource",
+    "precedence_wait",
+    "data_quality",
+    "solver",
+]
+ResourceAssistantGenerationSource = Literal["llm", "local_fallback", "user_adjusted"]
+ResourceAssistantGenerationMode = Literal["llm_first", "local_fallback_only"]
+ResourceAssistantPlanStatus = Literal[
+    "draft",
+    "ready_to_solve",
+    "stale",
+    "solving",
+    "optimal",
+    "feasible",
+    "infeasible",
+    "unknown",
+    "failed",
+    "model_invalid",
+]
+ResourceAssistantPlanOutcomeStatus = Literal["met", "not_met", "unconfirmed", "infeasible"]
+ResourceAssistantScheduleOutcomeStatus = Literal[
+    "duration_target_met",
+    "duration_target_not_met",
+    "no_feasible_schedule",
+]
+ResourceAssistantScheduleOutcomeReason = Literal[
+    "target_met",
+    "proven_late",
+    "late_unconfirmed",
+    "time_limit_no_schedule",
+    "proven_infeasible",
+    "resource_coverage_missing",
+    "target_missing",
+]
+ResourceAssistantRecommendationStatus = Literal["recommended", "no_recommendation", "insufficient_results"]
+ResourceAssistantExplanationSource = Literal["local", "llm"]
 
 ObjectiveTermId = Literal[
     "control_node_late",
@@ -370,6 +427,7 @@ class Task(BaseModel):
     productivity_rule_id: str
     quantity: float
     quantity_label: str
+    structure_parameter_label: str | None = None
     duration_days: int = Field(ge=1)
     compatible_resource_types: list[str] = Field(default_factory=list)
     properties: dict[str, Any] = {}
@@ -398,6 +456,7 @@ class ComponentModel(BaseModel):
     component_type: ComponentType
     quantity: float = Field(ge=0)
     quantity_label: str = ""
+    structure_parameter_label: str | None = None
     method_id: str | None = None
     productivity_option_id: str | None = None
     enabled: bool = True
@@ -425,6 +484,7 @@ class UpperStructureComponent(BaseModel):
     span_length_m: float
     beam_count_per_span: int | None = None
     span_group_expression: str
+    structure_parameter_label: str | None = None
     control_level: ControlLevel | None = None
     properties: dict[str, Any] = {}
 
@@ -809,6 +869,24 @@ class WbsResponse(BaseModel):
     validation: list[ValidationMessage]
 
 
+class TaskExecutionConstraint(BaseModel):
+    task_id: str
+    earliest_start_offset: int | None = Field(default=None, ge=0)
+    fixed_start_offset: int | None = Field(default=None, ge=0)
+    fixed_resource_id: str | None = None
+    source: str = "manual"
+
+    @model_validator(mode="after")
+    def validate_start_offsets(self) -> "TaskExecutionConstraint":
+        if (
+            self.earliest_start_offset is not None
+            and self.fixed_start_offset is not None
+            and self.fixed_start_offset < self.earliest_start_offset
+        ):
+            raise ValueError("fixed_start_offset must be greater than or equal to earliest_start_offset")
+        return self
+
+
 class ScheduleInput(BaseModel):
     project_name: str
     start_date: date
@@ -816,6 +894,7 @@ class ScheduleInput(BaseModel):
     precedence_links: list[PrecedenceLink]
     resources: list[Resource]
     milestones: list[MilestoneConstraint] = []
+    execution_constraints: list[TaskExecutionConstraint] = Field(default_factory=list)
     schedule_strategy: ScheduleStrategyConfig = Field(default_factory=ScheduleStrategyConfig)
     time_limit_seconds: float = Field(default=15.0, gt=0)
 
@@ -931,6 +1010,507 @@ class ScenarioCompareResponse(BaseModel):
     summaries: list[dict[str, Any]]
     best_scenario_id: str | None = None
     notes: list[str] = []
+
+
+class ResourceAssistantControlPierSummary(BaseModel):
+    structure_id: str
+    structure_name: str
+    bridge_id: str | None = None
+    bridge_name: str | None = None
+    work_section_id: str | None = None
+    work_section_name: str | None = None
+    side: WorkSectionSide = "none"
+    support_no: str | None = None
+    recognition_sources: list[str] = Field(default_factory=list)
+    related_continuous_beam_group_ids: list[str] = Field(default_factory=list)
+
+
+class ResourceAssistantReferenceExample(BaseModel):
+    profile: ResourceAssistantPlanProfile
+    description: str
+    resource_quantities: dict[str, int] = Field(default_factory=dict)
+    is_hard_constraint: bool = False
+
+
+class ResourceAssistantProjectProfile(BaseModel):
+    project_name: str
+    start_date: date
+    bridge_count: int = 0
+    work_section_count: int = 0
+    structure_count: int = 0
+    task_count: int = 0
+    control_piers: list[ResourceAssistantControlPierSummary] = Field(default_factory=list)
+    resource_types: list[dict[str, Any]] = Field(default_factory=list)
+    continuous_beam_groups: list[dict[str, Any]] = Field(default_factory=list)
+    critical_path_candidates: list[dict[str, Any]] = Field(default_factory=list)
+    constraint_hints: list[str] = Field(default_factory=list)
+    reference_examples: list[ResourceAssistantReferenceExample] = Field(default_factory=list)
+    data_quality_messages: list[ValidationMessage] = Field(default_factory=list)
+
+
+class ResourceAssistantPlan(BaseModel):
+    scenario_id: str
+    scenario_name: str
+    profile: ResourceAssistantPlanProfile
+    positioning: str
+    generation_source: ResourceAssistantGenerationSource = "local_fallback"
+    generation_rationale: str = ""
+    reference_example_used: str | None = None
+    organization_strategy: str = ""
+    validation_messages: list[ValidationMessage] = Field(default_factory=list)
+    applicable_scenarios: str = ""
+    expected_risks: str = ""
+    resource_pools: list[ResourcePool] = Field(default_factory=list)
+    changed_from_standard: bool = False
+    solve_status: ResourceAssistantPlanStatus = "draft"
+    stale_reason: str | None = None
+
+
+class ResourceAssistantGenerationRecord(BaseModel):
+    generation_id: str
+    source: ResourceAssistantGenerationSource = "local_fallback"
+    input_fingerprint: str
+    prompt_summary: str = ""
+    reference_examples_used: list[ResourceAssistantReferenceExample] = Field(default_factory=list)
+    constraint_hints_used: list[str] = Field(default_factory=list)
+    raw_output_available: bool = False
+    parsed_plan_ids: list[str] = Field(default_factory=list)
+    validation_status: Literal["valid", "partially_valid", "invalid"] = "valid"
+    fallback_reason: str | None = None
+
+
+class ResourceAssistantLlmConfigStatus(BaseModel):
+    provider: str = "local"
+    model: str | None = None
+    endpoint_configured: bool = False
+    api_key_configured: bool = False
+    timeout_seconds: int = 30
+    status: Literal["local_fallback", "configured", "failed"] = "local_fallback"
+    warning: str | None = None
+
+
+class ResourceAssistantTransferPenalty(BaseModel):
+    penalty_score: int = 0
+    jump_pier_count: int = 0
+    side_switch_count: int = 0
+    cross_side_jump_count: int = 0
+    path_group_switch_count: int = 0
+    max_jump_distance: int = 0
+    details: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ResourceAssistantDemoCost(BaseModel):
+    total_cost: float = 0
+    work_cost: float = 0
+    idle_cost: float = 0
+    mobilization_cost: float = 0
+    transfer_cost: float = 0
+    resource_costs: list[dict[str, Any]] = Field(default_factory=list)
+    price_source: str = "demo_default_price"
+    disclaimer: str = "演示默认价格估算，仅用于方案横向比较。"
+
+
+class ResourceAssistantCoreMetrics(BaseModel):
+    total_days: int | None = None
+    plan_finish_date: date | None = None
+    control_pier_release_dates: list[dict[str, Any]] = Field(default_factory=list)
+    first_continuous_beam_start_date: date | None = None
+    all_continuous_beams_started_date: date | None = None
+    resource_utilization_by_type: list[dict[str, Any]] = Field(default_factory=list)
+    average_wait_days: float | None = None
+    max_wait_days: int | None = None
+    control_pier_wait_days: int | None = None
+    continuous_beam_wait_days: int | None = None
+    transfer_penalty: ResourceAssistantTransferPenalty = Field(default_factory=ResourceAssistantTransferPenalty)
+    demo_cost: ResourceAssistantDemoCost = Field(default_factory=ResourceAssistantDemoCost)
+    target_status: str = "not_evaluated"
+    not_available_reasons: list[str] = Field(default_factory=list)
+
+
+class ResourceAssistantPrimaryStageSummary(BaseModel):
+    attempted: bool = True
+    solver_status: str | None = None
+    max_target_delay_days: int | None = Field(default=None, ge=0)
+    makespan_days: int | None = Field(default=None, ge=0)
+    optimality_proven: bool = False
+    elapsed_seconds: float = Field(default=0.0, ge=0)
+    configured_budget_seconds: float = Field(default=0.0, ge=0)
+
+
+class ResourceAssistantSecondaryStageSummary(BaseModel):
+    attempted: bool = False
+    solver_status: str | None = None
+    resource_idle_days: int | None = Field(default=None, ge=0)
+    continuity_penalty: int | None = Field(default=None, ge=0)
+    optimality_proven: bool = False
+    elapsed_seconds: float = Field(default=0.0, ge=0)
+    configured_budget_seconds: float = Field(default=0.0, ge=0)
+    skipped_reason: Literal[
+        "primary_no_schedule",
+        "time_budget_exhausted",
+        "insufficient_remaining_budget",
+        "idle_already_zero",
+        "not_applicable",
+    ] | None = None
+    validation_failure_reason: Literal[
+        "primary_bounds_exceeded",
+        "resource_snapshot_changed",
+        "task_set_changed",
+        "no_secondary_improvement",
+        "model_error",
+    ] | None = None
+
+
+class ResourceAssistantOptimizationStages(BaseModel):
+    primary: ResourceAssistantPrimaryStageSummary
+    secondary: ResourceAssistantSecondaryStageSummary
+    selected_stage: Literal["primary", "secondary"] = "primary"
+    fallback_reason: str | None = None
+    total_budget_seconds: float = Field(default=0.0, ge=0)
+    total_elapsed_seconds: float = Field(default=0.0, ge=0)
+
+
+class ResourceAssistantPlanResult(BaseModel):
+    scenario_id: str
+    plan_status: ResourceAssistantPlanOutcomeStatus | None = None
+    schedule_outcome_status: ResourceAssistantScheduleOutcomeStatus | None = None
+    schedule_outcome_reason: ResourceAssistantScheduleOutcomeReason | None = None
+    solver_status: str | None = None
+    input_resource_quantities: dict[str, int] = Field(default_factory=dict)
+    resource_expansion_attempted: bool = False
+    optimization_stages: ResourceAssistantOptimizationStages | None = None
+    generated: GeneratedScheduleInput | None = None
+    result: ScheduleResult | None = None
+    metrics: ResourceAssistantCoreMetrics = Field(default_factory=ResourceAssistantCoreMetrics)
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+    generated_at: datetime
+    input_fingerprint: str
+
+
+class ResourceAssistantMetricRow(BaseModel):
+    metric_id: str
+    metric_name: str
+    unit: str = ""
+    values: dict[str, Any] = Field(default_factory=dict)
+    source_type: Literal["solver_result", "derived_diagnostic", "demo_estimate"]
+    description: str = ""
+
+
+class ResourceAssistantComparison(BaseModel):
+    scenario_columns: list[dict[str, str]] = Field(default_factory=list)
+    metric_rows: list[ResourceAssistantMetricRow] = Field(default_factory=list)
+    best_scenario_id: str | None = None
+    comparison_notes: list[str] = Field(default_factory=list)
+
+
+class ResourceAssistantRecommendation(BaseModel):
+    recommended_scenario_id: str | None = None
+    recommendation_status: ResourceAssistantRecommendationStatus = "insufficient_results"
+    rule_reason: str = ""
+    evidence: list[str] = Field(default_factory=list)
+    risk_notes: list[str] = Field(default_factory=list)
+    marginal_benefit_notes: list[str] = Field(default_factory=list)
+    ai_explanation: str = ""
+    explanation_source: ResourceAssistantExplanationSource = "local"
+    llm_status: ResourceAssistantLlmConfigStatus = Field(default_factory=ResourceAssistantLlmConfigStatus)
+
+
+class ResourceAssistantInitialRequest(BaseModel):
+    scenario: ScenarioInput
+    generation_mode: ResourceAssistantGenerationMode = "llm_first"
+
+
+class ResourceAssistantInitialResponse(BaseModel):
+    project_profile: ResourceAssistantProjectProfile
+    resource_plans: list[ResourceAssistantPlan]
+    plan_generation: ResourceAssistantGenerationRecord
+    reference_examples: list[ResourceAssistantReferenceExample] = Field(default_factory=list)
+    constraint_hints: list[str] = Field(default_factory=list)
+    llm_generation_context: dict[str, Any] = Field(default_factory=dict)
+    llm_config_status: ResourceAssistantLlmConfigStatus
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+
+
+class ResourceAssistantUpdatePlanRequest(BaseModel):
+    plan_id: str
+    resource_updates: dict[str, int] = Field(default_factory=dict)
+    resource_plan: ResourceAssistantPlan | None = None
+
+
+class ResourceAssistantUpdatePlanResponse(BaseModel):
+    resource_plan: ResourceAssistantPlan
+    invalidated_result_ids: list[str] = Field(default_factory=list)
+    generation_source: ResourceAssistantGenerationSource = "user_adjusted"
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+
+
+class ResourceAssistantBatchSolveRequest(BaseModel):
+    scenario: ScenarioInput
+    resource_plans: list[ResourceAssistantPlan]
+    solve_scope: str = "all_plans"
+
+
+class ResourceAssistantBatchSolveResponse(BaseModel):
+    project_profile: ResourceAssistantProjectProfile
+    resource_plans: list[ResourceAssistantPlan]
+    plan_results: list[ResourceAssistantPlanResult]
+    comparison: ResourceAssistantComparison
+    recommendation: ResourceAssistantRecommendation
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+
+
+class ResourceAssistantSingleSolveRequest(BaseModel):
+    scenario: ScenarioInput
+    resource_plan: ResourceAssistantPlan
+
+
+class ResourceAssistantSingleSolveResponse(BaseModel):
+    resource_plan: ResourceAssistantPlan
+    plan_result: ResourceAssistantPlanResult
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+
+
+class ResourceAssistantResultsRequest(BaseModel):
+    resource_plans: list[ResourceAssistantPlan]
+    plan_results: list[ResourceAssistantPlanResult]
+
+
+class ResourceAssistantRecommendationResponse(BaseModel):
+    comparison: ResourceAssistantComparison
+    recommendation: ResourceAssistantRecommendation
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+
+
+class PlanVersion(BaseModel):
+    plan_version_id: str
+    project_id: str
+    project_name: str
+    plan_type: Literal["master"] = "master"
+    version_no: int = Field(ge=1)
+    version_kind: PlanVersionKind
+    status: PlanVersionStatus = "active"
+    parent_version_id: str | None = None
+    source_scenario_id: str
+    scenario_snapshot: ScenarioInput
+    generated_snapshot: GeneratedScheduleInput
+    schedule_result_snapshot: ScheduleResult
+    resource_plan_snapshot: ResourceAssistantPlan
+    input_fingerprint: str
+    confirmed_by: str
+    confirmed_at: datetime
+    confirmation_reason: str
+
+
+class ProgressEntry(BaseModel):
+    task_id: str
+    status: ProgressTaskStatus = "not_started"
+    actual_start_date: date | None = None
+    actual_finish_date: date | None = None
+    percent_complete: float = Field(default=0, ge=0, le=100)
+    completed_quantity: float | None = Field(default=None, ge=0)
+    remaining_quantity: float | None = Field(default=None, ge=0)
+    actual_productivity: float | None = Field(default=None, gt=0)
+    estimated_remaining_days: int | None = Field(default=None, ge=0)
+    remaining_days: int = Field(default=0, ge=0)
+    remaining_days_source: RemainingDaysSource = "none"
+    expected_resume_date: date | None = None
+    reason: str | None = None
+    notes: str = ""
+
+
+class ProgressSnapshot(BaseModel):
+    progress_snapshot_id: str
+    plan_version_id: str
+    status_date: date
+    revision_no: int = Field(ge=1)
+    is_current: bool = True
+    entries: list[ProgressEntry] = Field(default_factory=list)
+    data_quality_status: ProgressDataQualityStatus = "valid"
+    validation_messages: list[ValidationMessage] = Field(default_factory=list)
+    submitted_by: str
+    submitted_at: datetime
+    correction_reason: str | None = None
+
+
+class ProgressCorrectionRecord(BaseModel):
+    correction_id: str
+    plan_version_id: str
+    status_date: date
+    previous_snapshot_id: str
+    new_snapshot_id: str
+    changes: list[dict[str, Any]] = Field(default_factory=list)
+    correction_reason: str
+    corrected_by: str
+    corrected_at: datetime
+
+
+class ForecastTaskState(BaseModel):
+    task_id: str
+    task_name: str
+    state: Literal["baseline", "actual", "predicted"]
+    baseline_start_date: date | None = None
+    baseline_finish_date: date | None = None
+    actual_start_date: date | None = None
+    actual_finish_date: date | None = None
+    predicted_start_date: date | None = None
+    predicted_finish_date: date | None = None
+    assigned_resource_type: str | None = None
+    assigned_resource_id: str | None = None
+    progress_status: ProgressTaskStatus | None = None
+    execution_state: ForecastTaskExecutionState | None = None
+    remaining_days: int | None = Field(default=None, ge=0)
+    related_diagnostics: list[str] = Field(default_factory=list)
+    variance_days: int | None = None
+
+
+class ForecastExecutionSummary(BaseModel):
+    completed_locked_count: int = Field(default=0, ge=0)
+    cancelled_excluded_count: int = Field(default=0, ge=0)
+    in_progress_remaining_count: int = Field(default=0, ge=0)
+    paused_remaining_count: int = Field(default=0, ge=0)
+    not_started_future_count: int = Field(default=0, ge=0)
+    resource_policy: Literal["baseline_fixed", "bottleneck_expanded"] = "baseline_fixed"
+    sequence_policy: Literal["baseline_order", "critical_priority"] = "baseline_order"
+
+
+class CriticalNodeEvidence(BaseModel):
+    type: CriticalNodeEvidenceType
+    message: str
+    task_ids: list[str] = Field(default_factory=list)
+    resource_types: list[str] = Field(default_factory=list)
+    variance_days: int | None = None
+
+
+class CriticalNodeForecast(BaseModel):
+    node_id: str
+    name: str
+    node_type: CriticalNodeType
+    level: MilestoneLevel | None = None
+    mode: MilestoneMode | None = None
+    target_date: date
+    evaluated_date: date | None = None
+    date_source: CriticalNodeDateSource = "unavailable"
+    variance_days: int | None = None
+    buffer_days: int | None = None
+    status: ForecastRiskStatus = "insufficient_data"
+    related_task_ids: list[str] = Field(default_factory=list)
+    evidence: list[CriticalNodeEvidence] = Field(default_factory=list)
+
+
+class ForecastSchedule(BaseModel):
+    forecast_id: str
+    plan_version_id: str
+    progress_snapshot_id: str
+    status_date: date
+    strategy: ForecastStrategy = "as_is"
+    status: ForecastSolveStatus = "ready"
+    input_fingerprint: str
+    historical_tasks: list[ForecastTaskState] = Field(default_factory=list)
+    predicted_tasks: list[ForecastTaskState] = Field(default_factory=list)
+    schedule_result: ScheduleResult | None = None
+    execution_summary: ForecastExecutionSummary = Field(default_factory=ForecastExecutionSummary)
+    critical_nodes: list[CriticalNodeForecast] = Field(default_factory=list)
+    risk_status: ForecastRiskStatus = "insufficient_data"
+    risk_evidence: list[dict[str, Any]] = Field(default_factory=list)
+    confidence: ForecastConfidence = "low"
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+    created_at: datetime
+
+
+class AdjustmentProposal(BaseModel):
+    proposal_id: str
+    forecast_id: str
+    plan_version_id: str
+    strategy: ForecastStrategy
+    status: ForecastSolveStatus
+    strategy_parameters: dict[str, Any] = Field(default_factory=dict)
+    forecast: ForecastSchedule
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    recommended: bool = False
+    recommendation_reason: str = ""
+    explanation: str = ""
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+    created_at: datetime
+
+
+class PlanChangeRecord(BaseModel):
+    change_id: str
+    source_plan_version_id: str
+    source_forecast_id: str
+    proposal_id: str
+    new_plan_version_id: str
+    adoption_reason: str
+    confirmed_by: str
+    confirmed_at: datetime
+
+
+class PlanControlStore(BaseModel):
+    schema_version: str = "plan-control/v1"
+    plan_versions: list[PlanVersion] = Field(default_factory=list)
+    progress_snapshots: list[ProgressSnapshot] = Field(default_factory=list)
+    correction_records: list[ProgressCorrectionRecord] = Field(default_factory=list)
+    forecasts: list[ForecastSchedule] = Field(default_factory=list)
+    adjustment_proposals: list[AdjustmentProposal] = Field(default_factory=list)
+    plan_change_records: list[PlanChangeRecord] = Field(default_factory=list)
+
+
+class CreateBaselinePlanRequest(BaseModel):
+    scenario: ScenarioInput
+    resource_plan: ResourceAssistantPlan
+    plan_result: ResourceAssistantPlanResult
+    confirmed_by: str = "本地计划工程师"
+    confirmation_reason: str = "确认为执行基准计划"
+
+
+class PlanControlProjectSummary(BaseModel):
+    project_id: str
+    active_plan: PlanVersion | None = None
+    plan_versions: list[PlanVersion] = Field(default_factory=list)
+    current_progress_snapshot: ProgressSnapshot | None = None
+    latest_forecast: ForecastSchedule | None = None
+
+
+class CreateProgressSnapshotRequest(BaseModel):
+    plan_version_id: str
+    status_date: date
+    entries: list[ProgressEntry] = Field(default_factory=list)
+    submitted_by: str = "本地计划工程师"
+    correction_reason: str | None = None
+    expected_revision_no: int | None = Field(default=None, ge=1)
+
+
+class CreateProgressSnapshotResponse(BaseModel):
+    progress_snapshot: ProgressSnapshot
+    stale_forecast_ids: list[str] = Field(default_factory=list)
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+
+
+class CreateForecastRequest(BaseModel):
+    plan_version_id: str
+    progress_snapshot_id: str
+
+
+class CreateAdjustmentRequest(BaseModel):
+    max_resource_increments: dict[str, int] = Field(default_factory=dict)
+
+
+class AdjustmentComparisonResponse(BaseModel):
+    forecast_id: str
+    proposals: list[AdjustmentProposal]
+    recommended_proposal_id: str | None = None
+
+
+class AdoptAdjustmentRequest(BaseModel):
+    confirmed_by: str = "本地计划工程师"
+    adoption_reason: str
+    source_plan_fingerprint: str
+
+
+class AdoptAdjustmentResponse(BaseModel):
+    new_plan_version: PlanVersion
+    previous_plan_version: PlanVersion
+    change_record: PlanChangeRecord
 
 
 class ImportBridgeParamsResponse(BaseModel):

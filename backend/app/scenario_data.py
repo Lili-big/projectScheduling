@@ -62,6 +62,7 @@ def default_scenario() -> ScenarioInput:
                     component_type="cap",
                     quantity=1,
                     quantity_label="1个",
+                    structure_parameter_label="承台",
                 )
             )
         components.append(
@@ -70,7 +71,8 @@ def default_scenario() -> ScenarioInput:
                 name=f"{abutment.name}-桥台",
                 component_type="abutment_body",
                 quantity=1,
-                quantity_label=f"{abutment.body_height_m:g}m",
+                quantity_label="1个",
+                structure_parameter_label=f"桥台台身，高度{abutment.body_height_m:g}m",
                 properties={"height_m": abutment.body_height_m},
             )
         )
@@ -103,6 +105,7 @@ def default_scenario() -> ScenarioInput:
                     component_type="cap",
                     quantity=1,
                     quantity_label="1个",
+                    structure_parameter_label="承台",
                 )
             )
         components.append(
@@ -112,6 +115,7 @@ def default_scenario() -> ScenarioInput:
                 component_type="pier_body",
                 quantity=pier.pier_height_m,
                 quantity_label=f"{pier.pier_height_m:g}m",
+                structure_parameter_label="墩柱",
                 properties={"height_m": pier.pier_height_m},
             )
         )
@@ -123,6 +127,7 @@ def default_scenario() -> ScenarioInput:
                     component_type="cap_beam",
                     quantity=1,
                     quantity_label="1个",
+                    structure_parameter_label="盖梁",
                 )
             )
         structures.append(
@@ -480,7 +485,8 @@ def _pile_components(
             name=f"{structure_name}-{pile_no}#桩基",
             component_type="pile",
             quantity=pile_length_m,
-            quantity_label=_pile_label(pile_diameter_m, pile_length_m),
+            quantity_label=f"{pile_length_m:g}m",
+            structure_parameter_label=f"桩基础，桩径{pile_diameter_m:g}m",
             method_id=method_id,
             properties={"pile_no": pile_no, "diameter_m": pile_diameter_m, "length_m": pile_length_m},
         )

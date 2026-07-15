@@ -28,6 +28,19 @@ from .scenario_data import apply_resource_max_quantity_defaults, sync_bridge_com
 
 ONTOLOGY_PATH = Path(__file__).resolve().parent / "ontology" / "bridge_structure_ontology.v1.json"
 SUPPORTED_SUFFIXES = {".xlsx", ".xlsm"}
+DEFAULT_LOCAL_BRIDGE_WORKBOOK_NAME = "渠溪河特大桥结构设计表.xlsx"
+
+
+def default_local_bridge_workbook(project_root: Path) -> Path | None:
+    preferred = project_root / DEFAULT_LOCAL_BRIDGE_WORKBOOK_NAME
+    if preferred.is_file():
+        return preferred
+    workbooks = sorted(
+        path
+        for path in project_root.glob("*.xlsx")
+        if not path.name.startswith("~$")
+    )
+    return workbooks[0] if workbooks else None
 DEFAULT_HEADER_DEPTH = 3
 
 
@@ -388,6 +401,11 @@ def _upper_structures_from_span_groups(
                     span_length_m=float(length),
                     beam_count_per_span=group.get("beamCountPerSpan"),
                     span_group_expression=str(group.get("expression") or ""),
+                    structure_parameter_label="，".join(
+                        part
+                        for part in [structure_type, support_range, str(group.get("expression") or "")]
+                        if part
+                    ),
                     properties={
                         "structure_code": group.get("structureCode"),
                         "group_index": group.get("groupIndex"),
@@ -846,7 +864,8 @@ def _structure_from_support(support: dict[str, Any], bridge_id: str, side: str, 
         components.get("spreadFoundation", {}),
         support,
         quantity=_count_quantity(components.get("spreadFoundation", {})),
-        quantity_label=_dimensions_label(components.get("spreadFoundation", {})),
+        quantity_label=_count_label(components.get("spreadFoundation", {})),
+        structure_parameter_label=_dimensions_parameter_label(components.get("spreadFoundation", {}), "扩大基础"),
     )
     _append_component_if_present(
         structure.components,
@@ -858,7 +877,8 @@ def _structure_from_support(support: dict[str, Any], bridge_id: str, side: str, 
         components.get("cap", {}),
         support,
         quantity=_count_quantity(components.get("cap", {})),
-        quantity_label=_dimensions_label(components.get("cap", {})),
+        quantity_label=_count_label(components.get("cap", {})),
+        structure_parameter_label=_dimensions_parameter_label(components.get("cap", {}), "承台"),
     )
     _append_component_if_present(
         structure.components,
@@ -870,13 +890,14 @@ def _structure_from_support(support: dict[str, Any], bridge_id: str, side: str, 
         components.get("groundTieBeam", {}),
         support,
         quantity=_count_quantity(components.get("groundTieBeam", {})),
-        quantity_label=_dimensions_label(components.get("groundTieBeam", {})),
+        quantity_label=_count_label(components.get("groundTieBeam", {})),
+        structure_parameter_label=_dimensions_parameter_label(components.get("groundTieBeam", {}), "地系梁"),
     )
     pier_column = components.get("pierColumn", {})
     if pier_column.get("present"):
         height = pier_column.get("heightM")
         count = pier_column.get("count") or 1
-        quantity = (height or 0) * count if height else count
+        quantity = height or 0
         _append_component_if_present(
             structure.components,
             structure_id,
@@ -887,7 +908,8 @@ def _structure_from_support(support: dict[str, Any], bridge_id: str, side: str, 
             pier_column,
             support,
             quantity=quantity,
-            quantity_label=f"{count}根，高度{_format_number(height)}m" if height else f"{count}根",
+            quantity_label=f"{_format_number(height)}m" if height else "",
+            structure_parameter_label=_pier_parameter_label(pier_column),
         )
     _append_component_if_present(
         structure.components,
@@ -899,7 +921,8 @@ def _structure_from_support(support: dict[str, Any], bridge_id: str, side: str, 
         components.get("middleTieBeam", {}),
         support,
         quantity=_count_quantity(components.get("middleTieBeam", {})),
-        quantity_label=_dimensions_label(components.get("middleTieBeam", {})),
+        quantity_label=_count_label(components.get("middleTieBeam", {})),
+        structure_parameter_label=_dimensions_parameter_label(components.get("middleTieBeam", {}), "中系梁"),
     )
     _append_component_if_present(
         structure.components,
@@ -911,7 +934,8 @@ def _structure_from_support(support: dict[str, Any], bridge_id: str, side: str, 
         components.get("capBeam", {}),
         support,
         quantity=_count_quantity(components.get("capBeam", {})),
-        quantity_label=_dimensions_label(components.get("capBeam", {})),
+        quantity_label=_count_label(components.get("capBeam", {})),
+        structure_parameter_label=_dimensions_parameter_label(components.get("capBeam", {}), "盖梁"),
     )
     _append_component_if_present(
         structure.components,
@@ -923,7 +947,8 @@ def _structure_from_support(support: dict[str, Any], bridge_id: str, side: str, 
         components.get("abutment", {}),
         support,
         quantity=1,
-        quantity_label=str(components.get("abutment", {}).get("type") or "1个"),
+        quantity_label="1个",
+        structure_parameter_label=str(components.get("abutment", {}).get("type") or "桥台"),
     )
     return structure
 
@@ -945,7 +970,8 @@ def _pile_components_for_schedule(
                 name=f"{structure_name}-{pile_no}#桩基",
                 component_type="pile",
                 quantity=float(pile["lengthM"]),
-                quantity_label=_pile_label(pile.get("diameterM"), pile.get("lengthM")),
+                quantity_label=f"{_format_number(pile['lengthM'])}m",
+                structure_parameter_label=_pile_parameter_label(pile),
                 method_id="rotary_drill",
                 properties=_component_properties("pileFoundation", pile, support, {"pile_no": pile_no}),
             )
@@ -965,6 +991,7 @@ def _append_component_if_present(
     *,
     quantity: float,
     quantity_label: str,
+    structure_parameter_label: str | None = None,
 ) -> None:
     if not canonical_component.get("present") or quantity <= 0:
         return
@@ -975,6 +1002,7 @@ def _append_component_if_present(
             component_type=component_type,
             quantity=quantity,
             quantity_label=quantity_label,
+            structure_parameter_label=structure_parameter_label,
             properties=_component_properties(suffix.lower(), canonical_component, support),
         )
     )
@@ -1028,12 +1056,37 @@ def _count_quantity(component: dict[str, Any]) -> float:
     return float(component.get("count") or 1)
 
 
-def _dimensions_label(component: dict[str, Any]) -> str:
+def _count_label(component: dict[str, Any]) -> str:
+    return f"{_format_number(component.get('count') or 1)}个"
+
+
+def _dimensions_parameter_label(component: dict[str, Any], fallback: str) -> str:
     dimensions = component.get("dimensionsM")
-    count = component.get("count") or 1
     if dimensions:
-        return f"{_format_dimensions(dimensions)}，{count}个"
-    return f"{count}个"
+        return _format_dimensions(dimensions)
+    return str(component.get("type") or fallback)
+
+
+def _pile_parameter_label(component: dict[str, Any]) -> str:
+    parts = [str(component.get("type") or "桩基础")]
+    diameter = component.get("diameterM")
+    if diameter is not None:
+        parts.append(f"桩径{_format_number(diameter)}m")
+    return "，".join(parts)
+
+
+def _pier_parameter_label(component: dict[str, Any]) -> str:
+    parts = [str(component.get("type") or "墩柱")]
+    dimensions = component.get("dimensionsM")
+    if isinstance(dimensions, list) and dimensions:
+        if len(dimensions) == 1:
+            parts.append(f"柱径{_format_number(dimensions[0])}m")
+        else:
+            parts.append(f"截面{_format_dimensions(dimensions)}")
+    count = component.get("count")
+    if count:
+        parts.append(f"{_format_number(count)}根")
+    return "，".join(parts)
 
 
 def _default_deck(side: str) -> dict[str, Any]:

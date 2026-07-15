@@ -1,0 +1,62 @@
+/* @theme business */
+
+@import 'default';
+
+:root {
+  --bg: #f7f9fc;
+  --ink: #18202f;
+  --muted: #5a6475;
+  --line: #d9e0ea;
+  --primary: #1f5eff;
+  --accent: #16a085;
+}
+
+section {
+  width: 1280px;
+  height: 720px;
+  padding: 54px 68px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Microsoft YaHei", "PingFang SC", "Arial", sans-serif;
+}
+
+h1 {
+  color: var(--ink);
+  font-size: 44px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+h2 {
+  color: var(--ink);
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+p,
+li {
+  color: var(--muted);
+  font-size: 23px;
+  line-height: 1.55;
+}
+
+strong {
+  color: var(--primary);
+}
+
+section.cover {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 28px;
+}
+
+section.cover h1 {
+  font-size: 56px;
+}
+
+section::after {
+  color: #7d8798;
+  font-size: 14px;
+}
