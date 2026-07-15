@@ -1,5 +1,6 @@
 import {
   Bot,
+  ChartSpline,
   ChartNoAxesCombined,
   CheckCircle2,
   ChevronDown,
@@ -51,6 +52,7 @@ const navigationGroups: NavigationGroup[] = [
     label: "计划执行",
     items: [
       { key: "planControl", label: "进度反馈与预测", icon: <ChartNoAxesCombined size={15} /> },
+      { key: "progressVisualization", label: "进度可视化", icon: <ChartSpline size={15} /> },
     ],
   },
 ];

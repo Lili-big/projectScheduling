@@ -33,7 +33,8 @@ export type TabKey =
   | "tasks"
   | "results"
   | "resourceAssistant"
-  | "planControl";
+  | "planControl"
+  | "progressVisualization";
 export type GanttMode = "by_time" | "by_structure" | "by_process";
 export type TaskViewMode = "by_structure" | "by_process";
 export type BusyState =
@@ -1329,6 +1330,13 @@ export type ProgressTaskStatus = "not_started" | "in_progress" | "completed" | "
 export type ForecastStrategy = "as_is" | "add_bottleneck_resources" | "prioritize_critical_tasks";
 export type ForecastSolveStatus = "ready" | "solving" | "feasible" | "infeasible" | "failed" | "stale";
 export type ForecastRiskStatus = "on_track" | "at_risk" | "late" | "insufficient_data";
+export type ForecastTaskExecutionState =
+  | "completed_locked"
+  | "cancelled_excluded"
+  | "in_progress_remaining"
+  | "paused_remaining"
+  | "not_started_future";
+export type CriticalNodeDateSource = "actual" | "predicted" | "combined" | "unavailable";
 
 export type PlanVersion = {
   plan_version_id: string;
@@ -1392,7 +1400,46 @@ export type ForecastTaskState = {
   predicted_start_date?: string | null;
   predicted_finish_date?: string | null;
   assigned_resource_type?: string | null;
+  assigned_resource_id?: string | null;
+  progress_status?: ProgressTaskStatus | null;
+  execution_state?: ForecastTaskExecutionState | null;
+  remaining_days?: number | null;
+  related_diagnostics: string[];
   variance_days?: number | null;
+};
+
+export type ForecastExecutionSummary = {
+  completed_locked_count: number;
+  cancelled_excluded_count: number;
+  in_progress_remaining_count: number;
+  paused_remaining_count: number;
+  not_started_future_count: number;
+  resource_policy: "baseline_fixed" | "bottleneck_expanded";
+  sequence_policy: "baseline_order" | "critical_priority";
+};
+
+export type CriticalNodeEvidence = {
+  type: "driving_task" | "bottleneck_resource" | "precedence_wait" | "data_quality" | "solver";
+  message: string;
+  task_ids: string[];
+  resource_types: string[];
+  variance_days?: number | null;
+};
+
+export type CriticalNodeForecast = {
+  node_id: string;
+  name: string;
+  node_type: "project_finish" | "milestone";
+  level?: MilestoneConstraint["level"] | null;
+  mode?: MilestoneConstraint["mode"] | null;
+  target_date: string;
+  evaluated_date?: string | null;
+  date_source: CriticalNodeDateSource;
+  variance_days?: number | null;
+  buffer_days?: number | null;
+  status: ForecastRiskStatus;
+  related_task_ids: string[];
+  evidence: CriticalNodeEvidence[];
 };
 
 export type ForecastSchedule = {
@@ -1406,6 +1453,8 @@ export type ForecastSchedule = {
   historical_tasks: ForecastTaskState[];
   predicted_tasks: ForecastTaskState[];
   schedule_result?: ScheduleResult | null;
+  execution_summary: ForecastExecutionSummary;
+  critical_nodes: CriticalNodeForecast[];
   risk_status: ForecastRiskStatus;
   risk_evidence: Array<Record<string, unknown>>;
   confidence: "high" | "medium" | "low";

@@ -158,6 +158,46 @@ code {
   min-height: 88px;
 }
 
+.progress-workflow-steps {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.progress-workflow-step {
+  align-items: flex-start;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: flex;
+  gap: 10px;
+  min-height: 112px;
+  padding: 14px;
+}
+
+.progress-workflow-step.ready { border-color: #67e8f9; background: #ecfeff; }
+.progress-workflow-step.complete { border-color: #86efac; background: #f0fdf4; }
+.progress-workflow-step.running { border-color: #93c5fd; background: #eff6ff; }
+.progress-workflow-step.failed { border-color: #fca5a5; background: #fef2f2; }
+.progress-workflow-step.stale { border-color: #fdba74; background: #fff7ed; }
+.progress-workflow-step.blocked { opacity: .72; }
+
+.progress-workflow-step-index {
+  align-items: center;
+  background: #0f766e;
+  border-radius: 999px;
+  color: #fff;
+  display: flex;
+  flex: 0 0 28px;
+  font-weight: 700;
+  height: 28px;
+  justify-content: center;
+}
+
+.progress-workflow-step > div:last-child { display: grid; gap: 4px; }
+.progress-workflow-step span { color: #0f766e; font-size: 12px; font-weight: 600; }
+.progress-workflow-step p { color: var(--muted); font-size: 12px; line-height: 1.45; margin: 2px 0 0; }
+
 .plan-version-strip {
   display: grid;
   gap: 12px;
@@ -204,7 +244,7 @@ code {
 
 .progress-entry-table {
   border-collapse: collapse;
-  min-width: 1580px;
+  min-width: 1740px;
   width: 100%;
 }
 
@@ -225,7 +265,7 @@ code {
 
 .progress-entry-table td:first-child {
   display: grid;
-  min-width: 210px;
+  min-width: 250px;
 }
 
 .progress-entry-table input,
@@ -269,6 +309,31 @@ code {
   color: #64748b;
 }
 
+.planned-task-dates {
+  line-height: 1.35;
+  margin-top: 2px;
+}
+
+.planned-task-dates.valid {
+  color: #0369a1;
+}
+
+.planned-task-dates.unavailable {
+  color: #b45309;
+}
+
+.actual-date-field {
+  display: grid;
+  gap: 4px;
+  min-width: 145px;
+}
+
+.actual-date-suggestion {
+  color: #047857 !important;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
 .quantity-status {
   line-height: 1.35;
   margin-top: 2px;
@@ -287,6 +352,16 @@ code {
 .quantity-conflict-row {
   background: #fffaf0;
 }
+
+.progress-entry-issue {
+  display: block;
+  line-height: 1.35;
+  margin-top: 3px;
+  max-width: 240px;
+}
+
+.progress-entry-issue.error { color: #b91c1c !important; }
+.progress-entry-issue.warning { color: #b45309 !important; }
 
 .progress-pagination {
   align-items: center;
@@ -332,6 +407,48 @@ code {
   color: var(--muted);
   font-size: 13px;
 }
+
+.forecast-execution-summary {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin-bottom: 12px;
+}
+
+.forecast-execution-summary > div {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+}
+
+.forecast-execution-summary span { color: var(--muted); font-size: 12px; }
+
+.critical-node-section { margin: 14px 0; }
+.critical-node-heading { align-items: end; display: flex; justify-content: space-between; margin-bottom: 8px; }
+.critical-node-heading > div { display: grid; gap: 3px; }
+.critical-node-heading span { color: var(--muted); font-size: 12px; }
+.critical-node-table-wrap { border: 1px solid var(--border); border-radius: 10px; max-height: 360px; overflow: auto; }
+.critical-node-table { border-collapse: collapse; min-width: 1180px; width: 100%; }
+.critical-node-table th,
+.critical-node-table td { border-bottom: 1px solid var(--border); padding: 9px; text-align: left; vertical-align: top; }
+.critical-node-table th { background: var(--surface, #fff); position: sticky; top: 0; z-index: 1; }
+.critical-node-table td:first-child { display: grid; gap: 2px; min-width: 180px; }
+.critical-node-table td:first-child small { color: var(--muted); }
+.critical-node-table tr.late { background: #fff7f7; }
+.critical-node-table tr.at_risk { background: #fffbeb; }
+.critical-node-table tr.on_track { background: #f8fff9; }
+
+.critical-node-status { border-radius: 999px; display: inline-flex; font-size: 12px; font-weight: 600; padding: 3px 8px; white-space: nowrap; }
+.critical-node-status.late { background: #fee2e2; color: #b91c1c; }
+.critical-node-status.at_risk { background: #fef3c7; color: #92400e; }
+.critical-node-status.on_track { background: #dcfce7; color: #166534; }
+.critical-node-status.insufficient_data { background: #e2e8f0; color: #475569; }
+.critical-node-evidence { display: grid; gap: 4px; max-width: 320px; }
+.critical-node-evidence span { color: #475569; font-size: 12px; line-height: 1.4; }
+.link-button { background: transparent; color: #0369a1; padding: 4px 6px; text-decoration: underline; }
 
 .risk-evidence-list {
   display: grid;
@@ -469,9 +586,12 @@ code {
 
 @media (max-width: 1100px) {
   .plan-version-strip,
-  .adjustment-grid {
+  .adjustment-grid,
+  .progress-workflow-steps {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .forecast-execution-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
   .plan-control-toolbar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -491,6 +611,8 @@ code {
 @media (max-width: 700px) {
   .plan-version-strip,
   .adjustment-grid,
+  .progress-workflow-steps,
+  .forecast-execution-summary,
   .plan-control-toolbar {
     grid-template-columns: 1fr;
   }

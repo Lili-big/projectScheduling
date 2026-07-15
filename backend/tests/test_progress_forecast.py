@@ -50,6 +50,52 @@ def _progress_status_date(baseline) -> date:
     return min(date.today(), baseline.scenario_snapshot.project.start_date + timedelta(days=30))
 
 
+@pytest.mark.parametrize(
+    ("target", "evaluated", "expected_status", "expected_variance", "expected_buffer"),
+    [
+        (date(2026, 7, 20), date(2026, 7, 16), "on_track", -4, 4),
+        (date(2026, 7, 20), date(2026, 7, 17), "at_risk", -3, 3),
+        (date(2026, 7, 20), date(2026, 7, 20), "at_risk", 0, 0),
+        (date(2026, 7, 20), date(2026, 7, 21), "late", 1, -1),
+        (date(2026, 7, 20), None, "insufficient_data", None, None),
+    ],
+)
+def test_critical_node_status_uses_three_day_buffer_boundary(
+    target: date,
+    evaluated: date | None,
+    expected_status: str,
+    expected_variance: int | None,
+    expected_buffer: int | None,
+) -> None:
+    assert forecast_module._critical_node_status(target, evaluated) == (
+        expected_status,
+        expected_variance,
+        expected_buffer,
+    )
+
+
+@pytest.mark.parametrize(
+    ("statuses", "expected"),
+    [
+        (["completed", "completed"], "actual"),
+        (["completed", "not_started"], "combined"),
+        (["in_progress", "not_started"], "predicted"),
+        (["completed", "cancelled"], "unavailable"),
+    ],
+)
+def test_critical_node_date_source_covers_actual_predicted_combined_and_unavailable(
+    statuses: list[str],
+    expected: str,
+) -> None:
+    task_ids = [f"task-{index}" for index in range(len(statuses))]
+    entries = {
+        task_id: ProgressEntry.model_construct(task_id=task_id, status=status)
+        for task_id, status in zip(task_ids, statuses)
+    }
+
+    assert forecast_module._critical_node_date_source(task_ids, entries) == expected
+
+
 def test_progress_snapshot_calculates_remaining_days_and_keeps_revision_audit(tmp_path: Path) -> None:
     repository, baseline = _repository_and_baseline(tmp_path)
     task = baseline.generated_snapshot.schedule_input.tasks[0]
@@ -402,7 +448,18 @@ def test_forecast_freezes_completed_task_and_adoption_creates_new_version(tmp_pa
     )
     actual = next(item for item in forecast.historical_tasks if item.task_id == task.id)
     assert actual.actual_finish_date == actual_finish
+    assert actual.execution_state == "completed_locked"
+    assert actual.progress_status == "completed"
+    assert forecast.execution_summary.completed_locked_count == 1
+    assert forecast.execution_summary.not_started_future_count == len(baseline.generated_snapshot.schedule_input.tasks) - 1
     assert all(item.predicted_start_date >= status_date for item in forecast.predicted_tasks)
+    project_node = next(item for item in forecast.critical_nodes if item.node_id == "project-finish")
+    assert project_node.target_date == baseline.schedule_result_snapshot.plan_finish_date
+    assert project_node.date_source == "combined"
+    assert len(forecast.critical_nodes) == len(baseline.generated_snapshot.schedule_input.milestones) + 1
+    assert project_node.evidence
+    assert project_node.evidence[0].type == "driving_task"
+    assert project_node.evidence[0].task_ids
 
     comparison = create_adjustment_proposals(forecast.forecast_id, {}, repository)
     assert {item.strategy for item in comparison.proposals} == {
@@ -433,6 +490,164 @@ def test_forecast_freezes_completed_task_and_adoption_creates_new_version(tmp_pa
             ),
             repository,
         )
+
+
+def test_forecast_exposes_five_execution_states_and_preserves_resource_locking(tmp_path: Path) -> None:
+    repository, baseline = _repository_and_baseline(tmp_path)
+    tasks = baseline.generated_snapshot.schedule_input.tasks
+    assert len(tasks) >= 5
+    completed_task, cancelled_task, active_task, paused_task = tasks[:4]
+    status_date = _progress_status_date(baseline)
+    baseline_by_id = {item.id: item for item in baseline.schedule_result_snapshot.tasks}
+    snapshot = create_progress_snapshot(
+        CreateProgressSnapshotRequest(
+            plan_version_id=baseline.plan_version_id,
+            status_date=status_date,
+            submitted_by="填报人",
+            entries=[
+                ProgressEntry(
+                    task_id=completed_task.id,
+                    status="completed",
+                    actual_start_date=status_date - timedelta(days=3),
+                    actual_finish_date=status_date - timedelta(days=1),
+                    percent_complete=100,
+                ),
+                ProgressEntry(
+                    task_id=cancelled_task.id,
+                    status="cancelled",
+                    percent_complete=0,
+                    reason="设计取消",
+                ),
+                ProgressEntry(
+                    task_id=active_task.id,
+                    status="in_progress",
+                    actual_start_date=status_date - timedelta(days=2),
+                    percent_complete=50,
+                    estimated_remaining_days=2,
+                ),
+                ProgressEntry(
+                    task_id=paused_task.id,
+                    status="paused",
+                    actual_start_date=status_date - timedelta(days=2),
+                    percent_complete=25,
+                    estimated_remaining_days=3,
+                    expected_resume_date=status_date + timedelta(days=1),
+                    reason="等待复工",
+                ),
+            ],
+        ),
+        repository,
+    ).progress_snapshot
+
+    forecast = create_forecast(
+        CreateForecastRequest(
+            plan_version_id=baseline.plan_version_id,
+            progress_snapshot_id=snapshot.progress_snapshot_id,
+        ),
+        repository,
+    )
+
+    summary = forecast.execution_summary
+    assert summary.completed_locked_count == 1
+    assert summary.cancelled_excluded_count == 1
+    assert summary.in_progress_remaining_count == 1
+    assert summary.paused_remaining_count == 1
+    assert summary.not_started_future_count == len(tasks) - 4
+    assert summary.resource_policy == "baseline_fixed"
+    assert summary.sequence_policy == "baseline_order"
+    by_id = {item.task_id: item for item in [*forecast.historical_tasks, *forecast.predicted_tasks]}
+    assert by_id[completed_task.id].execution_state == "completed_locked"
+    assert by_id[cancelled_task.id].execution_state == "cancelled_excluded"
+    assert by_id[active_task.id].execution_state == "in_progress_remaining"
+    assert by_id[active_task.id].assigned_resource_id == baseline_by_id[active_task.id].assigned_resource_id
+    assert by_id[active_task.id].predicted_start_date == status_date
+    assert by_id[paused_task.id].execution_state == "paused_remaining"
+    assert by_id[paused_task.id].assigned_resource_id == baseline_by_id[paused_task.id].assigned_resource_id
+    assert by_id[paused_task.id].predicted_start_date >= status_date + timedelta(days=1)
+    assert all(
+        item.predicted_start_date is None or item.predicted_start_date >= status_date
+        for item in forecast.predicted_tasks
+        if item.execution_state == "not_started_future"
+    )
+    assert any(cancelled_task.id in item.message for item in forecast.diagnostics)
+
+
+def test_as_is_forecast_invokes_schedule_solver_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repository, baseline = _repository_and_baseline(tmp_path)
+    snapshot = create_progress_snapshot(
+        CreateProgressSnapshotRequest(
+            plan_version_id=baseline.plan_version_id,
+            status_date=_progress_status_date(baseline),
+            submitted_by="填报人",
+            entries=[],
+        ),
+        repository,
+    ).progress_snapshot
+    original_solve = forecast_module.solve_schedule
+    call_count = 0
+
+    def counted_solve(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return original_solve(*args, **kwargs)
+
+    monkeypatch.setattr(forecast_module, "solve_schedule", counted_solve)
+    create_forecast(
+        CreateForecastRequest(
+            plan_version_id=baseline.plan_version_id,
+            progress_snapshot_id=snapshot.progress_snapshot_id,
+        ),
+        repository,
+    )
+
+    assert call_count == 1
+
+
+def test_paused_task_without_resume_date_is_saved_with_warning_and_blocks_deterministic_forecast(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, baseline = _repository_and_baseline(tmp_path)
+    task = baseline.generated_snapshot.schedule_input.tasks[0]
+    status_date = _progress_status_date(baseline)
+    snapshot = create_progress_snapshot(
+        CreateProgressSnapshotRequest(
+            plan_version_id=baseline.plan_version_id,
+            status_date=status_date,
+            submitted_by="填报人",
+            entries=[
+                ProgressEntry(
+                    task_id=task.id,
+                    status="paused",
+                    actual_start_date=max(baseline.scenario_snapshot.project.start_date, status_date - timedelta(days=2)),
+                    percent_complete=40,
+                    estimated_remaining_days=3,
+                    reason="等待场地恢复",
+                )
+            ],
+        ),
+        repository,
+    ).progress_snapshot
+
+    assert snapshot.data_quality_status == "warning"
+    assert any(item.subject_id == task.id and "恢复日期" in item.message for item in snapshot.validation_messages)
+
+    def unexpected_solve(*args, **kwargs):
+        raise AssertionError("缺少暂停恢复日期时不应执行确定性 CP-SAT 求解")
+
+    monkeypatch.setattr(forecast_module, "solve_schedule", unexpected_solve)
+    forecast = create_forecast(
+        CreateForecastRequest(plan_version_id=baseline.plan_version_id, progress_snapshot_id=snapshot.progress_snapshot_id),
+        repository,
+    )
+
+    assert forecast.status == "failed"
+    assert forecast.risk_status == "insufficient_data"
+    paused = next(item for item in forecast.predicted_tasks if item.task_id == task.id)
+    assert paused.execution_state == "paused_remaining"
+    assert paused.predicted_start_date is None
+    assert any("恢复日期" in message for message in paused.related_diagnostics)
+    assert all(item.status == "insufficient_data" for item in forecast.critical_nodes)
 
 
 def test_progress_calculates_percent_and_warns_for_actual_logic_conflict(tmp_path: Path) -> None:

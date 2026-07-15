@@ -87,6 +87,22 @@ ForecastStrategy = Literal["as_is", "add_bottleneck_resources", "prioritize_crit
 ForecastSolveStatus = Literal["ready", "solving", "feasible", "infeasible", "failed", "stale"]
 ForecastRiskStatus = Literal["on_track", "at_risk", "late", "insufficient_data"]
 ForecastConfidence = Literal["high", "medium", "low"]
+ForecastTaskExecutionState = Literal[
+    "completed_locked",
+    "cancelled_excluded",
+    "in_progress_remaining",
+    "paused_remaining",
+    "not_started_future",
+]
+CriticalNodeType = Literal["project_finish", "milestone"]
+CriticalNodeDateSource = Literal["actual", "predicted", "combined", "unavailable"]
+CriticalNodeEvidenceType = Literal[
+    "driving_task",
+    "bottleneck_resource",
+    "precedence_wait",
+    "data_quality",
+    "solver",
+]
 ResourceAssistantGenerationSource = Literal["llm", "local_fallback", "user_adjusted"]
 ResourceAssistantGenerationMode = Literal["llm_first", "local_fallback_only"]
 ResourceAssistantPlanStatus = Literal[
@@ -1339,7 +1355,46 @@ class ForecastTaskState(BaseModel):
     predicted_start_date: date | None = None
     predicted_finish_date: date | None = None
     assigned_resource_type: str | None = None
+    assigned_resource_id: str | None = None
+    progress_status: ProgressTaskStatus | None = None
+    execution_state: ForecastTaskExecutionState | None = None
+    remaining_days: int | None = Field(default=None, ge=0)
+    related_diagnostics: list[str] = Field(default_factory=list)
     variance_days: int | None = None
+
+
+class ForecastExecutionSummary(BaseModel):
+    completed_locked_count: int = Field(default=0, ge=0)
+    cancelled_excluded_count: int = Field(default=0, ge=0)
+    in_progress_remaining_count: int = Field(default=0, ge=0)
+    paused_remaining_count: int = Field(default=0, ge=0)
+    not_started_future_count: int = Field(default=0, ge=0)
+    resource_policy: Literal["baseline_fixed", "bottleneck_expanded"] = "baseline_fixed"
+    sequence_policy: Literal["baseline_order", "critical_priority"] = "baseline_order"
+
+
+class CriticalNodeEvidence(BaseModel):
+    type: CriticalNodeEvidenceType
+    message: str
+    task_ids: list[str] = Field(default_factory=list)
+    resource_types: list[str] = Field(default_factory=list)
+    variance_days: int | None = None
+
+
+class CriticalNodeForecast(BaseModel):
+    node_id: str
+    name: str
+    node_type: CriticalNodeType
+    level: MilestoneLevel | None = None
+    mode: MilestoneMode | None = None
+    target_date: date
+    evaluated_date: date | None = None
+    date_source: CriticalNodeDateSource = "unavailable"
+    variance_days: int | None = None
+    buffer_days: int | None = None
+    status: ForecastRiskStatus = "insufficient_data"
+    related_task_ids: list[str] = Field(default_factory=list)
+    evidence: list[CriticalNodeEvidence] = Field(default_factory=list)
 
 
 class ForecastSchedule(BaseModel):
@@ -1353,6 +1408,8 @@ class ForecastSchedule(BaseModel):
     historical_tasks: list[ForecastTaskState] = Field(default_factory=list)
     predicted_tasks: list[ForecastTaskState] = Field(default_factory=list)
     schedule_result: ScheduleResult | None = None
+    execution_summary: ForecastExecutionSummary = Field(default_factory=ForecastExecutionSummary)
+    critical_nodes: list[CriticalNodeForecast] = Field(default_factory=list)
     risk_status: ForecastRiskStatus = "insufficient_data"
     risk_evidence: list[dict[str, Any]] = Field(default_factory=list)
     confidence: ForecastConfidence = "low"

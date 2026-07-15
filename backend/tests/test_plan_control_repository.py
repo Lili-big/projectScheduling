@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -50,6 +50,38 @@ def test_repository_rejects_corrupted_store(tmp_path: Path) -> None:
 
     with pytest.raises(PlanControlRepositoryError, match="读取失败"):
         PlanControlRepository(path).load()
+
+
+def test_repository_reads_legacy_forecast_without_closed_loop_fields(tmp_path: Path) -> None:
+    repository = PlanControlRepository(tmp_path / "plan-control-legacy-forecast.json")
+    baseline = create_baseline_plan(solved_baseline_request(), repository)
+    payload = json.loads(repository.path.read_text(encoding="utf-8"))
+    payload["forecasts"].append(
+        {
+            "forecast_id": "legacy-forecast",
+            "plan_version_id": baseline.plan_version_id,
+            "progress_snapshot_id": "legacy-progress",
+            "status_date": str(baseline.schedule_result_snapshot.plan_start_date),
+            "strategy": "as_is",
+            "status": "feasible",
+            "input_fingerprint": "legacy-input",
+            "historical_tasks": [],
+            "predicted_tasks": [],
+            "schedule_result": None,
+            "risk_status": "on_track",
+            "risk_evidence": [],
+            "confidence": "high",
+            "metrics": {},
+            "diagnostics": [],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    repository.path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    restored = PlanControlRepository(repository.path).load().forecasts[0]
+
+    assert restored.execution_summary.completed_locked_count == 0
+    assert restored.critical_nodes == []
 
 
 def test_baseline_rejects_mismatched_plan_result_and_increments_versions(tmp_path: Path) -> None:

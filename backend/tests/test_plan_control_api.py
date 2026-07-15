@@ -158,6 +158,43 @@ def test_plan_control_progress_api_normalizes_quantities_and_creates_correction_
     assert summary.current_progress_snapshot.progress_snapshot_id == second.progress_snapshot.progress_snapshot_id
 
 
+def test_plan_control_forecast_api_returns_execution_summary_and_critical_nodes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(default_plan_control_repository, "path", tmp_path / "plan-control-forecast.json")
+    request = solved_baseline_request()
+    baseline = create_baseline_plan_endpoint(request)
+    snapshot = create_progress_snapshot_endpoint(
+        CreateProgressSnapshotRequest(
+            plan_version_id=baseline.plan_version_id,
+            status_date=_progress_status_date(baseline),
+            submitted_by="填报人",
+            entries=[],
+        )
+    ).progress_snapshot
+
+    forecast = create_forecast_endpoint(
+        CreateForecastRequest(
+            plan_version_id=baseline.plan_version_id,
+            progress_snapshot_id=snapshot.progress_snapshot_id,
+        )
+    )
+
+    task_count = len(baseline.generated_snapshot.schedule_input.tasks)
+    assert forecast.execution_summary.not_started_future_count == task_count
+    assert forecast.execution_summary.resource_policy == "baseline_fixed"
+    assert len(forecast.critical_nodes) == len(baseline.generated_snapshot.schedule_input.milestones) + 1
+    project_node = next(item for item in forecast.critical_nodes if item.node_id == "project-finish")
+    assert project_node.target_date == baseline.schedule_result_snapshot.plan_finish_date
+    assert project_node.date_source == "predicted"
+    assert project_node.evidence
+    summary = get_plan_control_project_endpoint(request.scenario.scenario_id)
+    assert summary.latest_forecast is not None
+    assert summary.latest_forecast.forecast_id == forecast.forecast_id
+    assert summary.latest_forecast.critical_nodes == forecast.critical_nodes
+
+
 @pytest.mark.parametrize(
     ("completed_factor", "remaining_factor", "percent_complete", "message"),
     [

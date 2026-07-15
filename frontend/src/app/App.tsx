@@ -171,6 +171,7 @@ import { MilestonesTab } from "../features/milestones/MilestonesTab";
 import { ParameterAssistantPanel } from "../features/assistant/parameter";
 import { ResourceAssistantPanel } from "../features/resourceAssistant/ResourceAssistantPanel";
 import { PlanControlPanel } from "../features/planControl/PlanControlPanel";
+import { ProgressVisualizationPanel } from "../features/progressVisualization/ProgressVisualizationPanel";
 import { Metric } from "../components/common/Metric";
 import { PanelTitle } from "../components/common/PanelTitle";
 import {
@@ -828,7 +829,7 @@ export default function App() {
           </section>
         )}
 
-        <div className="workspace-content">
+        <div className={`workspace-content ${activeTab === "progressVisualization" ? "progress-visualization-workspace" : ""}`}>
         {scenario && activeTab === "projectFiles" && (
           <ParameterAssistantPanel
             scenario={scenario}
@@ -893,6 +894,7 @@ export default function App() {
           />
         )}
         {scenario && activeTab === "planControl" && <PlanControlPanel scenario={scenario} />}
+        {activeTab === "progressVisualization" && <ProgressVisualizationPanel />}
         {scenario && activeTab === "milestones" && (
           <MilestonesTab
             scenario={scenario}

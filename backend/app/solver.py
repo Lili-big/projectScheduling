@@ -7867,6 +7867,45 @@ def _critical_path_milestone_results(
     return results
 
 
+def task_ids_for_milestone(milestone: MilestoneConstraint, tasks: list[Task]) -> list[str]:
+    """Return the canonical task scope for a milestone without building a solver model."""
+    return _task_ids_for_milestone(milestone, tasks)
+
+
+def evaluate_milestones_from_scheduled_tasks(
+    schedule_input: ScheduleInput,
+    scheduled_tasks: list[ScheduledTask],
+) -> list[MilestoneResult]:
+    """Evaluate configured milestones on a combined actual/predicted schedule."""
+    scheduled_by_id = {task.id: task for task in scheduled_tasks}
+    results: list[MilestoneResult] = []
+    for milestone in schedule_input.milestones:
+        scoped_task_ids = _task_ids_for_milestone(milestone, schedule_input.tasks)
+        if not scoped_task_ids or any(task_id not in scheduled_by_id for task_id in scoped_task_ids):
+            results.append(_not_evaluated_milestone(milestone))
+            continue
+        scoped = [scheduled_by_id[task_id] for task_id in scoped_task_ids]
+        if milestone.target_event == "finish":
+            actual_date = max(task.finish_date for task in scoped)
+            actual_offset = (actual_date - schedule_input.start_date).days + 1
+        else:
+            actual_date = min(task.start_date for task in scoped)
+            actual_offset = (actual_date - schedule_input.start_date).days
+        target_offset = _target_offset(schedule_input.start_date, milestone)
+        lateness_days = max(0, actual_offset - target_offset)
+        results.append(
+            MilestoneResult(
+                **milestone.model_dump(),
+                actual_date=actual_date,
+                actual_offset=actual_offset,
+                lateness_days=lateness_days,
+                penalty=lateness_days * milestone.penalty_per_day if milestone.mode == "soft" else 0,
+                status="late" if lateness_days > 0 else "met",
+            )
+        )
+    return results
+
+
 def _capacity_window_days(schedule_input: ScheduleInput, fallback_target_days: int | None) -> int | None:
     hard_targets = [
         _target_offset(schedule_input.start_date, milestone)

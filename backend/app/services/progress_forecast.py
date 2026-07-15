@@ -16,6 +16,9 @@ from ..models import (
     CreateForecastRequest,
     CreateProgressSnapshotRequest,
     CreateProgressSnapshotResponse,
+    CriticalNodeEvidence,
+    CriticalNodeForecast,
+    ForecastExecutionSummary,
     ForecastSchedule,
     ForecastStrategy,
     ForecastTaskState,
@@ -34,7 +37,7 @@ from ..models import (
     TaskExecutionConstraint,
     ValidationMessage,
 )
-from ..solver import solve_schedule
+from ..solver import evaluate_milestones_from_scheduled_tasks, solve_schedule, task_ids_for_milestone
 from .plan_control_repository import (
     PlanControlConflictError,
     PlanControlRepository,
@@ -120,7 +123,16 @@ def create_progress_snapshot(
         task = task_by_id.get(entry.task_id)
         if task is None:
             raise PlanControlValidationError(f"进度任务 {entry.task_id} 不属于当前计划版本。")
-        normalized.append(_normalize_progress_entry(entry, task, request.status_date))
+        normalized_entry = _normalize_progress_entry(entry, task, request.status_date)
+        normalized.append(normalized_entry)
+        if normalized_entry.status == "paused" and normalized_entry.expected_resume_date is None:
+            messages.append(
+                ValidationMessage(
+                    level="warning",
+                    subject_id=entry.task_id,
+                    message="暂停任务尚未填写恢复日期；现场事实已保存，但暂不能生成确定性未来排程。",
+                )
+            )
     previous = repository.current_snapshot_for_date(request.plan_version_id, request.status_date)
     if previous and not (request.correction_reason or "").strip():
         raise PlanControlValidationError("更正同一状态日期的进度时必须填写更正原因。")
@@ -347,6 +359,8 @@ def _normalize_progress_entry(entry: ProgressEntry, task, status_date: date) -> 
             raise PlanControlValidationError(f"暂停任务 {entry.task_id} 必须填写实际开始日期和暂停原因。")
         if entry.estimated_remaining_days is None or entry.estimated_remaining_days <= 0:
             raise PlanControlValidationError(f"暂停任务 {entry.task_id} 必须填写预计剩余工期。")
+        if entry.expected_resume_date and entry.expected_resume_date < status_date:
+            raise PlanControlValidationError(f"暂停任务 {entry.task_id} 的恢复日期不能早于状态日期。")
         values.update(remaining_days=entry.estimated_remaining_days, remaining_days_source="manual")
     else:
         if not (0 <= values["percent_complete"] < 100):
@@ -396,6 +410,9 @@ def _solve_forecast(
     historical: list[ForecastTaskState] = []
     constraints: list[TaskExecutionConstraint] = []
     diagnostics: list[ValidationMessage] = list(snapshot.validation_messages)
+    diagnostics_by_task: dict[str, list[str]] = defaultdict(list)
+    paused_without_resume: list[str] = []
+    cancelled_task_ids: set[str] = set()
 
     for task in generated.schedule_input.tasks:
         entry = entries.get(task.id) or ProgressEntry(
@@ -416,10 +433,17 @@ def _solve_forecast(
                     actual_start_date=entry.actual_start_date,
                     actual_finish_date=entry.actual_finish_date,
                     assigned_resource_type=baseline.assigned_resource_type if baseline else None,
+                    assigned_resource_id=baseline.assigned_resource_id if baseline else None,
+                    progress_status=entry.status,
+                    execution_state="completed_locked" if entry.status == "completed" else "cancelled_excluded",
+                    remaining_days=entry.remaining_days,
                 )
             )
             if entry.status == "cancelled":
-                diagnostics.append(ValidationMessage(level="warning", subject_id=task.id, message="取消任务未进入剩余求解，其后续依赖需要人工确认。"))
+                cancelled_task_ids.add(task.id)
+                message = "取消任务未进入剩余求解，其后续依赖需要人工确认。"
+                diagnostics.append(ValidationMessage(level="warning", subject_id=task.id, message=message))
+                diagnostics_by_task[task.id].append(message)
             continue
         remaining_days = entry.remaining_days or task.duration_days
         residual_tasks.append(task.model_copy(update={"duration_days": max(1, remaining_days)}))
@@ -432,15 +456,29 @@ def _solve_forecast(
                     source="progress_snapshot",
                 )
             )
-        elif entry.status == "paused" and entry.expected_resume_date:
-            constraints.append(
-                TaskExecutionConstraint(
-                    task_id=task.id,
-                    earliest_start_offset=max(0, (entry.expected_resume_date - snapshot.status_date).days),
-                    fixed_resource_id=baseline.assigned_resource_id if baseline else None,
-                    source="progress_snapshot",
+        elif entry.status == "paused":
+            if entry.expected_resume_date:
+                constraints.append(
+                    TaskExecutionConstraint(
+                        task_id=task.id,
+                        earliest_start_offset=max(0, (entry.expected_resume_date - snapshot.status_date).days),
+                        fixed_resource_id=baseline.assigned_resource_id if baseline else None,
+                        source="progress_snapshot",
+                    )
                 )
-            )
+            else:
+                paused_without_resume.append(task.id)
+                message = "暂停任务缺少恢复日期，无法确定剩余工作何时重新开始。"
+                diagnostics_by_task[task.id].append(message)
+
+    if cancelled_task_ids:
+        for link in generated.schedule_input.precedence_links:
+            if link.predecessor_id not in cancelled_task_ids:
+                continue
+            message = f"前置任务 {link.predecessor_id} 已取消，后续任务 {link.successor_id} 的工艺释放条件需要人工确认。"
+            diagnostics.append(ValidationMessage(level="warning", subject_id=link.successor_id, message=message))
+            diagnostics_by_task[link.predecessor_id].append(message)
+            diagnostics_by_task[link.successor_id].append(message)
 
     residual_ids = {task.id for task in residual_tasks}
     residual_links = [
@@ -469,10 +507,65 @@ def _solve_forecast(
     )
     if not residual_tasks:
         residual_result = ScheduleResult(status="OPTIMAL", objective_days=0, plan_start_date=snapshot.status_date, plan_finish_date=snapshot.status_date)
+    elif paused_without_resume:
+        residual_result = ScheduleResult(
+            status="MODEL_INVALID",
+            plan_start_date=snapshot.status_date,
+            plan_finish_date=None,
+            validation=[
+                ValidationMessage(
+                    level="warning",
+                    subject_id=task_id,
+                    message="暂停任务缺少恢复日期，未执行确定性剩余计划求解。",
+                )
+                for task_id in paused_without_resume
+            ],
+        )
     else:
         residual_result = solve_schedule(schedule_input, enforce_hard_milestones=False)
     combined_result, predicted = _combined_result(plan, snapshot, historical, residual_result)
-    risk_status, evidence, confidence, metrics = _forecast_risk(plan, snapshot, combined_result, diagnostics)
+    predicted_ids = {item.task_id for item in predicted}
+    for task in residual_tasks:
+        if task.id in predicted_ids:
+            continue
+        entry = entries.get(task.id) or ProgressEntry(
+            task_id=task.id,
+            status="not_started",
+            remaining_days=task.duration_days,
+            remaining_days_source="baseline",
+        )
+        baseline = baseline_tasks.get(task.id)
+        predicted.append(
+            ForecastTaskState(
+                task_id=task.id,
+                task_name=task.name,
+                state="predicted",
+                baseline_start_date=baseline.start_date if baseline else None,
+                baseline_finish_date=baseline.finish_date if baseline else None,
+                actual_start_date=entry.actual_start_date,
+                assigned_resource_type=baseline.assigned_resource_type if baseline else None,
+                assigned_resource_id=baseline.assigned_resource_id if baseline else None,
+                progress_status=entry.status,
+                execution_state=_execution_state(entry.status),
+                remaining_days=entry.remaining_days or task.duration_days,
+                related_diagnostics=diagnostics_by_task.get(task.id, []),
+            )
+        )
+    for item in historical:
+        item.related_diagnostics = diagnostics_by_task.get(item.task_id, [])
+    for item in predicted:
+        if not item.related_diagnostics:
+            item.related_diagnostics = diagnostics_by_task.get(item.task_id, [])
+
+    execution_summary = _execution_summary(generated.schedule_input.tasks, entries, strategy)
+    critical_nodes = _forecast_critical_nodes(plan, snapshot, combined_result, entries)
+    risk_status, evidence, confidence, metrics = _forecast_risk(
+        plan,
+        snapshot,
+        combined_result,
+        diagnostics,
+        critical_nodes,
+    )
     status = "feasible" if residual_result.status in {"OPTIMAL", "FEASIBLE"} else "infeasible"
     if risk_status == "insufficient_data":
         status = "failed" if residual_result.status not in {"OPTIMAL", "FEASIBLE"} else "feasible"
@@ -492,6 +585,8 @@ def _solve_forecast(
         historical_tasks=historical,
         predicted_tasks=predicted,
         schedule_result=combined_result,
+        execution_summary=execution_summary,
+        critical_nodes=critical_nodes,
         risk_status=risk_status,
         risk_evidence=evidence,
         confidence=confidence,
@@ -529,6 +624,32 @@ def _baseline_resource_order_links(
                 )
             )
     return links
+
+
+def _execution_state(status: str) -> str:
+    return {
+        "completed": "completed_locked",
+        "cancelled": "cancelled_excluded",
+        "in_progress": "in_progress_remaining",
+        "paused": "paused_remaining",
+        "not_started": "not_started_future",
+    }[status]
+
+
+def _execution_summary(tasks, entries: dict[str, ProgressEntry], strategy: ForecastStrategy) -> ForecastExecutionSummary:
+    counts = defaultdict(int)
+    for task in tasks:
+        status = entries.get(task.id).status if entries.get(task.id) else "not_started"
+        counts[_execution_state(status)] += 1
+    return ForecastExecutionSummary(
+        completed_locked_count=counts["completed_locked"],
+        cancelled_excluded_count=counts["cancelled_excluded"],
+        in_progress_remaining_count=counts["in_progress_remaining"],
+        paused_remaining_count=counts["paused_remaining"],
+        not_started_future_count=counts["not_started_future"],
+        resource_policy="bottleneck_expanded" if strategy == "add_bottleneck_resources" else "baseline_fixed",
+        sequence_policy="critical_priority" if strategy == "prioritize_critical_tasks" else "baseline_order",
+    )
 
 
 def _expanded_resources(resources: list[Resource], tasks, parameters: dict[str, Any]) -> list[Resource]:
@@ -573,6 +694,7 @@ def _combined_result(
     predicted: list[ForecastTaskState] = []
     for task in residual_result.tasks:
         baseline = baseline_by_id.get(task.id)
+        entry = entry_by_id.get(task.id)
         predicted.append(
             ForecastTaskState(
                 task_id=task.id,
@@ -580,10 +702,14 @@ def _combined_result(
                 state="predicted",
                 baseline_start_date=baseline.start_date if baseline else None,
                 baseline_finish_date=baseline.finish_date if baseline else None,
-                actual_start_date=(entry_by_id.get(task.id).actual_start_date if entry_by_id.get(task.id) else None),
+                actual_start_date=entry.actual_start_date if entry else None,
                 predicted_start_date=task.start_date,
                 predicted_finish_date=task.finish_date,
                 assigned_resource_type=task.assigned_resource_type,
+                assigned_resource_id=task.assigned_resource_id,
+                progress_status=entry.status if entry else "not_started",
+                execution_state=_execution_state(entry.status if entry else "not_started"),
+                remaining_days=entry.remaining_days if entry else task.duration_days,
                 variance_days=(task.finish_date - baseline.finish_date).days if baseline else None,
             )
         )
@@ -596,9 +722,159 @@ def _combined_result(
             "plan_finish_date": finish,
             "objective_days": max(0, (finish - plan_start).days + 1),
             "tasks": all_tasks,
+            "milestone_results": evaluate_milestones_from_scheduled_tasks(
+                plan.generated_snapshot.schedule_input,
+                all_tasks,
+            ),
         }
     )
     return combined, predicted
+
+
+def _critical_node_status(target_date: date, evaluated_date: date | None) -> tuple[str, int | None, int | None]:
+    if evaluated_date is None:
+        return "insufficient_data", None, None
+    variance_days = (evaluated_date - target_date).days
+    buffer_days = -variance_days
+    if variance_days > 0:
+        return "late", variance_days, buffer_days
+    if buffer_days <= 3:
+        return "at_risk", variance_days, buffer_days
+    return "on_track", variance_days, buffer_days
+
+
+def _critical_node_date_source(task_ids: list[str], entries: dict[str, ProgressEntry]) -> str:
+    statuses = [entries.get(task_id).status if entries.get(task_id) else "not_started" for task_id in task_ids]
+    if not statuses or any(status == "cancelled" for status in statuses):
+        return "unavailable"
+    completed_count = sum(status == "completed" for status in statuses)
+    if completed_count == len(statuses):
+        return "actual"
+    if completed_count > 0:
+        return "combined"
+    return "predicted"
+
+
+def _node_evidence(
+    *,
+    node_name: str,
+    target_event: str,
+    task_ids: list[str],
+    scheduled_by_id: dict[str, ScheduledTask],
+    evaluated_date: date | None,
+    result: ScheduleResult,
+) -> list[CriticalNodeEvidence]:
+    if evaluated_date is None:
+        message = "剩余任务未获得可用排程，无法计算节点日期。" if result.status not in {"OPTIMAL", "FEASIBLE"} else "节点范围任务不完整，无法计算节点日期。"
+        return [CriticalNodeEvidence(type="solver", message=message, task_ids=task_ids)]
+    scoped = [scheduled_by_id[task_id] for task_id in task_ids if task_id in scheduled_by_id]
+    if not scoped:
+        return [CriticalNodeEvidence(type="data_quality", message="节点没有可用于评估的任务。", task_ids=task_ids)]
+    if target_event == "start":
+        driving_date = min(task.start_date for task in scoped)
+        driving = [task for task in scoped if task.start_date == driving_date]
+    else:
+        driving_date = max(task.finish_date for task in scoped)
+        driving = [task for task in scoped if task.finish_date == driving_date]
+    task_names = "、".join(task.name for task in driving[:3])
+    resource_types = sorted({task.assigned_resource_type for task in driving if task.assigned_resource_type})
+    return [
+        CriticalNodeEvidence(
+            type="driving_task",
+            message=f"{task_names} 决定“{node_name}”的当前节点日期。",
+            task_ids=[task.id for task in driving],
+            resource_types=resource_types,
+            variance_days=None,
+        )
+    ]
+
+
+def _forecast_critical_nodes(
+    plan: PlanVersion,
+    snapshot: ProgressSnapshot,
+    result: ScheduleResult,
+    entries: dict[str, ProgressEntry],
+) -> list[CriticalNodeForecast]:
+    schedule_input = plan.generated_snapshot.schedule_input
+    scheduled_by_id = {task.id: task for task in result.tasks}
+    feasible = result.status in {"OPTIMAL", "FEASIBLE"}
+    nodes: list[CriticalNodeForecast] = []
+
+    project_task_ids = [task.id for task in schedule_input.tasks]
+    project_source = _critical_node_date_source(project_task_ids, entries)
+    project_target = plan.schedule_result_snapshot.plan_finish_date or plan.schedule_result_snapshot.plan_start_date
+    project_evaluated = result.plan_finish_date if feasible and project_source != "unavailable" else None
+    project_status, project_variance, project_buffer = _critical_node_status(project_target, project_evaluated)
+    nodes.append(
+        CriticalNodeForecast(
+            node_id="project-finish",
+            name="项目计划完工",
+            node_type="project_finish",
+            level="contract",
+            mode="hard",
+            target_date=project_target,
+            evaluated_date=project_evaluated,
+            date_source=project_source if project_evaluated else "unavailable",
+            variance_days=project_variance,
+            buffer_days=project_buffer,
+            status=project_status,
+            related_task_ids=project_task_ids,
+            evidence=_node_evidence(
+                node_name="项目计划完工",
+                target_event="finish",
+                task_ids=project_task_ids,
+                scheduled_by_id=scheduled_by_id,
+                evaluated_date=project_evaluated,
+                result=result,
+            ),
+        )
+    )
+
+    milestone_results = {item.id: item for item in result.milestone_results}
+    for milestone in schedule_input.milestones:
+        task_ids = task_ids_for_milestone(milestone, schedule_input.tasks)
+        source = _critical_node_date_source(task_ids, entries)
+        milestone_result = milestone_results.get(milestone.id)
+        evaluated = (
+            milestone_result.actual_date
+            if feasible and source != "unavailable" and milestone_result and milestone_result.status != "not_evaluated"
+            else None
+        )
+        node_status, variance_days, buffer_days = _critical_node_status(milestone.target_date, evaluated)
+        nodes.append(
+            CriticalNodeForecast(
+                node_id=milestone.id,
+                name=milestone.name,
+                node_type="milestone",
+                level=milestone.level,
+                mode=milestone.mode,
+                target_date=milestone.target_date,
+                evaluated_date=evaluated,
+                date_source=source if evaluated else "unavailable",
+                variance_days=variance_days,
+                buffer_days=buffer_days,
+                status=node_status,
+                related_task_ids=task_ids,
+                evidence=_node_evidence(
+                    node_name=milestone.name,
+                    target_event=milestone.target_event,
+                    task_ids=task_ids,
+                    scheduled_by_id=scheduled_by_id,
+                    evaluated_date=evaluated,
+                    result=result,
+                ),
+            )
+        )
+    status_order = {"late": 0, "at_risk": 1, "insufficient_data": 2, "on_track": 3}
+    return sorted(
+        nodes,
+        key=lambda item: (
+            status_order[item.status],
+            0 if item.mode == "hard" else 1,
+            item.target_date,
+            item.node_id,
+        ),
+    )
 
 
 def _forecast_risk(
@@ -606,6 +882,7 @@ def _forecast_risk(
     snapshot: ProgressSnapshot,
     result: ScheduleResult,
     diagnostics: list[ValidationMessage],
+    critical_nodes: list[CriticalNodeForecast],
 ) -> tuple[str, list[dict[str, Any]], str, dict[str, Any]]:
     evidence: list[dict[str, Any]] = []
     baseline_finish = plan.schedule_result_snapshot.plan_finish_date
@@ -613,17 +890,21 @@ def _forecast_risk(
     finish_variance = (predicted_finish - baseline_finish).days if baseline_finish and predicted_finish else None
     if finish_variance and finish_variance > 0:
         evidence.append({"type": "project_finish", "message": f"项目预测完成日期较基准晚 {finish_variance} 天。", "variance_days": finish_variance})
-    milestone_late = [item for item in result.milestone_results if item.lateness_days > 0]
+    primary_nodes = [item for item in critical_nodes if item.node_type == "project_finish" or item.mode == "hard"]
+    milestone_late = [item for item in primary_nodes if item.node_type == "milestone" and item.status == "late"]
     for item in milestone_late:
-        evidence.append({"type": "milestone", "milestone_id": item.id, "message": f"{item.name} 预测迟延 {item.lateness_days} 天。"})
+        evidence.append({"type": "milestone", "milestone_id": item.node_id, "message": f"{item.name} 预测迟延 {item.variance_days} 天。"})
     if result.status not in {"OPTIMAL", "FEASIBLE"}:
         risk = "insufficient_data"
         evidence.append({"type": "solver", "message": "剩余任务未得到可行预测。"})
-    elif milestone_late or (finish_variance is not None and finish_variance > 0):
+    elif any(item.status == "insufficient_data" for item in primary_nodes):
+        risk = "insufficient_data"
+        evidence.append({"type": "data_quality", "message": "至少一个关键节点缺少可判断日期。"})
+    elif any(item.status == "late" for item in primary_nodes):
         risk = "late"
-    elif finish_variance is not None and finish_variance >= -3:
+    elif any(item.status == "at_risk" for item in primary_nodes):
         risk = "at_risk"
-        evidence.append({"type": "buffer", "message": "项目剩余缓冲不超过 3 天。"})
+        evidence.append({"type": "buffer", "message": "至少一个关键节点剩余缓冲不超过 3 天。"})
     else:
         risk = "on_track"
         evidence.append({"type": "project_finish", "message": "当前预测未超过基准完成日期。"})
