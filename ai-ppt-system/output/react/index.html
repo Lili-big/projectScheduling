@@ -1,0 +1,677 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>基建智能计划管控中枢</title>
+  <style>
+    :root {
+      --navy: #071525;
+      --navy-2: #0d2237;
+      --ink: #152538;
+      --muted: #5f6f80;
+      --line: #d7e0e8;
+      --paper: #f3f6f8;
+      --white: #ffffff;
+      --teal: #0f8f83;
+      --teal-soft: #d9f0ec;
+      --blue: #2d64d8;
+      --orange: #f1a33c;
+      --orange-soft: #fff0d9;
+      --danger: #d95d4f;
+      --scale: 1;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; }
+    body {
+      margin: 0;
+      background: #030b14;
+      color: var(--ink);
+      font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", Arial, sans-serif;
+      overflow: hidden;
+    }
+    .deck {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(15, 143, 131, .16), transparent 32%),
+        radial-gradient(circle at 82% 76%, rgba(45, 100, 216, .18), transparent 34%),
+        #030b14;
+    }
+    .slide {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 1280px;
+      height: 720px;
+      padding: 58px 70px 54px;
+      background: var(--paper);
+      overflow: hidden;
+      page-break-after: always;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transform: translate(-50%, -48%) scale(calc(var(--scale) * .97));
+      transition: opacity .34s ease, transform .42s cubic-bezier(.2,.8,.2,1), visibility .34s;
+      box-shadow: 0 30px 90px rgba(0, 0, 0, .35);
+    }
+    .slide.active {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+      transform: translate(-50%, -50%) scale(var(--scale));
+    }
+    .slide::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 12px;
+      height: 100%;
+      background: linear-gradient(180deg, var(--orange), var(--teal));
+      z-index: 3;
+    }
+    .slide-grid {
+      position: absolute;
+      inset: 0;
+      opacity: .28;
+      background-image:
+        linear-gradient(rgba(21,37,56,.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(21,37,56,.05) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: linear-gradient(90deg, transparent 0%, #000 40%, #000 100%);
+    }
+    .ambient { position: absolute; border-radius: 50%; filter: blur(1px); opacity: .5; }
+    .ambient-a { width: 360px; height: 360px; right: -160px; top: -180px; background: rgba(15,143,131,.15); }
+    .ambient-b { width: 280px; height: 280px; left: -160px; bottom: -170px; background: rgba(45,100,216,.12); }
+    .content-shell { position: relative; z-index: 2; }
+    .slide-kicker {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 5px 12px;
+      margin-bottom: 18px;
+      border-radius: 999px;
+      background: var(--teal-soft);
+      color: #076b63;
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+    }
+    h1 {
+      width: 1020px;
+      margin: 0;
+      color: var(--ink);
+      font-size: 48px;
+      line-height: 1.14;
+      font-weight: 800;
+      letter-spacing: -.8px;
+    }
+    .message {
+      width: 1040px;
+      margin: 18px 0 34px;
+      color: var(--muted);
+      font-size: 27px;
+      line-height: 1.36;
+      font-weight: 500;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 22px;
+      width: 1100px;
+    }
+    .card {
+      position: relative;
+      min-height: 166px;
+      padding: 52px 26px 26px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255,255,255,.88);
+      box-shadow: 0 16px 36px rgba(28,55,83,.08);
+      color: var(--ink);
+      font-size: 26px;
+      line-height: 1.34;
+      font-weight: 700;
+      display: flex;
+      align-items: flex-end;
+    }
+    .card::after {
+      content: "";
+      position: absolute;
+      left: 26px;
+      bottom: 22px;
+      width: 42px;
+      height: 4px;
+      background: var(--orange);
+      border-radius: 2px;
+      transform: translateY(12px);
+    }
+    .card i {
+      position: absolute;
+      top: 20px;
+      left: 24px;
+      color: var(--teal);
+      font-size: 18px;
+      font-style: normal;
+      font-weight: 800;
+    }
+    .problem-cards .card { border-top: 5px solid var(--danger); }
+    .problem-cards .card i { color: var(--danger); }
+    .architecture-cards .card { border-top: 5px solid var(--blue); }
+    .architecture-cards .card:nth-child(2) { border-top-color: var(--teal); }
+    .architecture-cards .card:nth-child(3) { border-top-color: var(--orange); }
+    .steps {
+      display: flex;
+      align-items: stretch;
+      width: 1100px;
+      gap: 0;
+    }
+    .step {
+      position: relative;
+      flex: 1;
+      min-height: 174px;
+      padding: 30px 26px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255,255,255,.9);
+      box-shadow: 0 16px 36px rgba(28,55,83,.08);
+    }
+    .step b {
+      display: block;
+      color: var(--orange);
+      font-size: 24px;
+      line-height: 1;
+      margin-bottom: 30px;
+    }
+    .step span { color: var(--ink); font-size: 26px; line-height: 1.34; font-weight: 700; }
+    .step-line {
+      position: relative;
+      flex: 0 0 42px;
+    }
+    .step-line::before {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 6px;
+      width: 30px;
+      height: 2px;
+      background: var(--teal);
+    }
+    .step-line::after {
+      content: "";
+      position: absolute;
+      top: calc(50% - 5px);
+      right: 4px;
+      border-left: 8px solid var(--teal);
+      border-top: 6px solid transparent;
+      border-bottom: 6px solid transparent;
+    }
+    .points { display: grid; gap: 16px; width: 930px; margin: 0; padding: 0; list-style: none; }
+    .points li {
+      display: flex;
+      align-items: center;
+      min-height: 70px;
+      padding: 16px 22px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.9);
+      font-size: 25px;
+      font-weight: 700;
+    }
+    .points li span { width: 48px; color: var(--teal); font-size: 17px; }
+    .brand-mark {
+      position: absolute;
+      left: 70px;
+      bottom: 30px;
+      z-index: 2;
+      color: #7a8897;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: .5px;
+    }
+    .brand-mark span {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      margin-right: 8px;
+      border-radius: 50%;
+      background: var(--orange);
+    }
+    footer {
+      position: absolute;
+      right: 66px;
+      bottom: 28px;
+      z-index: 2;
+      color: #7a8897;
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .cover, .summary {
+      color: var(--white);
+      background:
+        linear-gradient(120deg, rgba(7,21,37,.98), rgba(13,34,55,.94)),
+        var(--navy);
+    }
+    .cover::before, .summary::before { width: 14px; }
+    .cover .slide-grid, .summary .slide-grid {
+      opacity: .5;
+      background-image:
+        linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.045) 1px, transparent 1px);
+      mask-image: none;
+    }
+    .cover .ambient-a { width: 520px; height: 520px; right: -100px; top: -210px; background: rgba(15,143,131,.3); }
+    .cover .ambient-b { width: 440px; height: 440px; left: 160px; bottom: -360px; background: rgba(241,163,60,.23); }
+    .cover .slide-kicker, .summary .slide-kicker { color: #9ee4dc; background: rgba(15,143,131,.22); }
+    .cover h1, .summary h1 { color: var(--white); }
+    .cover h1 { width: 1040px; font-size: 64px; line-height: 1.1; }
+    .cover .message, .summary .message { color: #c8d4df; }
+    .cover .message { width: 1030px; font-size: 30px; margin-top: 24px; }
+    .cover-values { display: flex; gap: 16px; margin-top: 10px; }
+    .cover-values span {
+      min-width: 205px;
+      padding: 15px 20px;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 12px;
+      background: rgba(255,255,255,.07);
+      color: #f5f8fb;
+      font-size: 20px;
+      font-weight: 700;
+    }
+    .cover .brand-mark, .cover footer, .summary .brand-mark, .summary footer { color: #8da0b2; }
+    .summary .card { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.14); color: var(--white); }
+    .summary .card i { color: #9ee4dc; }
+    .comparison .card:nth-child(1) { border-top: 5px solid var(--blue); }
+    .comparison .card:nth-child(2) { border-top: 5px solid var(--teal); }
+    .comparison .card:nth-child(3) { border-top: 5px solid var(--orange); }
+    .page-hud {
+      position: fixed;
+      left: 50%;
+      bottom: 14px;
+      z-index: 50;
+      width: min(420px, 58vw);
+      transform: translateX(-50%);
+      color: #d5e0e9;
+      font-size: 12px;
+      letter-spacing: 1px;
+      text-align: center;
+      pointer-events: none;
+    }
+    .progress-track { height: 3px; margin-bottom: 8px; border-radius: 2px; background: rgba(255,255,255,.16); overflow: hidden; }
+    .progress-bar { width: 0; height: 100%; background: linear-gradient(90deg, var(--teal), var(--orange)); transition: width .3s ease; }
+    @page { size: 1280px 720px; margin: 0; }
+    @media print {
+      html, body { width: auto; height: auto; overflow: visible; background: white; }
+      .deck { width: auto; height: auto; overflow: visible; background: white; }
+      .slide {
+        position: relative;
+        left: auto;
+        top: auto;
+        display: block;
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+        transform: none !important;
+        margin: 0;
+        box-shadow: none;
+      }
+      .page-hud { display: none; }
+    }
+  </style>
+</head>
+<body>
+<main class="deck" aria-label="基建智能计划管控中枢">
+<section class="slide cover active" data-page="1" aria-hidden="false">
+  <div class="ambient ambient-a" aria-hidden="true"></div>
+  <div class="ambient ambient-b" aria-hidden="true"></div>
+  <div class="slide-grid" aria-hidden="true"></div>
+  <div class="content-shell">
+    <div class="slide-kicker">PRODUCT VISION</div>
+    <h1 class="layout-item fit-check">基建智能计划管控中枢</h1>
+    <p class="message layout-item fit-check">让计划从一次性编制，升级为持续感知、动态推演、主动预警</p>
+    <div class="cover-values"><span class="layout-item fit-check">算得出 · 算得清</span><span class="layout-item fit-check">跟得上 · 调得动</span><span class="layout-item fit-check">看得早 · 闭得环</span></div>
+  </div>
+  <div class="brand-mark"><span></span>智能计划管控中枢</div>
+  <footer>01</footer>
+</section>
+<section class="slide problem" data-page="2" aria-hidden="true">
+  <div class="ambient ambient-a" aria-hidden="true"></div>
+  <div class="ambient ambient-b" aria-hidden="true"></div>
+  <div class="slide-grid" aria-hidden="true"></div>
+  <div class="content-shell">
+    <div class="slide-kicker">WHY CHANGE</div>
+    <h1 class="layout-item fit-check">计划管理的断点</h1>
+    <p class="message layout-item fit-check">计划编得出来，却难跟踪、难预警、难调整</p>
+    <div class="cards problem-cards"><div class="card layout-item fit-check">
+        <i>01</i>
+        <span>数据与规则分散</span>
+      </div><div class="card layout-item fit-check">
+        <i>02</i>
+        <span>变化依赖经验重排</span>
+      </div><div class="card layout-item fit-check">
+        <i>03</i>
+        <span>风险往往发现太晚</span>
+      </div></div>
+  </div>
+  <div class="brand-mark"><span></span>智能计划管控中枢</div>
+  <footer>02</footer>
+</section>
+<section class="slide insight" data-page="3" aria-hidden="true">
+  <div class="ambient ambient-a" aria-hidden="true"></div>
+  <div class="ambient ambient-b" aria-hidden="true"></div>
+  <div class="slide-grid" aria-hidden="true"></div>
+  <div class="content-shell">
+    <div class="slide-kicker">PRODUCT POSITIONING</div>
+    <h1 class="layout-item fit-check">从排程工具到管控中枢</h1>
+    <p class="message layout-item fit-check">统一数据、规则与计算，持续支撑项目决策</p>
+    <ul class="points"><li class="layout-item fit-check"><span>01</span>统一项目数据与规则</li><li class="layout-item fit-check"><span>02</span>连接计划编制与现场</li><li class="layout-item fit-check"><span>03</span>支撑持续推演与决策</li></ul>
+  </div>
+  <div class="brand-mark"><span></span>智能计划管控中枢</div>
+  <footer>03</footer>
+</section>
+<section class="slide process" data-page="4" aria-hidden="true">
+  <div class="ambient ambient-a" aria-hidden="true"></div>
+  <div class="ambient ambient-b" aria-hidden="true"></div>
+  <div class="slide-grid" aria-hidden="true"></div>
+  <div class="content-shell">
+    <div class="slide-kicker">BUSINESS LOOP</div>
+    <h1 class="layout-item fit-check">一条持续业务闭环</h1>
+    <p class="message layout-item fit-check">以前期基准计划为起点，把执行反馈不断带回计划</p>
+    <div class="steps"><div class="step layout-item fit-check">
+        <b>01</b>
+        <span>初始计划智能编制</span>
+      </div><div class="step-line" aria-hidden="true"></div><div class="step layout-item fit-check">
+        <b>02</b>
+        <span>执行进度动态推演</span>
+      </div><div class="step-line" aria-hidden="true"></div><div class="step layout-item fit-check">
+        <b>03</b>
+        <span>风险处置重新发布</span>
+      </div></div>
+  </div>
+  <div class="brand-mark"><span></span>智能计划管控中枢</div>
+  <footer>04</footer>
+</section>
+<section class="slide solution" data-page="5" aria-hidden="true">
+  <div class="ambient ambient-a" aria-hidden="true"></div>
+  <div class="ambient ambient-b" aria-hidden="true"></div>
+  <div class="slide-grid" aria-hidden="true"></div>
+  <div class="content-shell">
+    <div class="slide-kicker">CORE CAPABILITY</div>
+    <h1 class="layout-item fit-check">初始计划：算得清</h1>
+    <p class="message layout-item fit-check">把原始资料转成可执行、可解释、可比较的基准计划</p>
+    <div class="cards"><div class="card layout-item fit-check">
+        <i>01</i>
+        <span>任务网络自动生成</span>
+      </div><div class="card layout-item fit-check">
+        <i>02</i>
+        <span>双模式资源求解</span>
+      </div><div class="card layout-item fit-check">
+        <i>03</i>
+        <span>经济平衡抢工比选</span>
+      </div></div>
+  </div>
+  <div class="brand-mark"><span></span>智能计划管控中枢</div>
+  <footer>05</footer>
+</section>
+<section class="slide solution" data-page="6" aria-hidden="true">
+  <div class="ambient ambient-a" aria-hidden="true"></div>
+  <div class="ambient ambient-b" aria-hidden="true"></div>
+  <div class="slide-grid" aria-hidden="true"></div>
+  <div class="content-shell">
+    <div class="slide-kicker">CORE CAPABILITY</div>
+    <h1 class="layout-item fit-check">动态管控：跟得上</h1>
+    <p class="message layout-item fit-check">不只看完成率，更要判断当前状态会把未来带向哪里</p>
+    <div class="cards"><div class="card layout-item fit-check">
+        <i>01</i>
+        <span>基准 · 实际 · 预测</span>
+      </div><div class="card layout-item fit-check">
+        <i>02</i>
+        <span>偏差沿逻辑链传播</span>
+      </div><div class="card layout-item fit-check">
+        <i>03</i>
+        <span>干预方案模拟对比</span>
+      </div></div>
+  </div>
+  <div class="brand-mark"><span></span>智能计划管控中枢</div>
+  <footer>06</footer>
+</section>
+<section class="slide solution" data-page="7" aria-hidden="true">
+  <div class="ambient ambient-a" aria-hidden="true"></div>
+  <div class="ambient ambient-b" aria-hidden="true"></div>
+  <div class="slide-grid" aria-hidden="true"></div>
+  <div class="content-shell">
+    <div class="slide-kicker">CORE CAPABILITY</div>
+    <h1 class="layout-item fit-check">风险预警：看得早</h1>
+    <p class="message layout-item fit-check">每条风险都必须有证据、有影响、有处置闭环</p>
+    <div class="cards"><div class="card layout-item fit-check">
+        <i>01</i>
+        <span>六类进度关联风险</span>
+      </div><div class="card layout-item fit-check">
+        <i>02</i>
+        <span>处置窗口与责任人</span>
+      </div><div class="card layout-item fit-check">
+        <i>03</i>
+        <span>跟踪 · 降级 · 关闭</span>
+      </div></div>
+  </div>
+  <div class="brand-mark"><span></span>智能计划管控中枢</div>
+  <footer>07</footer>
+</section>
+<section class="slide data_card" data-page="8" aria-hidden="true">
+  <div class="ambient ambient-a" aria-hidden="true"></div>
+  <div class="ambient ambient-b" aria-hidden="true"></div>
+  <div class="slide-grid" aria-hidden="true"></div>
+  <div class="content-shell">
+    <div class="slide-kicker">VALUE</div>
+    <h1 class="layout-item fit-check">首期六类预警</h1>
+    <p class="message layout-item fit-check">先聚焦与进度直接相关、能够形成处置动作的风险</p>
+    <div class="cards"><div class="card layout-item fit-check">
+        <i>01</i>
+        <span>节点风险 / 关键任务</span>
+      </div><div class="card layout-item fit-check">
+        <i>02</i>
+        <span>资源风险 / 工效风险</span>
+      </div><div class="card layout-item fit-check">
+        <i>03</i>
+        <span>逻辑工作面 / 数据风险</span>
+      </div></div>
+  </div>
+  <div class="brand-mark"><span></span>智能计划管控中枢</div>
+  <footer>08</footer>
+</section>
+<section class="slide architecture" data-page="9" aria-hidden="true">
+  <div class="ambient ambient-a" aria-hidden="true"></div>
+  <div class="ambient ambient-b" aria-hidden="true"></div>
+  <div class="slide-grid" aria-hidden="true"></div>
+  <div class="content-shell">
+    <div class="slide-kicker">CAPABILITY ARCHITECTURE</div>
+    <h1 class="layout-item fit-check">产品能力架构</h1>
+    <p class="message layout-item fit-check">数据、知识与智能引擎共同支撑计划闭环</p>
+    <div class="cards architecture-cards"><div class="card layout-item fit-check">
+        <i>01</i>
+        <span>项目数据与现场进度</span>
+      </div><div class="card layout-item fit-check">
+        <i>02</i>
+        <span>三级规则与施工知识</span>
+      </div><div class="card layout-item fit-check">
+        <i>03</i>
+        <span>排程 · 预测 · 风险引擎</span>
+      </div></div>
+  </div>
+  <div class="brand-mark"><span></span>智能计划管控中枢</div>
+  <footer>09</footer>
+</section>
+<section class="slide comparison" data-page="10" aria-hidden="true">
+  <div class="ambient ambient-a" aria-hidden="true"></div>
+  <div class="ambient ambient-b" aria-hidden="true"></div>
+  <div class="slide-grid" aria-hidden="true"></div>
+  <div class="content-shell">
+    <div class="slide-kicker">BOUNDARY &amp; EVOLUTION</div>
+    <h1 class="layout-item fit-check">AI与算法各司其职</h1>
+    <p class="message layout-item fit-check">AI提出候选，规则负责校验，排程计算验证可行</p>
+    <div class="cards"><div class="card layout-item fit-check">
+        <i>01</i>
+        <span>AI生成方案与解释</span>
+      </div><div class="card layout-item fit-check">
+        <i>02</i>
+        <span>规则校验并修复输入</span>
+      </div><div class="card layout-item fit-check">
+        <i>03</i>
+        <span>用户保留最终确认权</span>
+      </div></div>
+  </div>
+  <div class="brand-mark"><span></span>智能计划管控中枢</div>
+  <footer>10</footer>
+</section>
+<section class="slide comparison" data-page="11" aria-hidden="true">
+  <div class="ambient ambient-a" aria-hidden="true"></div>
+  <div class="ambient ambient-b" aria-hidden="true"></div>
+  <div class="slide-grid" aria-hidden="true"></div>
+  <div class="content-shell">
+    <div class="slide-kicker">BOUNDARY &amp; EVOLUTION</div>
+    <h1 class="layout-item fit-check">Demo连接产品蓝图</h1>
+    <p class="message layout-item fit-check">已验证计划引擎，下一步向执行管控持续延伸</p>
+    <div class="cards"><div class="card layout-item fit-check">
+        <i>01</i>
+        <span>已验证：计划与方案</span>
+      </div><div class="card layout-item fit-check">
+        <i>02</i>
+        <span>下一步：动态与预警</span>
+      </div><div class="card layout-item fit-check">
+        <i>03</i>
+        <span>长期：企业级协同</span>
+      </div></div>
+  </div>
+  <div class="brand-mark"><span></span>智能计划管控中枢</div>
+  <footer>11</footer>
+</section>
+<section class="slide roadmap" data-page="12" aria-hidden="true">
+  <div class="ambient ambient-a" aria-hidden="true"></div>
+  <div class="ambient ambient-b" aria-hidden="true"></div>
+  <div class="slide-grid" aria-hidden="true"></div>
+  <div class="content-shell">
+    <div class="slide-kicker">ROADMAP</div>
+    <h1 class="layout-item fit-check">四阶段建设路线</h1>
+    <p class="message layout-item fit-check">试点验证价值，再逐步补齐动态、风险与企业化能力</p>
+    <div class="steps"><div class="step layout-item fit-check">
+        <b>01</b>
+        <span>阶段1 初始计划试点</span>
+      </div><div class="step-line" aria-hidden="true"></div><div class="step layout-item fit-check">
+        <b>02</b>
+        <span>阶段2-3 动态风险闭环</span>
+      </div><div class="step-line" aria-hidden="true"></div><div class="step layout-item fit-check">
+        <b>03</b>
+        <span>阶段4 企业化协同</span>
+      </div></div>
+  </div>
+  <div class="brand-mark"><span></span>智能计划管控中枢</div>
+  <footer>12</footer>
+</section>
+<section class="slide case" data-page="13" aria-hidden="true">
+  <div class="ambient ambient-a" aria-hidden="true"></div>
+  <div class="ambient ambient-b" aria-hidden="true"></div>
+  <div class="slide-grid" aria-hidden="true"></div>
+  <div class="content-shell">
+    <div class="slide-kicker">PILOT</div>
+    <h1 class="layout-item fit-check">从一个真实项目开始</h1>
+    <p class="message layout-item fit-check">以一座桥或一个工区，共同验证完整业务链路</p>
+    <div class="cards"><div class="card layout-item fit-check">
+        <i>01</i>
+        <span>真实数据与业务复核</span>
+      </div><div class="card layout-item fit-check">
+        <i>02</i>
+        <span>每周滚动更新进度</span>
+      </div><div class="card layout-item fit-check">
+        <i>03</i>
+        <span>形成可量化验收结论</span>
+      </div></div>
+  </div>
+  <div class="brand-mark"><span></span>智能计划管控中枢</div>
+  <footer>13</footer>
+</section>
+<section class="slide summary" data-page="14" aria-hidden="true">
+  <div class="ambient ambient-a" aria-hidden="true"></div>
+  <div class="ambient ambient-b" aria-hidden="true"></div>
+  <div class="slide-grid" aria-hidden="true"></div>
+  <div class="content-shell">
+    <div class="slide-kicker">NEXT STEP</div>
+    <h1 class="layout-item fit-check">下一步，与客户共创</h1>
+    <p class="message layout-item fit-check">先跑通一个真实闭环，再决定规模化建设</p>
+    <div class="cards"><div class="card layout-item fit-check">
+        <i>01</i>
+        <span>确认试点范围</span>
+      </div><div class="card layout-item fit-check">
+        <i>02</i>
+        <span>锁定双方责任人</span>
+      </div><div class="card layout-item fit-check">
+        <i>03</i>
+        <span>确定数据与时间表</span>
+      </div></div>
+  </div>
+  <div class="brand-mark"><span></span>智能计划管控中枢</div>
+  <footer>14</footer>
+</section>
+</main>
+<div class="page-hud" aria-hidden="true">
+  <div class="progress-track"><div class="progress-bar"></div></div>
+  <span class="page-current">01</span> / <span class="page-total">14</span>
+</div>
+<script>
+  const deck = document.querySelector('.deck');
+  const slideItems = Array.from(document.querySelectorAll('.slide'));
+  const currentLabel = document.querySelector('.page-current');
+  const progressBar = document.querySelector('.progress-bar');
+  let activeIndex = 0;
+  let wheelLocked = false;
+  let touchStartY = null;
+
+  function resizeStage() {
+    const scale = Math.min(window.innerWidth / 1280, window.innerHeight / 720) * 0.94;
+    document.documentElement.style.setProperty('--scale', String(Math.max(0.2, scale)));
+  }
+
+  function renderSlide(index) {
+    activeIndex = Math.max(0, Math.min(slideItems.length - 1, index));
+    slideItems.forEach((slide, slideIndex) => {
+      const active = slideIndex === activeIndex;
+      slide.classList.toggle('active', active);
+      slide.setAttribute('aria-hidden', active ? 'false' : 'true');
+    });
+    if (currentLabel) currentLabel.textContent = String(activeIndex + 1).padStart(2, '0');
+    if (progressBar) progressBar.style.width = String(((activeIndex + 1) / slideItems.length) * 100) + '%';
+  }
+
+  function move(direction) {
+    renderSlide(activeIndex + direction);
+  }
+
+  deck?.addEventListener('wheel', (event) => {
+    if (Math.abs(event.deltaY) < 20) return;
+    event.preventDefault();
+    if (wheelLocked) return;
+    wheelLocked = true;
+    move(event.deltaY > 0 ? 1 : -1);
+    window.setTimeout(() => { wheelLocked = false; }, 620);
+  }, { passive: false });
+
+  deck?.addEventListener('touchstart', (event) => {
+    touchStartY = event.touches[0]?.clientY ?? null;
+  }, { passive: true });
+
+  deck?.addEventListener('touchend', (event) => {
+    if (touchStartY === null) return;
+    const endY = event.changedTouches[0]?.clientY ?? touchStartY;
+    const delta = touchStartY - endY;
+    if (Math.abs(delta) > 45) move(delta > 0 ? 1 : -1);
+    touchStartY = null;
+  }, { passive: true });
+
+  window.addEventListener('resize', resizeStage);
+  resizeStage();
+  renderSlide(0);
+</script>
+</body>
+</html>
