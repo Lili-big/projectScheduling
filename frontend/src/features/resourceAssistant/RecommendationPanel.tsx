@@ -1,6 +1,6 @@
 import { Bot, CheckCircle2, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
-import type { ResourceAssistantPlan, ResourceAssistantRecommendation } from "../../types/scheduler";
+import type { ResourceAssistantPlan, ResourceAssistantRecommendation } from "../../contracts";
 import { llmConfigStatusLabel, resourceAssistantProfileLabels } from "../../domain/resourceAssistant";
 
 export function RecommendationPanel({

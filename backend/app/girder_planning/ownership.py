@@ -2,14 +2,70 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from ..models import (
+from ..contracts import (
     CompetingRouteOccurrence,
     ErectionOwnerOverride,
     ErectionOwnership,
     GirderExecutionActual,
+    GirderWorkPoint,
+    PassageConditionRef,
     ValidationMessage,
 )
+from ..contracts.project_master import ProjectMasterSnapshot
 from .models import RouteOccurrence
+
+
+def derive_route_workpoints(snapshot: ProjectMasterSnapshot) -> list[GirderWorkPoint]:
+    """Derive stable route nodes from unified workpoint + side master data."""
+
+    result: list[GirderWorkPoint] = []
+    type_map = {"bridge": "bridge", "roadbed": "roadbed", "tunnel": "tunnel", "culvert": "culvert"}
+    for workpoint in sorted(snapshot.workpoints, key=lambda item: (item.sort_order, item.workpoint_id)):
+        sides = sorted(
+            {item.side for item in workpoint.structures if item.side in {"left", "right"}},
+            key=lambda item: {"left": 0, "right": 1}[item],
+        )
+        if workpoint.workpoint_type != "bridge" or not sides:
+            sides = ["unknown"]
+        for side in sides:
+            side_structures = [
+                item
+                for item in workpoint.structures
+                if side == "unknown" or item.side in {side, "shared", "none"}
+            ]
+            section = next((item for item in side_structures if item.section_code), None)
+            derived_id = f"{workpoint.workpoint_id}:{side}"
+            result.append(
+                GirderWorkPoint(
+                    workpoint_id=derived_id,
+                    name=f"{workpoint.workpoint_name}·{_side_label(side)}" if side != "unknown" else workpoint.workpoint_name,
+                    workpoint_type=type_map.get(workpoint.workpoint_type, "access"),
+                    side=side,
+                    mileage_start_m=workpoint.start_mileage_m or 0,
+                    mileage_end_m=workpoint.end_mileage_m or workpoint.start_mileage_m or 0,
+                    corridor_id=workpoint.alignment_code or "default",
+                    bridge_id=workpoint.workpoint_id if workpoint.workpoint_type == "bridge" else None,
+                    work_section_id=section.section_code if section else None,
+                    requires_erection=workpoint.workpoint_type == "bridge",
+                    rough_granularity=False,
+                    linked_condition_refs=[
+                        PassageConditionRef(
+                            ref_type="upper_structure" if item.structure_category == "superstructure" else "structure",
+                            entity_id=item.structure_id,
+                        )
+                        for item in side_structures
+                    ],
+                    properties={
+                        "project_master_workpoint_id": workpoint.workpoint_id,
+                        "project_master_side": side,
+                    },
+                )
+            )
+    return result
+
+
+def _side_label(side: str) -> str:
+    return {"left": "左幅", "right": "右幅", "unknown": "不分幅"}.get(side, side)
 
 
 def resolve_ownership(

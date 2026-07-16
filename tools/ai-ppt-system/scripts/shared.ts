@@ -6,6 +6,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const PROJECT_ROOT = path.resolve(__dirname, "..");
+export const REPOSITORY_ROOT = path.resolve(PROJECT_ROOT, "..", "..");
+export const OUTPUT_ROOT = process.env.AI_PPT_OUTPUT_DIR
+  ? path.resolve(PROJECT_ROOT, process.env.AI_PPT_OUTPUT_DIR)
+  : path.join(REPOSITORY_ROOT, "artifacts", "ai-ppt-system", "output");
 
 export const ALLOWED_TYPES = [
   "cover",
@@ -58,6 +62,9 @@ export interface DeckSpec {
 }
 
 export function resolveProject(...parts: string[]) {
+  if (parts[0] === "output") {
+    return path.join(OUTPUT_ROOT, ...parts.slice(1));
+  }
   return path.join(PROJECT_ROOT, ...parts);
 }
 

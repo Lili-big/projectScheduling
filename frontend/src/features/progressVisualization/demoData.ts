@@ -1,4 +1,4 @@
-import type { ComponentType } from "../../types/scheduler";
+import type { ComponentType } from "../../contracts";
 import type {
   BridgeProgressSummary,
   ComponentProgressSummary,

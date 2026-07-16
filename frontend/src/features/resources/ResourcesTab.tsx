@@ -1,7 +1,7 @@
 import { CheckCircle2, Loader2, Save, XCircle } from "lucide-react";
 import { PanelTitle } from "../../components/common/PanelTitle";
 import { resourcePoolQuantity } from "../../domain/resources";
-import type { ResourcePool, ScenarioInput } from "../../types/scheduler";
+import type { ResourcePool, ScenarioInput } from "../../contracts";
 
 export function ResourcesTab({
   scenario,

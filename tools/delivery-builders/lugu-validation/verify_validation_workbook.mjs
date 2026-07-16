@@ -1,8 +1,12 @@
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { FileBlob, SpreadsheetFile } from "@oai/artifact-tool";
 
-const outputDir = fileURLToPath(new URL(".", import.meta.url));
-const filePath = `${outputDir}泸古项目验证材料_20260715.xlsx`;
+const inputArgIndex = process.argv.indexOf("--input");
+const defaultInputPath = fileURLToPath(
+  new URL("../../../deliverables/validation/lugu/泸古项目验证材料_20260715.xlsx", import.meta.url),
+);
+const filePath = path.resolve(inputArgIndex >= 0 ? process.argv[inputArgIndex + 1] : defaultInputPath);
 const input = await FileBlob.load(filePath);
 const workbook = await SpreadsheetFile.importXlsx(input);
 

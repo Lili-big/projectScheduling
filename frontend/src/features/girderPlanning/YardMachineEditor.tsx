@@ -1,4 +1,4 @@
-import type { BeamYardConfig, ErectionMachineConfig, GirderPlanningConfig } from "../../types/scheduler";
+import type { BeamYardConfig, ErectionMachineConfig, GirderPlanningConfig } from "../../contracts";
 
 export function YardMachineEditor({
   config,

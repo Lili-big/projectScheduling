@@ -9,7 +9,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from ..process_nl import ensure_process_for_assignment, extract_process_method_suggestions
-from ..models import (
+from ..contracts import (
     AiParameterApplyRequest,
     AiParameterApplyResponse,
     AiParameterAppliedItem,

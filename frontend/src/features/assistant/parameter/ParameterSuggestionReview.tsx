@@ -2,7 +2,7 @@ import { AlertTriangle, Check, Image as ImageIcon } from "lucide-react";
 import type {
   AiParameterSuggestion,
   AiParameterUploadedMaterialSummary,
-} from "../../../types/scheduler";
+} from "../../../contracts";
 import {
   aiParameterConfidenceLabels,
   confidenceClassName,

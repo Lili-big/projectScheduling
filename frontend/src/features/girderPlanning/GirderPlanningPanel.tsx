@@ -1,15 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   confirmGirderSpecialty,
-  confirmProjectDataVersion,
   createPlanningScenarioVersion,
-  createProjectDataVersion,
-  importGirderWorkpoints,
   previewGirderPlanning,
   solveIntegratedSchedule,
   validateGirderPlanning,
-} from "../../api/schedulerApi";
+} from "../../api/girderPlanningApi";
+import { listProjectMasterGirderWorkpoints } from "../../api/projectMasterApi";
 import type {
   FieldConflict,
   GirderImportPreview,
@@ -19,11 +17,10 @@ import type {
   IntegratedCalculationSnapshot,
   GirderWorkPoint,
   PlanningScenarioVersion,
-  ProjectDataVersion,
   ScenarioInput,
   SourceEvidence,
   ValidationMessage,
-} from "../../types/scheduler";
+} from "../../contracts";
 import { normalizeGirderPlanningConfig, withGirderPlanningConfig } from "./adapter";
 import { GirderDiagnostics } from "./GirderDiagnostics";
 import { GirderResultPanel } from "./GirderResultPanel";
@@ -42,7 +39,6 @@ export function GirderPlanningPanel({
   onIntegratedSnapshot?: (snapshot: IntegratedCalculationSnapshot | null) => void;
 }) {
   const config = useMemo(() => normalizeGirderPlanningConfig(scenario), [scenario]);
-  const [projectVersion, setProjectVersion] = useState<ProjectDataVersion | null>(null);
   const [scenarioVersion, setScenarioVersion] = useState<PlanningScenarioVersion | null>(null);
   const [preview, setPreview] = useState<ImportPreview>({ workpoints: [], source_evidence: [], field_conflicts: [], diagnostics: [] });
   const [readiness, setReadiness] = useState<GirderPlanningReadiness | null>(null);
@@ -50,6 +46,19 @@ export function GirderPlanningPanel({
   const [integratedSnapshot, setIntegratedSnapshot] = useState<IntegratedCalculationSnapshot | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const versionId = scenario.project_data_version_id;
+    if (!versionId) {
+      setPreview({ workpoints: [], source_evidence: [], field_conflicts: [], diagnostics: [] });
+      return;
+    }
+    setBusy("derive-workpoints");
+    void listProjectMasterGirderWorkpoints(versionId)
+      .then((workpoints) => setPreview({ workpoints, source_evidence: [], field_conflicts: [], diagnostics: [] }))
+      .catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)))
+      .finally(() => setBusy(null));
+  }, [scenario.project_data_version_id]);
 
   function updateConfig(next: GirderPlanningConfig) {
     setScenarioVersion(null);
@@ -65,44 +74,10 @@ export function GirderPlanningPanel({
     try { await callback(); } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); } finally { setBusy(null); }
   }
 
-  async function saveProjectVersion() {
-    await run("project", async () => {
-      const saved = await createProjectDataVersion({
-        project: scenario.project,
-        workpoints: preview.workpoints,
-        source_evidence: preview.source_evidence,
-        field_conflicts: preview.field_conflicts,
-        expected_latest_version_no: projectVersion?.version_no ?? null,
-        created_by: "本地计划工程师",
-      });
-      setProjectVersion(saved);
-      setScenarioVersion(null);
-    });
-  }
-
-  async function importFile(file: File) {
-    if (!projectVersion) { setError("请先创建项目主数据草稿，再导入工点文件。"); return; }
-    await run("import", async () => {
-      const data = new FormData();
-      data.append("project_data_version_id", projectVersion.project_data_version_id);
-      data.append("coarse_mode", String(config.coarse_mode));
-      data.append("file", file);
-      const imported = await importGirderWorkpoints(data) as ImportPreview;
-      setPreview(imported);
-      setProjectVersion(null);
-      setScenarioVersion(null);
-    });
-  }
-
-  async function confirmProject() {
-    if (!projectVersion) return;
-    await run("confirm-project", async () => setProjectVersion(await confirmProjectDataVersion(projectVersion.project_data_version_id, { expected_input_fingerprint: projectVersion.input_fingerprint, confirmed_by: "项目总工", confirmation_reason: "结构与架梁工点数据已核对" })));
-  }
-
   async function saveScenarioVersion() {
-    if (!projectVersion || projectVersion.status !== "confirmed") { setError("请先确认项目主数据版本。"); return; }
+    if (!scenario.project_data_version_id) { setError("请先在“项目主数据”确认一个版本。"); return; }
     await run("scenario", async () => {
-      const saved = await createPlanningScenarioVersion({ scenario: withGirderPlanningConfig(scenario, config), project_data_version_id: projectVersion.project_data_version_id, girder_planning: config, expected_latest_version_no: scenarioVersion?.version_no ?? null, created_by: "本地计划工程师" });
+      const saved = await createPlanningScenarioVersion({ scenario: withGirderPlanningConfig(scenario, config), project_data_version_id: scenario.project_data_version_id!, girder_planning: config, expected_latest_version_no: scenarioVersion?.version_no ?? null, created_by: "本地计划工程师" });
       setScenarioVersion(saved);
       setReadiness(null);
     });
@@ -141,18 +116,15 @@ export function GirderPlanningPanel({
       <div className="panel-title"><div><h2>架梁专项策划</h2><span>统一项目数据、梁场设备、固定路线和专项确认；正式结果由联合排程生成。</span></div></div>
       {error && <div className="notice error">{error}</div>}
       <section className="girder-card girder-workflow">
-        <div className="girder-card-heading"><div><h3>版本与导入</h3><p>项目主数据确认后才能创建正式方案版本。</p></div></div>
+        <div className="girder-card-heading"><div><h3>主数据版本与派生工点</h3><p>路线工点由统一主数据的 workpoint_id + side 自动派生，不再单独上传。</p></div></div>
         <div className="girder-actions">
-          <button type="button" onClick={saveProjectVersion} disabled={Boolean(busy)}>{projectVersion ? "保存新的统一项目版本" : "创建项目主数据草稿"}</button>
-          <label className="girder-file-button">导入架梁工点<input type="file" accept=".xlsx,.xlsm,.csv,.tsv" disabled={Boolean(busy) || !projectVersion} onChange={(event) => { const file = event.target.files?.[0]; if (file) void importFile(file); }} /></label>
-          <button type="button" onClick={confirmProject} disabled={Boolean(busy) || !projectVersion || projectVersion.status !== "draft"}>确认项目数据</button>
-          <button type="button" onClick={saveScenarioVersion} disabled={Boolean(busy) || projectVersion?.status !== "confirmed"}>保存专项方案版本</button>
+          <button type="button" onClick={saveScenarioVersion} disabled={Boolean(busy) || !scenario.project_data_version_id}>保存专项方案版本</button>
           <button type="button" onClick={validateCurrent} disabled={Boolean(busy) || !scenarioVersion}>校验专项</button>
           <button type="button" onClick={confirmSpecialty} disabled={Boolean(busy) || !scenarioVersion || !readiness || readiness.status === "blocking"}>专业确认</button>
           <button type="button" onClick={previewCurrent} disabled={Boolean(busy) || !scenarioVersion}>专项预览</button>
           <button type="button" onClick={solveCurrent} disabled={Boolean(busy) || scenarioVersion?.status !== "specialty_confirmed"}>联合计算</button>
         </div>
-        <div className="girder-version-strip"><span>项目版本：{projectVersion ? `v${projectVersion.version_no} · ${projectVersion.status}` : "未保存"}</span><span>方案版本：{scenarioVersion ? `v${scenarioVersion.version_no} · ${scenarioVersion.status}` : "未保存"}</span><span>已导入工点：{preview.workpoints.length}</span></div>
+        <div className="girder-version-strip"><span>主数据版本：{scenario.project_data_version_id || "未确认"}</span><span>方案版本：{scenarioVersion ? `v${scenarioVersion.version_no} · ${scenarioVersion.status}` : "未保存"}</span><span>派生路线工点：{preview.workpoints.length}</span></div>
       </section>
       <section className="girder-card"><div className="girder-card-heading"><div><h3>专项开关与通行口径</h3></div></div><div className="girder-grid compact"><label className="girder-check"><input type="checkbox" checked={config.enabled} onChange={(event) => updateConfig({ ...config, enabled: event.target.checked })} />启用架梁专项</label><label>架后通行缓冲（天）<input type="number" min={0} value={config.parameters.post_erection_passage_buffer_days} onChange={(event) => updateConfig({ ...config, parameters: { ...config.parameters, post_erection_passage_buffer_days: Number(event.target.value), post_erection_buffer_confirmed: false } })} /></label><label className="girder-check"><input type="checkbox" checked={config.parameters.post_erection_buffer_confirmed} onChange={(event) => updateConfig({ ...config, parameters: { ...config.parameters, post_erection_buffer_confirmed: event.target.checked } })} />确认架后缓冲</label><label className="girder-check"><input type="checkbox" checked={config.coarse_mode} onChange={(event) => updateConfig({ ...config, coarse_mode: event.target.checked })} />粗粒度预览模式</label></div></section>
       <YardMachineEditor config={config} startDate={scenario.project.start_date} onChange={updateConfig} />

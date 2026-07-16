@@ -7,9 +7,9 @@ import {
   generateProgressForecast,
   getPlanControlProject,
   saveProgressSnapshot,
-} from "../../api/schedulerApi";
+} from "../../api/planControlApi";
 import { PanelTitle } from "../../components/common/PanelTitle";
-import { GirderProgressEditor } from "../girderPlanning/GirderProgressEditor";
+import { GirderProgressEditor } from "../girderPlanning";
 import {
   applyActualDateStatusDefaults,
   buildPlannedTaskDatesById,
@@ -17,14 +17,27 @@ import {
   markActualDateFieldManual,
   recomputeSuggestedActualDates,
   type ActualDateSuggestionState,
-} from "./progressDateDefaults";
+} from "./progressEditor";
 import {
   deriveProgressWorkflowSteps,
   hasUnsavedProgressChanges,
   planControlErrorMessage,
   validateProgressEntries,
   type ProgressWorkflowStep,
-} from "./progressWorkflow";
+} from "./progressEditor";
+import {
+  criticalNodeDateSourceLabel,
+  criticalNodeStatusLabel,
+  criticalNodeVarianceLabel,
+  dateRange,
+  executionStateLabel,
+  executionSummaryItems,
+  remainingSourceLabel,
+  riskLabel,
+  workflowStepStatusLabel,
+} from "./forecastPresenter";
+import { diagnosticText } from "./adjustmentPresenter";
+import { executePlanControlRequest } from "./requestController";
 import type {
   AdjustmentComparisonResponse,
   CriticalNodeForecast,
@@ -39,7 +52,7 @@ import type {
   ScenarioInput,
   Task,
   YardInventoryActual,
-} from "../../types/scheduler";
+} from "../../contracts";
 
 const statusLabels: Record<ProgressTaskStatus, string> = {
   not_started: "未开始",
@@ -65,7 +78,6 @@ function emptyEntry(taskId: string): ProgressEntry {
     notes: "",
   };
 }
-
 type ProgressQuantityView = {
   entry: ProgressEntry;
   status: "valid" | "derived" | "conflict" | "unavailable";
@@ -224,11 +236,10 @@ export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null 
 
   async function reload() {
     if (!scenario) return;
-    setBusy("loading");
     setError(null);
     setMessage(null);
     try {
-      const next = await getPlanControlProject(scenario.scenario_id);
+      const next = await executePlanControlRequest("loading", setBusy, () => getPlanControlProject(scenario.scenario_id));
       setSummary(next);
       setForecast(next.latest_forecast ?? null);
       const restored = Object.fromEntries((next.current_progress_snapshot?.entries ?? []).map((item) => [item.task_id, item]));
@@ -243,8 +254,6 @@ export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null 
       setFailedStep(null);
     } catch (exc) {
       setError(planControlErrorMessage(exc, "load"));
-    } finally {
-      setBusy(null);
     }
   }
 
@@ -819,77 +828,4 @@ export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null 
       )}
     </div>
   );
-}
-
-function riskLabel(value: ForecastSchedule["risk_status"]): string {
-  return { on_track: "预计按期", at_risk: "临近风险", late: "预计延期", insufficient_data: "无法判断" }[value];
-}
-
-function workflowStepStatusLabel(step: ProgressWorkflowStep): string {
-  return {
-    blocked: "未解锁",
-    ready: "可执行",
-    running: "执行中",
-    complete: "已完成",
-    failed: "需处理",
-    stale: "待更新",
-  }[step.status];
-}
-
-function executionSummaryItems(forecast: ForecastSchedule): Array<{ label: string; value: string | number }> {
-  const summary = forecast.execution_summary;
-  if (!summary) return [{ label: "历史预测", value: "请重新重排" }];
-  return [
-    { label: "已完成锁定", value: summary.completed_locked_count },
-    { label: "进行中剩余", value: summary.in_progress_remaining_count },
-    { label: "暂停待恢复", value: summary.paused_remaining_count },
-    { label: "未开始重排", value: summary.not_started_future_count },
-    { label: "取消待确认", value: summary.cancelled_excluded_count },
-    { label: "资源与顺序", value: summary.resource_policy === "baseline_fixed" ? "原资源 / 既定顺序" : "瓶颈资源增配" },
-  ];
-}
-
-function executionStateLabel(
-  value: ForecastSchedule["historical_tasks"][number]["execution_state"],
-  fallbackState: ForecastSchedule["historical_tasks"][number]["state"],
-): string {
-  if (!value) return fallbackState === "actual" ? "历史实际" : "未来预测";
-  return {
-    completed_locked: "已完成 · 实绩锁定",
-    cancelled_excluded: "已取消 · 依赖待确认",
-    in_progress_remaining: "进行中 · 仅排剩余工作",
-    paused_remaining: "暂停 · 按恢复日期续排",
-    not_started_future: "未开始 · 状态日后重排",
-  }[value];
-}
-
-function criticalNodeStatusLabel(value: CriticalNodeForecast["status"]): string {
-  return { on_track: "预计按期", at_risk: "临近风险", late: "预计延期", insufficient_data: "无法判断" }[value];
-}
-
-function criticalNodeDateSourceLabel(value: CriticalNodeForecast["date_source"]): string {
-  return { actual: "历史实绩", predicted: "未来预测", combined: "实绩＋预测", unavailable: "不可用" }[value];
-}
-
-function criticalNodeVarianceLabel(node: CriticalNodeForecast): string {
-  if (node.variance_days == null || node.buffer_days == null) return "-";
-  if (node.variance_days > 0) return `延期 ${node.variance_days} 天`;
-  if (node.buffer_days === 0) return "无剩余缓冲";
-  return `缓冲 ${node.buffer_days} 天`;
-}
-
-function remainingSourceLabel(value: ProgressEntry["remaining_days_source"]): string {
-  return { none: "无", baseline: "基准", calculated: "工程量/工效", manual: "人工" }[value];
-}
-
-function dateRange(start?: string | null, finish?: string | null): string {
-  if (!start && !finish) return "-";
-  return `${start ?? "?"} ～ ${finish ?? "?"}`;
-}
-
-function diagnosticText(
-  diagnostics: Array<{ level: "error" | "warning" | "info"; message: string }>,
-  level: "error" | "warning",
-): string {
-  return diagnostics.filter((item) => item.level === level).map((item) => item.message).join("；");
 }

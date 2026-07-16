@@ -7,7 +7,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from ..models import (
+from ..contracts import (
     AdoptAdjustmentRequest,
     AdoptAdjustmentResponse,
     AdjustmentComparisonResponse,
@@ -112,7 +112,11 @@ def create_baseline_plan(
         confirmed_by=request.confirmed_by.strip(),
         confirmed_at=confirmed_at,
         confirmation_reason=request.confirmation_reason.strip(),
-        project_data_version_id=(integrated_snapshot.project_data_version_id if integrated_snapshot else None),
+        project_data_version_id=(
+            integrated_snapshot.project_data_version_id
+            if integrated_snapshot
+            else request.scenario.project_data_version_id
+        ),
         scenario_version_id=(integrated_snapshot.scenario_version_id if integrated_snapshot else None),
         integrated_snapshot_id=(integrated_snapshot.integrated_snapshot_id if integrated_snapshot else None),
         girder_result_snapshot=(integrated_snapshot.girder_result.model_copy(deep=True) if integrated_snapshot and integrated_snapshot.girder_result else None),

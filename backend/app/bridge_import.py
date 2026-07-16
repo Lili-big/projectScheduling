@@ -14,7 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from .models import (
+from .contracts import (
     ComponentModel,
     ImportBridgeParamsResponse,
     ProjectBridge,
@@ -32,12 +32,23 @@ DEFAULT_LOCAL_BRIDGE_WORKBOOK_NAME = "渠溪河特大桥结构设计表.xlsx"
 
 
 def default_local_bridge_workbook(project_root: Path) -> Path | None:
-    preferred = project_root / DEFAULT_LOCAL_BRIDGE_WORKBOOK_NAME
-    if preferred.is_file():
-        return preferred
+    preferred_paths = (
+        project_root / DEFAULT_LOCAL_BRIDGE_WORKBOOK_NAME,
+        project_root / "examples" / "bridge-import" / DEFAULT_LOCAL_BRIDGE_WORKBOOK_NAME,
+        project_root / "examples" / DEFAULT_LOCAL_BRIDGE_WORKBOOK_NAME,
+    )
+    for preferred in preferred_paths:
+        if preferred.is_file():
+            return preferred
     workbooks = sorted(
         path
-        for path in project_root.glob("*.xlsx")
+        for search_root in (
+            project_root,
+            project_root / "examples" / "bridge-import",
+            project_root / "examples",
+        )
+        if search_root.is_dir()
+        for path in search_root.glob("*.xlsx")
         if not path.name.startswith("~$")
     )
     return workbooks[0] if workbooks else None

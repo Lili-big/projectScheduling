@@ -1,12 +1,12 @@
 import { useState } from "react";
 
-import { importGirderProgressActuals } from "../../api/schedulerApi";
+import { importGirderProgressActuals } from "../../api/girderPlanningApi";
 import type {
   GirderExecutionActual,
   GirderProgressImportPreview,
   PassageActual,
   YardInventoryActual,
-} from "../../types/scheduler";
+} from "../../contracts";
 
 export function GirderProgressEditor({
   yardActuals,

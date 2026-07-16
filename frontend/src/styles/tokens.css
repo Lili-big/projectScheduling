@@ -1,0 +1,13 @@
+:root {
+  --accent: #0ea5a4;
+  --border: #dbe3ec;
+  --muted: #64748b;
+  --surface: #fff;
+  --surface-soft: #f7f8fa;
+  font-family:
+    Inter, "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #18212f;
+  background: #eef2f6;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}

@@ -2,7 +2,7 @@ import { Check, PlusCircle } from "lucide-react";
 import type {
   AiParameterCandidateAddition,
   AiParameterUploadedMaterialSummary,
-} from "../../../types/scheduler";
+} from "../../../contracts";
 import {
   aiParameterCategoryLabels,
   aiParameterConfidenceLabels,

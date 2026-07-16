@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Workspace Cleanup Policy",
+  "type": "object",
+  "required": ["version", "default_mode", "rules"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "default_mode": { "const": "dry-run" },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["pattern", "retention_class", "protected", "reason"],
+        "properties": {
+          "pattern": { "type": "string", "minLength": 1 },
+          "retention_class": { "enum": ["persistent-state", "user-input", "formal-output", "diagnostic-log", "rebuildable", "cache", "temporary"] },
+          "protected": { "type": "boolean" },
+          "reason": { "type": "string", "minLength": 1 },
+          "requires_process_check": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

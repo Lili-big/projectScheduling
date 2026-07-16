@@ -1,6 +1,6 @@
 import { componentLabels, sideLabels } from "./labels";
 import { findComponent, findStructure, findWorkSection, isComponentType } from "./projectTree";
-import type { MilestoneConstraint, MilestoneResult, ScenarioInput } from "../types/scheduler";
+import type { MilestoneConstraint, MilestoneResult, ScenarioInput } from "../contracts";
 
 export function milestoneStatusClass(milestone: MilestoneResult): string {
   if (milestone.status !== "late") return milestone.status;

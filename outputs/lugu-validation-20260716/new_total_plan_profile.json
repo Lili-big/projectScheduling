@@ -1,0 +1,1609 @@
+{
+  "input": "C:\\Users\\wangl-bj\\Desktop\\泸古高速项目TJ-1标总体进度计划-1标6.6.xlsx",
+  "generated_at": "2026-07-16T08:25:56.221996+00:00",
+  "tables": [
+    {
+      "name": "Sheet1",
+      "rows": 204,
+      "columns": 11,
+      "likely_header_row": 2,
+      "headers": [
+        "203-1-a",
+        "挖土方",
+        "m3",
+        "558128",
+        "612297",
+        "Column 6",
+        "Column 7",
+        "Column 8",
+        "Column 9",
+        "Column 10",
+        "Column 11"
+      ],
+      "data_rows": 202,
+      "empty_rows": 0,
+      "duplicate_data_rows": 0,
+      "sample_rows": [
+        [
+          null,
+          "松土",
+          null,
+          null,
+          45200,
+          "渠坝枢纽",
+          "S3-23",
+          null,
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "松土",
+          null,
+          null,
+          1627,
+          "KO+640～K1+380",
+          "S3-23",
+          null,
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "松土",
+          null,
+          null,
+          6242,
+          "K1+380～K2+659.500",
+          "S3-23",
+          null,
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "松土",
+          null,
+          null,
+          898,
+          "K2+659.500～K3+600",
+          "S3-23",
+          null,
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          "松土",
+          null,
+          null,
+          540,
+          "K3+600～K4+040",
+          "S3-23",
+          null,
+          null,
+          null,
+          null
+        ]
+      ],
+      "column_summaries": [
+        {
+          "index": 1,
+          "name": "203-1-a",
+          "non_empty": 4,
+          "missing": 198,
+          "types": [
+            "str"
+          ],
+          "text": {
+            "distinct": 4,
+            "top_values": [
+              [
+                "203-1-b",
+                1
+              ],
+              [
+                "204-1",
+                1
+              ],
+              [
+                "204-1-a",
+                1
+              ],
+              [
+                "204-1-b",
+                1
+              ]
+            ]
+          }
+        },
+        {
+          "index": 2,
+          "name": "挖土方",
+          "non_empty": 202,
+          "missing": 0,
+          "types": [
+            "str"
+          ],
+          "text": {
+            "distinct": 13,
+            "top_values": [
+              [
+                "松土",
+                24
+              ],
+              [
+                "普通土",
+                24
+              ],
+              [
+                "硬土",
+                24
+              ],
+              [
+                "软石",
+                24
+              ],
+              [
+                "次坚石",
+                24
+              ]
+            ]
+          }
+        },
+        {
+          "index": 3,
+          "name": "m3",
+          "non_empty": 3,
+          "missing": 199,
+          "types": [
+            "str"
+          ],
+          "text": {
+            "distinct": 1,
+            "top_values": [
+              [
+                "m3",
+                3
+              ]
+            ]
+          }
+        },
+        {
+          "index": 4,
+          "name": "558128",
+          "non_empty": 3,
+          "missing": 199,
+          "types": [
+            "int"
+          ],
+          "numeric": {
+            "count": 3,
+            "min": 164098,
+            "max": 3070150,
+            "mean": 1606529.3333333333
+          }
+        },
+        {
+          "index": 5,
+          "name": "612297",
+          "non_empty": 201,
+          "missing": 1,
+          "types": [
+            "int"
+          ],
+          "numeric": {
+            "count": 201,
+            "min": 5,
+            "max": 3016785,
+            "mean": 49147.935323383084
+          }
+        },
+        {
+          "index": 6,
+          "name": "Column 6",
+          "non_empty": 198,
+          "missing": 4,
+          "types": [
+            "str"
+          ],
+          "text": {
+            "distinct": 24,
+            "top_values": [
+              [
+                "渠坝枢纽",
+                9
+              ],
+              [
+                "K1+380～K2+659.500",
+                9
+              ],
+              [
+                "K2+659.500～K3+600",
+                9
+              ],
+              [
+                "K7+000～K8+180",
+                9
+              ],
+              [
+                "K8+180～K9+000",
+                9
+              ]
+            ]
+          }
+        },
+        {
+          "index": 7,
+          "name": "Column 7",
+          "non_empty": 200,
+          "missing": 2,
+          "types": [
+            "str"
+          ],
+          "text": {
+            "distinct": 1,
+            "top_values": [
+              [
+                "S3-23",
+                200
+              ]
+            ]
+          }
+        },
+        {
+          "index": 8,
+          "name": "Column 8",
+          "non_empty": 0,
+          "missing": 202,
+          "types": []
+        },
+        {
+          "index": 9,
+          "name": "Column 9",
+          "non_empty": 35,
+          "missing": 167,
+          "types": [
+            "int"
+          ],
+          "numeric": {
+            "count": 35,
+            "min": 5,
+            "max": 272484,
+            "mean": 41252.6
+          }
+        },
+        {
+          "index": 10,
+          "name": "Column 10",
+          "non_empty": 43,
+          "missing": 159,
+          "types": [
+            "int"
+          ],
+          "numeric": {
+            "count": 43,
+            "min": 39,
+            "max": 299371,
+            "mean": 37591.48837209302
+          }
+        },
+        {
+          "index": 11,
+          "name": "Column 11",
+          "non_empty": 29,
+          "missing": 173,
+          "types": [
+            "int"
+          ],
+          "numeric": {
+            "count": 29,
+            "min": 173,
+            "max": 299371,
+            "mean": 55739.10344827586
+          }
+        }
+      ]
+    },
+    {
+      "name": "1",
+      "rows": 29,
+      "columns": 10,
+      "likely_header_row": 2,
+      "headers": [
+        "里程桩号",
+        "Column 2",
+        "Column 3",
+        "持续时间（计算式）",
+        "开始时间",
+        "结束时间",
+        "是否为关键工点",
+        "计算依据",
+        "备注",
+        "Column 10"
+      ],
+      "data_rows": 27,
+      "empty_rows": 0,
+      "duplicate_data_rows": 0,
+      "sample_rows": [
+        [
+          "厦蓉高速右线1号大桥",
+          null,
+          null,
+          211,
+          "2027-03-20T00:00:00",
+          "2027-10-17T00:00:00",
+          "否",
+          null,
+          null,
+          null
+        ],
+        [
+          "厦蓉高速右线2号大桥",
+          null,
+          null,
+          350,
+          "2026-11-20T00:00:00",
+          "2027-11-05T00:00:00",
+          "否",
+          null,
+          null,
+          null
+        ],
+        [
+          "夏蓉高速右线中桥",
+          null,
+          null,
+          36,
+          "2027-09-20T00:00:00",
+          "2027-10-26T00:00:00",
+          "否",
+          null,
+          null,
+          null
+        ],
+        [
+          "渠坝互通路基",
+          null,
+          null,
+          614,
+          "2026-11-01T00:00:00",
+          "2028-07-07T00:00:00",
+          "是",
+          "涉路施工手续办理+路基挖填方+附属+雨期跨年影响",
+          null,
+          null
+        ],
+        [
+          "联合村1号中桥",
+          null,
+          null,
+          60,
+          "2027-10-11T00:00:00",
+          "2027-12-10T00:00:00",
+          "否",
+          null,
+          "桥长：87m；桩基：4根；墩柱：3根；盖梁：4个；预制T梁：21片",
+          null
+        ]
+      ],
+      "column_summaries": [
+        {
+          "index": 1,
+          "name": "里程桩号",
+          "non_empty": 27,
+          "missing": 0,
+          "types": [
+            "float",
+            "int",
+            "str"
+          ],
+          "numeric": {
+            "count": 11,
+            "min": 1376,
+            "max": 14625,
+            "mean": 6761.169545454545
+          },
+          "text": {
+            "distinct": 16,
+            "top_values": [
+              [
+                "厦蓉高速右线1号大桥",
+                1
+              ],
+              [
+                "厦蓉高速右线2号大桥",
+                1
+              ],
+              [
+                "夏蓉高速右线中桥",
+                1
+              ],
+              [
+                "渠坝互通路基",
+                1
+              ],
+              [
+                "联合村1号中桥",
+                1
+              ]
+            ]
+          }
+        },
+        {
+          "index": 2,
+          "name": "Column 2",
+          "non_empty": 11,
+          "missing": 16,
+          "types": [
+            "str"
+          ],
+          "text": {
+            "distinct": 1,
+            "top_values": [
+              [
+                "～",
+                11
+              ]
+            ]
+          }
+        },
+        {
+          "index": 3,
+          "name": "Column 3",
+          "non_empty": 11,
+          "missing": 16,
+          "types": [
+            "float",
+            "int"
+          ],
+          "numeric": {
+            "count": 11,
+            "min": 1941,
+            "max": 14929,
+            "mean": 7525.261181818182
+          }
+        },
+        {
+          "index": 4,
+          "name": "持续时间（计算式）",
+          "non_empty": 27,
+          "missing": 0,
+          "types": [
+            "float",
+            "int"
+          ],
+          "numeric": {
+            "count": 27,
+            "min": 36,
+            "max": 1009,
+            "mean": 428.3633890783014
+          }
+        },
+        {
+          "index": 5,
+          "name": "开始时间",
+          "non_empty": 27,
+          "missing": 0,
+          "types": [
+            "datetime"
+          ],
+          "date": {
+            "count": 27,
+            "min": "2026-07-01T00:00:00",
+            "max": "2028-02-15T00:00:00"
+          }
+        },
+        {
+          "index": 6,
+          "name": "结束时间",
+          "non_empty": 27,
+          "missing": 0,
+          "types": [
+            "datetime"
+          ],
+          "date": {
+            "count": 27,
+            "min": "2027-03-06T00:00:00",
+            "max": "2029-04-05T00:00:00"
+          }
+        },
+        {
+          "index": 7,
+          "name": "是否为关键工点",
+          "non_empty": 27,
+          "missing": 0,
+          "types": [
+            "str"
+          ],
+          "text": {
+            "distinct": 2,
+            "top_values": [
+              [
+                "否",
+                24
+              ],
+              [
+                "是",
+                3
+              ]
+            ]
+          }
+        },
+        {
+          "index": 8,
+          "name": "计算依据",
+          "non_empty": 23,
+          "missing": 4,
+          "types": [
+            "str"
+          ],
+          "text": {
+            "distinct": 14,
+            "top_values": [
+              [
+                "便道+桩量/工效/设备+养护+桥台、地系梁30d+柱系梁（5d+数量/模板*3d）+（25d+柱量/模板*5d）+（7d+盖梁量/模板*5）+养护（28）+右幅架梁+右幅桥面系及附属+跨年雨期影响",
+                5
+              ],
+              [
+                "路基挖填方+附属",
+                4
+              ],
+              [
+                "便道+洞口+五级围岩+四级围岩+二衬延后+前后洞延后+附属+雨期跨年影响",
+                2
+              ],
+              [
+                "涵洞+特殊路基处理+路基挖填方+附属+雨期影响",
+                2
+              ],
+              [
+                "涉路施工手续办理+路基挖填方+附属+雨期跨年影响",
+                1
+              ]
+            ]
+          }
+        },
+        {
+          "index": 9,
+          "name": "备注",
+          "non_empty": 4,
+          "missing": 23,
+          "types": [
+            "str"
+          ],
+          "text": {
+            "distinct": 4,
+            "top_values": [
+              [
+                "桥长：87m；桩基：4根；墩柱：3根；盖梁：4个；预制T梁：21片",
+                1
+              ],
+              [
+                "桥长：600m；桩基：134根；；承台（含地系梁）55；系梁：56；墩柱：60根；盖梁：34个；预制T梁：224片",
+                1
+              ],
+              [
+                "ZK1+658附近，优先做梁厂段、挖12.6万、土石2:8，填1.5万。1台套挖方设备；标段起点至永宁河特大桥小里程引桥共1103片。梁厂说明产能（1片/13d/台座）：42个台座、3片/d；最大存梁96片。",
+                1
+              ],
+              [
+                "K10+000附近，优先做梁厂段、挖7.98万、土石2:8，填12.3万。1台套挖方设备；标段永宁河特大桥大里程引桥至标尾共757片。梁厂说明产能（1片/13d/台座）：30个台座、2片/d；最大存梁64片。",
+                1
+              ]
+            ]
+          }
+        },
+        {
+          "index": 10,
+          "name": "Column 10",
+          "non_empty": 1,
+          "missing": 26,
+          "types": [
+            "str"
+          ],
+          "text": {
+            "distinct": 1,
+            "top_values": [
+              [
+                "2028/6.12",
+                1
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "各专业及关键工点",
+      "rows": 322,
+      "columns": 18,
+      "likely_header_row": 2,
+      "headers": [
+        "序号",
+        "关键节点",
+        "月数",
+        "工期（计算式）",
+        "开始时间",
+        "结束时间",
+        "工装配置",
+        "说明",
+        "备注",
+        "Column 10",
+        "Column 11",
+        "Column 12",
+        "Column 13",
+        "Column 14",
+        "Column 15",
+        "Column 16",
+        "Column 17",
+        "Column 18"
+      ],
+      "data_rows": 310,
+      "empty_rows": 10,
+      "duplicate_data_rows": 1,
+      "sample_rows": [
+        [
+          null,
+          "标段总体完工",
+          33.0666666666667,
+          992,
+          "2026-07-01T00:00:00",
+          "2029-03-19T00:00:00",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        [
+          "一",
+          "制架梁",
+          24.0444444444433,
+          721.333333333299,
+          "2026-12-13T16:00:00",
+          "2028-12-04T00:00:00",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        [
+          1,
+          "1#梁场",
+          21.4666666666667,
+          644,
+          "2027-03-01T00:00:00",
+          "2028-12-04T00:00:00",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        [
+          1.1,
+          "路基",
+          6.02222222222222,
+          180.666666666667,
+          "2026-07-01T00:00:00",
+          "2026-12-27T16:00:00",
+          "1套机械设备",
+          "K1+376～K1+941主线路基上，优先做梁厂段、挖13.1万方，填1400方，1级坡",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        [
+          1.2,
+          "梁场建设时间",
+          3,
+          90,
+          "2027-03-01T00:00:00",
+          "2027-05-30T00:00:00",
+          null,
+          "1#梁场位于K1+416～K1+891段路基，长度475m;设置42个制梁台座，生产能力为：42*2.2=92片/月，（40m制梁台座21个，25m制梁台座21个，其中25m和40m共用7个台座）;存梁能力：设置12道存梁台座（40m存梁台座4个，25m存梁台座8个），T梁存放按双层考虑，可存25mT64片、40mT梁32片，共计存梁96片",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      ],
+      "column_summaries": [
+        {
+          "index": 1,
+          "name": "序号",
+          "non_empty": 309,
+          "missing": 1,
+          "types": [
+            "float",
+            "int",
+            "str"
+          ],
+          "numeric": {
+            "count": 241,
+            "min": 1,
+            "max": 8,
+            "mean": 2.5790871369294606
+          },
+          "text": {
+            "distinct": 22,
+            "top_values": [
+              [
+                "1)",
+                18
+              ],
+              [
+                "2)",
+                18
+              ],
+              [
+                "（一）",
+                3
+              ],
+              [
+                "（二）",
+                3
+              ],
+              [
+                "（三）",
+                3
+              ]
+            ]
+          }
+        },
+        {
+          "index": 2,
+          "name": "关键节点",
+          "non_empty": 310,
+          "missing": 0,
+          "types": [
+            "str"
+          ],
+          "text": {
+            "distinct": 134,
+            "top_values": [
+              [
+                "路基土石方",
+                24
+              ],
+              [
+                "防护工程",
+                24
+              ],
+              [
+                "左幅下部结构",
+                11
+              ],
+              [
+                "左幅架梁",
+                11
+              ],
+              [
+                "左幅桥面系",
+                11
+              ]
+            ]
+          }
+        },
+        {
+          "index": 3,
+          "name": "月数",
+          "non_empty": 310,
+          "missing": 0,
+          "types": [
+            "float",
+            "int"
+          ],
+          "numeric": {
+            "count": 310,
+            "min": 0,
+            "max": 33.0666666666667,
+            "mean": 6.173367101868742
+          }
+        },
+        {
+          "index": 4,
+          "name": "工期（计算式）",
+          "non_empty": 309,
+          "missing": 1,
+          "types": [
+            "float",
+            "int"
+          ],
+          "numeric": {
+            "count": 309,
+            "min": 6.5,
+            "max": 992,
+            "mean": 185.80036908536988
+          }
+        },
+        {
+          "index": 5,
+          "name": "开始时间",
+          "non_empty": 309,
+          "missing": 1,
+          "types": [
+            "datetime"
+          ],
+          "date": {
+            "count": 309,
+            "min": "2026-07-01T00:00:00",
+            "max": "2028-12-20T00:00:00"
+          }
+        },
+        {
+          "index": 6,
+          "name": "结束时间",
+          "non_empty": 309,
+          "missing": 1,
+          "types": [
+            "datetime"
+          ],
+          "date": {
+            "count": 309,
+            "min": "2026-07-16T00:00:00",
+            "max": "2029-03-19T00:00:00"
+          }
+        },
+        {
+          "index": 7,
+          "name": "工装配置",
+          "non_empty": 55,
+          "missing": 255,
+          "types": [
+            "str"
+          ],
+          "text": {
+            "distinct": 30,
+            "top_values": [
+              [
+                "1套机械设备",
+                23
+              ],
+              [
+                "架桥机1台，运梁车2台",
+                2
+              ],
+              [
+                "2套机械设备",
+                2
+              ],
+              [
+                "挖机1台，装载机1台，YT28湿式钻机15台，空压机3台，渣土运输车4台，二衬台车1台，湿喷机1台，简易仰拱栈桥1台，拖式混凝土泵车1台，防水板台车1台，养护台车1台，射流风机1台，",
+                2
+              ],
+              [
+                "制梁台座42个，存梁台座12道。25mT梁模板4套，40mT梁模板4套",
+                1
+              ]
+            ]
+          }
+        },
+        {
+          "index": 8,
+          "name": "说明",
+          "non_empty": 172,
+          "missing": 138,
+          "types": [
+            "str"
+          ],
+          "text": {
+            "distinct": 112,
+            "top_values": [
+              [
+                "15天安装，10天预压",
+                10
+              ],
+              [
+                "长13m，高12m，宽16.6m，分两次浇筑",
+                6
+              ],
+              [
+                "桩基9根，采用旋挖钻考虑1.5天1根，养护7天",
+                4
+              ],
+              [
+                "现浇段长3.8m，高4m，宽16.5m",
+                4
+              ],
+              [
+                "桩基9根，采用旋挖钻考虑1天1根，养护7天",
+                4
+              ]
+            ]
+          }
+        },
+        {
+          "index": 9,
+          "name": "备注",
+          "non_empty": 24,
+          "missing": 286,
+          "types": [
+            "float",
+            "str"
+          ],
+          "numeric": {
+            "count": 1,
+            "min": 301.71,
+            "max": 301.71,
+            "mean": 301.71
+          },
+          "text": {
+            "distinct": 11,
+            "top_values": [
+              [
+                "开挖1级防护1级",
+                6
+              ],
+              [
+                "开挖一级防护一级",
+                6
+              ],
+              [
+                "便道+桩基+养护+承台地系梁+墩柱+柱系梁+盖梁+养护",
+                2
+              ],
+              [
+                "预留1跨合龙后架设",
+                2
+              ],
+              [
+                "长度300m",
+                1
+              ]
+            ]
+          }
+        },
+        {
+          "index": 10,
+          "name": "Column 10",
+          "non_empty": 0,
+          "missing": 310,
+          "types": []
+        },
+        {
+          "index": 11,
+          "name": "Column 11",
+          "non_empty": 0,
+          "missing": 310,
+          "types": []
+        },
+        {
+          "index": 12,
+          "name": "Column 12",
+          "non_empty": 0,
+          "missing": 310,
+          "types": []
+        },
+        {
+          "index": 13,
+          "name": "Column 13",
+          "non_empty": 0,
+          "missing": 310,
+          "types": []
+        },
+        {
+          "index": 14,
+          "name": "Column 14",
+          "non_empty": 0,
+          "missing": 310,
+          "types": []
+        },
+        {
+          "index": 15,
+          "name": "Column 15",
+          "non_empty": 0,
+          "missing": 310,
+          "types": []
+        },
+        {
+          "index": 16,
+          "name": "Column 16",
+          "non_empty": 0,
+          "missing": 310,
+          "types": []
+        },
+        {
+          "index": 17,
+          "name": "Column 17",
+          "non_empty": 0,
+          "missing": 310,
+          "types": []
+        },
+        {
+          "index": 18,
+          "name": "Column 18",
+          "non_empty": 0,
+          "missing": 310,
+          "types": []
+        }
+      ]
+    },
+    {
+      "name": "Sheet3",
+      "rows": 58,
+      "columns": 23,
+      "likely_header_row": 4,
+      "headers": [
+        "Column 1",
+        "KO+646.5～K1+380",
+        "733.5",
+        "～",
+        "794",
+        "Column 6",
+        "1627",
+        "3254",
+        "1627",
+        "19521",
+        "6507",
+        "6508",
+        "26028",
+        "1848",
+        "3695",
+        "1848",
+        "22390",
+        "7169",
+        "1848",
+        "3695",
+        "1848",
+        "22390",
+        "7169"
+      ],
+      "data_rows": 52,
+      "empty_rows": 2,
+      "duplicate_data_rows": 0,
+      "sample_rows": [
+        [
+          null,
+          "K1+380～K2+659.500",
+          1376,
+          "～",
+          1941,
+          null,
+          6242,
+          8739,
+          2497,
+          77406,
+          29964,
+          17478,
+          107370,
+          6558,
+          9182,
+          2623,
+          81643,
+          31165,
+          6558,
+          9182,
+          2623,
+          81643,
+          31165
+        ],
+        [
+          null,
+          "K2+659.500～K3+600",
+          2614,
+          "～",
+          2930,
+          null,
+          898,
+          1436,
+          1077,
+          9335,
+          5206,
+          3411,
+          14541,
+          5515,
+          8488,
+          6505,
+          66658,
+          23115,
+          5515,
+          8488,
+          6505,
+          66658,
+          23115
+        ],
+        [
+          null,
+          "K3+600～K4+040",
+          3570,
+          "～",
+          3636,
+          null,
+          540,
+          1080,
+          432,
+          5617,
+          3133,
+          2052,
+          8750,
+          1198,
+          2395,
+          958,
+          13641,
+          5764,
+          1198,
+          2395,
+          958,
+          13641,
+          5764
+        ],
+        [
+          null,
+          "K4+040～K6+072.412",
+          4096,
+          "～",
+          4251.453,
+          null,
+          8125,
+          11375,
+          6500,
+          89376,
+          47125,
+          26000,
+          136501,
+          8477,
+          11868,
+          6782,
+          93884,
+          48534,
+          4238.5,
+          5934,
+          3391,
+          46942,
+          24267
+        ],
+        [
+          null,
+          "K6+072.412～K7+000",
+          4783.453,
+          "～",
+          4983.42,
+          null,
+          43156,
+          77680,
+          25893,
+          483345,
+          233041,
+          146729,
+          716386,
+          43156,
+          77680,
+          25893,
+          483345,
+          233041,
+          4238.5,
+          5934,
+          3391,
+          46942,
+          24267
+        ]
+      ],
+      "column_summaries": [
+        {
+          "index": 1,
+          "name": "Column 1",
+          "non_empty": 0,
+          "missing": 52,
+          "types": []
+        },
+        {
+          "index": 2,
+          "name": "KO+646.5～K1+380",
+          "non_empty": 51,
+          "missing": 1,
+          "types": [
+            "str"
+          ],
+          "text": {
+            "distinct": 24,
+            "top_values": [
+              [
+                "K1+380～K2+659.500",
+                3
+              ],
+              [
+                "K2+659.500～K3+600",
+                3
+              ],
+              [
+                "K3+600～K4+040",
+                3
+              ],
+              [
+                "K4+040～K6+072.412",
+                3
+              ],
+              [
+                "K7+000～K8+180",
+                3
+              ]
+            ]
+          }
+        },
+        {
+          "index": 3,
+          "name": "733.5",
+          "non_empty": 48,
+          "missing": 4,
+          "types": [
+            "float",
+            "int",
+            "str"
+          ],
+          "numeric": {
+            "count": 46,
+            "min": 733.5,
+            "max": 14625,
+            "mean": 6499.096956521739
+          },
+          "text": {
+            "distinct": 1,
+            "top_values": [
+              [
+                "渠坝枢纽",
+                2
+              ]
+            ]
+          }
+        },
+        {
+          "index": 4,
+          "name": "～",
+          "non_empty": 46,
+          "missing": 6,
+          "types": [
+            "str"
+          ],
+          "text": {
+            "distinct": 1,
+            "top_values": [
+              [
+                "～",
+                46
+              ]
+            ]
+          }
+        },
+        {
+          "index": 5,
+          "name": "794",
+          "non_empty": 46,
+          "missing": 6,
+          "types": [
+            "float",
+            "int"
+          ],
+          "numeric": {
+            "count": 46,
+            "min": 794,
+            "max": 14929,
+            "mean": 7232.597652173913
+          }
+        },
+        {
+          "index": 6,
+          "name": "Column 6",
+          "non_empty": 0,
+          "missing": 52,
+          "types": []
+        },
+        {
+          "index": 7,
+          "name": "1627",
+          "non_empty": 52,
+          "missing": 0,
+          "types": [
+            "int"
+          ],
+          "numeric": {
+            "count": 52,
+            "min": 173,
+            "max": 299371,
+            "mean": 37163.78846153846
+          }
+        },
+        {
+          "index": 8,
+          "name": "3254",
+          "non_empty": 49,
+          "missing": 3,
+          "types": [
+            "float",
+            "int"
+          ],
+          "numeric": {
+            "count": 49,
+            "min": 112.5,
+            "max": 552236.2,
+            "mean": 42887.0
+          }
+        },
+        {
+          "index": 9,
+          "name": "1627",
+          "non_empty": 23,
+          "missing": 29,
+          "types": [
+            "int"
+          ],
+          "numeric": {
+            "count": 23,
+            "min": 126,
+            "max": 166682,
+            "mean": 11844.565217391304
+          }
+        },
+        {
+          "index": 10,
+          "name": "19521",
+          "non_empty": 25,
+          "missing": 27,
+          "types": [
+            "int",
+            "str"
+          ],
+          "numeric": {
+            "count": 23,
+            "min": 2869,
+            "max": 2122651,
+            "mean": 160615.65217391305
+          },
+          "text": {
+            "distinct": 2,
+            "top_values": [
+              [
+                "土",
+                1
+              ],
+              [
+                "石",
+                1
+              ]
+            ]
+          }
+        },
+        {
+          "index": 11,
+          "name": "6507",
+          "non_empty": 23,
+          "missing": 29,
+          "types": [
+            "int"
+          ],
+          "numeric": {
+            "count": 23,
+            "min": 662,
+            "max": 894134,
+            "mean": 67561.91304347826
+          }
+        },
+        {
+          "index": 12,
+          "name": "6508",
+          "non_empty": 23,
+          "missing": 29,
+          "types": [
+            "int"
+          ],
+          "numeric": {
+            "count": 23,
+            "min": 705,
+            "max": 612297,
+            "mean": 46675.52173913043
+          }
+        },
+        {
+          "index": 13,
+          "name": "26028",
+          "non_empty": 23,
+          "missing": 29,
+          "types": [
+            "int"
+          ],
+          "numeric": {
+            "count": 23,
+            "min": 3531,
+            "max": 3016785,
+            "mean": 228177.5652173913
+          }
+        },
+        {
+          "index": 14,
+          "name": "1848",
+          "non_empty": 14,
+          "missing": 38,
+          "types": [
+            "int"
+          ],
+          "numeric": {
+            "count": 14,
+            "min": 970,
+            "max": 181455,
+            "mean": 22561.571428571428
+          }
+        },
+        {
+          "index": 15,
+          "name": "3695",
+          "non_empty": 14,
+          "missing": 38,
+          "types": [
+            "int"
+          ],
+          "numeric": {
+            "count": 14,
+            "min": 1357,
+            "max": 264160,
+            "mean": 34613.42857142857
+          }
+        },
+        {
+          "index": 16,
+          "name": "1848",
+          "non_empty": 14,
+          "missing": 38,
+          "types": [
+            "int"
+          ],
+          "numeric": {
+            "count": 14,
+            "min": 776,
+            "max": 166682,
+            "mean": 19443.14285714286
+          }
+        },
+        {
+          "index": 17,
+          "name": "22390",
+          "non_empty": 14,
+          "missing": 38,
+          "types": [
+            "int"
+          ],
+          "numeric": {
+            "count": 14,
+            "min": 10471,
+            "max": 2122651,
+            "mean": 263663.64285714284
+          }
+        },
+        {
+          "index": 18,
+          "name": "7169",
+          "non_empty": 14,
+          "missing": 38,
+          "types": [
+            "int"
+          ],
+          "numeric": {
+            "count": 14,
+            "min": 5764,
+            "max": 894134,
+            "mean": 110947.28571428571
+          }
+        },
+        {
+          "index": 19,
+          "name": "1848",
+          "non_empty": 12,
+          "missing": 40,
+          "types": [
+            "float",
+            "int"
+          ],
+          "numeric": {
+            "count": 12,
+            "min": 1198,
+            "max": 181455,
+            "mean": 26321.833333333332
+          }
+        },
+        {
+          "index": 20,
+          "name": "3695",
+          "non_empty": 12,
+          "missing": 40,
+          "types": [
+            "float",
+            "int"
+          ],
+          "numeric": {
+            "count": 12,
+            "min": 2395,
+            "max": 264160,
+            "mean": 40382.333333333336
+          }
+        },
+        {
+          "index": 21,
+          "name": "1848",
+          "non_empty": 12,
+          "missing": 40,
+          "types": [
+            "float",
+            "int"
+          ],
+          "numeric": {
+            "count": 12,
+            "min": 958,
+            "max": 166682,
+            "mean": 22683.666666666668
+          }
+        },
+        {
+          "index": 22,
+          "name": "22390",
+          "non_empty": 12,
+          "missing": 40,
+          "types": [
+            "float",
+            "int"
+          ],
+          "numeric": {
+            "count": 12,
+            "min": 13641,
+            "max": 2122651,
+            "mean": 307607.5833333333
+          }
+        },
+        {
+          "index": 23,
+          "name": "7169",
+          "non_empty": 12,
+          "missing": 40,
+          "types": [
+            "float",
+            "int"
+          ],
+          "numeric": {
+            "count": 12,
+            "min": 5764,
+            "max": 894134,
+            "mean": 129438.5
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import type { ProcessTemplate, ResourceCostType, ResourceMode, ResourcePool, ScenarioInput, Task } from "../types/scheduler";
+import type { ProcessTemplate, ResourceCostType, ResourceMode, ResourcePool, ScenarioInput, Task } from "../contracts";
 import {
   defaultResourceTypeByComponent,
   keyResourceComponentTypes,

@@ -1,0 +1,879 @@
+{
+  "format_version": 1,
+  "entry_count": 71,
+  "entries": [
+    {
+      "path": ".dockerignore",
+      "category": "root_entry",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 448,
+      "sha256": null,
+      "references": [
+        ".agents/skills/speckit-implement/SKILL.md"
+      ]
+    },
+    {
+      "path": ".gitignore",
+      "category": "root_entry",
+      "tracked": true,
+      "status": " M",
+      "size_bytes": 511,
+      "sha256": null,
+      "references": [
+        ".agents/skills/speckit-implement/SKILL.md",
+        "README.md",
+        "agent.md",
+        "specs/027-baseline-progress-forecast/quickstart.md",
+        "specs/027-baseline-progress-forecast/tasks.md"
+      ]
+    },
+    {
+      "path": ".local.env.example",
+      "category": "root_entry",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 1520,
+      "sha256": null,
+      "references": [
+        "\"docs/AI\\350\\265\\204\\346\\272\\220\\351\\205\\215\\347\\275\\256\\344\\270\\216\\346\\216\\222\\347\\250\\213\\344\\274\\230\\345\\214\\226\\345\\212\\251\\346\\211\\213\\351\\252\\214\\350\\257\\201\\350\\257\\264\\346\\230\\216.md\"",
+        "README.md",
+        "agent.md",
+        "specs/022-ai-resource-scheduling-assistant/tasks.md"
+      ]
+    },
+    {
+      "path": ".netlifyignore",
+      "category": "root_entry",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 373,
+      "sha256": null,
+      "references": []
+    },
+    {
+      "path": "AGENTS.md",
+      "category": "root_entry",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 7131,
+      "sha256": null,
+      "references": [
+        ".agents/skills/demo-algorithm-explainer/SKILL.md",
+        ".specify/memory/constitution.md",
+        ".specify/templates/spec-template.md",
+        ".specify/templates/tasks-template.md",
+        "README.md",
+        "agent.md",
+        "specs/001-cp-sat-fixed-resource/spec.md",
+        "specs/002-ai-parameter-assistant/spec.md",
+        "specs/002-ai-parameter-assistant/tasks.md",
+        "specs/002-objective-function-config/spec.md",
+        "specs/003-refinement-milestone-objective/spec.md",
+        "specs/004-normal-work-balance/spec.md",
+        "specs/005-best-effort-refinement/spec.md",
+        "specs/007-objective-metric-config/checklists/requirements.md",
+        "specs/007-objective-metric-config/plan.md",
+        "specs/007-objective-metric-config/spec.md",
+        "specs/007-objective-metric-config/tasks.md",
+        "specs/008-objective-model-gating/spec.md",
+        "specs/009-remove-resource-workload-balance/spec.md",
+        "specs/010-remove-unconfigured-normal-balance/spec.md",
+        "specs/011-drill-group-two-stage-refinement/spec.md",
+        "specs/012-stage2-makespan-relaxation/spec.md",
+        "specs/013-stage2-visible-distance-pruning/spec.md",
+        "specs/016-continuous-beam-team-span/spec.md",
+        "specs/017-stage1-route-continuity/spec.md",
+        "specs/018-unified-target-solve/plan.md",
+        "specs/018-unified-target-solve/spec.md",
+        "specs/019-pressure-resource-search/spec.md",
+        "specs/019-pressure-resource-search/tasks.md",
+        "specs/020-fixed-resource-plan2-output/plan.md",
+        "specs/020-fixed-resource-plan2-output/spec.md",
+        "specs/020-fixed-resource-plan2-output/tasks.md",
+        "specs/021-resource-path-unbounded/spec.md",
+        "specs/022-ai-resource-scheduling-assistant/spec.md",
+        "specs/022-ai-resource-scheduling-assistant/tasks.md",
+        "specs/023-stepwise-resource-solve/spec.md",
+        "specs/024-navigation-ai-comparison/spec.md",
+        "specs/025-llm-project-context-export/spec.md",
+        "specs/026-resource-plan-policy-baseline/spec.md",
+        "specs/027-baseline-progress-forecast/spec.md",
+        "specs/028-ai-strict-resource-solve/spec.md",
+        "specs/029-ai-status-delay-consolidation/spec.md",
+        "specs/029-ai-status-delay-consolidation/tasks.md",
+        "specs/030-task-parameter-quantity-split/spec.md",
+        "specs/030-task-parameter-quantity-split/tasks.md",
+        "specs/031-progress-quantity-consistency/spec.md",
+        "specs/031-progress-quantity-consistency/tasks.md",
+        "specs/032-ai-resource-solve-timeout/spec.md",
+        "specs/033-ai-two-stage-resource-optimization/spec.md",
+        "specs/034-ai-resource-solve-60s-budget/plan.md",
+        "specs/034-ai-resource-solve-60s-budget/spec.md",
+        "specs/034-ai-resource-solve-60s-budget/tasks.md",
+        "specs/035-ai-idle-only-second-stage/spec.md",
+        "specs/035-ai-idle-only-second-stage/tasks.md",
+        "specs/036-ai-single-stage-solve/spec.md",
+        "specs/036-ai-single-stage-solve/tasks.md",
+        "specs/037-ai-solve-15s-budget/plan.md",
+        "specs/037-ai-solve-15s-budget/spec.md",
+        "specs/038-ai-solve-stability/spec.md",
+        "specs/039-progress-actual-date-defaults/spec.md",
+        "specs/040-progress-forecast-closed-loop/plan.md",
+        "specs/040-progress-forecast-closed-loop/spec.md",
+        "specs/041-girder-scheduling-integration/plan.md",
+        "specs/041-girder-scheduling-integration/spec.md"
+      ]
+    },
+    {
+      "path": "Dockerfile",
+      "category": "root_entry",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 329,
+      "sha256": null,
+      "references": [
+        ".agents/skills/speckit-implement/SKILL.md",
+        "README.md"
+      ]
+    },
+    {
+      "path": "LLM+CPSAT融合方案.md",
+      "category": "root_entry",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 16320,
+      "sha256": null,
+      "references": [
+        "specs/022-ai-resource-scheduling-assistant/spec.md",
+        "specs/022-ai-resource-scheduling-assistant/tasks.md"
+      ]
+    },
+    {
+      "path": "MVP方案_工程化落地版.md",
+      "category": "root_entry",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 23442,
+      "sha256": null,
+      "references": []
+    },
+    {
+      "path": "README.md",
+      "category": "root_entry",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 18329,
+      "sha256": null,
+      "references": [
+        ".agents/skills/speckit-constitution/SKILL.md",
+        ".specify/memory/constitution.md",
+        ".specify/templates/spec-template.md",
+        "AGENTS.md",
+        "agent.md",
+        "specs/001-cp-sat-fixed-resource/spec.md",
+        "specs/002-ai-parameter-assistant/spec.md",
+        "specs/002-objective-function-config/quickstart.md",
+        "specs/002-objective-function-config/spec.md",
+        "specs/005-best-effort-refinement/spec.md",
+        "specs/007-objective-metric-config/spec.md",
+        "specs/008-objective-model-gating/spec.md",
+        "specs/009-remove-resource-workload-balance/checklists/requirements.md",
+        "specs/009-remove-resource-workload-balance/plan.md",
+        "specs/009-remove-resource-workload-balance/spec.md",
+        "specs/010-remove-unconfigured-normal-balance/checklists/requirements.md",
+        "specs/010-remove-unconfigured-normal-balance/plan.md",
+        "specs/010-remove-unconfigured-normal-balance/spec.md",
+        "specs/011-drill-group-two-stage-refinement/spec.md",
+        "specs/017-stage1-route-continuity/spec.md",
+        "specs/018-unified-target-solve/plan.md",
+        "specs/018-unified-target-solve/spec.md",
+        "specs/020-fixed-resource-plan2-output/plan.md",
+        "specs/020-fixed-resource-plan2-output/spec.md",
+        "specs/021-resource-path-unbounded/spec.md",
+        "specs/022-ai-resource-scheduling-assistant/plan.md",
+        "specs/022-ai-resource-scheduling-assistant/spec.md",
+        "specs/023-stepwise-resource-solve/spec.md",
+        "specs/024-navigation-ai-comparison/plan.md",
+        "specs/024-navigation-ai-comparison/spec.md",
+        "specs/025-llm-project-context-export/spec.md",
+        "specs/026-resource-plan-policy-baseline/spec.md",
+        "specs/027-baseline-progress-forecast/spec.md",
+        "specs/028-ai-strict-resource-solve/spec.md",
+        "specs/029-ai-status-delay-consolidation/spec.md",
+        "specs/030-task-parameter-quantity-split/spec.md",
+        "specs/031-progress-quantity-consistency/spec.md",
+        "specs/032-ai-resource-solve-timeout/spec.md",
+        "specs/033-ai-two-stage-resource-optimization/spec.md",
+        "specs/034-ai-resource-solve-60s-budget/spec.md",
+        "specs/035-ai-idle-only-second-stage/spec.md",
+        "specs/036-ai-single-stage-solve/spec.md",
+        "specs/036-ai-single-stage-solve/tasks.md",
+        "specs/037-ai-solve-15s-budget/spec.md",
+        "specs/037-ai-solve-15s-budget/tasks.md",
+        "specs/038-ai-solve-stability/spec.md",
+        "specs/039-progress-actual-date-defaults/spec.md",
+        "specs/041-girder-scheduling-integration/quickstart.md",
+        "specs/041-girder-scheduling-integration/spec.md",
+        "specs/041-girder-scheduling-integration/tasks.md"
+      ]
+    },
+    {
+      "path": "agent.md",
+      "category": "root_entry",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 22595,
+      "sha256": null,
+      "references": [
+        ".agents/skills/demo-algorithm-explainer/SKILL.md",
+        ".specify/memory/constitution.md",
+        ".specify/templates/spec-template.md",
+        "AGENTS.md",
+        "README.md",
+        "specs/001-cp-sat-fixed-resource/spec.md",
+        "specs/002-ai-parameter-assistant/spec.md",
+        "specs/002-objective-function-config/spec.md",
+        "specs/003-refinement-milestone-objective/spec.md",
+        "specs/004-normal-work-balance/spec.md",
+        "specs/005-best-effort-refinement/spec.md",
+        "specs/007-objective-metric-config/spec.md",
+        "specs/008-objective-model-gating/spec.md",
+        "specs/009-remove-resource-workload-balance/spec.md",
+        "specs/010-remove-unconfigured-normal-balance/spec.md",
+        "specs/011-drill-group-two-stage-refinement/spec.md",
+        "specs/016-continuous-beam-team-span/spec.md",
+        "specs/017-stage1-route-continuity/spec.md",
+        "specs/018-unified-target-solve/plan.md",
+        "specs/018-unified-target-solve/spec.md",
+        "specs/019-pressure-resource-search/spec.md",
+        "specs/020-fixed-resource-plan2-output/plan.md",
+        "specs/020-fixed-resource-plan2-output/spec.md",
+        "specs/021-resource-path-unbounded/spec.md",
+        "specs/022-ai-resource-scheduling-assistant/spec.md",
+        "specs/023-stepwise-resource-solve/spec.md",
+        "specs/024-navigation-ai-comparison/spec.md",
+        "specs/025-llm-project-context-export/spec.md",
+        "specs/026-resource-plan-policy-baseline/spec.md",
+        "specs/027-baseline-progress-forecast/spec.md",
+        "specs/028-ai-strict-resource-solve/spec.md",
+        "specs/029-ai-status-delay-consolidation/spec.md",
+        "specs/030-task-parameter-quantity-split/spec.md",
+        "specs/031-progress-quantity-consistency/spec.md",
+        "specs/032-ai-resource-solve-timeout/spec.md",
+        "specs/033-ai-two-stage-resource-optimization/spec.md",
+        "specs/034-ai-resource-solve-60s-budget/spec.md",
+        "specs/035-ai-idle-only-second-stage/spec.md",
+        "specs/035-ai-idle-only-second-stage/tasks.md",
+        "specs/036-ai-single-stage-solve/spec.md",
+        "specs/036-ai-single-stage-solve/tasks.md",
+        "specs/037-ai-solve-15s-budget/plan.md",
+        "specs/037-ai-solve-15s-budget/spec.md",
+        "specs/038-ai-solve-stability/spec.md",
+        "specs/039-progress-actual-date-defaults/spec.md",
+        "specs/040-progress-forecast-closed-loop/plan.md",
+        "specs/040-progress-forecast-closed-loop/spec.md",
+        "specs/041-girder-scheduling-integration/plan.md",
+        "specs/041-girder-scheduling-integration/spec.md"
+      ]
+    },
+    {
+      "path": "ai-ppt-system/assets/company-template/company-template.pptx",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 6734454,
+      "sha256": "7c949fafd6a57eff9216dd89f42081e7ff87ba542a28bffd2111382f23cf8f55",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/assets/company-template/media/image1.jpg",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 136013,
+      "sha256": "4d102666e3cc508565cee995d5e9ffcfc7d12f96e24b0b67dbe88daab9bb5d04",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/assets/company-template/media/image10.jpg",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 257673,
+      "sha256": "1a516722c381a056efc7d28003d4d13abd97e06fa28854610b067bfd52ed458a",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/assets/company-template/media/image11.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 135449,
+      "sha256": "dd9824bd3ebeaca7708602bdf7dc101904d5e700e25ea1ce323219b7f04bbca6",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/assets/company-template/media/image12.jpg",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 92209,
+      "sha256": "c8a16f03400981aac87e6f127a44683fe5e5cc8bcb031e7fe14f53ec128f1634",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/assets/company-template/media/image13.jpg",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 91300,
+      "sha256": "09214dd10d319e0b23769351399d20ce9a921ca5e9aaf7fc2cd282a50d58c91e",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/assets/company-template/media/image14.jpg",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 48324,
+      "sha256": "f2daa5b0121630b4d94bb857d0d3e1bb911bf166a5b779b13a0e4cc40ea9d9fd",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/assets/company-template/media/image2.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 135887,
+      "sha256": "0e0aaf7fc381ffc36323dd9f8fd9fb46925842c2479277ccf62b874ea11cc48c",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/assets/company-template/media/image3.jpg",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 99328,
+      "sha256": "2142c8c734b487ff181646920185220bc1b5914868767f807f5e1ce312d034dd",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/assets/company-template/media/image4.jpg",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 58303,
+      "sha256": "4164beb3afd7232d12a5472cb1fa347049a979008817e84ad1fa8d30a5bf6e3f",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/assets/company-template/media/image5.jpg",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 25407,
+      "sha256": "3fe867009d0980fcf92f8ab6757499787824069e2158e097837bfc1c6099dec9",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/assets/company-template/media/image7.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 6684,
+      "sha256": "d9975af040a27ff67e0acb4e39d0c53072ee88be9aa5c79b655416fe0f187055",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/assets/company-template/media/image8.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 1371,
+      "sha256": "28ca7cf11cc0c5e655dc76aebb3aa14584582f7dbad8b5fe7c33f89a87c3f358",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/assets/company-template/media/image9.jpeg",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 36667,
+      "sha256": "9f90d7a3b9f2cbe4e54a8120a41bd510bfb22173c86ad07e3bdbfb4aebc3b909",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/output/pdf/deck.pdf",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 2527782,
+      "sha256": "af03ba3ca31b8bd86a2051ef7e9c30bbc7ce16d1075b67f24d8181895953ab91",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/output/png/slide-01.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 835542,
+      "sha256": "2cc44f1e5259aef961c96c21a1406094679c4423d78036207327ebf19ed642db",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/output/png/slide-02.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 152377,
+      "sha256": "466b3c649b99d3059d9fbaf6233166f74c644847fa3a037173c0f027e3f31b4a",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/output/png/slide-03.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 144489,
+      "sha256": "9517203874ab51b8b8fadea27d7d72c87895a5c0feb53d978a1ef312b2163734",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/output/png/slide-04.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 161963,
+      "sha256": "9bca0648186a487410e77de3a3458b00e2b6d146f6bb7d45d439a47897c71248",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/output/png/slide-05.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 164088,
+      "sha256": "b9ef331252490bb408a6fe0b81f4e3f3992165ddaa42872ed04ab26952378751",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/output/png/slide-06.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 157096,
+      "sha256": "37c28906758fa7a9413a593535ebf10db55b4aa7562159d9a2bc1488a18ae671",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/output/png/slide-07.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 154703,
+      "sha256": "a70dcc17ed023bc88396427e6413447f37873c662bec5acdcc97aff3c4953832",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/output/png/slide-08.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 158808,
+      "sha256": "49ac71f6a03b89ba7996f164e7fe9742931aa0fb519ce45a77d02284078ec000",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/output/png/slide-09.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 152765,
+      "sha256": "9d08f0ddec0d17f8e8759517547a5f98fee1fb777592106496a5acd1cd2b4087",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/output/png/slide-10.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 161529,
+      "sha256": "62cc3123dc4a6be1f2f7b39c0972a4d1b76bffbaa171d6e0cd5b74645ad2fefe",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/output/png/slide-11.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 152486,
+      "sha256": "5e9bc9ab89e02f33eba98403c033eda3f9140b1ee8bd0f7d54acca1927766ba0",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/output/png/slide-12.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 167670,
+      "sha256": "f4fdc0b55b1f341f6518e39a8512e1d1699b24fecd22193daf334f3c4de5caa0",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/output/png/slide-13.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 156005,
+      "sha256": "403e610dfd0897cc916ae57b584832733a257590af2e9d530428405484d8c611",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/output/png/slide-14.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 841216,
+      "sha256": "f5ca3f5e2cde70ba3f9e35c21900821f47e7a966ddbebbaadadc53f5e3d0c9c9",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/output/pptx/deck-company-dark.pptx",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 974927,
+      "sha256": "fb90424493e8eedf28d40cf0cd2863b421e1999292fbb0d4a821e9ffcce0d3d8",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/output/pptx/deck-company-light.pptx",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 721648,
+      "sha256": "6edc56879ce1a5c2d7c0302860f0632400abcaf389c0ca1b7ad2a11e111a8261",
+      "references": []
+    },
+    {
+      "path": "ai-ppt-system/output/pptx/deck.pptx",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 218813,
+      "sha256": "e7451c83b5bba0189e78838735bcaa990df0bfb72e5d7e983d3d7c9cd15a1329",
+      "references": []
+    },
+    {
+      "path": "docs/~$项目上午调研验证记录_20260715.docx",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 162,
+      "sha256": "2670d1d3645ffa81f715299dbd18223fedae3718e3de714a992a4ff8c78f7630",
+      "references": []
+    },
+    {
+      "path": "docs/泸古项目上午调研验证记录_20260715.docx",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 59292,
+      "sha256": "d96b3d0470ec9b3ae9dbe8d6a58c04fc416a5beb7a85714e4c7e983769fdc8fc",
+      "references": []
+    },
+    {
+      "path": "docs/泸古项目前期工期策划思路分析_20260715.docx",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 39385,
+      "sha256": "1f5de5637c1bb932fb2ab1a845eafbd7d9511e5d9cf70b18bce4ead2c60aab07",
+      "references": []
+    },
+    {
+      "path": "frontend/src/assets/progress-visualization/bridge-model.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 2062249,
+      "sha256": "c734bd994de871074543a4a1a1877b39cd9f11a7e96e37feafd48fab3308ddd5",
+      "references": []
+    },
+    {
+      "path": "frontend/src/assets/progress-visualization/route-overview.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 3441954,
+      "sha256": "48eed09a535f979ab23971f267d7a81f8c8bcc0c84f11219d85ca252b3a9c877",
+      "references": []
+    },
+    {
+      "path": "netlify.toml",
+      "category": "root_entry",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 160,
+      "sha256": null,
+      "references": [
+        "README.md",
+        "agent.md"
+      ]
+    },
+    {
+      "path": "outputs/019f5a26-3844-7b70-9ea7-04821584dc04/AI最佳应用案例-王丽陈思汝吴经伟.xlsx",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 12367,
+      "sha256": "5a09eacd1d4d7d0f4a989cecc9eaf1efc07c0ba353b7b1b0547846c0121ecebf",
+      "references": []
+    },
+    {
+      "path": "outputs/019f5a26-3844-7b70-9ea7-04821584dc04/斑马2026荣誉评优奖项申请表_AI最佳应用案例_名称更新.xlsx",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 7659,
+      "sha256": "23799dedd1e309d37f620d22071ed0fdb26acdb2379327b8a3f8bc0d032b472c",
+      "references": []
+    },
+    {
+      "path": "outputs/019f5a26-3844-7b70-9ea7-04821584dc04/斑马2026荣誉评优奖项申请表_AI最佳应用案例_已填写.xlsx",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 7648,
+      "sha256": "d12197485b6e876328bb60a7c19cfbc963b1ef2d3668c834e249658b50ab087e",
+      "references": []
+    },
+    {
+      "path": "outputs/lugu-validation-20260715/preview_会议纪要.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 125064,
+      "sha256": "38622eb62a15c7076ced3bee1734e01b296b6117922d97a8e0fbc9f27d83b3c0",
+      "references": []
+    },
+    {
+      "path": "outputs/lugu-validation-20260715/preview_客户复核.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 229008,
+      "sha256": "978f53c289a786d1732fd57fb345875b052a3d7fa02aeb01e24b4f62b3e972ba",
+      "references": []
+    },
+    {
+      "path": "outputs/lugu-validation-20260715/preview_数据清单.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 121821,
+      "sha256": "3c8dd28c5b335b88f83d59dbb7c202dad0a08f7ba114278139a6791d4c219811",
+      "references": []
+    },
+    {
+      "path": "outputs/lugu-validation-20260715/preview_行动项.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 95295,
+      "sha256": "aa745554577a098edf9631ba5491c66a6f03d21ffe1ee5d5e8b2e10adccd3a42",
+      "references": []
+    },
+    {
+      "path": "outputs/lugu-validation-20260715/preview_访谈提纲.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 181772,
+      "sha256": "59250fedfcb48e54ad124f17aab4019681d82bda36d8650f4b3c26aa30d7b9a5",
+      "references": []
+    },
+    {
+      "path": "outputs/lugu-validation-20260715/preview_进度计划.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 146492,
+      "sha256": "6ba854b8ac5622515ec8ce946b344fdaeb7fd29d463ae62607af478b85d1a2f5",
+      "references": []
+    },
+    {
+      "path": "outputs/lugu-validation-20260715/preview_验证总表.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 107816,
+      "sha256": "8e72191d3ded9ebd0a9fa5aa0174d3bab89959fa9161c37991f510499de4db80",
+      "references": []
+    },
+    {
+      "path": "outputs/lugu-validation-20260715/preview_验证看板.png",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 196121,
+      "sha256": "286923d3a228eb914b090e8e74da6d346dba4f07862abfd93765b462a85bb9ae",
+      "references": []
+    },
+    {
+      "path": "outputs/lugu-validation-20260715/~$泸古项目验证材料_20260715.xlsx",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 165,
+      "sha256": "50635652a084d84046900809192bec8f4fca0b219b87986925e64a5f6ac1c5bc",
+      "references": []
+    },
+    {
+      "path": "outputs/lugu-validation-20260715/泸古项目验证材料_20260715.xlsx",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 31835,
+      "sha256": "0e8e89b39befebabcea0266b26e84fefcef8c2be4f77c21f20a602c674572e6c",
+      "references": []
+    },
+    {
+      "path": "package-lock.json",
+      "category": "root_entry",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 59783,
+      "sha256": null,
+      "references": [
+        ".agents/skills/speckit-implement/SKILL.md",
+        "agent.md"
+      ]
+    },
+    {
+      "path": "package.json",
+      "category": "root_entry",
+      "tracked": true,
+      "status": " M",
+      "size_bytes": 744,
+      "sha256": null,
+      "references": [
+        ".agents/skills/speckit-implement/SKILL.md",
+        "README.md",
+        "agent.md",
+        "specs/002-ai-parameter-assistant/tasks.md",
+        "specs/024-navigation-ai-comparison/tasks.md",
+        "specs/025-llm-project-context-export/plan.md",
+        "specs/035-ai-idle-only-second-stage/tasks.md",
+        "specs/039-progress-actual-date-defaults/tasks.md",
+        "specs/040-progress-forecast-closed-loop/tasks.md",
+        "specs/041-girder-scheduling-integration/tasks.md"
+      ]
+    },
+    {
+      "path": "requirements.txt",
+      "category": "root_entry",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 83,
+      "sha256": null,
+      "references": [
+        "README.md",
+        "agent.md",
+        "backend/app/bridge_import.py",
+        "specs/002-ai-parameter-assistant/tasks.md",
+        "specs/028-ai-strict-resource-solve/quickstart.md"
+      ]
+    },
+    {
+      "path": "tools/repo-governance/README.md",
+      "category": "source_or_tool",
+      "tracked": false,
+      "status": "??",
+      "size_bytes": 695,
+      "sha256": null,
+      "references": []
+    },
+    {
+      "path": "tools/repo-governance/inventory_repository.py",
+      "category": "source_or_tool",
+      "tracked": false,
+      "status": "??",
+      "size_bytes": 3999,
+      "sha256": null,
+      "references": []
+    },
+    {
+      "path": "tools/repo-governance/validate_dependencies.py",
+      "category": "source_or_tool",
+      "tracked": false,
+      "status": "??",
+      "size_bytes": 3276,
+      "sha256": null,
+      "references": [
+        "package.json"
+      ]
+    },
+    {
+      "path": "tools/repo-governance/validate_docs.py",
+      "category": "source_or_tool",
+      "tracked": false,
+      "status": "??",
+      "size_bytes": 2676,
+      "sha256": null,
+      "references": [
+        "package.json"
+      ]
+    },
+    {
+      "path": "tools/repo-governance/validate_repository.py",
+      "category": "source_or_tool",
+      "tracked": false,
+      "status": "??",
+      "size_bytes": 3080,
+      "sha256": null,
+      "references": [
+        "package.json"
+      ]
+    },
+    {
+      "path": "渠溪河特大桥结构设计表.xlsx",
+      "category": "binary_asset",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 18094,
+      "sha256": "e5f433990044f8f7d23590b3fb448b4638a544c326ca53a81583065f5c4750a6",
+      "references": [
+        "README.md",
+        "agent.md",
+        "backend/app/bridge_import.py",
+        "backend/tests/test_bridge_import.py",
+        "docs/fixed-resource-shortest-duration-20260707-134506.json",
+        "specs/010-remove-unconfigured-normal-balance/quickstart.md",
+        "specs/032-ai-resource-solve-timeout/quickstart.md",
+        "specs/032-ai-resource-solve-timeout/tasks.md",
+        "specs/033-ai-two-stage-resource-optimization/quickstart.md",
+        "specs/033-ai-two-stage-resource-optimization/tasks.md",
+        "specs/034-ai-resource-solve-60s-budget/quickstart.md",
+        "specs/034-ai-resource-solve-60s-budget/tasks.md",
+        "specs/035-ai-idle-only-second-stage/tasks.md",
+        "specs/036-ai-single-stage-solve/quickstart.md",
+        "specs/036-ai-single-stage-solve/tasks.md",
+        "specs/037-ai-solve-15s-budget/quickstart.md",
+        "specs/037-ai-solve-15s-budget/tasks.md",
+        "specs/038-ai-solve-stability/discovery.md",
+        "specs/038-ai-solve-stability/quickstart.md"
+      ]
+    },
+    {
+      "path": "系统整体长期目标.md",
+      "category": "root_entry",
+      "tracked": true,
+      "status": "",
+      "size_bytes": 31895,
+      "sha256": null,
+      "references": []
+    }
+  ]
+}

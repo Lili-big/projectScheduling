@@ -1,0 +1,8 @@
+{
+  "bridge_ids": ["WP-B01"],
+  "section_ids": ["WS-C:none", "WS-L:left", "WS-R:right"],
+  "lower_structure_ids": ["ST-L-P1", "ST-L-P2", "ST-R-P1", "ST-R-P2", "ST-S-A0"],
+  "upper_structure_ids": ["ST-L-CIP2", "ST-L-SP1", "ST-R-CB2", "ST-R-SP1"],
+  "scheduled_component_ids": ["CP-L-P1-PILE", "CP-R-P1-PILE"],
+  "non_bridge_diagnostic_count": 2
+}

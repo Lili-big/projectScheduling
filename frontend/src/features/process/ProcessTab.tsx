@@ -11,7 +11,7 @@ import {
   supportsSegmentedPierUnits,
 } from "../../domain/productivity";
 import { processResourceLabel } from "../../domain/resources";
-import type { ProcessTemplate, ProductivityOption, ScenarioInput } from "../../types/scheduler";
+import type { ProcessTemplate, ProductivityOption, ScenarioInput } from "../../contracts";
 
 export function ProcessTab({
   scenario,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from ..models import (
+from ..contracts import (
     CreateIntegratedScheduleRequest,
     IntegratedCalculationSnapshot,
     IntegratedIterationRecord,

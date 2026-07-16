@@ -1,4 +1,4 @@
-import type { GirderPlanningResult, IntegratedCalculationSnapshot } from "../../types/scheduler";
+import type { GirderPlanningResult, IntegratedCalculationSnapshot } from "../../contracts";
 
 export function GirderResultPanel({
   result,

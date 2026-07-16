@@ -1,0 +1,127 @@
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 6px;
+  height: 34px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+input,
+select {
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  height: 30px;
+  padding: 0 8px;
+  background: #fff;
+  color: #18212f;
+}
+
+input[type="file"] {
+  min-width: 240px;
+  padding: 4px 8px;
+}
+
+input[type="number"] {
+  width: 82px;
+}
+
+input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+}
+
+select {
+  min-width: 104px;
+  cursor: pointer;
+}
+
+code {
+  color: #475569;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  padding: 2px 5px;
+  white-space: nowrap;
+}
+
+.rule-name {
+  font-weight: 600;
+  line-height: 1.35;
+  margin-bottom: 4px;
+}
+
+.muted-code {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.text-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: #f8fafc;
+  color: #334155;
+  white-space: nowrap;
+}
+
+.app-shell {
+  height: 100vh;
+  background: #eef2f6;
+  overflow: hidden;
+}
+
+.eyebrow {
+  color: #9fd8d6;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.actions.inline {
+  justify-content: flex-end;
+}
+
+.primary {
+  background: #0ea5a4;
+  color: #fff;
+}
+
+.secondary {
+  background: #e7eef6;
+  color: #0f2742;
+}
+

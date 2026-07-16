@@ -1,0 +1,1052 @@
+{
+  "summary": {
+    "file": "D:\\00-1-03-生产产线-24年\\02-产品需求\\15-2026斑马基建版\\03 项目验证\\泸古1标\\泸古高速TJ-1标桥梁进度统计表4.27(1).xlsx",
+    "sheet_count": 15,
+    "visible_sheet_count": 15,
+    "sheet_names": [
+      "汇总表",
+      "夏蓉高速右线1号大桥",
+      "夏蓉高速右线2号大桥",
+      "夏蓉高速右线中桥",
+      "联合村1号中桥",
+      "联合村2号大桥",
+      "两河口大桥",
+      "观音岩大桥",
+      "观房屋基大桥",
+      "特殊结构物施工工艺",
+      "永宁河特大桥",
+      "松树湾大桥",
+      "观音溪大桥",
+      "七龙咀大桥",
+      "新屋基大桥"
+    ],
+    "detail_sheet_count": 14,
+    "total_rows_across_sheets": 1130,
+    "total_non_empty_cells": 16517,
+    "total_formulas": 5030,
+    "total_date_cells": 35,
+    "total_pile_ids": 762,
+    "total_pier_labels": 152,
+    "total_resource_text_cells": 410,
+    "cached_formula_error_count": 13,
+    "detail_rows_min": 6,
+    "detail_rows_max": 192,
+    "detail_cols_min": 19,
+    "detail_cols_max": 48
+  },
+  "sheets": [
+    {
+      "name": "汇总表",
+      "state": "visible",
+      "rows": 106,
+      "columns": 18,
+      "non_empty_cells": 543,
+      "merged_ranges": null,
+      "formula_count": 114,
+      "formula_columns": [
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M",
+        "N",
+        "O",
+        "P",
+        "Q"
+      ],
+      "date_cells": 0,
+      "cached_errors": [
+        [
+          "C8",
+          "#REF!"
+        ],
+        [
+          "D8",
+          "#REF!"
+        ],
+        [
+          "H8",
+          "#REF!"
+        ],
+        [
+          "I8",
+          "#REF!"
+        ],
+        [
+          "J8",
+          "#REF!"
+        ],
+        [
+          "K8",
+          "#REF!"
+        ],
+        [
+          "L8",
+          "#REF!"
+        ],
+        [
+          "M8",
+          "#REF!"
+        ],
+        [
+          "N8",
+          "#REF!"
+        ],
+        [
+          "O8",
+          "#REF!"
+        ],
+        [
+          "P8",
+          "#REF!"
+        ],
+        [
+          "Q8",
+          "#REF!"
+        ]
+      ],
+      "cached_error_count": 12,
+      "pier_label_count": 0,
+      "pile_id_count": 0,
+      "resource_text_cells": 0,
+      "sample_formulas": [
+        {
+          "cell": "Q3",
+          "formula": "=SUM(C3:P3)"
+        },
+        {
+          "cell": "Q4",
+          "formula": "=SUM(C4:P4)"
+        },
+        {
+          "cell": "Q5",
+          "formula": "=SUM(C5:P5)"
+        },
+        {
+          "cell": "Q6",
+          "formula": "=SUM(C6:P6)"
+        },
+        {
+          "cell": "Q7",
+          "formula": "=SUM(C7:P7)"
+        },
+        {
+          "cell": "C8",
+          "formula": "=#REF!"
+        },
+        {
+          "cell": "D8",
+          "formula": "=#REF!"
+        },
+        {
+          "cell": "E8",
+          "formula": "=两河口大桥!H119"
+        }
+      ]
+    },
+    {
+      "name": "夏蓉高速右线1号大桥",
+      "state": "visible",
+      "rows": 29,
+      "columns": 47,
+      "non_empty_cells": 603,
+      "merged_ranges": null,
+      "formula_count": 192,
+      "formula_columns": [
+        "AD",
+        "AG",
+        "AH",
+        "AK",
+        "AM",
+        "AN",
+        "AU",
+        "K",
+        "L",
+        "M",
+        "R",
+        "U",
+        "V"
+      ],
+      "date_cells": 1,
+      "cached_errors": [],
+      "cached_error_count": 0,
+      "pier_label_count": 11,
+      "pile_id_count": 26,
+      "resource_text_cells": 20,
+      "sample_formulas": [
+        {
+          "cell": "AU3",
+          "formula": "=MAX(AN:AN)"
+        },
+        {
+          "cell": "K4",
+          "formula": "=H4/J4"
+        },
+        {
+          "cell": "L4",
+          "formula": "=AT3"
+        },
+        {
+          "cell": "M4",
+          "formula": "=L4+K4"
+        },
+        {
+          "cell": "U4",
+          "formula": "<openpyxl.worksheet.formula.ArrayFormula object at 0x00000194FA85EDB0>"
+        },
+        {
+          "cell": "V4",
+          "formula": "=U4+R4"
+        },
+        {
+          "cell": "AG4",
+          "formula": "=V4"
+        },
+        {
+          "cell": "AH4",
+          "formula": "=AG4+AD4"
+        }
+      ]
+    },
+    {
+      "name": "夏蓉高速右线2号大桥",
+      "state": "visible",
+      "rows": 36,
+      "columns": 48,
+      "non_empty_cells": 575,
+      "merged_ranges": null,
+      "formula_count": 187,
+      "formula_columns": [
+        "AD",
+        "AG",
+        "AH",
+        "AK",
+        "AM",
+        "AN",
+        "AQ",
+        "AR",
+        "AS",
+        "AV",
+        "K",
+        "L",
+        "M",
+        "R",
+        "U",
+        "V"
+      ],
+      "date_cells": 1,
+      "cached_errors": [],
+      "cached_error_count": 0,
+      "pier_label_count": 7,
+      "pile_id_count": 32,
+      "resource_text_cells": 13,
+      "sample_formulas": [
+        {
+          "cell": "U4",
+          "formula": "=AU4"
+        },
+        {
+          "cell": "V4",
+          "formula": "=U4+R4"
+        },
+        {
+          "cell": "AG4",
+          "formula": "=V4"
+        },
+        {
+          "cell": "AH4",
+          "formula": "=AG4+AF4"
+        },
+        {
+          "cell": "AM4",
+          "formula": "=AH4"
+        },
+        {
+          "cell": "AN4",
+          "formula": "=AM4+AK4"
+        },
+        {
+          "cell": "AQ4",
+          "formula": "=120*1.2+15"
+        },
+        {
+          "cell": "AR4",
+          "formula": "=MAX(AN4:AN16)"
+        }
+      ]
+    },
+    {
+      "name": "夏蓉高速右线中桥",
+      "state": "visible",
+      "rows": 6,
+      "columns": 44,
+      "non_empty_cells": 101,
+      "merged_ranges": null,
+      "formula_count": 16,
+      "formula_columns": [
+        "AD",
+        "AF",
+        "AG",
+        "AH",
+        "AM",
+        "AN",
+        "AR",
+        "K",
+        "L",
+        "M",
+        "R",
+        "U",
+        "V"
+      ],
+      "date_cells": 1,
+      "cached_errors": [
+        [
+          "AF4",
+          "#VALUE!"
+        ]
+      ],
+      "cached_error_count": 1,
+      "pier_label_count": 1,
+      "pile_id_count": 2,
+      "resource_text_cells": 6,
+      "sample_formulas": [
+        {
+          "cell": "AR3",
+          "formula": "=AN4"
+        },
+        {
+          "cell": "K4",
+          "formula": "=H4/J4"
+        },
+        {
+          "cell": "L4",
+          "formula": "=AQ3"
+        },
+        {
+          "cell": "M4",
+          "formula": "=L4+K4"
+        },
+        {
+          "cell": "R4",
+          "formula": "=Q4*4"
+        },
+        {
+          "cell": "U4",
+          "formula": "<openpyxl.worksheet.formula.ArrayFormula object at 0x00000194FA88C740>"
+        },
+        {
+          "cell": "V4",
+          "formula": "=U4+R4"
+        },
+        {
+          "cell": "AD4",
+          "formula": "=ROUNDUP((Y4+Y5)/12,0)*4"
+        }
+      ]
+    },
+    {
+      "name": "联合村1号中桥",
+      "state": "visible",
+      "rows": 12,
+      "columns": 35,
+      "non_empty_cells": 133,
+      "merged_ranges": null,
+      "formula_count": 26,
+      "formula_columns": [
+        "AA",
+        "AE",
+        "AF",
+        "K",
+        "L",
+        "M",
+        "X",
+        "Z"
+      ],
+      "date_cells": 1,
+      "cached_errors": [],
+      "cached_error_count": 0,
+      "pier_label_count": 2,
+      "pile_id_count": 4,
+      "resource_text_cells": 1,
+      "sample_formulas": [
+        {
+          "cell": "AE4",
+          "formula": "=K12"
+        },
+        {
+          "cell": "AF4",
+          "formula": "=ROUND(AE4+AD4,0)"
+        },
+        {
+          "cell": "K5",
+          "formula": "=CEILING(H5/J5,1)"
+        },
+        {
+          "cell": "L5",
+          "formula": "=K12"
+        },
+        {
+          "cell": "M5",
+          "formula": "=ROUNDUP(L5+K5,1)"
+        },
+        {
+          "cell": "X5",
+          "formula": "=CEILING(MAX(T5:T6)/6*4,1)"
+        },
+        {
+          "cell": "Z5",
+          "formula": "=MAX(M5:M6)+15"
+        },
+        {
+          "cell": "AA5",
+          "formula": "=ROUND(Z5+X5,2)"
+        }
+      ]
+    },
+    {
+      "name": "联合村2号大桥",
+      "state": "visible",
+      "rows": 154,
+      "columns": 47,
+      "non_empty_cells": 2057,
+      "merged_ranges": null,
+      "formula_count": 671,
+      "formula_columns": [
+        "AD",
+        "AG",
+        "AH",
+        "AM",
+        "AN",
+        "AU",
+        "K",
+        "L",
+        "M",
+        "R",
+        "S",
+        "U",
+        "V"
+      ],
+      "date_cells": 3,
+      "cached_errors": [],
+      "cached_error_count": 0,
+      "pier_label_count": 16,
+      "pile_id_count": 103,
+      "resource_text_cells": 38,
+      "sample_formulas": [
+        {
+          "cell": "U4",
+          "formula": "=AT4"
+        },
+        {
+          "cell": "V4",
+          "formula": "=U4+R4"
+        },
+        {
+          "cell": "AG4",
+          "formula": "=V4"
+        },
+        {
+          "cell": "AH4",
+          "formula": "=AG4+AD4"
+        },
+        {
+          "cell": "AM4",
+          "formula": "=AH4"
+        },
+        {
+          "cell": "AN4",
+          "formula": "=AM4+AK4"
+        },
+        {
+          "cell": "AU4",
+          "formula": "=MAX(AN4:AN75)"
+        },
+        {
+          "cell": "K5",
+          "formula": "=H5/J5"
+        }
+      ]
+    },
+    {
+      "name": "两河口大桥",
+      "state": "visible",
+      "rows": 119,
+      "columns": 43,
+      "non_empty_cells": 1913,
+      "merged_ranges": null,
+      "formula_count": 556,
+      "formula_columns": [
+        "AA",
+        "AD",
+        "AE",
+        "AF",
+        "AH",
+        "AI",
+        "AK",
+        "AL",
+        "AP",
+        "H",
+        "K",
+        "L",
+        "M",
+        "O",
+        "Q",
+        "T",
+        "U",
+        "Y"
+      ],
+      "date_cells": 3,
+      "cached_errors": [],
+      "cached_error_count": 0,
+      "pier_label_count": 16,
+      "pile_id_count": 75,
+      "resource_text_cells": 62,
+      "sample_formulas": [
+        {
+          "cell": "K4",
+          "formula": "=H4/J4"
+        },
+        {
+          "cell": "L4",
+          "formula": "=M5"
+        },
+        {
+          "cell": "M4",
+          "formula": "=ROUNDUP(L4+K4,0)"
+        },
+        {
+          "cell": "AK4",
+          "formula": "=M4+15"
+        },
+        {
+          "cell": "AL4",
+          "formula": "=AK4+AI4"
+        },
+        {
+          "cell": "K5",
+          "formula": "=H5/J5"
+        },
+        {
+          "cell": "L5",
+          "formula": "=M65+1"
+        },
+        {
+          "cell": "M5",
+          "formula": "=ROUNDUP(L5+K5,0)"
+        }
+      ]
+    },
+    {
+      "name": "观音岩大桥",
+      "state": "visible",
+      "rows": 82,
+      "columns": 39,
+      "non_empty_cells": 1727,
+      "merged_ranges": null,
+      "formula_count": 463,
+      "formula_columns": [
+        "AA",
+        "AC",
+        "AD",
+        "AE",
+        "AG",
+        "AI",
+        "AJ",
+        "AL",
+        "H",
+        "K",
+        "L",
+        "M",
+        "O",
+        "Q",
+        "T",
+        "U",
+        "Y"
+      ],
+      "date_cells": 1,
+      "cached_errors": [],
+      "cached_error_count": 0,
+      "pier_label_count": 17,
+      "pile_id_count": 44,
+      "resource_text_cells": 61,
+      "sample_formulas": [
+        {
+          "cell": "K4",
+          "formula": "=H4/J4"
+        },
+        {
+          "cell": "M4",
+          "formula": "=ROUNDUP(L4+K4,0)"
+        },
+        {
+          "cell": "AI4",
+          "formula": "=M5+15"
+        },
+        {
+          "cell": "AJ4",
+          "formula": "=AI4+AH4"
+        },
+        {
+          "cell": "K5",
+          "formula": "=H5/J5"
+        },
+        {
+          "cell": "L5",
+          "formula": "=M4"
+        },
+        {
+          "cell": "M5",
+          "formula": "=ROUNDUP(L5+K5,0)"
+        },
+        {
+          "cell": "K6",
+          "formula": "=H6/J6"
+        }
+      ]
+    },
+    {
+      "name": "观房屋基大桥",
+      "state": "visible",
+      "rows": 83,
+      "columns": 39,
+      "non_empty_cells": 1615,
+      "merged_ranges": null,
+      "formula_count": 385,
+      "formula_columns": [
+        "AA",
+        "AC",
+        "AD",
+        "AE",
+        "AG",
+        "AI",
+        "AJ",
+        "AL",
+        "H",
+        "K",
+        "L",
+        "M",
+        "O",
+        "Q",
+        "T",
+        "U",
+        "Y"
+      ],
+      "date_cells": 1,
+      "cached_errors": [],
+      "cached_error_count": 0,
+      "pier_label_count": 16,
+      "pile_id_count": 64,
+      "resource_text_cells": 50,
+      "sample_formulas": [
+        {
+          "cell": "K4",
+          "formula": "=H4/J4"
+        },
+        {
+          "cell": "M4",
+          "formula": "=ROUNDUP(L4+K4,0)"
+        },
+        {
+          "cell": "AI4",
+          "formula": "=M5+15"
+        },
+        {
+          "cell": "AJ4",
+          "formula": "=AI4+AH4"
+        },
+        {
+          "cell": "K5",
+          "formula": "=H5/J5"
+        },
+        {
+          "cell": "L5",
+          "formula": "=M4+1"
+        },
+        {
+          "cell": "M5",
+          "formula": "=ROUNDUP(L5+K5,0)"
+        },
+        {
+          "cell": "K6",
+          "formula": "=H6/J6"
+        }
+      ]
+    },
+    {
+      "name": "特殊结构物施工工艺",
+      "state": "visible",
+      "rows": 56,
+      "columns": 19,
+      "non_empty_cells": 316,
+      "merged_ranges": null,
+      "formula_count": 129,
+      "formula_columns": [
+        "D",
+        "E",
+        "F",
+        "J",
+        "K",
+        "L",
+        "M"
+      ],
+      "date_cells": 16,
+      "cached_errors": [],
+      "cached_error_count": 0,
+      "pier_label_count": 1,
+      "pile_id_count": 0,
+      "resource_text_cells": 19,
+      "sample_formulas": [
+        {
+          "cell": "D4",
+          "formula": "=ROUNDUP((30*3/1.6),0)+15"
+        },
+        {
+          "cell": "F4",
+          "formula": "=E4+D4"
+        },
+        {
+          "cell": "E6",
+          "formula": "=F4+1"
+        },
+        {
+          "cell": "F6",
+          "formula": "=E6+D6"
+        },
+        {
+          "cell": "D7",
+          "formula": "=ROUNDUP(((86-6)/4.5*7),0)+20"
+        },
+        {
+          "cell": "E7",
+          "formula": "=F6+1"
+        },
+        {
+          "cell": "F7",
+          "formula": "=E7+D7"
+        },
+        {
+          "cell": "E8",
+          "formula": "=F7+1"
+        }
+      ]
+    },
+    {
+      "name": "永宁河特大桥",
+      "state": "visible",
+      "rows": 192,
+      "columns": 43,
+      "non_empty_cells": 2457,
+      "merged_ranges": null,
+      "formula_count": 839,
+      "formula_columns": [
+        "AD",
+        "AF",
+        "AG",
+        "AK",
+        "AL",
+        "K",
+        "L",
+        "M",
+        "P",
+        "U",
+        "V"
+      ],
+      "date_cells": 2,
+      "cached_errors": [],
+      "cached_error_count": 0,
+      "pier_label_count": 19,
+      "pile_id_count": 178,
+      "resource_text_cells": 66,
+      "sample_formulas": [
+        {
+          "cell": "K4",
+          "formula": "=CEILING(H4/J4,1)"
+        },
+        {
+          "cell": "L4",
+          "formula": "=M95"
+        },
+        {
+          "cell": "M4",
+          "formula": "=ROUNDUP(L4+K4,1)"
+        },
+        {
+          "cell": "P4",
+          "formula": "<openpyxl.worksheet.formula.ArrayFormula object at 0x00000194FA53C830>"
+        },
+        {
+          "cell": "U4",
+          "formula": "=V34"
+        },
+        {
+          "cell": "V4",
+          "formula": "=ROUNDUP(U4+S4+25,0)"
+        },
+        {
+          "cell": "K5",
+          "formula": "=CEILING(H5/J5,1)"
+        },
+        {
+          "cell": "L5",
+          "formula": "=M4"
+        }
+      ]
+    },
+    {
+      "name": "松树湾大桥",
+      "state": "visible",
+      "rows": 39,
+      "columns": 38,
+      "non_empty_cells": 589,
+      "merged_ranges": null,
+      "formula_count": 170,
+      "formula_columns": [
+        "AA",
+        "AC",
+        "AD",
+        "AH",
+        "AI",
+        "K",
+        "L",
+        "M",
+        "S",
+        "T"
+      ],
+      "date_cells": 1,
+      "cached_errors": [],
+      "cached_error_count": 0,
+      "pier_label_count": 7,
+      "pile_id_count": 32,
+      "resource_text_cells": 1,
+      "sample_formulas": [
+        {
+          "cell": "K4",
+          "formula": "=CEILING(H4/J4,1)"
+        },
+        {
+          "cell": "L4",
+          "formula": "=K39"
+        },
+        {
+          "cell": "M4",
+          "formula": "=ROUNDUP(L4+K4,1)"
+        },
+        {
+          "cell": "AH4",
+          "formula": "=MAX(M4:M5)+15"
+        },
+        {
+          "cell": "AI4",
+          "formula": "=ROUND(AH4+AG4,0)"
+        },
+        {
+          "cell": "K5",
+          "formula": "=CEILING(H5/J5,1)"
+        },
+        {
+          "cell": "L5",
+          "formula": "=M4"
+        },
+        {
+          "cell": "M5",
+          "formula": "=ROUNDUP(L5+K5,1)"
+        }
+      ]
+    },
+    {
+      "name": "观音溪大桥",
+      "state": "visible",
+      "rows": 58,
+      "columns": 39,
+      "non_empty_cells": 1064,
+      "merged_ranges": null,
+      "formula_count": 310,
+      "formula_columns": [
+        "AB",
+        "AD",
+        "AE",
+        "AI",
+        "AJ",
+        "K",
+        "L",
+        "M",
+        "T",
+        "U"
+      ],
+      "date_cells": 1,
+      "cached_errors": [],
+      "cached_error_count": 0,
+      "pier_label_count": 11,
+      "pile_id_count": 52,
+      "resource_text_cells": 2,
+      "sample_formulas": [
+        {
+          "cell": "K4",
+          "formula": "=CEILING(H4/J4,1)"
+        },
+        {
+          "cell": "L4",
+          "formula": "=L58"
+        },
+        {
+          "cell": "M4",
+          "formula": "=ROUNDUP(L4+K4,1)"
+        },
+        {
+          "cell": "AI4",
+          "formula": "=MAX(M4:M5)+15"
+        },
+        {
+          "cell": "AJ4",
+          "formula": "=ROUND(AI4+AH4,0)"
+        },
+        {
+          "cell": "K5",
+          "formula": "=CEILING(H5/J5,1)"
+        },
+        {
+          "cell": "L5",
+          "formula": "=M4"
+        },
+        {
+          "cell": "M5",
+          "formula": "=ROUNDUP(L5+K5,1)"
+        }
+      ]
+    },
+    {
+      "name": "七龙咀大桥",
+      "state": "visible",
+      "rows": 67,
+      "columns": 46,
+      "non_empty_cells": 1360,
+      "merged_ranges": null,
+      "formula_count": 466,
+      "formula_columns": [
+        "AD",
+        "AG",
+        "AH",
+        "AK",
+        "AM",
+        "AN",
+        "AT",
+        "K",
+        "L",
+        "M",
+        "R",
+        "U",
+        "V"
+      ],
+      "date_cells": 2,
+      "cached_errors": [],
+      "cached_error_count": 0,
+      "pier_label_count": 16,
+      "pile_id_count": 62,
+      "resource_text_cells": 38,
+      "sample_formulas": [
+        {
+          "cell": "U4",
+          "formula": "=AS4"
+        },
+        {
+          "cell": "V4",
+          "formula": "=U4+R4"
+        },
+        {
+          "cell": "AG4",
+          "formula": "=V4"
+        },
+        {
+          "cell": "AH4",
+          "formula": "=AG4+AD4"
+        },
+        {
+          "cell": "AM4",
+          "formula": "=AH4"
+        },
+        {
+          "cell": "AN4",
+          "formula": "=AM4+AK4"
+        },
+        {
+          "cell": "AT4",
+          "formula": "=MAX(AN4:AN32)"
+        },
+        {
+          "cell": "K5",
+          "formula": "=ROUNDUP(H5/J5,0)"
+        }
+      ]
+    },
+    {
+      "name": "新屋基大桥",
+      "state": "visible",
+      "rows": 91,
+      "columns": 44,
+      "non_empty_cells": 1464,
+      "merged_ranges": null,
+      "formula_count": 506,
+      "formula_columns": [
+        "AD",
+        "AG",
+        "AH",
+        "AK",
+        "AM",
+        "AN",
+        "AR",
+        "K",
+        "L",
+        "M",
+        "R",
+        "U",
+        "V"
+      ],
+      "date_cells": 1,
+      "cached_errors": [],
+      "cached_error_count": 0,
+      "pier_label_count": 12,
+      "pile_id_count": 88,
+      "resource_text_cells": 33,
+      "sample_formulas": [
+        {
+          "cell": "K4",
+          "formula": "=ROUNDUP(H4/J4,0)"
+        },
+        {
+          "cell": "L4",
+          "formula": "=AQ4"
+        },
+        {
+          "cell": "M4",
+          "formula": "=L4+K4"
+        },
+        {
+          "cell": "U4",
+          "formula": "<openpyxl.worksheet.formula.ArrayFormula object at 0x00000194FA6FF050>"
+        },
+        {
+          "cell": "V4",
+          "formula": "=U4+R4"
+        },
+        {
+          "cell": "AG4",
+          "formula": "=V4"
+        },
+        {
+          "cell": "AH4",
+          "formula": "=V4+AD4"
+        },
+        {
+          "cell": "AM4",
+          "formula": "=AH4"
+        }
+      ]
+    }
+  ]
+}

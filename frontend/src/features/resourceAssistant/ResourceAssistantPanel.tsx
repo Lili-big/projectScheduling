@@ -3,12 +3,12 @@ import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   compareAiResourceAssistantResults,
-  createBaselinePlan,
   generateAiResourceAssistantRecommendation,
   initializeAiResourceAssistant,
   solveAiResourceAssistantPlan,
   updateAiResourceAssistantPlan,
-} from "../../api/schedulerApi";
+} from "../../api/resourceAssistantApi";
+import { createBaselinePlan } from "../../api/planControlApi";
 import {
   invalidatedAfterPlanChange,
   llmConfigStatusLabel,
@@ -26,7 +26,7 @@ import type {
   ResourceAssistantPlanResult,
   ResourceAssistantRecommendation,
   ScenarioInput,
-} from "../../types/scheduler";
+} from "../../contracts";
 import { PanelTitle } from "../../components/common/PanelTitle";
 import { MetricComparisonTable } from "./MetricComparisonTable";
 import { RecommendationPanel } from "./RecommendationPanel";

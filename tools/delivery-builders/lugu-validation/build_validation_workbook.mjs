@@ -1,9 +1,16 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SpreadsheetFile, Workbook } from "@oai/artifact-tool";
 
-const outputDir = fileURLToPath(new URL(".", import.meta.url));
-const outputPath = `${outputDir}泸古项目验证材料_20260715.xlsx`;
+const outputArgIndex = process.argv.indexOf("--output");
+const defaultOutputPath = fileURLToPath(
+  new URL("../../../deliverables/validation/lugu/泸古项目验证材料_20260715.xlsx", import.meta.url),
+);
+const outputPath = path.resolve(outputArgIndex >= 0 ? process.argv[outputArgIndex + 1] : defaultOutputPath);
+const outputDir = path.dirname(outputPath);
+const previewDir = path.join(outputDir, "previews");
+await fs.mkdir(previewDir, { recursive: true });
 const date = (day) => new Date(Date.UTC(2026, 6, day));
 
 const COLORS = {
@@ -489,7 +496,7 @@ console.log("FORMULA_ERRORS\n" + inspections.errors);
 
 for (const sheet of allSheets) {
   const preview = await workbook.render({ sheetName: sheet.name, autoCrop: "all", scale: 1, format: "png" });
-  await fs.writeFile(`${outputDir}preview_${sheet.name}.png`, new Uint8Array(await preview.arrayBuffer()));
+  await fs.writeFile(path.join(previewDir, `preview_${sheet.name}.png`), new Uint8Array(await preview.arrayBuffer()));
 }
 
 const output = await SpreadsheetFile.exportXlsx(workbook);

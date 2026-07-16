@@ -9,7 +9,7 @@ from typing import Any, Iterable
 
 from openpyxl import load_workbook
 
-from ..models import (
+from ..contracts import (
     FieldCandidateValue,
     FieldConflict,
     GirderImportPreview,

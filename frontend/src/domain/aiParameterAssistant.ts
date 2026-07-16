@@ -7,7 +7,7 @@ import type {
   AiParameterSourceEvidence,
   AiParameterSuggestion,
   AiParameterUploadedMaterialSummary,
-} from "../types/scheduler";
+} from "../contracts";
 
 export type AiParameterSuggestionGroup = {
   category: AiParameterCategory;

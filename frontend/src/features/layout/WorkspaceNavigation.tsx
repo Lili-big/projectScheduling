@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
-import type { TabKey } from "../../types/scheduler";
+import type { TabKey } from "../../contracts";
 
 type NavigationItem = { key: TabKey; label: string; icon: ReactNode };
 type NavigationGroup = {
@@ -31,7 +31,8 @@ const navigationGroups: NavigationGroup[] = [
     key: "projectParameters",
     label: "项目基本参数",
     items: [
-      { key: "projectFiles", label: "项目文件", icon: <Files size={15} /> },
+      { key: "projectFiles", label: "项目主数据", icon: <Database size={15} /> },
+      { key: "parameterAssistant", label: "AI 参数助手", icon: <Bot size={15} /> },
       { key: "process", label: "工艺工效库", icon: <Database size={15} /> },
       { key: "logic", label: "工艺逻辑", icon: <Workflow size={15} /> },
       { key: "resources", label: "资源配置", icon: <Server size={15} /> },

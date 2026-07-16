@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import type { PrecedenceLink, Task } from "../../types/scheduler";
+import type { PrecedenceLink, Task } from "../../contracts";
 
 export type PredecessorDetail = {
   predecessorId: string;

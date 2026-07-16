@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from ..bridge_import import default_local_bridge_workbook, import_bridge_parameters
-from ..models import ImportBridgeParamsResponse, ScenarioInput
+from ..contracts import ImportBridgeParamsResponse, ScenarioInput
 
 
 def import_uploaded_bridge_params(

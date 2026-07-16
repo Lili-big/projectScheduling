@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from ..models import (
+from ..contracts import (
     ResourceAssistantComparison,
     ResourceAssistantLlmConfigStatus,
     ResourceAssistantRecommendation,

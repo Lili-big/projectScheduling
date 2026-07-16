@@ -1,7 +1,7 @@
 import { Loader2, Save } from "lucide-react";
 import { PanelTitle } from "../../components/common/PanelTitle";
 import { buildLogicRuleRows, deferredScheduleLogicItems } from "../../domain/logic";
-import type { LogicRule, RelationshipType, ScenarioInput, UpperStructureLogicRule } from "../../types/scheduler";
+import type { LogicRule, RelationshipType, ScenarioInput, UpperStructureLogicRule } from "../../contracts";
 
 export function LogicTab({
   scenario,

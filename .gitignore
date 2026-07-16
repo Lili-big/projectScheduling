@@ -25,3 +25,16 @@ backend/tests/__pycache__/
 .netlify
 .edge-profile/
 .netlify-cli-runtime/
+venv/
+dist/
+build/
+*.egg-info/
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
+.playwright-cli/
+output/playwright/
+/artifacts/
+.vscode/
+.idea/

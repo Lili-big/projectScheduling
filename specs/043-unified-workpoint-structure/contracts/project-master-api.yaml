@@ -1,0 +1,535 @@
+openapi: 3.1.0
+info:
+  title: 统一工点与结构物主数据 API
+  version: 1.0.0
+  description: >-
+    统一维护项目主数据完整快照。旧桥梁结构导入、旧架梁工点导入和旧 JSON
+    不属于本契约的数据来源。
+servers:
+  - url: /api
+tags:
+  - name: ProjectMaster
+  - name: ProjectMasterImport
+paths:
+  /project-master/template:
+    get:
+      tags: [ProjectMasterImport]
+      summary: 下载当前统一 Excel 模板
+      operationId: downloadProjectMasterTemplate
+      responses:
+        "200":
+          description: Excel 模板
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+  /projects/{project_id}/project-master/imports:
+    post:
+      tags: [ProjectMasterImport]
+      summary: 上传并校验一份完整项目主数据快照
+      operationId: importProjectMasterWorkbook
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, created_by]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                expected_current_version_id:
+                  type: [string, "null"]
+                  description: 上传时看到的当前确认版本；首次导入为空
+                created_by:
+                  type: string
+                  minLength: 1
+      responses:
+        "201":
+          description: 批次已完成同步校验；可能为 ready、blocked 或 unchanged
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportBatchDetail" }
+        "202":
+          description: 大文件已受理，客户端按批次查询进度
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportBatchDetail" }
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/ValidationFailure"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /project-master/imports/{batch_id}:
+    get:
+      tags: [ProjectMasterImport]
+      summary: 查询导入进度、问题和生成版本
+      operationId: getProjectMasterImport
+      parameters:
+        - $ref: "#/components/parameters/BatchId"
+      responses:
+        "200":
+          description: 导入批次详情
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportBatchDetail" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [ProjectMasterImport]
+      summary: 取消阻断批次或未确认草稿
+      operationId: cancelProjectMasterImport
+      parameters:
+        - $ref: "#/components/parameters/BatchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cancelled_by]
+              properties:
+                cancelled_by: { type: string, minLength: 1 }
+                cancel_reason: { type: [string, "null"], maxLength: 500 }
+      responses:
+        "200":
+          description: 批次已取消；审计保留，未确认草稿业务行已清理，当前确认版本未变化
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportBatchDetail" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: 批次状态不允许取消，例如已确认或已取消
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /projects/{project_id}/project-master/versions:
+    get:
+      tags: [ProjectMaster]
+      summary: 查询项目主数据版本历史
+      operationId: listProjectMasterVersions
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 版本列表
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/ProjectMasterVersionSummary" }
+  /projects/{project_id}/project-master/current:
+    get:
+      tags: [ProjectMaster]
+      summary: 查询当前确认版本摘要
+      operationId: getCurrentProjectMasterVersion
+      parameters:
+        - $ref: "#/components/parameters/ProjectId"
+      responses:
+        "200":
+          description: 当前确认版本
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectMasterVersionSummary" }
+        "404":
+          description: 项目尚未建立确认版本
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+  /project-master/versions/{version_id}:
+    get:
+      tags: [ProjectMaster]
+      summary: 查询版本摘要、差异和来源批次
+      operationId: getProjectMasterVersion
+      parameters:
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: 版本详情
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectMasterVersionDetail" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /project-master/versions/{version_id}/workpoints:
+    get:
+      tags: [ProjectMaster]
+      summary: 分页查询版本中的工点
+      operationId: listProjectMasterWorkpoints
+      parameters:
+        - $ref: "#/components/parameters/VersionId"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - name: workpoint_type
+          in: query
+          schema: { $ref: "#/components/schemas/WorkpointType" }
+        - name: keyword
+          in: query
+          schema: { type: string, maxLength: 100 }
+      responses:
+        "200":
+          description: 工点列表；不内嵌全量结构物和构件
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/WorkpointSummary" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /project-master/versions/{version_id}/workpoints/{workpoint_id}:
+    get:
+      tags: [ProjectMaster]
+      summary: 查询单工点完整结构物与构件子树
+      operationId: getProjectMasterWorkpoint
+      parameters:
+        - $ref: "#/components/parameters/VersionId"
+        - $ref: "#/components/parameters/WorkpointId"
+      responses:
+        "200":
+          description: 工点明细
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkpointDetail" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /project-master/versions/{version_id}/confirm:
+    post:
+      tags: [ProjectMaster]
+      summary: 确认草稿为项目当前主数据版本
+      operationId: confirmProjectMasterVersion
+      parameters:
+        - $ref: "#/components/parameters/VersionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmed_by, expected_current_version_id, acknowledge_warning_codes]
+              properties:
+                confirmed_by: { type: string, minLength: 1 }
+                expected_current_version_id:
+                  type: [string, "null"]
+                  description: 必须与导入和当前确认版本一致；首次确认为空
+                acknowledge_warning_codes:
+                  type: array
+                  uniqueItems: true
+                  items: { type: string }
+      responses:
+        "200":
+          description: 确认成功
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectMasterVersionDetail" }
+        "409":
+          description: 当前版本已变化、草稿状态不允许或删除受引用对象
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiError" }
+              examples:
+                currentChanged:
+                  value:
+                    code: CURRENT_VERSION_CHANGED
+                    message: 当前确认版本已变化，请基于最新版本重新导入。
+                    details: { current_version_id: PMV-0002 }
+        "422":
+          $ref: "#/components/responses/ValidationFailure"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /project-master/versions/{version_id}/export:
+    get:
+      tags: [ProjectMaster]
+      summary: 导出指定版本为统一 Excel
+      operationId: exportProjectMasterVersion
+      parameters:
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: 可再次导入的完整快照
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        "404":
+          $ref: "#/components/responses/NotFound"
+components:
+  parameters:
+    ProjectId:
+      name: project_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+    VersionId:
+      name: version_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+    BatchId:
+      name: batch_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+    WorkpointId:
+      name: workpoint_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1 }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: page_size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+  responses:
+    NotFound:
+      description: 对象不存在
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
+    PayloadTooLarge:
+      description: 文件超过配置上限
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
+    ValidationFailure:
+      description: 请求或业务校验失败
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
+    ServiceUnavailable:
+      description: 主数据仓储不可用或事务失败，当前确认版本未变化
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ApiError" }
+  schemas:
+    PageMeta:
+      type: object
+      required: [page, page_size, total]
+      properties:
+        page: { type: integer }
+        page_size: { type: integer }
+        total: { type: integer }
+    ApiError:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        details: { type: object, additionalProperties: true }
+        request_id: { type: [string, "null"] }
+    WorkpointType:
+      type: string
+      enum: [bridge, roadbed, tunnel, culvert, interchange, service_area, station_yard, access_road, other]
+    VersionStatus:
+      type: string
+      enum: [draft, confirmed, superseded]
+    ImportStatus:
+      type: string
+      enum: [uploaded, validating, blocked, ready, confirmed, cancelled, failed, unchanged]
+    Side:
+      type: string
+      enum: [left, right, shared, none]
+    ScheduleSupport:
+      type: string
+      enum: [bridge_supported, not_supported]
+    Counts:
+      type: object
+      required: [workpoints, structures, components, errors, warnings]
+      properties:
+        workpoints: { type: integer, minimum: 0 }
+        structures: { type: integer, minimum: 0 }
+        components: { type: integer, minimum: 0 }
+        errors: { type: integer, minimum: 0 }
+        warnings: { type: integer, minimum: 0 }
+    DiffCounts:
+      type: object
+      required: [added, modified, deleted]
+      properties:
+        added: { type: integer, minimum: 0 }
+        modified: { type: integer, minimum: 0 }
+        deleted: { type: integer, minimum: 0 }
+    SourceEvidence:
+      type: object
+      required: [batch_id, sheet_name, row_no]
+      properties:
+        batch_id: { type: string }
+        sheet_name: { type: string }
+        row_no: { type: integer, minimum: 1 }
+        column_name: { type: [string, "null"] }
+    ImportIssue:
+      type: object
+      required: [issue_id, severity, issue_code, sheet_name, message]
+      properties:
+        issue_id: { type: string }
+        severity: { type: string, enum: [error, warning] }
+        issue_code: { type: string }
+        sheet_name: { type: string }
+        row_no: { type: [integer, "null"] }
+        field_name: { type: [string, "null"] }
+        object_kind: { type: [string, "null"] }
+        object_id: { type: [string, "null"] }
+        message: { type: string }
+        suggestion: { type: [string, "null"] }
+    ImportBatchDetail:
+      type: object
+      required: [batch_id, project_id, status, file_name, created_at, created_by, counts, issues]
+      properties:
+        batch_id: { type: string }
+        project_id: { type: string }
+        status: { $ref: "#/components/schemas/ImportStatus" }
+        file_name: { type: string }
+        file_sha256: { type: string }
+        content_fingerprint: { type: [string, "null"] }
+        expected_current_version_id: { type: [string, "null"] }
+        created_version_id: { type: [string, "null"] }
+        existing_version_id:
+          type: [string, "null"]
+          description: unchanged 时指向已有相同业务版本
+        cancelled_version_id:
+          type: [string, "null"]
+          description: 取消 ready 批次时记录已清理草稿的原版本 ID
+        counts: { $ref: "#/components/schemas/Counts" }
+        diff_counts: { $ref: "#/components/schemas/DiffCounts" }
+        issues:
+          type: array
+          items: { $ref: "#/components/schemas/ImportIssue" }
+        created_at: { type: string, format: date-time }
+        created_by: { type: string }
+        completed_at: { type: [string, "null"], format: date-time }
+        cancelled_at: { type: [string, "null"], format: date-time }
+        cancelled_by: { type: [string, "null"] }
+        cancel_reason: { type: [string, "null"] }
+    ProjectMasterVersionSummary:
+      type: object
+      required: [version_id, project_id, version_no, status, content_fingerprint, counts, created_at, created_by]
+      properties:
+        version_id: { type: string }
+        project_id: { type: string }
+        version_no: { type: integer, minimum: 1 }
+        status: { $ref: "#/components/schemas/VersionStatus" }
+        content_fingerprint: { type: string }
+        source_batch_id: { type: string }
+        base_version_id: { type: [string, "null"] }
+        counts: { $ref: "#/components/schemas/Counts" }
+        created_at: { type: string, format: date-time }
+        created_by: { type: string }
+        confirmed_at: { type: [string, "null"], format: date-time }
+        confirmed_by: { type: [string, "null"] }
+    DiffEntry:
+      type: object
+      required: [object_kind, object_id, change_type]
+      properties:
+        object_kind: { type: string, enum: [workpoint, structure, component, parameter] }
+        object_id: { type: string }
+        change_type: { type: string, enum: [added, modified, deleted, unchanged] }
+        field_name: { type: [string, "null"] }
+        before_value: {}
+        after_value: {}
+        blocking_reference: { type: boolean, default: false }
+    ProjectMasterVersionDetail:
+      allOf:
+        - $ref: "#/components/schemas/ProjectMasterVersionSummary"
+        - type: object
+          required: [diff_counts, diff_entries]
+          properties:
+            diff_counts: { $ref: "#/components/schemas/DiffCounts" }
+            diff_entries:
+              type: array
+              items: { $ref: "#/components/schemas/DiffEntry" }
+            warning_codes:
+              type: array
+              items: { type: string }
+    WorkpointSummary:
+      type: object
+      required: [workpoint_id, workpoint_name, workpoint_type, sort_order, schedule_support, structure_count]
+      properties:
+        workpoint_id: { type: string }
+        workpoint_name: { type: string }
+        workpoint_type: { $ref: "#/components/schemas/WorkpointType" }
+        alignment_code: { type: [string, "null"] }
+        start_mileage_m: { type: [number, "null"] }
+        end_mileage_m: { type: [number, "null"] }
+        sort_order: { type: integer, minimum: 0 }
+        schedule_support: { $ref: "#/components/schemas/ScheduleSupport" }
+        structure_count: { type: integer, minimum: 0 }
+        source: { $ref: "#/components/schemas/SourceEvidence" }
+    ParameterValue:
+      type: object
+      required: [parameter_code, value_type, value]
+      properties:
+        parameter_code: { type: string }
+        value_type: { type: string, enum: [text, number, integer, boolean, date] }
+        value: {}
+        unit: { type: [string, "null"] }
+        source: { $ref: "#/components/schemas/SourceEvidence" }
+    Component:
+      type: object
+      required: [component_id, component_name, component_type, quantity, unit, enabled, sort_order, parameters]
+      properties:
+        component_id: { type: string }
+        component_name: { type: string }
+        component_type: { type: string }
+        quantity: { type: number, minimum: 0 }
+        unit: { type: string }
+        enabled: { type: boolean }
+        sort_order: { type: integer, minimum: 0 }
+        remark: { type: [string, "null"] }
+        parameters:
+          type: array
+          items: { $ref: "#/components/schemas/ParameterValue" }
+        source: { $ref: "#/components/schemas/SourceEvidence" }
+    Structure:
+      type: object
+      required: [structure_id, structure_name, structure_category, structure_type, side, sort_order, parameters, components]
+      properties:
+        structure_id: { type: string }
+        structure_name: { type: string }
+        structure_category: { type: string }
+        structure_type: { type: string }
+        side: { $ref: "#/components/schemas/Side" }
+        section_code: { type: [string, "null"] }
+        section_name: { type: [string, "null"] }
+        control_level: { type: [string, "null"] }
+        sort_order: { type: integer, minimum: 0 }
+        remark: { type: [string, "null"] }
+        parameters:
+          type: array
+          items: { $ref: "#/components/schemas/ParameterValue" }
+        components:
+          type: array
+          items: { $ref: "#/components/schemas/Component" }
+        source: { $ref: "#/components/schemas/SourceEvidence" }
+    WorkpointDetail:
+      allOf:
+        - $ref: "#/components/schemas/WorkpointSummary"
+        - type: object
+          required: [structures]
+          properties:
+            remark: { type: [string, "null"] }
+            structures:
+              type: array
+              items: { $ref: "#/components/schemas/Structure" }

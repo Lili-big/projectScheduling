@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from ..models import LatestFinishControl, PassageReleaseResult, ProjectDataVersion, RouteRun, ValidationMessage
+from ..contracts import LatestFinishControl, PassageReleaseResult, ProjectDataVersion, RouteRun, ValidationMessage
 
 
 def calculate_latest_finish_controls(

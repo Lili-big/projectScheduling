@@ -1,0 +1,27 @@
+.girder-planning-panel { display: grid; gap: 16px; }
+.girder-card { border: 1px solid #dbe5ee; border-radius: 12px; background: #fff; padding: 16px; display: grid; gap: 12px; }
+.girder-card h3 { margin: 0; color: #16324f; }
+.girder-card p { margin: 4px 0 0; color: #64748b; }
+.girder-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.girder-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.girder-grid.compact { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.girder-editor-group, .girder-route { border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; display: grid; gap: 10px; }
+.girder-editor-group label, .girder-grid label { display: grid; gap: 6px; color: #334155; font-size: 13px; }
+.girder-check { display: flex !important; align-items: center; gap: 8px !important; }
+.girder-actions, .girder-version-strip { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.girder-version-strip span { background: #eff6ff; color: #1e3a5f; border-radius: 999px; padding: 5px 10px; font-size: 12px; }
+.girder-file-button { border-radius: 7px; background: #e2e8f0; color: #0f172a; padding: 8px 12px; cursor: pointer; }
+.girder-file-button input { display: none; }
+.girder-node-picker { display: flex; flex-wrap: wrap; gap: 8px; }
+.girder-node-picker label { border: 1px solid #cbd5e1; border-radius: 999px; padding: 5px 9px; font-size: 12px; }
+.girder-diagnostics { display: grid; gap: 8px; }
+.girder-message { border-left: 4px solid #94a3b8; background: #f8fafc; padding: 9px 12px; display: grid; gap: 3px; }
+.girder-message.error { border-color: #dc2626; background: #fef2f2; }
+.girder-message.warning { border-color: #d97706; background: #fffbeb; }
+.girder-message.info { border-color: #0284c7; background: #f0f9ff; }
+.girder-status { border-radius: 999px; padding: 5px 10px; font-size: 12px; font-weight: 700; }
+.girder-status.ready { background: #dcfce7; color: #166534; }
+.girder-status.warning { background: #fef3c7; color: #92400e; }
+.girder-status.blocking { background: #fee2e2; color: #991b1b; }
+.girder-result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+

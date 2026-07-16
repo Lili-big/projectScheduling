@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date
 
-from ..models import (
+from ..contracts import (
     ErectionMachineConfig,
     ErectionOwnership,
     GeneratedScheduleInput,

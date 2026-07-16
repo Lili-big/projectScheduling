@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from ..models import (
+from ..contracts import (
     GirderExecutionActual,
     GirderMachineActual,
     GirderProgressImportPreview,

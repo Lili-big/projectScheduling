@@ -2,7 +2,7 @@
 
 **分支/目录**：`[###-feature-name]` | **日期**：[DATE] | **规格**：[link]
 
-**输入**：来自 `/specs/[###-feature-name]/spec.md` 的功能规格
+**输入**：来自当前 `SPECIFY_FEATURE_DIRECTORY/spec.md` 的功能规格
 
 **说明**：本模板由 `/speckit-plan` 填写。执行流程以 `.specify/templates/plan-template.md` 和 `.agents/skills/speckit-plan/SKILL.md` 为准。
 
@@ -44,13 +44,16 @@
 - 输入、输出、约束、边界场景和验收标准可测试。
 - 未经明确批准，不把 Demo 临时限制提升为正式产品目标。
 - Spec Kit 过程文档和阶段报告使用中文简体；代码标识符、文件路径、接口名、任务编号和必要英文缩写可保持原文。
+- 已声明主要生命周期阶段、工作包、资产类型、保留策略和主要所有者。
+- 资产迁移具有逐项清单、清单外保护、引用更新和回退边界。
+- 本地状态、用户输入和正式成果不会被当作缓存或临时文件清理。
 
 ## 项目结构
 
 ### 本功能文档
 
 ```text
-specs/[###-feature]/
+[SPECIFY_FEATURE_DIRECTORY]/
 ├── plan.md              # 本文件（/speckit-plan 输出）
 ├── research.md          # Phase 0 输出
 ├── data-model.md        # Phase 1 输出
@@ -59,35 +62,24 @@ specs/[###-feature]/
 └── tasks.md             # Phase 2 输出（由 /speckit-tasks 创建）
 ```
 
-### 源码结构（仓库根目录）
+### 生命周期与源码结构（仓库根目录）
 
 <!--
   用本功能真实涉及的目录替换下方示例；删除未使用路径，不保留“选项”标签。
 -->
 
 ```text
-backend/
-├── app/
-│   ├── models.py
-│   ├── scenario.py
-│   ├── solver.py
-│   ├── services/
-│   └── api/
-└── tests/
+00-governance/
+01-discovery/
+02-solution-analysis/
+03-requirements/
+04-demo/
+05-validation/
+06-delivery/
 
-frontend/
-├── src/
-│   ├── app/
-│   ├── api/
-│   ├── domain/
-│   ├── features/
-│   └── components/
-
-netlify/
-└── functions/
-
-docs/
-└── [需求、PRD、评审和算法文档]
+.agents/       # 必需的 Agent/Skill 发现入口
+.specify/      # 必需的 Spec Kit 发现入口
+.local-data/   # 本地状态、日志、缓存和临时文件，按保留等级分区
 ```
 
 **结构决策**：[说明选择的真实结构，并引用上方具体目录]

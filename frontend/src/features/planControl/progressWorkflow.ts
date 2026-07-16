@@ -1,4 +1,4 @@
-import type { ForecastSchedule, ProgressEntry, ProgressSnapshot, Task } from "../../types/scheduler";
+import type { ForecastSchedule, ProgressEntry, ProgressSnapshot, Task } from "../../contracts";
 
 export type ProgressEntryIssue = {
   task_id: string;

@@ -11,10 +11,12 @@
     "export:pdf": "tsx scripts/export-pdf.ts",
     "export:png": "tsx scripts/export-png.ts",
     "check": "tsx scripts/check-layout.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "verify": "npm run typecheck && npm run check",
     "all": "npm run marp && npm run react && npm run pptx && npm run export:pdf && npm run export:png && npm run check",
     "all:from-outline": "npm run spec && npm run all",
-    "marp:pdf": "marp output/marp/slides.md --theme themes/business.css --pdf --output output/marp/slides.pdf",
-    "marp:pptx": "marp output/marp/slides.md --theme themes/business.css --pptx --output output/marp/slides.pptx"
+    "marp:pdf": "marp ../../artifacts/ai-ppt-system/output/marp/slides.md --theme themes/business.css --pdf --output ../../artifacts/ai-ppt-system/output/marp/slides.pdf",
+    "marp:pptx": "marp ../../artifacts/ai-ppt-system/output/marp/slides.md --theme themes/business.css --pptx --output ../../artifacts/ai-ppt-system/output/marp/slides.pptx"
   },
   "dependencies": {
     "@marp-team/marp-cli": "latest",

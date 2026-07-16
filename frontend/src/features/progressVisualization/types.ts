@@ -1,4 +1,4 @@
-import type { ComponentType, ForecastRiskStatus } from "../../types/scheduler";
+import type { ComponentType, ForecastRiskStatus } from "../../contracts";
 
 export type ProgressVisualizationView = "route" | "bridge";
 export type ProgressVisualizationMode = "progress" | "variance";

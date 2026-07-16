@@ -1,4 +1,4 @@
-import type { FieldConflict, GirderPlanningReadiness, SourceEvidence, ValidationMessage } from "../../types/scheduler";
+import type { FieldConflict, GirderPlanningReadiness, SourceEvidence, ValidationMessage } from "../../contracts";
 
 export function GirderDiagnostics({
   conflicts,

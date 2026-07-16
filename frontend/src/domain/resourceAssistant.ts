@@ -12,7 +12,7 @@ import type {
   ResourceAssistantRecommendation,
   ResourceAssistantLlmConfigStatus,
   ResourcePool,
-} from "../types/scheduler";
+} from "../contracts";
 
 const defaultResourceTypeLabels: Record<string, string> = {
   rotary_drill: "旋挖钻",

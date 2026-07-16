@@ -1,4 +1,4 @@
-import type { ComponentType, ResourceCostType } from "../types/scheduler";
+import type { ComponentType, ResourceCostType } from "../contracts";
 
 export const PREDECESSOR_HOVER_DELAY_MS = 450;
 export const PREDECESSOR_HOVER_CLOSE_DELAY_MS = 140;

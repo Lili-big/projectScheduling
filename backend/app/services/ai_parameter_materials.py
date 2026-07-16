@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..models import AiParameterMaterialKind, AiParameterUploadedMaterialSummary, ValidationMessage
+from ..contracts import AiParameterMaterialKind, AiParameterUploadedMaterialSummary, ValidationMessage
 
 
 MAX_AI_PARAMETER_FILE_COUNT = 10

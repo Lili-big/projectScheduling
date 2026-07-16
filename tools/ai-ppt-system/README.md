@@ -12,7 +12,7 @@
 ## 快速开始
 
 ```powershell
-cd D:\codex_workspace\文档处理\03_演示文档\ai-ppt-system
+cd D:\codex_workspace\排程算法\tools\ai-ppt-system
 npm.cmd install
 npx.cmd playwright install chromium
 npm.cmd run all
@@ -20,12 +20,12 @@ npm.cmd run all
 
 完成后查看：
 
-- `output/pptx/deck.pptx`
-- `output/react/index.html`
-- `output/pdf/deck.pdf`
-- `output/png/slide-01.png`
-- `output/marp/slides.md`
-- `output/checks/layout-report.json`
+- `../../artifacts/ai-ppt-system/output/pptx/deck.pptx`
+- `../../artifacts/ai-ppt-system/output/react/index.html`
+- `../../artifacts/ai-ppt-system/output/pdf/deck.pdf`
+- `../../artifacts/ai-ppt-system/output/png/slide-01.png`
+- `../../artifacts/ai-ppt-system/output/marp/slides.md`
+- `../../artifacts/ai-ppt-system/output/checks/layout-report.json`
 
 ## Codex 调用方式
 
@@ -41,7 +41,7 @@ npm.cmd run all
 调用 $ai-ppt-system，读取 input/outline.md，生成可编辑 PPTX，并检查版式。
 ```
 
-当需要大模型理解模板、判断页面类型、压缩文案或修正版式时，不要在脚本里调用外部 API，直接让当前 Codex 对话读取 `input/outline.md`、`specs/slide_spec.json` 和 `output/checks/layout-report.json` 后修改结构化文件。
+当需要大模型理解模板、判断页面类型、压缩文案或修正版式时，不要在脚本里调用外部 API，直接让当前 Codex 对话读取 `input/outline.md`、`specs/slide_spec.json` 和 `../../artifacts/ai-ppt-system/output/checks/layout-report.json` 后修改结构化文件。
 
 ## 公司 PPT 模板
 
@@ -70,7 +70,7 @@ npm.cmd run all
 - `themes/business.css`：Marp 与商务风格参考主题。
 - `assets/company-template/`：公司 PPT 模板原文件及 PPTX 渲染器使用的背景、Logo 资源。
 - `scripts/`：结构化、渲染、导出、版式检查脚本。
-- `output/`：所有生成结果。
+- `../../artifacts/ai-ppt-system/output/`：所有本地生成结果，默认不跟踪。可用 `AI_PPT_OUTPUT_DIR` 临时覆盖输出目录。
 
 ## 常用命令
 
@@ -82,6 +82,7 @@ npm.cmd run pptx
 npm.cmd run export:pdf
 npm.cmd run export:png
 npm.cmd run check
+npm.cmd run verify
 npm.cmd run all
 ```
 

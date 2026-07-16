@@ -6,7 +6,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .bridge_import import default_local_bridge_workbook, import_bridge_parameters
-from .models import ProjectModel, ProjectStructureParamsResponse, ScenarioInput
+from .contracts import ProjectModel, ProjectStructureParamsResponse, ScenarioInput
 from .scenario_data import apply_resource_max_quantity_defaults, default_scenario, sync_bridge_completion_milestones
 
 

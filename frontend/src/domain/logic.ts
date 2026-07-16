@@ -1,4 +1,4 @@
-import type { LogicRule, RelationshipType, ScenarioInput, StructureModel, UpperStructureModel } from "../types/scheduler";
+import type { LogicRule, RelationshipType, ScenarioInput, StructureModel, UpperStructureModel } from "../contracts";
 import { upperStructureCodes } from "./constants";
 import { componentLabels } from "./labels";
 import { mergeUpperStructureLogicRules, upperStructureLogicDefinitions } from "./upperStructureLogic";

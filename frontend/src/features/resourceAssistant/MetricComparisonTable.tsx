@@ -1,4 +1,4 @@
-import type { ResourceAssistantComparison, ResourceAssistantPlan, ResourceAssistantPlanResult } from "../../types/scheduler";
+import type { ResourceAssistantComparison, ResourceAssistantPlan, ResourceAssistantPlanResult } from "../../contracts";
 import { metricValueDisplay, resourceAssistantProfileLabels } from "../../domain/resourceAssistant";
 
 export function MetricComparisonTable({

@@ -1,5 +1,5 @@
 import { AlertCircle, CheckCircle2, Eye, Loader2, Play, SlidersHorizontal } from "lucide-react";
-import type { ResourceAssistantPlan, ResourceAssistantPlanResult } from "../../types/scheduler";
+import type { ResourceAssistantPlan, ResourceAssistantPlanResult } from "../../contracts";
 import {
   editableResourcePools,
   metricsSummary,

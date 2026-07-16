@@ -2,7 +2,7 @@ import { GitCompare, PenLine } from "lucide-react";
 import type {
   AiParameterConflictGroup,
   AiParameterSuggestion,
-} from "../../../types/scheduler";
+} from "../../../contracts";
 import {
   formatAiParameterValue,
   isAiParameterConflictResolved,

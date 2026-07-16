@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
-from ..models import ScenarioInput
+from ..contracts import ScenarioInput
 from .ai_parameter_materials import AiParameterMaterial
 
 

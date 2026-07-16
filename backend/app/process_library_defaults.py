@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 
-from .models import ProcessTemplate, ProductivityOption
+from .contracts import ProcessTemplate, ProductivityOption
 
 
 def historical_default_process_library() -> list[ProcessTemplate]:

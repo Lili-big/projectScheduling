@@ -36,6 +36,12 @@ export async function apiPostFormData<T>(path: string, payload: FormData): Promi
   return response.json() as Promise<T>;
 }
 
+export async function apiGetBlob(path: string): Promise<Blob> {
+  const response = await apiFetch(path);
+  if (!response.ok) throw new Error(await responseErrorText(response));
+  return response.blob();
+}
+
 async function apiFetch(path: string, init: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
   ensureApiBaseConfiguredForNetlify();
   const controller = new AbortController();
@@ -67,7 +73,14 @@ async function responseErrorText(response: Response): Promise<string> {
   const text = await response.text();
   try {
     const payload = JSON.parse(text) as { detail?: unknown };
-    return typeof payload.detail === "string" ? payload.detail : text;
+    if (typeof payload.detail === "string") return payload.detail;
+    if (payload.detail && typeof payload.detail === "object") {
+      const detail = payload.detail as { code?: unknown; message?: unknown };
+      if (typeof detail.message === "string") {
+        return typeof detail.code === "string" ? `${detail.message}（${detail.code}）` : detail.message;
+      }
+    }
+    return text;
   } catch {
     return text;
   }

@@ -5,7 +5,7 @@ import type {
   PlanControlProjectSummary,
   ProgressEntry,
   ScheduledTask,
-} from "../../types/scheduler";
+} from "../../contracts";
 import type {
   BridgeProgressSummary,
   ComponentProgressSummary,

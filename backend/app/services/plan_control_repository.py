@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from ..models import (
+from ..contracts import (
     AdjustmentProposal,
     ConfirmProjectDataVersionRequest,
     ConfirmSpecialtyRequest,
@@ -164,7 +164,7 @@ class PlanControlRepository:
             (
                 item
                 for item in self.load().planning_scenario_versions
-                if item.project_data_version_id in project_version_ids
+                if item.project_data_version_id in project_version_ids or item.scenario.project.project_id == project_id
             ),
             key=lambda item: (item.scenario_id, item.version_no),
             reverse=True,
@@ -193,14 +193,31 @@ class PlanControlRepository:
                 ),
                 None,
             )
-            if project_version is None:
-                raise PlanControlNotFoundError(f"项目主数据版本 {request.project_data_version_id} 不存在。")
-            if project_version.status != "confirmed":
-                raise PlanControlConflictError("方案版本只能引用已确认的项目主数据版本。")
-            if request.scenario.project.project_id != project_version.project_id:
-                raise PlanControlConflictError("方案项目与项目主数据版本不一致。")
-            if stable_fingerprint(request.scenario.project) != stable_fingerprint(project_version.project):
-                raise PlanControlConflictError("方案中的项目结构与确认项目版本不一致。")
+            if request.project_data_version_id.startswith("pmv-"):
+                from ..project_master.repository import ProjectMasterRepositoryError
+                from ..project_master.service import default_project_master_service
+
+                try:
+                    master_version = default_project_master_service().repository.get_version_summary(
+                        request.project_data_version_id
+                    )
+                except ProjectMasterRepositoryError as exc:
+                    raise PlanControlNotFoundError(str(exc)) from exc
+                if master_version.status != "confirmed":
+                    raise PlanControlConflictError("方案版本只能引用已确认的项目主数据版本。")
+                if request.scenario.project.project_id != master_version.project_id:
+                    raise PlanControlConflictError("方案项目与项目主数据版本不一致。")
+                if request.scenario.project_data_version_id not in {None, request.project_data_version_id}:
+                    raise PlanControlConflictError("方案内项目主数据版本引用不一致。")
+            else:
+                if project_version is None:
+                    raise PlanControlNotFoundError(f"项目主数据版本 {request.project_data_version_id} 不存在。")
+                if project_version.status != "confirmed":
+                    raise PlanControlConflictError("方案版本只能引用已确认的项目主数据版本。")
+                if request.scenario.project.project_id != project_version.project_id:
+                    raise PlanControlConflictError("方案项目与项目主数据版本不一致。")
+                if stable_fingerprint(request.scenario.project) != stable_fingerprint(project_version.project):
+                    raise PlanControlConflictError("方案中的项目结构与确认项目版本不一致。")
             versions = [
                 item
                 for item in store.planning_scenario_versions
@@ -232,7 +249,10 @@ class PlanControlRepository:
                 project_data_version_id=request.project_data_version_id,
                 version_no=latest_no + 1,
                 status="draft",
-                scenario=request.scenario.model_copy(deep=True),
+                scenario=request.scenario.model_copy(
+                    deep=True,
+                    update={"project_data_version_id": request.project_data_version_id},
+                ),
                 girder_planning=request.girder_planning.model_copy(deep=True),
                 input_fingerprint=input_fingerprint,
                 created_by=request.created_by.strip(),
@@ -247,6 +267,46 @@ class PlanControlRepository:
             store.planning_scenario_versions.append(version)
             self._write_unlocked(store)
             return version
+
+    def invalidate_project_master_reference(self, project_data_version_id: str) -> None:
+        """Mark every downstream artifact derived from a superseded master version stale."""
+
+        with self._lock:
+            store = self._load_unlocked()
+            stale_scenario_ids = {
+                item.scenario_version_id
+                for item in store.planning_scenario_versions
+                if item.project_data_version_id == project_data_version_id
+            }
+            store.planning_scenario_versions = [
+                item.model_copy(update={"status": "stale"})
+                if item.scenario_version_id in stale_scenario_ids and item.status != "superseded"
+                else item
+                for item in store.planning_scenario_versions
+            ]
+            store.integrated_calculation_snapshots = [
+                item.model_copy(update={"status": "stale"})
+                if (
+                    item.project_data_version_id == project_data_version_id
+                    or item.scenario_version_id in stale_scenario_ids
+                )
+                else item
+                for item in store.integrated_calculation_snapshots
+            ]
+            store.plan_versions = [
+                item.model_copy(update={"status": "stale"})
+                if item.project_data_version_id == project_data_version_id and item.status == "active"
+                else item
+                for item in store.plan_versions
+            ]
+            stale_plan_ids = {item.plan_version_id for item in store.plan_versions if item.status == "stale"}
+            store.forecasts = [
+                item.model_copy(update={"status": "stale"})
+                if item.plan_version_id in stale_plan_ids and item.status != "stale"
+                else item
+                for item in store.forecasts
+            ]
+            self._write_unlocked(store)
 
     def confirm_specialty(
         self,

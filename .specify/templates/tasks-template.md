@@ -5,7 +5,7 @@ description: "功能实施任务清单模板"
 
 # 任务清单：[功能名称]
 
-**输入**：来自 `/specs/[###-feature-name]/` 的设计文档
+**输入**：来自当前 `SPECIFY_FEATURE_DIRECTORY/` 的设计文档
 
 **前置条件**：`plan.md`（必需）、`spec.md`（用户故事必需）、`research.md`、`data-model.md`、`contracts/`
 
@@ -22,10 +22,15 @@ description: "功能实施任务清单模板"
 
 ## 路径约定
 
-- **后端**：`backend/app/`、`backend/tests/`
-- **前端**：`frontend/src/`
-- **Netlify 演示 API**：`netlify/functions/`
-- **文档**：`docs/`
+- **治理**：`00-governance/`
+- **调研**：`01-discovery/`
+- **方案分析**：`02-solution-analysis/`
+- **需求与规格**：`03-requirements/`
+- **Demo 代码与独立演示**：`04-demo/`
+- **客户/工程验证**：`05-validation/`
+- **正式交付与案例**：`06-delivery/`
+- **兼容发现入口**：`.agents/`、`.specify/`
+- **本地产物**：`.local-data/`，必须区分状态、日志、缓存和临时文件
 - 下方路径仅为示例，生成任务时必须根据 `plan.md` 和真实项目结构调整。
 
 <!--
@@ -49,6 +54,7 @@ description: "功能实施任务清单模板"
 - [ ] T001 按实施计划确认项目结构和受影响文件
 - [ ] T002 准备 [language] / [framework] 相关依赖或配置
 - [ ] T003 [P] 配置或复核格式化、类型检查和基础校验工具
+- [ ] T004 记录本功能生命周期阶段、工作包、资产类型、保留策略和主要所有者
 
 ---
 

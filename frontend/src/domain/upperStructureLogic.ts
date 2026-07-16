@@ -1,4 +1,4 @@
-import type { RelationshipType, UpperStructureLogicRule } from "../types/scheduler";
+import type { RelationshipType, UpperStructureLogicRule } from "../contracts";
 
 export type UpperStructureLogicDefinition = {
   id: string;

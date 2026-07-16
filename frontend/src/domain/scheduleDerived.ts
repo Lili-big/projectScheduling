@@ -1,4 +1,4 @@
-import type { ScheduleResult, ValidationMessage } from "../types/scheduler";
+import type { ScheduleResult, ValidationMessage } from "../contracts";
 import { scheduleStatusLabels } from "./labels";
 
 export type MetricTone = "ok" | "warn" | "danger" | "neutral";

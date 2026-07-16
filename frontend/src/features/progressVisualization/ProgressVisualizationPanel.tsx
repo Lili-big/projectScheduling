@@ -18,7 +18,7 @@ import { useMemo, useState } from "react";
 
 import bridgeBackground from "../../assets/progress-visualization/bridge-model.png";
 import routeBackground from "../../assets/progress-visualization/route-overview.png";
-import type { ComponentType, ForecastRiskStatus } from "../../types/scheduler";
+import type { ComponentType, ForecastRiskStatus } from "../../contracts";
 import { demoProgressVisualizationData } from "./demoData";
 import "./ProgressVisualizationPanel.css";
 import type {

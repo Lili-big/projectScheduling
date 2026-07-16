@@ -6,7 +6,7 @@
 .npm-cache/
 .npm-cache-netlify-deploy/
 .netlify-deploy-staging/
-netlify/demo-functions/
+tools/demo-api-mirror/
 .pip-cache/
 .pytest_cache/
 __pycache__/

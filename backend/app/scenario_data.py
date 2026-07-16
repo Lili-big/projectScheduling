@@ -4,7 +4,7 @@ import json
 from datetime import date
 from pathlib import Path
 
-from .models import (
+from .contracts import (
     ComponentModel,
     LogicRule,
     MilestoneConstraint,

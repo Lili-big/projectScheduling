@@ -1,4 +1,4 @@
-import type { ComponentType, MilestoneResult, ResourceCostType, ResourceMode, ScheduleResult, ValidationMessage, WorkSectionSide } from "../types/scheduler";
+import type { ComponentType, MilestoneResult, ResourceCostType, ResourceMode, ScheduleResult, ValidationMessage, WorkSectionSide } from "../contracts";
 
 export const componentLabels: Record<ComponentType, string> = {
   pile: "桩基",

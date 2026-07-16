@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lifecycle Work Package",
+  "type": "object",
+  "required": ["id", "stage", "purpose", "status", "inputs", "entrypoints", "results", "owner", "tracking_policy", "retention_policy"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "stage": { "type": "string", "pattern": "^(00|01|02|03|04|05|06)-" },
+    "purpose": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["active", "historical", "orphaned", "archived"] },
+    "inputs": { "type": "array", "items": { "type": "string" } },
+    "entrypoints": { "type": "array", "items": { "type": "string" } },
+    "results": { "type": "array", "items": { "type": "string" } },
+    "owner": { "type": "string", "minLength": 1 },
+    "tracking_policy": { "enum": ["tracked", "ignored", "local-only"] },
+    "retention_policy": { "type": "string", "minLength": 1 },
+    "related_workpackages": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

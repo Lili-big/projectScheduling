@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from datetime import datetime, timedelta, timezone
 
-from ..models import (
+from ..contracts import (
     AiParameterCandidateAddition,
     AiParameterConflictGroup,
     AiParameterSuggestion,

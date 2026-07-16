@@ -3,7 +3,7 @@ import type {
   GirderPlanningResult,
   IntegratedCalculationSnapshot,
   ScenarioInput,
-} from "../../types/scheduler";
+} from "../../contracts";
 
 export function createDefaultGirderPlanningConfig(startDate: string): GirderPlanningConfig {
   return {

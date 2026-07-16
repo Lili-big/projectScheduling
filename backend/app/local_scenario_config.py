@@ -6,7 +6,7 @@ from typing import Any, Iterable, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from .models import (
+from .contracts import (
     LogicRule,
     MilestoneConstraint,
     ProcessTemplate,

@@ -6,7 +6,7 @@ from datetime import date, timedelta
 
 from pydantic import BaseModel, Field
 
-from ..models import BeamYardConfig, ValidationMessage, YardInventoryActual, YardInventoryPoint
+from ..contracts import BeamYardConfig, ValidationMessage, YardInventoryActual, YardInventoryPoint
 
 
 class SupplyDemand(BaseModel):

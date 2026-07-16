@@ -2,7 +2,7 @@ import { Fragment } from "react";
 
 import { Loader2, Save } from "lucide-react";
 import { PanelTitle } from "../../components/common/PanelTitle";
-import type { MilestoneConstraint, ProjectBridge, ScenarioInput, WorkPointType } from "../../types/scheduler";
+import type { MilestoneConstraint, ProjectBridge, ScenarioInput, WorkPointType } from "../../contracts";
 
 const workPointTypeLabels: Record<WorkPointType, string> = {
   bridge: "桥梁工点",

@@ -1,4 +1,4 @@
-import type { ProcessTemplate, ProductivityOption } from "../types/scheduler";
+import type { ProcessTemplate, ProductivityOption } from "../contracts";
 
 export const pileProductivityUnitOptions = [
   { unit: "m/天", duration_method: "units_per_day", quantity_source: "pile_length_m" },

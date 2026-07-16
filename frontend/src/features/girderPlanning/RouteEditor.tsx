@@ -1,4 +1,4 @@
-import type { GirderPlanningConfig, GirderRouteConfig, GirderWorkPoint } from "../../types/scheduler";
+import type { GirderPlanningConfig, GirderRouteConfig, GirderWorkPoint } from "../../contracts";
 
 export function RouteEditor({
   config,
@@ -60,7 +60,7 @@ export function RouteEditor({
                 {workpoint.name} · {workpoint.side}
               </label>
             ))}
-            {!workpoints.length && <span className="muted">请先导入架梁工点。</span>}
+            {!workpoints.length && <span className="muted">请先确认项目主数据版本，系统将按工点与幅别派生路线节点。</span>}
           </div>
           <button type="button" className={route.confirmed ? "secondary" : ""} onClick={() => updateRoute(routeIndex, { confirmed: !route.confirmed })}>{route.confirmed ? "已确认节点顺序" : "确认节点顺序"}</button>
         </div>

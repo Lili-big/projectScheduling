@@ -9,7 +9,7 @@ from typing import Any, Iterable, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
-from .models import ComponentModel, ProcessNlChange, ProcessNlResponse, ProcessTemplate, ResourcePool, ScenarioInput
+from .contracts import ComponentModel, ProcessNlChange, ProcessNlResponse, ProcessTemplate, ResourcePool, ScenarioInput
 from .process_library_defaults import historical_default_process_library
 
 

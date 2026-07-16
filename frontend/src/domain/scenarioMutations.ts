@@ -1,5 +1,5 @@
 import { findComponent } from "./projectTree";
-import type { ScenarioInput, Task, TaskOverride } from "../types/scheduler";
+import type { ScenarioInput, Task, TaskOverride } from "../contracts";
 
 export function scenarioWithTaskProcessPatch(scenario: ScenarioInput, task: Task, patch: TaskOverride): ScenarioInput {
   const componentId = task.component_id ?? task.id;

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-from ..models import (
+from ..contracts import (
     GirderPlanningReadiness,
     GirderPlanningReadinessCheck,
     PlanningScenarioVersion,

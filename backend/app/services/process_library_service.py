@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..local_scenario_config import apply_bundled_scenario_config, apply_local_scenario_config, save_local_scenario_config, save_process_library
-from ..models import LogicRule, MilestoneConstraint, ProcessTemplate, ResourcePool, ScenarioInput, UpperStructureLogicRule
+from ..contracts import LogicRule, MilestoneConstraint, ProcessTemplate, ResourcePool, ScenarioInput, UpperStructureLogicRule
 from ..scenario_data import default_scenario
 
 

@@ -1,5 +1,5 @@
 import { componentLabels } from "./labels";
-import type { ComponentModel, ComponentType, ProjectModel, StructureModel, WorkSection } from "../types/scheduler";
+import type { ComponentModel, ComponentType, ProjectModel, StructureModel, WorkSection } from "../contracts";
 
 export function findWorkSection(project: ProjectModel, sectionId: string): WorkSection | null {
   for (const bridge of project.bridges) {
