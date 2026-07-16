@@ -171,9 +171,14 @@ def _alternative_output_from_recommendation(
     )
 
 
-def generate_schedule_input_from_scenario(scenario: ScenarioInput, *, use_max_resources: bool = False) -> GeneratedScheduleInput:
+def generate_schedule_input_from_scenario(
+    scenario: ScenarioInput,
+    *,
+    use_max_resources: bool = False,
+    include_girder_erection: bool = False,
+) -> GeneratedScheduleInput:
     validation: list[ValidationMessage] = []
-    tasks, generated_links = _build_tasks(scenario, validation)
+    tasks, generated_links = _build_tasks(scenario, validation, include_girder_erection=include_girder_erection)
     tasks = _apply_required_resource_types(tasks, scenario.resource_pools, validation)
     same_structure_rules = [rule for rule in scenario.logic_rules if rule.scope == "same_structure"]
     precedence_links, link_messages = build_precedence_links(tasks, same_structure_rules)
@@ -2217,7 +2222,12 @@ def _structure_pier_height(structure: StructureModel) -> float | None:
     return max(heights) if heights else None
 
 
-def _build_tasks(scenario: ScenarioInput, validation: list[ValidationMessage]) -> tuple[list[Task], list[PrecedenceLink]]:
+def _build_tasks(
+    scenario: ScenarioInput,
+    validation: list[ValidationMessage],
+    *,
+    include_girder_erection: bool = False,
+) -> tuple[list[Task], list[PrecedenceLink]]:
     tasks: list[Task] = []
     generated_links: list[PrecedenceLink] = []
     upper_logic_rules = _upper_structure_logic_rule_by_id(scenario.upper_structure_logic_rules)
@@ -2256,6 +2266,7 @@ def _build_tasks(scenario: ScenarioInput, validation: list[ValidationMessage]) -
                 upper_logic_rules=upper_logic_rules,
                 task_overrides=task_overrides,
                 inferred_levels=inferred_levels,
+                include_girder_erection=include_girder_erection,
             )
             tasks.extend(upper_tasks)
             generated_links.extend(upper_links)
@@ -2362,13 +2373,23 @@ def _build_upper_structure_tasks(
     upper_logic_rules: dict[str, UpperStructureLogicRule],
     task_overrides: dict[str, TaskOverride] | None = None,
     inferred_levels: dict[str, ControlLevel] | None = None,
+    include_girder_erection: bool = False,
 ) -> tuple[list[Task], list[PrecedenceLink]]:
     support_completions = _lower_completion_tasks_by_support(section, lower_tasks)
     tasks: list[Task] = []
     links: list[PrecedenceLink] = []
     overrides = task_overrides or {}
 
-    # 本期简支梁只保留为结构参数，不生成架梁排程任务。
+    if include_girder_erection:
+        simple_tasks, simple_links = _build_simple_beam_erection_tasks(
+            bridge=bridge,
+            section=section,
+            process_library=process_library,
+            validation=validation,
+            support_completions=support_completions,
+        )
+        tasks.extend(simple_tasks)
+        links.extend(simple_links)
 
     box_tasks, box_links = _build_cast_in_place_box_beam_tasks(
         bridge=bridge,

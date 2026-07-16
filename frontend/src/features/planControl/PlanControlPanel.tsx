@@ -9,6 +9,7 @@ import {
   saveProgressSnapshot,
 } from "../../api/schedulerApi";
 import { PanelTitle } from "../../components/common/PanelTitle";
+import { GirderProgressEditor } from "../girderPlanning/GirderProgressEditor";
 import {
   applyActualDateStatusDefaults,
   buildPlannedTaskDatesById,
@@ -28,11 +29,16 @@ import type {
   AdjustmentComparisonResponse,
   CriticalNodeForecast,
   ForecastSchedule,
+  GirderProgressImportPreview,
+  GirderExecutionActual,
+  GirderMachineActual,
+  PassageActual,
   PlanControlProjectSummary,
   ProgressEntry,
   ProgressTaskStatus,
   ScenarioInput,
   Task,
+  YardInventoryActual,
 } from "../../types/scheduler";
 
 const statusLabels: Record<ProgressTaskStatus, string> = {
@@ -196,6 +202,10 @@ function entryForStatus(task: Task, entry: ProgressEntry, status: ProgressTaskSt
 export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null }) {
   const [summary, setSummary] = useState<PlanControlProjectSummary | null>(null);
   const [entries, setEntries] = useState<Record<string, ProgressEntry>>({});
+  const [yardInventoryActuals, setYardInventoryActuals] = useState<YardInventoryActual[]>([]);
+  const [girderExecutionActuals, setGirderExecutionActuals] = useState<GirderExecutionActual[]>([]);
+  const [girderMachineActuals, setGirderMachineActuals] = useState<GirderMachineActual[]>([]);
+  const [passageActuals, setPassageActuals] = useState<PassageActual[]>([]);
   const [quantityDrafts, setQuantityDrafts] = useState<Record<string, ProgressQuantityDraft>>({});
   const [actualDateSuggestions, setActualDateSuggestions] = useState<Record<string, ActualDateSuggestionState>>({});
   const [statusDate, setStatusDate] = useState(formatLocalDate);
@@ -223,6 +233,10 @@ export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null 
       setForecast(next.latest_forecast ?? null);
       const restored = Object.fromEntries((next.current_progress_snapshot?.entries ?? []).map((item) => [item.task_id, item]));
       setEntries(restored);
+      setYardInventoryActuals(next.current_progress_snapshot?.yard_inventory_actuals ?? []);
+      setGirderExecutionActuals(next.current_progress_snapshot?.girder_execution_actuals ?? []);
+      setGirderMachineActuals(next.current_progress_snapshot?.girder_machine_actuals ?? []);
+      setPassageActuals(next.current_progress_snapshot?.passage_actuals ?? []);
       setQuantityDrafts({});
       setActualDateSuggestions({});
       setStatusDate(next.current_progress_snapshot?.status_date ?? formatLocalDate());
@@ -239,6 +253,10 @@ export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null 
     setForecast(null);
     setAdjustments(null);
     setEntries({});
+    setYardInventoryActuals([]);
+    setGirderExecutionActuals([]);
+    setGirderMachineActuals([]);
+    setPassageActuals([]);
     setQuantityDrafts({});
     setActualDateSuggestions({});
     setStatusDate(formatLocalDate());
@@ -378,6 +396,14 @@ export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null 
     setActualDateSuggestions(nextSuggestions);
   }
 
+  function applyGirderProgressImport(preview: GirderProgressImportPreview) {
+    setYardInventoryActuals(preview.yard_inventory_actuals);
+    setGirderExecutionActuals(preview.girder_execution_actuals);
+    setGirderMachineActuals(preview.girder_machine_actuals);
+    setPassageActuals(preview.passage_actuals);
+    setMessage(`已导入架梁实绩：库存 ${preview.yard_inventory_actuals.length} 条、架梁 ${preview.girder_execution_actuals.length} 条、通道 ${preview.passage_actuals.length} 条。保存进度后才会进入滚动联算。`);
+  }
+
   function patchPercentComplete(task: Task, rawValue: string) {
     setQuantityDrafts((current) => ({ ...current, [task.id]: { percentComplete: rawValue } }));
     if (rawValue === "") return;
@@ -451,6 +477,10 @@ export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null 
         submitted_by: submittedBy,
         correction_reason: summary?.current_progress_snapshot ? correctionReason || null : null,
         expected_revision_no: summary?.current_progress_snapshot?.revision_no ?? null,
+        yard_inventory_actuals: yardInventoryActuals,
+        girder_execution_actuals: girderExecutionActuals,
+        girder_machine_actuals: girderMachineActuals,
+        passage_actuals: passageActuals,
       });
       setEntries(Object.fromEntries(response.progress_snapshot.entries.map((item) => [item.task_id, item])));
       setQuantityDrafts({});
@@ -573,6 +603,14 @@ export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null 
               <div><span>确认人</span><strong>{summary.active_plan.confirmed_by}</strong></div>
               <div><span>历史版本</span><strong>{summary.plan_versions.length}</strong></div>
             </div>
+            <div className="plan-integration-reference" aria-label="统一排程版本引用">
+              <span>项目数据版本：{summary.active_plan.project_data_version_id ?? "未关联"}</span>
+              <span>方案版本：{summary.active_plan.scenario_version_id ?? "未关联"}</span>
+              <span>联合快照：{summary.active_plan.integrated_snapshot_id ?? "未关联"}</span>
+            </div>
+            {summary.active_plan.scenario_snapshot.girder_planning?.enabled && !summary.active_plan.integrated_snapshot_id && (
+              <div className="notice warning">当前计划启用了架梁专项，但没有统一联合计算快照；请返回架梁专项完成联合计算后重新发布基线。</div>
+            )}
             <details className="plan-history">
               <summary>查看计划版本历史</summary>
               {summary.plan_versions.map((version) => (
@@ -614,6 +652,13 @@ export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null 
               {busy === "saving" ? <Loader2 className="spin" size={15} /> : <Save size={15} />}保存进度
             </button>
           </div>
+          <GirderProgressEditor
+            yardActuals={yardInventoryActuals}
+            executionActuals={girderExecutionActuals}
+            machineActuals={girderMachineActuals}
+            passageActuals={passageActuals}
+            onImported={applyGirderProgressImport}
+          />
           {quantityIssueCount > 0 && (
             <div className="notice warning">
               有 {quantityIssueCount} 个任务的计划总工程量不可用或历史进度数量不一致；请按行提示核验后再保存。

@@ -100,6 +100,7 @@ import type {
   TaskViewParentGroup,
   ResourceAssistantPlan,
   ResourceAssistantPlanResult,
+  IntegratedCalculationSnapshot,
 } from "../types/scheduler";
 
 import {
@@ -172,6 +173,7 @@ import { ParameterAssistantPanel } from "../features/assistant/parameter";
 import { ResourceAssistantPanel } from "../features/resourceAssistant/ResourceAssistantPanel";
 import { PlanControlPanel } from "../features/planControl/PlanControlPanel";
 import { ProgressVisualizationPanel } from "../features/progressVisualization/ProgressVisualizationPanel";
+import { GirderPlanningPanel } from "../features/girderPlanning";
 import { Metric } from "../components/common/Metric";
 import { PanelTitle } from "../components/common/PanelTitle";
 import {
@@ -347,6 +349,7 @@ export default function App() {
   const [logicDirty, setLogicDirty] = useState(false);
   const [resourcesDirty, setResourcesDirty] = useState(false);
   const [milestonesDirty, setMilestonesDirty] = useState(false);
+  const [integratedSnapshot, setIntegratedSnapshot] = useState<IntegratedCalculationSnapshot | null>(null);
 
   useEffect(() => {
     void loadScenario();
@@ -370,6 +373,7 @@ export default function App() {
     setSolveResult(null);
     setSolveResultScenarioFingerprint(null);
     setComparison(null);
+    setIntegratedSnapshot(null);
   }, [scenarioFingerprint]);
 
   useEffect(() => {
@@ -401,6 +405,7 @@ export default function App() {
       setSolveResult(null);
       setSolveResultScenarioFingerprint(null);
       setComparison(null);
+      setIntegratedSnapshot(null);
       setLastImport({ ...imported, scenario: normalizedScenario });
       setOpenTabs((current) => (current.includes("tasks") ? current : [...current, "tasks"]));
       setActiveTab("tasks");
@@ -871,6 +876,7 @@ export default function App() {
         {activeTab === "resourceAssistant" && (
           <ResourceAssistantPanel
             scenario={scenario}
+            integratedSnapshotId={integratedSnapshot?.status === "converged" ? integratedSnapshot.integrated_snapshot_id : null}
             onOpenPlanControl={() => openModule("planControl")}
             renderPlanDetail={(plan, planResult) => (
               <ResultsTab
@@ -894,6 +900,9 @@ export default function App() {
           />
         )}
         {scenario && activeTab === "planControl" && <PlanControlPanel scenario={scenario} />}
+        {scenario && activeTab === "girderPlanning" && (
+          <GirderPlanningPanel scenario={scenario} onScenarioChange={setScenario} onIntegratedSnapshot={setIntegratedSnapshot} />
+        )}
         {activeTab === "progressVisualization" && <ProgressVisualizationPanel />}
         {scenario && activeTab === "milestones" && (
           <MilestonesTab

@@ -4,7 +4,7 @@ import hashlib
 import json
 import math
 from collections import defaultdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from ..models import (
@@ -14,6 +14,7 @@ from ..models import (
     AdjustmentProposal,
     CreateBaselinePlanRequest,
     CreateForecastRequest,
+    CreateIntegratedScheduleRequest,
     CreateProgressSnapshotRequest,
     CreateProgressSnapshotResponse,
     CriticalNodeEvidence,
@@ -43,6 +44,7 @@ from .plan_control_repository import (
     PlanControlRepository,
     default_plan_control_repository,
 )
+from .integrated_schedule import solve_integrated_schedule
 
 
 class PlanControlValidationError(ValueError):
@@ -64,6 +66,19 @@ def create_baseline_plan(
 ) -> PlanVersion:
     result = request.plan_result.result
     generated = request.plan_result.generated
+    integrated_snapshot = None
+    if request.scenario.girder_planning and request.scenario.girder_planning.enabled:
+        if not request.integrated_snapshot_id:
+            raise PlanControlValidationError("启用架梁专项时必须提供已收敛的联合计算快照。")
+        integrated_snapshot = repository.get_integrated_snapshot(request.integrated_snapshot_id)
+        if integrated_snapshot.status != "converged":
+            raise PlanControlValidationError("只有已收敛的联合计算快照才能发布统一基线。")
+        scenario_version = repository.get_planning_scenario_version(integrated_snapshot.scenario_version_id)
+        if scenario_version.scenario_id != request.scenario.scenario_id:
+            raise PlanControlValidationError("联合计算快照与当前场景不一致。")
+        if integrated_snapshot.generated_snapshot is not None and integrated_snapshot.schedule_result is not None:
+            generated = integrated_snapshot.generated_snapshot
+            result = integrated_snapshot.schedule_result
     if result is None or generated is None or result.status not in {"OPTIMAL", "FEASIBLE"}:
         raise PlanControlValidationError("只能把已完成求解且可行或最优的方案设为基准计划。")
     if request.resource_plan.scenario_id != request.plan_result.scenario_id:
@@ -97,6 +112,10 @@ def create_baseline_plan(
         confirmed_by=request.confirmed_by.strip(),
         confirmed_at=confirmed_at,
         confirmation_reason=request.confirmation_reason.strip(),
+        project_data_version_id=(integrated_snapshot.project_data_version_id if integrated_snapshot else None),
+        scenario_version_id=(integrated_snapshot.scenario_version_id if integrated_snapshot else None),
+        integrated_snapshot_id=(integrated_snapshot.integrated_snapshot_id if integrated_snapshot else None),
+        girder_result_snapshot=(integrated_snapshot.girder_result.model_copy(deep=True) if integrated_snapshot and integrated_snapshot.girder_result else None),
     )
     return repository.add_plan_version(version)
 
@@ -115,6 +134,7 @@ def create_progress_snapshot(
     task_by_id = {task.id: task for task in plan.generated_snapshot.schedule_input.tasks}
     normalized: list[ProgressEntry] = []
     messages: list[ValidationMessage] = []
+    _validate_girder_actuals(plan, request)
     seen: set[str] = set()
     for entry in request.entries:
         if entry.task_id in seen:
@@ -189,6 +209,10 @@ def create_progress_snapshot(
         submitted_by=request.submitted_by.strip(),
         submitted_at=submitted_at,
         correction_reason=(request.correction_reason or "").strip() or None,
+        yard_inventory_actuals=[item.model_copy(deep=True) for item in request.yard_inventory_actuals],
+        girder_execution_actuals=[item.model_copy(deep=True) for item in request.girder_execution_actuals],
+        girder_machine_actuals=[item.model_copy(deep=True) for item in request.girder_machine_actuals],
+        passage_actuals=[item.model_copy(deep=True) for item in request.passage_actuals],
     )
     correction = None
     if previous:
@@ -203,7 +227,7 @@ def create_progress_snapshot(
             corrected_by=request.submitted_by.strip(),
             corrected_at=submitted_at,
         )
-    saved, stale_ids = repository.add_progress_snapshot(
+    saved, stale_ids, stale_integrated_ids = repository.add_progress_snapshot(
         snapshot,
         correction,
         expected_revision_no=request.expected_revision_no,
@@ -211,8 +235,60 @@ def create_progress_snapshot(
     return CreateProgressSnapshotResponse(
         progress_snapshot=saved,
         stale_forecast_ids=stale_ids,
+        stale_integrated_snapshot_ids=stale_integrated_ids,
         diagnostics=messages,
     )
+
+
+def _validate_girder_actuals(plan: PlanVersion, request: CreateProgressSnapshotRequest) -> None:
+    """校验架梁实绩的唯一性、日期和基本物料平衡。
+
+    实绩是事实源：可以偏离原计划，但不能制造重复架梁、未来事实或无法解释的
+    产耗关系。通过后才写入进度快照，避免错误数据进入滚动重排。
+    """
+    task_by_id = {task.id: task for task in plan.generated_snapshot.schedule_input.tasks}
+    seen_tasks: set[str] = set()
+    consumed_by_yard_type: defaultdict[tuple[str, str], float] = defaultdict(float)
+    for actual in request.girder_execution_actuals:
+        if actual.span_task_id in seen_tasks:
+            raise PlanControlValidationError(f"架梁任务 {actual.span_task_id} 重复填报实际架梁。")
+        seen_tasks.add(actual.span_task_id)
+        task = task_by_id.get(actual.span_task_id)
+        if task is None:
+            raise PlanControlValidationError(f"架梁实绩任务 {actual.span_task_id} 不属于当前计划版本。")
+        if actual.actual_start_date and actual.actual_start_date > request.status_date:
+            raise PlanControlValidationError(f"架梁任务 {actual.span_task_id} 的实际开始日期晚于状态日期。")
+        if actual.actual_finish_date and actual.actual_finish_date > request.status_date:
+            raise PlanControlValidationError(f"架梁任务 {actual.span_task_id} 的实际完成日期晚于状态日期。")
+        if actual.actual_start_date and actual.actual_finish_date and actual.actual_finish_date < actual.actual_start_date:
+            raise PlanControlValidationError(f"架梁任务 {actual.span_task_id} 的实际日期倒置。")
+        if actual.status == "completed" and actual.erected_beam_count <= 0:
+            raise PlanControlValidationError(f"已完成架梁任务 {actual.span_task_id} 必须填写已架梁片数。")
+        if actual.erected_beam_count > task.quantity + _quantity_tolerance(task.quantity):
+            raise PlanControlValidationError(f"架梁任务 {actual.span_task_id} 的实际架梁数量超过计划工程量。")
+        if actual.status == "completed":
+            yard_id = str(task.properties.get("beam_yard_id") or "")
+            beam_type = str(task.properties.get("beam_type") or "default")
+            if yard_id:
+                consumed_by_yard_type[(yard_id, beam_type)] += actual.erected_beam_count
+
+    opening_by_yard_type: defaultdict[tuple[str, str], float] = defaultdict(float)
+    if plan.girder_result_snapshot:
+        for point in plan.girder_result_snapshot.yard_inventory_series:
+            key = (point.beam_yard_id, point.beam_type)
+            opening_by_yard_type[key] = max(opening_by_yard_type[key], point.opening_inventory)
+    inventory_seen: set[tuple[str, str]] = set()
+    for actual in request.yard_inventory_actuals:
+        key = (actual.beam_yard_id, actual.beam_type)
+        if key in inventory_seen:
+            raise PlanControlValidationError(f"梁场 {actual.beam_yard_id}、梁型 {actual.beam_type} 的库存实绩重复填报。")
+        inventory_seen.add(key)
+        consumed = consumed_by_yard_type.get(key, 0.0)
+        available = opening_by_yard_type.get(key, 0.0) + actual.cumulative_produced + actual.opening_inventory_adjustment
+        if available + _quantity_tolerance(max(available, consumed, 1.0)) < consumed + actual.observed_inventory:
+            raise PlanControlValidationError(
+                f"梁场 {actual.beam_yard_id}、梁型 {actual.beam_type} 的产耗库存不平衡：产出与期初无法解释已消耗梁片。"
+            )
 
 
 _PERCENT_COMPLETE_TOLERANCE = 0.011
@@ -392,7 +468,50 @@ def create_forecast(
     snapshot = repository.get_progress_snapshot(request.progress_snapshot_id)
     if snapshot.plan_version_id != plan.plan_version_id or not snapshot.is_current:
         raise PlanControlConflictError("进度快照不属于当前计划版本或已经不是当前修订。")
-    forecast = _solve_forecast(plan, snapshot, "as_is", {})
+    effective_plan = plan
+    integrated_snapshot = None
+    girder_config = plan.scenario_snapshot.girder_planning
+    if plan.scenario_version_id and girder_config and girder_config.enabled:
+        scenario_version = repository.get_planning_scenario_version(plan.scenario_version_id)
+        if scenario_version.scenario_id != plan.source_scenario_id:
+            raise PlanControlValidationError("计划引用的架梁方案版本与计划来源场景不一致。")
+        if scenario_version.status != "specialty_confirmed":
+            raise PlanControlValidationError("架梁专项必须先完成专业确认，才能进行实绩滚动联算。")
+        integrated_snapshot = solve_integrated_schedule(
+            CreateIntegratedScheduleRequest(
+                scenario_version_id=scenario_version.scenario_version_id,
+                progress_snapshot_id=snapshot.progress_snapshot_id,
+                expected_input_fingerprint=scenario_version.input_fingerprint,
+            ),
+            repository,
+        )
+        if integrated_snapshot.status != "converged":
+            raise PlanControlValidationError(
+                f"实绩滚动后的联合计算未收敛（{integrated_snapshot.status}），不能生成确定性预测。"
+            )
+        if integrated_snapshot.generated_snapshot is None or integrated_snapshot.schedule_result is None:
+            raise PlanControlValidationError("联合计算未返回可用于滚动预测的统一任务快照。")
+        effective_plan = plan.model_copy(
+            update={
+                "generated_snapshot": integrated_snapshot.generated_snapshot,
+                "schedule_result_snapshot": integrated_snapshot.schedule_result,
+                "integrated_snapshot_id": integrated_snapshot.integrated_snapshot_id,
+                "girder_result_snapshot": integrated_snapshot.girder_result,
+            }
+        )
+    forecast = _solve_forecast(effective_plan, snapshot, "as_is", {})
+    if integrated_snapshot is not None:
+        forecast = forecast.model_copy(
+            update={
+                "metrics": {
+                    **forecast.metrics,
+                    "schedule_source": "integrated",
+                    "integrated_snapshot_id": integrated_snapshot.integrated_snapshot_id,
+                    "integrated_status": integrated_snapshot.status,
+                },
+                "diagnostics": [*integrated_snapshot.diagnostics, *forecast.diagnostics],
+            }
+        )
     return repository.add_forecast(forecast)
 
 
@@ -535,6 +654,7 @@ def _solve_forecast(
             remaining_days_source="baseline",
         )
         baseline = baseline_tasks.get(task.id)
+        fallback_start = _fallback_prediction_start(entry, snapshot.status_date)
         predicted.append(
             ForecastTaskState(
                 task_id=task.id,
@@ -543,6 +663,8 @@ def _solve_forecast(
                 baseline_start_date=baseline.start_date if baseline else None,
                 baseline_finish_date=baseline.finish_date if baseline else None,
                 actual_start_date=entry.actual_start_date,
+                predicted_start_date=fallback_start,
+                predicted_finish_date=(fallback_start + timedelta(days=max(1, entry.remaining_days or task.duration_days) - 1) if fallback_start else None),
                 assigned_resource_type=baseline.assigned_resource_type if baseline else None,
                 assigned_resource_id=baseline.assigned_resource_id if baseline else None,
                 progress_status=entry.status,
@@ -594,6 +716,14 @@ def _solve_forecast(
         diagnostics=diagnostics + list(residual_result.validation),
         created_at=created_at,
     )
+
+
+def _fallback_prediction_start(entry: ProgressEntry, status_date: date) -> date | None:
+    if entry.status == "in_progress":
+        return max(status_date, entry.actual_start_date or status_date)
+    if entry.status == "paused" and entry.expected_resume_date:
+        return max(status_date, entry.expected_resume_date)
+    return None
 
 
 def _baseline_resource_order_links(

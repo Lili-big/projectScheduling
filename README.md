@@ -2,6 +2,8 @@
 
 ## 本地启动命令
 
+当前工作区可以直接使用系统 Python 启动后端；如果已经创建 `.venv`，也可以将下文命令中的 `python` 替换为 `.\.venv\Scripts\python.exe`。开发调试推荐使用“前后端分离启动”，演示或验收推荐使用“单服务启动”。
+
 ### 首次安装依赖
 
 在项目根目录执行：
@@ -13,6 +15,12 @@ npm.cmd install --cache .npm-cache
 ```
 
 如果本机没有 Python 3.12，可先使用 `py -3 -m venv .venv` 创建虚拟环境；当前 Dockerfile 使用 Python 3.12，项目最低 Python 版本未在配置文件中声明，需确认。
+
+如果本机已经安装 `requirements.txt` 中的 Python 依赖，可以不创建虚拟环境，直接使用系统 `python`。可用以下命令确认 Uvicorn 已安装：
+
+```powershell
+python -c "import uvicorn; print(uvicorn.__version__)"
+```
 
 如果 `npm.cmd` 不在 `PATH` 中，可使用完整路径：
 
@@ -26,7 +34,7 @@ npm.cmd install --cache .npm-cache
 
 ```powershell
 npm.cmd run build
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir backend
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir backend
 ```
 
 访问地址：
@@ -43,7 +51,7 @@ npm.cmd run build
 窗口 A 启动后端：
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir backend --reload
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir backend --reload
 ```
 
 窗口 B 启动前端：
@@ -65,7 +73,7 @@ npm.cmd run frontend:dev
 
 ```powershell
 npm.cmd run build
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --app-dir backend
 ```
 
 启动后用 `ipconfig` 查看本机 IPv4 地址，例如 `192.168.1.23`，同事访问 `http://192.168.1.23:8000/`。

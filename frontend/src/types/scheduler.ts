@@ -32,6 +32,7 @@ export type TabKey =
   | "milestones"
   | "tasks"
   | "results"
+  | "girderPlanning"
   | "resourceAssistant"
   | "planControl"
   | "progressVisualization";
@@ -360,6 +361,7 @@ export type ScenarioInput = {
   milestones: MilestoneConstraint[];
   schedule_strategy?: ScheduleStrategyConfig;
   time_limit_seconds: number;
+  girder_planning?: GirderPlanningConfig | null;
 };
 
 export type AiParameterMaterialKind = "text" | "word" | "excel" | "pdf" | "image";
@@ -623,6 +625,9 @@ export type ValidationMessage = {
   level: "info" | "warning" | "error";
   message: string;
   subject_id?: string | null;
+  code?: string | null;
+  entity_refs?: string[];
+  suggestion?: string | null;
 };
 
 export type ScheduleInput = {
@@ -1356,6 +1361,10 @@ export type PlanVersion = {
   confirmed_by: string;
   confirmed_at: string;
   confirmation_reason: string;
+  project_data_version_id?: string | null;
+  scenario_version_id?: string | null;
+  integrated_snapshot_id?: string | null;
+  girder_result_snapshot?: GirderPlanningResult | null;
 };
 
 export type ProgressEntry = {
@@ -1387,6 +1396,10 @@ export type ProgressSnapshot = {
   submitted_by: string;
   submitted_at: string;
   correction_reason?: string | null;
+  yard_inventory_actuals: YardInventoryActual[];
+  girder_execution_actuals: GirderExecutionActual[];
+  girder_machine_actuals: GirderMachineActual[];
+  passage_actuals: PassageActual[];
 };
 
 export type ForecastTaskState = {
@@ -1493,6 +1506,7 @@ export type CreateBaselinePlanRequest = {
   plan_result: ResourceAssistantPlanResult;
   confirmed_by: string;
   confirmation_reason: string;
+  integrated_snapshot_id?: string | null;
 };
 
 export type CreateProgressSnapshotRequest = {
@@ -1502,11 +1516,16 @@ export type CreateProgressSnapshotRequest = {
   submitted_by: string;
   correction_reason?: string | null;
   expected_revision_no?: number | null;
+  yard_inventory_actuals?: YardInventoryActual[];
+  girder_execution_actuals?: GirderExecutionActual[];
+  girder_machine_actuals?: GirderMachineActual[];
+  passage_actuals?: PassageActual[];
 };
 
 export type CreateProgressSnapshotResponse = {
   progress_snapshot: ProgressSnapshot;
   stale_forecast_ids: string[];
+  stale_integrated_snapshot_ids: string[];
   diagnostics: ValidationMessage[];
 };
 
@@ -1520,4 +1539,363 @@ export type AdoptAdjustmentResponse = {
   new_plan_version: PlanVersion;
   previous_plan_version: PlanVersion;
   change_record: Record<string, unknown>;
+};
+
+export type GirderSide = "left" | "right" | "both" | "unknown";
+export type ProjectDataVersionStatus = "draft" | "confirmed" | "superseded";
+export type PlanningScenarioVersionStatus = "draft" | "specialty_confirmed" | "stale" | "superseded";
+export type IntegratedCalculationStatus =
+  | "running"
+  | "converged"
+  | "not_converged"
+  | "infeasible"
+  | "blocked"
+  | "stale";
+
+export type SourceEvidence = {
+  evidence_id: string;
+  source_type: "structure_import" | "girder_import" | "manual";
+  authority_domain: "structure" | "girder_workpoint" | "user_config";
+  field_path: string;
+  file_name?: string | null;
+  sheet_name?: string | null;
+  row_or_region?: string | null;
+  original_value?: unknown;
+  normalized_value?: unknown;
+};
+
+export type FieldConflict = {
+  conflict_id: string;
+  entity_ref: string;
+  field_path: string;
+  severity: "warning" | "blocking";
+  status: "unresolved" | "resolved";
+  candidate_values: Array<{ source_evidence_id: string; value: unknown }>;
+  selected_value?: unknown;
+  resolution_reason?: string | null;
+};
+
+export type PassageConditionRef = {
+  ref_type: "structure" | "upper_structure" | "milestone";
+  entity_id: string;
+  target_event: "finish";
+};
+
+export type GirderWorkPoint = {
+  workpoint_id: string;
+  name: string;
+  workpoint_type: "roadbed" | "bridge" | "tunnel" | "culvert" | "access";
+  side: GirderSide;
+  mileage_start_m: number;
+  mileage_end_m: number;
+  corridor_id: string;
+  bridge_id?: string | null;
+  work_section_id?: string | null;
+  requires_erection: boolean;
+  rough_granularity: boolean;
+  explicit_readiness_date?: string | null;
+  linked_condition_refs: PassageConditionRef[];
+  properties?: Record<string, unknown>;
+};
+
+export type CreateProjectDataVersionRequest = {
+  project: ProjectModel;
+  workpoints: GirderWorkPoint[];
+  source_evidence: SourceEvidence[];
+  field_conflicts: FieldConflict[];
+  expected_latest_version_no?: number | null;
+  created_by: string;
+};
+
+export type ProjectDataVersion = CreateProjectDataVersionRequest & {
+  project_data_version_id: string;
+  project_id: string;
+  version_no: number;
+  status: ProjectDataVersionStatus;
+  input_fingerprint: string;
+  created_at: string;
+  confirmed_by?: string | null;
+  confirmed_at?: string | null;
+  confirmation_reason?: string | null;
+};
+
+export type BeamYardConfig = {
+  beam_yard_id: string;
+  name: string;
+  mileage_m: number;
+  side: GirderSide;
+  corridor_id: string;
+  production_start_date: string;
+  daily_production_capacity: number;
+  initial_inventory_by_type: Record<string, number>;
+  max_inventory_by_type?: Record<string, number> | null;
+  calendar_id: string;
+  enabled: boolean;
+};
+
+export type ErectionMachineConfig = {
+  erection_machine_id: string;
+  name: string;
+  beam_yard_id: string;
+  available_date: string;
+  daily_erection_capacity: number;
+  first_span_preparation_days: number;
+  span_launching_days: number;
+  bridge_transfer_days: number;
+  side_switch_days: number;
+  calendar_id: string;
+  enabled: boolean;
+};
+
+export type GirderRouteNode = {
+  route_node_id: string;
+  workpoint_id: string;
+  sequence_index: number;
+  node_kind: "workpoint" | "turn" | "connection";
+  connection_days?: number | null;
+};
+
+export type GirderRouteConfig = {
+  route_id: string;
+  name: string;
+  beam_yard_id: string;
+  erection_machine_id: string;
+  route_direction: "mileage_increasing" | "mileage_decreasing" | "custom";
+  enabled: boolean;
+  confirmed: boolean;
+  nodes: GirderRouteNode[];
+};
+
+export type ErectionOwnerOverride = {
+  bridge_id: string;
+  side: "left" | "right";
+  owner_route_id: string;
+  reason: string;
+  confirmed_by: string;
+  confirmed_at: string;
+};
+
+export type PassageOverride = {
+  workpoint_id: string;
+  action: "include" | "exclude" | "readiness";
+  related_route_id?: string | null;
+  explicit_readiness_date?: string | null;
+  reason: string;
+};
+
+export type GirderPlanningParameters = {
+  substructure_acceptance_buffer_days: number;
+  roadbed_passage_buffer_days: number;
+  tunnel_passage_buffer_days: number;
+  post_erection_passage_buffer_days: number;
+  post_erection_buffer_confirmed: boolean;
+  default_transfer_days: number;
+  default_bridge_preparation_days: number;
+  max_iterations: number;
+  date_tolerance_days: 0;
+  enable_supply_constraint: true;
+  enable_passage_constraint: true;
+  enable_stock_limit: true;
+};
+
+export type GirderPlanningConfig = {
+  enabled: boolean;
+  beam_yards: BeamYardConfig[];
+  erection_machines: ErectionMachineConfig[];
+  routes: GirderRouteConfig[];
+  parameters: GirderPlanningParameters;
+  owner_overrides: ErectionOwnerOverride[];
+  manual_passage_overrides: PassageOverride[];
+  coarse_mode: boolean;
+};
+
+export type CreatePlanningScenarioVersionRequest = {
+  scenario: ScenarioInput;
+  project_data_version_id: string;
+  girder_planning: GirderPlanningConfig;
+  expected_latest_version_no?: number | null;
+  created_by: string;
+};
+
+export type PlanningScenarioVersion = CreatePlanningScenarioVersionRequest & {
+  scenario_version_id: string;
+  scenario_id: string;
+  version_no: number;
+  status: PlanningScenarioVersionStatus;
+  input_fingerprint: string;
+  created_at: string;
+  specialty_confirmed_by?: string | null;
+  specialty_confirmed_at?: string | null;
+  specialty_confirmation_reason?: string | null;
+};
+
+export type GirderPlanningReadiness = {
+  status: "ready" | "warning" | "blocking";
+  checks: Array<{
+    code: string;
+    status: "passed" | "warning" | "blocking";
+    message: string;
+    entity_refs: string[];
+  }>;
+  diagnostics: ValidationMessage[];
+};
+
+export type GirderImportPreview = {
+  workpoints: GirderWorkPoint[];
+  source_evidence: SourceEvidence[];
+  field_conflicts: FieldConflict[];
+  diagnostics: ValidationMessage[];
+};
+
+export type ErectionOwnership = {
+  bridge_id: string;
+  side: GirderSide;
+  owner_route_id: string;
+  owner_node_id: string;
+  arrival_date: string;
+  resolution_source: "earliest_arrival" | "manual_override" | "actual_fact";
+  competing_occurrences: Array<{ route_id: string; route_node_id: string; arrival_date: string }>;
+};
+
+export type GirderSpanPlan = {
+  task_id: string;
+  bridge_id: string;
+  work_section_id: string;
+  span_id: string;
+  route_id: string;
+  beam_yard_id: string;
+  erection_machine_id: string;
+  beam_type: string;
+  beam_count: number;
+  earliest_start_date: string;
+  suggested_latest_finish_date?: string | null;
+  planned_start_date?: string | null;
+  planned_finish_date?: string | null;
+  inventory_before?: number | null;
+  inventory_after?: number | null;
+  diagnostic_refs: string[];
+};
+
+export type PassageReleaseResult = {
+  workpoint_id: string;
+  passable_date?: string | null;
+  erection_buffer_date?: string | null;
+  explicit_readiness_date?: string | null;
+  linked_condition_finish_dates: Record<string, string>;
+  controlling_source: "erection_buffer" | "explicit_readiness" | "linked_condition" | "actual_fact" | "none";
+  status: "ready" | "waiting" | "blocked";
+};
+
+export type YardInventoryPoint = {
+  beam_yard_id: string;
+  beam_type: string;
+  date: string;
+  opening_inventory: number;
+  produced: number;
+  consumed: number;
+  closing_inventory: number;
+  max_inventory?: number | null;
+};
+
+export type RouteRun = {
+  route_id: string;
+  beam_yard_id: string;
+  erection_machine_id: string;
+  start_date: string;
+  finish_date: string;
+  waiting_days: number;
+  event_refs: string[];
+};
+
+export type LatestFinishControl = {
+  entity_ref: string;
+  controlled_by: string;
+  latest_finish_date: string;
+  mode: "soft";
+  priority: number;
+};
+
+export type GirderPlanningResult = {
+  result_id: string;
+  status: "ready" | "blocked";
+  ownerships: ErectionOwnership[];
+  span_plans: GirderSpanPlan[];
+  passage_releases: PassageReleaseResult[];
+  yard_inventory_series: YardInventoryPoint[];
+  route_runs: RouteRun[];
+  latest_finish_controls: LatestFinishControl[];
+  diagnostics: ValidationMessage[];
+  input_fingerprint: string;
+};
+
+export type IntegratedIterationRecord = {
+  iteration_no: number;
+  input_fingerprint: string;
+  ownership_fingerprint: string;
+  date_state_fingerprint: string;
+  girder_result_id: string;
+  schedule_status: "feasible" | "infeasible" | "blocked";
+  changed_owner_refs: string[];
+  changed_date_refs: string[];
+  started_at?: string | null;
+  finished_at?: string | null;
+};
+
+export type IntegratedCalculationSnapshot = {
+  integrated_snapshot_id: string;
+  project_data_version_id: string;
+  scenario_version_id: string;
+  progress_snapshot_id?: string | null;
+  status: IntegratedCalculationStatus;
+  iterations: IntegratedIterationRecord[];
+  girder_result?: GirderPlanningResult | null;
+  generated_snapshot?: GeneratedScheduleInput | null;
+  schedule_result?: ScheduleResult | null;
+  input_fingerprint: string;
+  diagnostics: ValidationMessage[];
+  created_at: string;
+};
+
+export type YardInventoryActual = {
+  beam_yard_id: string;
+  beam_type: string;
+  cumulative_produced: number;
+  opening_inventory_adjustment: number;
+  observed_inventory: number;
+  adjustment_reason?: string | null;
+  source: "manual" | "excel";
+};
+
+export type GirderExecutionActual = {
+  span_task_id: string;
+  status: "not_started" | "in_progress" | "completed";
+  actual_route_id?: string | null;
+  actual_start_date?: string | null;
+  actual_finish_date?: string | null;
+  erected_beam_count: number;
+  erection_machine_id?: string | null;
+};
+
+export type GirderMachineActual = {
+  erection_machine_id: string;
+  position_workpoint_id?: string | null;
+  availability_status: "available" | "unavailable" | "maintenance";
+  expected_resume_date?: string | null;
+  reason?: string | null;
+};
+
+export type PassageActual = {
+  workpoint_id: string;
+  status: "closed" | "conditional" | "open";
+  actual_open_date?: string | null;
+  restrictions?: string | null;
+};
+
+export type GirderProgressImportPreview = {
+  source_file_name: string;
+  yard_inventory_actuals: YardInventoryActual[];
+  girder_execution_actuals: GirderExecutionActual[];
+  girder_machine_actuals: GirderMachineActual[];
+  passage_actuals: PassageActual[];
+  diagnostics: ValidationMessage[];
 };

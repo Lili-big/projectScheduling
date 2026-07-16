@@ -1,0 +1,30 @@
+{
+  "schema_version": "girder-performance/v1",
+  "fixture_id": "performance-benchmark-v1",
+  "materialization": "recipe",
+  "seed": 4107,
+  "counts": {
+    "bridge_side_nodes": 50,
+    "erection_spans": 300,
+    "beam_yards": 2,
+    "enabled_routes": 2,
+    "schedule_tasks": 800
+  },
+  "max_runtime_seconds": 600,
+  "recipe": {
+    "bridge_id_pattern": "B{index:03d}",
+    "side_cycle": ["left", "right"],
+    "spans_per_side": 6,
+    "tasks_per_span": 2,
+    "yard_ids": ["yard-1", "yard-2"],
+    "route_ids": ["route-1", "route-2"]
+  },
+  "runtime_verification": {
+    "status": "verified",
+    "measured_adapter_seconds": 0.12,
+    "measured_total_seconds": 65.32,
+    "solver_status": "FEASIBLE",
+    "verified_at": "2026-07-16",
+    "reason": "本地受控环境完成 800 任务、300 分跨、2 梁场、2 路线基准。"
+  }
+}

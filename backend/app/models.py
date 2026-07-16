@@ -448,6 +448,9 @@ class ValidationMessage(BaseModel):
     level: Literal["info", "warning", "error"]
     message: str
     subject_id: str | None = None
+    code: str | None = None
+    entity_refs: list[str] = Field(default_factory=list)
+    suggestion: str | None = None
 
 
 class ComponentModel(BaseModel):
@@ -665,6 +668,7 @@ class ScenarioInput(BaseModel):
     milestones: list[MilestoneConstraint] = []
     schedule_strategy: ScheduleStrategyConfig = Field(default_factory=ScheduleStrategyConfig)
     time_limit_seconds: float = Field(default=15.0, gt=0)
+    girder_planning: GirderPlanningConfig | None = None
 
 
 class AiParameterUploadedMaterialSummary(BaseModel):
@@ -1281,6 +1285,429 @@ class ResourceAssistantRecommendationResponse(BaseModel):
     diagnostics: list[ValidationMessage] = Field(default_factory=list)
 
 
+GirderSide = Literal["left", "right", "both", "unknown"]
+GirderWorkPointType = Literal["roadbed", "bridge", "tunnel", "culvert", "access"]
+ProjectDataVersionStatus = Literal["draft", "confirmed", "superseded"]
+PlanningScenarioVersionStatus = Literal["draft", "specialty_confirmed", "stale", "superseded"]
+IntegratedCalculationStatus = Literal[
+    "running",
+    "converged",
+    "not_converged",
+    "infeasible",
+    "blocked",
+    "stale",
+]
+
+
+class SourceEvidence(BaseModel):
+    evidence_id: str
+    source_type: Literal["structure_import", "girder_import", "manual"]
+    authority_domain: Literal["structure", "girder_workpoint", "user_config"]
+    field_path: str
+    file_name: str | None = None
+    sheet_name: str | None = None
+    row_or_region: str | None = None
+    original_value: Any = None
+    normalized_value: Any = None
+
+
+class FieldCandidateValue(BaseModel):
+    source_evidence_id: str
+    value: Any = None
+
+
+class FieldConflict(BaseModel):
+    conflict_id: str
+    entity_ref: str
+    field_path: str
+    severity: Literal["warning", "blocking"]
+    status: Literal["unresolved", "resolved"] = "unresolved"
+    candidate_values: list[FieldCandidateValue] = Field(default_factory=list)
+    selected_value: Any = None
+    resolution_reason: str | None = None
+
+
+class PassageConditionRef(BaseModel):
+    ref_type: Literal["structure", "upper_structure", "milestone"]
+    entity_id: str
+    target_event: Literal["finish"] = "finish"
+
+
+class GirderWorkPoint(BaseModel):
+    workpoint_id: str
+    name: str
+    workpoint_type: GirderWorkPointType
+    side: GirderSide = "unknown"
+    mileage_start_m: float
+    mileage_end_m: float
+    corridor_id: str
+    bridge_id: str | None = None
+    work_section_id: str | None = None
+    requires_erection: bool = False
+    rough_granularity: bool = False
+    explicit_readiness_date: date | None = None
+    linked_condition_refs: list[PassageConditionRef] = Field(default_factory=list)
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class CreateProjectDataVersionRequest(BaseModel):
+    project: ProjectModel
+    workpoints: list[GirderWorkPoint] = Field(default_factory=list)
+    source_evidence: list[SourceEvidence] = Field(default_factory=list)
+    field_conflicts: list[FieldConflict] = Field(default_factory=list)
+    expected_latest_version_no: int | None = Field(default=None, ge=1)
+    created_by: str
+
+
+class ConfirmProjectDataVersionRequest(BaseModel):
+    expected_input_fingerprint: str
+    confirmed_by: str
+    confirmation_reason: str
+
+
+class ProjectDataVersion(BaseModel):
+    project_data_version_id: str
+    project_id: str
+    version_no: int = Field(ge=1)
+    status: ProjectDataVersionStatus = "draft"
+    project: ProjectModel
+    workpoints: list[GirderWorkPoint] = Field(default_factory=list)
+    source_evidence: list[SourceEvidence] = Field(default_factory=list)
+    field_conflicts: list[FieldConflict] = Field(default_factory=list)
+    input_fingerprint: str
+    created_by: str
+    created_at: datetime
+    confirmed_by: str | None = None
+    confirmed_at: datetime | None = None
+    confirmation_reason: str | None = None
+
+
+class BeamYardConfig(BaseModel):
+    beam_yard_id: str
+    name: str
+    mileage_m: float
+    side: GirderSide = "unknown"
+    corridor_id: str
+    production_start_date: date
+    daily_production_capacity: float = Field(ge=0)
+    initial_inventory_by_type: dict[str, float] = Field(default_factory=dict)
+    max_inventory_by_type: dict[str, float] | None = None
+    calendar_id: str = "continuous"
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def validate_inventory(self) -> "BeamYardConfig":
+        if any(value < 0 for value in self.initial_inventory_by_type.values()):
+            raise ValueError("期初库存不能为负数。")
+        if self.max_inventory_by_type and any(value < 0 for value in self.max_inventory_by_type.values()):
+            raise ValueError("最大库存不能为负数。")
+        return self
+
+
+class ErectionMachineConfig(BaseModel):
+    erection_machine_id: str
+    name: str
+    beam_yard_id: str
+    available_date: date
+    daily_erection_capacity: float = Field(gt=0)
+    first_span_preparation_days: int = Field(default=0, ge=0)
+    span_launching_days: int = Field(default=0, ge=0)
+    bridge_transfer_days: int = Field(default=0, ge=0)
+    side_switch_days: int = Field(default=0, ge=0)
+    calendar_id: str = "continuous"
+    enabled: bool = True
+
+
+class GirderRouteNode(BaseModel):
+    route_node_id: str
+    workpoint_id: str
+    sequence_index: int = Field(ge=0)
+    node_kind: Literal["workpoint", "turn", "connection"] = "workpoint"
+    connection_days: int | None = Field(default=None, ge=0)
+
+
+class GirderRouteConfig(BaseModel):
+    route_id: str
+    name: str
+    beam_yard_id: str
+    erection_machine_id: str
+    route_direction: Literal["mileage_increasing", "mileage_decreasing", "custom"] = "custom"
+    enabled: bool = True
+    confirmed: bool = False
+    nodes: list[GirderRouteNode] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_node_order(self) -> "GirderRouteConfig":
+        indexes = [item.sequence_index for item in self.nodes]
+        if len(indexes) != len(set(indexes)):
+            raise ValueError("同一路线的节点顺序号不能重复。")
+        return self
+
+
+class ErectionOwnerOverride(BaseModel):
+    bridge_id: str
+    side: Literal["left", "right"]
+    owner_route_id: str
+    reason: str
+    confirmed_by: str
+    confirmed_at: datetime
+
+
+class PassageOverride(BaseModel):
+    workpoint_id: str
+    action: Literal["include", "exclude", "readiness"]
+    related_route_id: str | None = None
+    explicit_readiness_date: date | None = None
+    reason: str
+
+
+class GirderPlanningParameters(BaseModel):
+    substructure_acceptance_buffer_days: int = Field(default=7, ge=0)
+    roadbed_passage_buffer_days: int = Field(default=4, ge=0)
+    tunnel_passage_buffer_days: int = Field(default=6, ge=0)
+    post_erection_passage_buffer_days: int = Field(default=0, ge=0)
+    post_erection_buffer_confirmed: bool = False
+    default_transfer_days: int = Field(default=2, ge=0)
+    default_bridge_preparation_days: int = Field(default=3, ge=0)
+    max_iterations: int = Field(default=10, ge=1, le=50)
+    date_tolerance_days: Literal[0] = 0
+    enable_supply_constraint: Literal[True] = True
+    enable_passage_constraint: Literal[True] = True
+    enable_stock_limit: Literal[True] = True
+
+
+class GirderPlanningConfig(BaseModel):
+    enabled: bool = False
+    beam_yards: list[BeamYardConfig] = Field(default_factory=list)
+    erection_machines: list[ErectionMachineConfig] = Field(default_factory=list)
+    routes: list[GirderRouteConfig] = Field(default_factory=list)
+    parameters: GirderPlanningParameters = Field(default_factory=GirderPlanningParameters)
+    owner_overrides: list[ErectionOwnerOverride] = Field(default_factory=list)
+    manual_passage_overrides: list[PassageOverride] = Field(default_factory=list)
+    coarse_mode: bool = False
+
+
+class CreatePlanningScenarioVersionRequest(BaseModel):
+    scenario: ScenarioInput
+    project_data_version_id: str
+    girder_planning: GirderPlanningConfig = Field(default_factory=GirderPlanningConfig)
+    expected_latest_version_no: int | None = Field(default=None, ge=1)
+    created_by: str
+
+
+class PlanningScenarioVersion(BaseModel):
+    scenario_version_id: str
+    scenario_id: str
+    project_data_version_id: str
+    version_no: int = Field(ge=1)
+    status: PlanningScenarioVersionStatus = "draft"
+    scenario: ScenarioInput
+    girder_planning: GirderPlanningConfig = Field(default_factory=GirderPlanningConfig)
+    input_fingerprint: str
+    created_by: str
+    created_at: datetime
+    specialty_confirmed_by: str | None = None
+    specialty_confirmed_at: datetime | None = None
+    specialty_confirmation_reason: str | None = None
+
+
+class ConfirmSpecialtyRequest(BaseModel):
+    expected_input_fingerprint: str
+    confirmed_by: str
+    confirmation_reason: str
+
+
+class ScenarioVersionReference(BaseModel):
+    scenario_version_id: str
+    expected_input_fingerprint: str
+
+
+class GirderPlanningReadinessCheck(BaseModel):
+    code: str
+    status: Literal["passed", "warning", "blocking"]
+    message: str
+    entity_refs: list[str] = Field(default_factory=list)
+
+
+class GirderPlanningReadiness(BaseModel):
+    status: Literal["ready", "warning", "blocking"]
+    checks: list[GirderPlanningReadinessCheck] = Field(default_factory=list)
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+
+
+class GirderImportPreview(BaseModel):
+    workpoints: list[GirderWorkPoint] = Field(default_factory=list)
+    source_evidence: list[SourceEvidence] = Field(default_factory=list)
+    field_conflicts: list[FieldConflict] = Field(default_factory=list)
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+
+
+class CompetingRouteOccurrence(BaseModel):
+    route_id: str
+    route_node_id: str
+    arrival_date: date
+
+
+class ErectionOwnership(BaseModel):
+    bridge_id: str
+    side: GirderSide
+    owner_route_id: str
+    owner_node_id: str
+    arrival_date: date
+    resolution_source: Literal["earliest_arrival", "manual_override", "actual_fact"]
+    competing_occurrences: list[CompetingRouteOccurrence] = Field(default_factory=list)
+
+
+class GirderSpanPlan(BaseModel):
+    task_id: str
+    bridge_id: str
+    work_section_id: str
+    span_id: str
+    route_id: str
+    beam_yard_id: str
+    erection_machine_id: str
+    beam_type: str
+    beam_count: int = Field(ge=1)
+    earliest_start_date: date
+    suggested_latest_finish_date: date | None = None
+    planned_start_date: date | None = None
+    planned_finish_date: date | None = None
+    inventory_before: float | None = Field(default=None, ge=0)
+    inventory_after: float | None = Field(default=None, ge=0)
+    diagnostic_refs: list[str] = Field(default_factory=list)
+
+
+class PassageReleaseResult(BaseModel):
+    workpoint_id: str
+    passable_date: date | None = None
+    erection_buffer_date: date | None = None
+    explicit_readiness_date: date | None = None
+    linked_condition_finish_dates: dict[str, date] = Field(default_factory=dict)
+    controlling_source: Literal["erection_buffer", "explicit_readiness", "linked_condition", "actual_fact", "none"] = "none"
+    status: Literal["ready", "waiting", "blocked"] = "blocked"
+
+
+class YardInventoryPoint(BaseModel):
+    beam_yard_id: str
+    beam_type: str
+    date: date
+    opening_inventory: float = Field(ge=0)
+    produced: float = Field(ge=0)
+    consumed: float = Field(ge=0)
+    closing_inventory: float = Field(ge=0)
+    max_inventory: float | None = Field(default=None, ge=0)
+
+
+class RouteRun(BaseModel):
+    route_id: str
+    beam_yard_id: str
+    erection_machine_id: str
+    start_date: date
+    finish_date: date
+    waiting_days: int = Field(default=0, ge=0)
+    event_refs: list[str] = Field(default_factory=list)
+
+
+class LatestFinishControl(BaseModel):
+    entity_ref: str
+    controlled_by: str
+    latest_finish_date: date
+    mode: Literal["soft"] = "soft"
+    priority: int = Field(default=1, ge=1)
+
+
+class GirderPlanningResult(BaseModel):
+    result_id: str
+    status: Literal["ready", "blocked"]
+    ownerships: list[ErectionOwnership] = Field(default_factory=list)
+    span_plans: list[GirderSpanPlan] = Field(default_factory=list)
+    passage_releases: list[PassageReleaseResult] = Field(default_factory=list)
+    yard_inventory_series: list[YardInventoryPoint] = Field(default_factory=list)
+    route_runs: list[RouteRun] = Field(default_factory=list)
+    latest_finish_controls: list[LatestFinishControl] = Field(default_factory=list)
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+    input_fingerprint: str
+
+
+class IntegratedIterationRecord(BaseModel):
+    iteration_no: int = Field(ge=1)
+    input_fingerprint: str
+    ownership_fingerprint: str
+    date_state_fingerprint: str
+    girder_result_id: str
+    schedule_status: Literal["feasible", "infeasible", "blocked"]
+    changed_owner_refs: list[str] = Field(default_factory=list)
+    changed_date_refs: list[str] = Field(default_factory=list)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
+class CreateIntegratedScheduleRequest(BaseModel):
+    scenario_version_id: str
+    progress_snapshot_id: str | None = None
+    expected_input_fingerprint: str
+    force_recompute: bool = False
+
+
+class IntegratedCalculationSnapshot(BaseModel):
+    integrated_snapshot_id: str
+    project_data_version_id: str
+    scenario_version_id: str
+    progress_snapshot_id: str | None = None
+    status: IntegratedCalculationStatus
+    iterations: list[IntegratedIterationRecord] = Field(default_factory=list)
+    girder_result: GirderPlanningResult | None = None
+    generated_snapshot: GeneratedScheduleInput | None = None
+    schedule_result: ScheduleResult | None = None
+    input_fingerprint: str
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+    created_at: datetime
+
+
+class YardInventoryActual(BaseModel):
+    beam_yard_id: str
+    beam_type: str
+    cumulative_produced: float = Field(ge=0)
+    opening_inventory_adjustment: float = 0
+    observed_inventory: float = Field(ge=0)
+    adjustment_reason: str | None = None
+    source: Literal["manual", "excel"] = "manual"
+
+
+class GirderExecutionActual(BaseModel):
+    span_task_id: str
+    status: Literal["not_started", "in_progress", "completed"]
+    actual_route_id: str | None = None
+    actual_start_date: date | None = None
+    actual_finish_date: date | None = None
+    erected_beam_count: int = Field(default=0, ge=0)
+    erection_machine_id: str | None = None
+
+
+class GirderMachineActual(BaseModel):
+    erection_machine_id: str
+    position_workpoint_id: str | None = None
+    availability_status: Literal["available", "unavailable", "maintenance"]
+    expected_resume_date: date | None = None
+    reason: str | None = None
+
+
+class PassageActual(BaseModel):
+    workpoint_id: str
+    status: Literal["closed", "conditional", "open"]
+    actual_open_date: date | None = None
+    restrictions: str | None = None
+
+
+class GirderProgressImportPreview(BaseModel):
+    source_file_name: str
+    yard_inventory_actuals: list[YardInventoryActual] = Field(default_factory=list)
+    girder_execution_actuals: list[GirderExecutionActual] = Field(default_factory=list)
+    girder_machine_actuals: list[GirderMachineActual] = Field(default_factory=list)
+    passage_actuals: list[PassageActual] = Field(default_factory=list)
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+
+
 class PlanVersion(BaseModel):
     plan_version_id: str
     project_id: str
@@ -1299,6 +1726,10 @@ class PlanVersion(BaseModel):
     confirmed_by: str
     confirmed_at: datetime
     confirmation_reason: str
+    project_data_version_id: str | None = None
+    scenario_version_id: str | None = None
+    integrated_snapshot_id: str | None = None
+    girder_result_snapshot: GirderPlanningResult | None = None
 
 
 class ProgressEntry(BaseModel):
@@ -1330,6 +1761,10 @@ class ProgressSnapshot(BaseModel):
     submitted_by: str
     submitted_at: datetime
     correction_reason: str | None = None
+    yard_inventory_actuals: list[YardInventoryActual] = Field(default_factory=list)
+    girder_execution_actuals: list[GirderExecutionActual] = Field(default_factory=list)
+    girder_machine_actuals: list[GirderMachineActual] = Field(default_factory=list)
+    passage_actuals: list[PassageActual] = Field(default_factory=list)
 
 
 class ProgressCorrectionRecord(BaseModel):
@@ -1446,8 +1881,11 @@ class PlanChangeRecord(BaseModel):
 
 
 class PlanControlStore(BaseModel):
-    schema_version: str = "plan-control/v1"
+    schema_version: str = "plan-control/v2"
     plan_versions: list[PlanVersion] = Field(default_factory=list)
+    project_data_versions: list[ProjectDataVersion] = Field(default_factory=list)
+    planning_scenario_versions: list[PlanningScenarioVersion] = Field(default_factory=list)
+    integrated_calculation_snapshots: list[IntegratedCalculationSnapshot] = Field(default_factory=list)
     progress_snapshots: list[ProgressSnapshot] = Field(default_factory=list)
     correction_records: list[ProgressCorrectionRecord] = Field(default_factory=list)
     forecasts: list[ForecastSchedule] = Field(default_factory=list)
@@ -1461,6 +1899,7 @@ class CreateBaselinePlanRequest(BaseModel):
     plan_result: ResourceAssistantPlanResult
     confirmed_by: str = "本地计划工程师"
     confirmation_reason: str = "确认为执行基准计划"
+    integrated_snapshot_id: str | None = None
 
 
 class PlanControlProjectSummary(BaseModel):
@@ -1478,11 +1917,16 @@ class CreateProgressSnapshotRequest(BaseModel):
     submitted_by: str = "本地计划工程师"
     correction_reason: str | None = None
     expected_revision_no: int | None = Field(default=None, ge=1)
+    yard_inventory_actuals: list[YardInventoryActual] = Field(default_factory=list)
+    girder_execution_actuals: list[GirderExecutionActual] = Field(default_factory=list)
+    girder_machine_actuals: list[GirderMachineActual] = Field(default_factory=list)
+    passage_actuals: list[PassageActual] = Field(default_factory=list)
 
 
 class CreateProgressSnapshotResponse(BaseModel):
     progress_snapshot: ProgressSnapshot
     stale_forecast_ids: list[str] = Field(default_factory=list)
+    stale_integrated_snapshot_ids: list[str] = Field(default_factory=list)
     diagnostics: list[ValidationMessage] = Field(default_factory=list)
 
 

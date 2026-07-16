@@ -16,10 +16,18 @@ from app.services.plan_control_repository import (  # noqa: E402
     PlanControlRepository,
     PlanControlRepositoryError,
 )
-from app.models import CreateProgressSnapshotRequest, ProgressEntry  # noqa: E402
+from app.models import (  # noqa: E402
+    ConfirmProjectDataVersionRequest,
+    CreatePlanningScenarioVersionRequest,
+    CreateProgressSnapshotRequest,
+    CreateProjectDataVersionRequest,
+    GirderPlanningConfig,
+    ProgressEntry,
+)
 from app.services.progress_forecast import create_baseline_plan, create_progress_snapshot  # noqa: E402
 from app.services.progress_forecast import PlanControlValidationError  # noqa: E402
 from plan_control_helpers import solved_baseline_request  # noqa: E402
+from app.services.process_library_service import default_scenario_with_process_library  # noqa: E402
 
 
 def _drop_structure_parameter_labels(value) -> None:
@@ -50,6 +58,62 @@ def test_repository_rejects_corrupted_store(tmp_path: Path) -> None:
 
     with pytest.raises(PlanControlRepositoryError, match="读取失败"):
         PlanControlRepository(path).load()
+
+
+def test_repository_reads_v1_and_writes_v2_with_new_collections(tmp_path: Path) -> None:
+    path = tmp_path / "plan-control-v1.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "plan-control/v1",
+                "plan_versions": [],
+                "progress_snapshots": [],
+                "correction_records": [],
+                "forecasts": [],
+                "adjustment_proposals": [],
+                "plan_change_records": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    repository = PlanControlRepository(path)
+
+    migrated = repository.load()
+
+    assert migrated.schema_version == "plan-control/v2"
+    assert migrated.project_data_versions == []
+    assert migrated.planning_scenario_versions == []
+    assert migrated.integrated_calculation_snapshots == []
+
+
+def test_project_and_scenario_version_confirmation_lifecycle(tmp_path: Path) -> None:
+    repository = PlanControlRepository(tmp_path / "girder-versions.json")
+    scenario = default_scenario_with_process_library()
+    project_version = repository.create_project_data_version(
+        CreateProjectDataVersionRequest(project=scenario.project, created_by="导入人")
+    )
+    assert project_version.status == "draft"
+
+    confirmed = repository.confirm_project_data_version(
+        project_version.project_data_version_id,
+        ConfirmProjectDataVersionRequest(
+            expected_input_fingerprint=project_version.input_fingerprint,
+            confirmed_by="项目总工",
+            confirmation_reason="结构数据已复核",
+        ),
+    )
+    assert confirmed.status == "confirmed"
+
+    scenario_version = repository.create_planning_scenario_version(
+        CreatePlanningScenarioVersionRequest(
+            scenario=scenario,
+            project_data_version_id=confirmed.project_data_version_id,
+            girder_planning=GirderPlanningConfig(enabled=False),
+            created_by="计划工程师",
+        )
+    )
+    assert scenario_version.status == "draft"
+    assert repository.list_planning_scenario_versions(scenario.project.project_id)[0].scenario_version_id == scenario_version.scenario_version_id
 
 
 def test_repository_reads_legacy_forecast_without_closed_loop_fields(tmp_path: Path) -> None:

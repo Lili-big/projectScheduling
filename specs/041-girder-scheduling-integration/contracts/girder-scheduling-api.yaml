@@ -1,0 +1,1105 @@
+openapi: 3.1.0
+info:
+  title: 架梁专项与综合排程融合 API
+  version: 1.0.0
+  description: >-
+    定义项目主数据版本、方案配置版本、架梁专项校验、联合计算、统一发布和架梁实绩扩展契约。
+    现有非架梁接口继续兼容；所有日期使用 YYYY-MM-DD，时间使用 ISO 8601。
+
+paths:
+  /api/project-data-versions:
+    post:
+      summary: 创建项目主数据版本
+      operationId: createProjectDataVersion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectDataVersionRequest'
+      responses:
+        '201':
+          description: 已创建不可变项目版本
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDataVersion'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /api/projects/{project_id}/data-versions:
+    get:
+      summary: 查询项目主数据版本
+      operationId: listProjectDataVersions
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: 版本按 version_no 倒序返回
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectDataVersion'
+
+  /api/project-data-versions/{project_data_version_id}/confirm:
+    post:
+      summary: 确认项目主数据版本
+      operationId: confirmProjectDataVersion
+      parameters:
+        - $ref: '#/components/parameters/ProjectDataVersionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmProjectDataVersionRequest'
+      responses:
+        '200':
+          description: 项目主数据版本已确认，可被正式方案版本引用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectDataVersion'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /api/girder-planning/import-workpoints:
+    post:
+      summary: 导入旧架梁工点输入并生成映射报告
+      operationId: importGirderWorkpoints
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [project_data_version_id, file]
+              properties:
+                project_data_version_id:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+                coarse_mode:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: 规范化工点、来源证据和冲突报告；不直接覆盖项目版本
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GirderImportPreview'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /api/girder-planning/import-progress:
+    post:
+      summary: 导入架梁实绩并返回字段级解析结果
+      operationId: importGirderProgressActuals
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: 解析后的库存、架梁、设备和通道实绩；不会直接写入状态日快照
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GirderProgressImportPreview'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /api/planning-scenario-versions:
+    post:
+      summary: 保存独立方案配置版本
+      operationId: createPlanningScenarioVersion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePlanningScenarioVersionRequest'
+      responses:
+        '201':
+          description: 已创建方案版本
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanningScenarioVersion'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /api/projects/{project_id}/planning-scenarios:
+    get:
+      summary: 查询项目方案版本
+      operationId: listPlanningScenarioVersions
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: 项目下的方案版本
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlanningScenarioVersion'
+
+  /api/planning-scenario-versions/{scenario_version_id}/confirm-specialty:
+    post:
+      summary: 确认架梁专项方案
+      operationId: confirmGirderSpecialty
+      parameters:
+        - $ref: '#/components/parameters/ScenarioVersionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_input_fingerprint, confirmed_by, confirmation_reason]
+              properties:
+                expected_input_fingerprint:
+                  type: string
+                confirmed_by:
+                  type: string
+                confirmation_reason:
+                  type: string
+      responses:
+        '200':
+          description: 专项已确认
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanningScenarioVersion'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /api/girder-planning/validate:
+    post:
+      summary: 校验架梁专项计算就绪度
+      operationId: validateGirderPlanning
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScenarioVersionReference'
+      responses:
+        '200':
+          description: 就绪度及阻断、警告和提示
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GirderPlanningReadiness'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/girder-planning/preview:
+    post:
+      summary: 执行不进入综合排程的专项预览
+      operationId: previewGirderPlanning
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScenarioVersionReference'
+      responses:
+        '200':
+          description: 架梁专项预览；不具备独立发布资格
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GirderPlanningResult'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /api/integrated-schedules:
+    post:
+      summary: 创建或复用一次联合计算快照
+      operationId: solveIntegratedSchedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIntegratedScheduleRequest'
+      responses:
+        '200':
+          description: 相同有效输入指纹已存在时返回原快照
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntegratedCalculationSnapshot'
+        '201':
+          description: 已完成新的联合计算
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntegratedCalculationSnapshot'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /api/integrated-schedules/{integrated_snapshot_id}:
+    get:
+      summary: 查询联合计算快照
+      operationId: getIntegratedSchedule
+      parameters:
+        - $ref: '#/components/parameters/IntegratedSnapshotId'
+      responses:
+        '200':
+          description: 联合计算只读快照
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntegratedCalculationSnapshot'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/plan-control/baselines:
+    post:
+      summary: 发布统一执行基线（扩展现有接口）
+      operationId: createIntegratedBaselinePlan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBaselinePlanRequest'
+      responses:
+        '200':
+          description: 已发布统一计划版本
+          content:
+            application/json:
+              schema:
+                type: object
+                description: 现有 PlanVersion，新增项目、方案、联合快照和架梁结果引用
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /api/plan-control/progress-snapshots:
+    post:
+      summary: 保存任务与架梁实绩快照（扩展现有接口）
+      operationId: createGirderProgressSnapshot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProgressSnapshotRequest'
+      responses:
+        '200':
+          description: 已保存实绩快照并使旧预测失效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateProgressSnapshotResponse'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+components:
+  parameters:
+    ProjectId:
+      name: project_id
+      in: path
+      required: true
+      schema: { type: string }
+    ProjectDataVersionId:
+      name: project_data_version_id
+      in: path
+      required: true
+      schema: { type: string }
+    ScenarioVersionId:
+      name: scenario_version_id
+      in: path
+      required: true
+      schema: { type: string }
+    IntegratedSnapshotId:
+      name: integrated_snapshot_id
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    NotFound:
+      description: 引用对象不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: 版本已变化、结果已失效、专项未确认或归属存在歧义
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ValidationFailed:
+      description: 数据格式或业务校验失败
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail: { type: string }
+        error_code: { type: string }
+        diagnostics:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationMessage'
+
+    ValidationMessage:
+      type: object
+      required: [level, message]
+      properties:
+        level:
+          type: string
+          enum: [info, warning, error]
+        code: { type: string }
+        message: { type: string }
+        entity_refs:
+          type: array
+          items: { type: string }
+        suggestion: { type: string }
+
+    SourceEvidence:
+      type: object
+      required: [evidence_id, source_type, authority_domain, field_path]
+      properties:
+        evidence_id: { type: string }
+        source_type:
+          type: string
+          enum: [structure_import, girder_import, manual]
+        authority_domain:
+          type: string
+          enum: [structure, girder_workpoint, user_config]
+        file_name: { type: [string, 'null'] }
+        sheet_name: { type: [string, 'null'] }
+        row_or_region: { type: [string, 'null'] }
+        field_path: { type: string }
+        original_value: {}
+        normalized_value: {}
+
+    GirderWorkPoint:
+      type: object
+      required: [workpoint_id, name, workpoint_type, side, mileage_start_m, mileage_end_m, corridor_id]
+      properties:
+        workpoint_id: { type: string }
+        name: { type: string }
+        workpoint_type:
+          type: string
+          enum: [roadbed, bridge, tunnel, culvert, access]
+        side:
+          type: string
+          enum: [left, right, both, unknown]
+        mileage_start_m: { type: number }
+        mileage_end_m: { type: number }
+        corridor_id: { type: string }
+        bridge_id: { type: [string, 'null'] }
+        work_section_id: { type: [string, 'null'] }
+        requires_erection: { type: boolean, default: false }
+        rough_granularity: { type: boolean, default: false }
+        explicit_readiness_date: { type: [string, 'null'], format: date }
+        linked_condition_refs:
+          type: array
+          items:
+            $ref: '#/components/schemas/PassageConditionRef'
+
+    PassageConditionRef:
+      type: object
+      required: [ref_type, entity_id, target_event]
+      properties:
+        ref_type:
+          type: string
+          enum: [structure, upper_structure, milestone]
+        entity_id: { type: string }
+        target_event:
+          type: string
+          enum: [finish]
+
+    FieldCandidateValue:
+      type: object
+      required: [source_evidence_id, value]
+      properties:
+        source_evidence_id: { type: string }
+        value: {}
+
+    FieldConflict:
+      type: object
+      required: [conflict_id, entity_ref, field_path, severity, status, candidate_values]
+      properties:
+        conflict_id: { type: string }
+        entity_ref: { type: string }
+        field_path: { type: string }
+        severity:
+          type: string
+          enum: [warning, blocking]
+        status:
+          type: string
+          enum: [unresolved, resolved]
+        candidate_values:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldCandidateValue'
+        selected_value: {}
+        resolution_reason: { type: [string, 'null'] }
+
+    CreateProjectDataVersionRequest:
+      type: object
+      required: [project, workpoints, created_by]
+      properties:
+        project:
+          type: object
+          description: 现有 ProjectModel 快照
+        workpoints:
+          type: array
+          items:
+            $ref: '#/components/schemas/GirderWorkPoint'
+        source_evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceEvidence'
+        conflict_resolutions:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldConflict'
+        expected_latest_version_no:
+          type: [integer, 'null']
+          minimum: 1
+        created_by: { type: string }
+
+    ConfirmProjectDataVersionRequest:
+      type: object
+      required: [expected_input_fingerprint, confirmed_by, confirmation_reason]
+      properties:
+        expected_input_fingerprint: { type: string }
+        confirmed_by: { type: string }
+        confirmation_reason: { type: string }
+
+    ProjectDataVersion:
+      allOf:
+        - $ref: '#/components/schemas/CreateProjectDataVersionRequest'
+        - type: object
+          required: [project_data_version_id, project_id, version_no, status, input_fingerprint, created_at]
+          properties:
+            project_data_version_id: { type: string }
+            project_id: { type: string }
+            version_no: { type: integer, minimum: 1 }
+            status:
+              type: string
+              enum: [draft, confirmed, superseded]
+            input_fingerprint: { type: string }
+            created_at: { type: string, format: date-time }
+            confirmed_by: { type: [string, 'null'] }
+            confirmed_at: { type: [string, 'null'], format: date-time }
+
+    BeamYardConfig:
+      type: object
+      required:
+        - beam_yard_id
+        - name
+        - mileage_m
+        - side
+        - corridor_id
+        - production_start_date
+        - daily_production_capacity
+        - initial_inventory_by_type
+        - calendar_id
+        - enabled
+      properties:
+        beam_yard_id: { type: string }
+        name: { type: string }
+        mileage_m: { type: number }
+        side: { type: string, enum: [left, right, both, unknown] }
+        corridor_id: { type: string }
+        production_start_date: { type: string, format: date }
+        daily_production_capacity: { type: number, minimum: 0 }
+        initial_inventory_by_type:
+          type: object
+          additionalProperties: { type: number, minimum: 0 }
+        max_inventory_by_type:
+          type: [object, 'null']
+          additionalProperties: { type: number, minimum: 0 }
+        calendar_id: { type: string }
+        enabled: { type: boolean }
+
+    ErectionMachineConfig:
+      type: object
+      required:
+        - erection_machine_id
+        - name
+        - beam_yard_id
+        - available_date
+        - daily_erection_capacity
+        - first_span_preparation_days
+        - span_launching_days
+        - bridge_transfer_days
+        - side_switch_days
+        - calendar_id
+        - enabled
+      properties:
+        erection_machine_id: { type: string }
+        name: { type: string }
+        beam_yard_id: { type: string }
+        available_date: { type: string, format: date }
+        daily_erection_capacity: { type: number, exclusiveMinimum: 0 }
+        first_span_preparation_days: { type: integer, minimum: 0 }
+        span_launching_days: { type: integer, minimum: 0 }
+        bridge_transfer_days: { type: integer, minimum: 0 }
+        side_switch_days: { type: integer, minimum: 0 }
+        calendar_id: { type: string }
+        enabled: { type: boolean }
+
+    GirderRouteNode:
+      type: object
+      required: [route_node_id, workpoint_id, sequence_index, node_kind]
+      properties:
+        route_node_id: { type: string }
+        workpoint_id: { type: string }
+        sequence_index: { type: integer, minimum: 0 }
+        node_kind: { type: string, enum: [workpoint, turn, connection] }
+        connection_days: { type: [integer, 'null'], minimum: 0 }
+
+    GirderRouteConfig:
+      type: object
+      required: [route_id, name, beam_yard_id, erection_machine_id, enabled, confirmed, nodes]
+      properties:
+        route_id: { type: string }
+        name: { type: string }
+        beam_yard_id: { type: string }
+        erection_machine_id: { type: string }
+        enabled: { type: boolean }
+        confirmed: { type: boolean }
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/GirderRouteNode'
+
+    ErectionOwnerOverride:
+      type: object
+      required: [bridge_id, side, owner_route_id, reason, confirmed_by, confirmed_at]
+      properties:
+        bridge_id: { type: string }
+        side: { type: string, enum: [left, right] }
+        owner_route_id: { type: string }
+        reason: { type: string }
+        confirmed_by: { type: string }
+        confirmed_at: { type: string, format: date-time }
+
+    PassageOverride:
+      type: object
+      required: [workpoint_id, action, reason]
+      properties:
+        workpoint_id: { type: string }
+        action: { type: string, enum: [include, exclude, readiness] }
+        related_route_id: { type: [string, 'null'] }
+        explicit_readiness_date: { type: [string, 'null'], format: date }
+        reason: { type: string }
+
+    GirderPlanningParameters:
+      type: object
+      required:
+        - post_erection_passage_buffer_days
+        - post_erection_buffer_confirmed
+        - max_iterations
+        - date_tolerance_days
+      properties:
+        substructure_acceptance_buffer_days: { type: integer, minimum: 0, default: 7 }
+        roadbed_passage_buffer_days: { type: integer, minimum: 0, default: 4 }
+        tunnel_passage_buffer_days: { type: integer, minimum: 0, default: 6 }
+        post_erection_passage_buffer_days: { type: integer, minimum: 0 }
+        post_erection_buffer_confirmed: { type: boolean }
+        default_transfer_days: { type: integer, minimum: 0, default: 2 }
+        default_bridge_preparation_days: { type: integer, minimum: 0, default: 3 }
+        max_iterations: { type: integer, minimum: 1, maximum: 50, default: 10 }
+        date_tolerance_days: { type: integer, const: 0 }
+        enable_supply_constraint: { type: boolean, const: true }
+        enable_passage_constraint: { type: boolean, const: true }
+        enable_stock_limit: { type: boolean, const: true }
+
+    GirderPlanningConfig:
+      type: object
+      required: [enabled, beam_yards, erection_machines, routes, parameters]
+      properties:
+        enabled: { type: boolean }
+        beam_yards:
+          type: array
+          items:
+            $ref: '#/components/schemas/BeamYardConfig'
+        erection_machines:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErectionMachineConfig'
+        routes:
+          type: array
+          items:
+            $ref: '#/components/schemas/GirderRouteConfig'
+        parameters:
+          $ref: '#/components/schemas/GirderPlanningParameters'
+        owner_overrides:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErectionOwnerOverride'
+        manual_passage_overrides:
+          type: array
+          items:
+            $ref: '#/components/schemas/PassageOverride'
+        coarse_mode: { type: boolean, default: false }
+
+    CreatePlanningScenarioVersionRequest:
+      type: object
+      required: [scenario, project_data_version_id, girder_planning, created_by]
+      properties:
+        scenario:
+          type: object
+          description: 现有 ScenarioInput；project 内容必须与引用项目版本一致
+        project_data_version_id: { type: string }
+        girder_planning:
+          $ref: '#/components/schemas/GirderPlanningConfig'
+        expected_latest_version_no:
+          type: [integer, 'null']
+          minimum: 1
+        created_by: { type: string }
+
+    PlanningScenarioVersion:
+      allOf:
+        - $ref: '#/components/schemas/CreatePlanningScenarioVersionRequest'
+        - type: object
+          required: [scenario_version_id, scenario_id, version_no, status, input_fingerprint, created_at]
+          properties:
+            scenario_version_id: { type: string }
+            scenario_id: { type: string }
+            version_no: { type: integer, minimum: 1 }
+            status:
+              type: string
+              enum: [draft, specialty_confirmed, stale, superseded]
+            input_fingerprint: { type: string }
+            created_at: { type: string, format: date-time }
+            specialty_confirmed_by: { type: [string, 'null'] }
+            specialty_confirmed_at: { type: [string, 'null'], format: date-time }
+
+    ScenarioVersionReference:
+      type: object
+      required: [scenario_version_id, expected_input_fingerprint]
+      properties:
+        scenario_version_id: { type: string }
+        expected_input_fingerprint: { type: string }
+
+    GirderImportPreview:
+      type: object
+      required: [workpoints, source_evidence, field_conflicts, diagnostics]
+      properties:
+        workpoints:
+          type: array
+          items:
+            $ref: '#/components/schemas/GirderWorkPoint'
+        source_evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceEvidence'
+        field_conflicts:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldConflict'
+        diagnostics:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationMessage'
+
+    GirderProgressImportPreview:
+      type: object
+      required: [source_file_name, yard_inventory_actuals, girder_execution_actuals, girder_machine_actuals, passage_actuals, diagnostics]
+      properties:
+        source_file_name: { type: string }
+        yard_inventory_actuals:
+          type: array
+          items:
+            $ref: '#/components/schemas/YardInventoryActual'
+        girder_execution_actuals:
+          type: array
+          items:
+            $ref: '#/components/schemas/GirderExecutionActual'
+        girder_machine_actuals:
+          type: array
+          items:
+            $ref: '#/components/schemas/GirderMachineActual'
+        passage_actuals:
+          type: array
+          items:
+            $ref: '#/components/schemas/PassageActual'
+        diagnostics:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationMessage'
+
+    GirderPlanningReadiness:
+      type: object
+      required: [status, checks, diagnostics]
+      properties:
+        status:
+          type: string
+          enum: [ready, warning, blocking]
+        checks:
+          type: array
+          items:
+            type: object
+            required: [code, status, message]
+            properties:
+              code: { type: string }
+              status: { type: string, enum: [passed, warning, blocking] }
+              message: { type: string }
+              entity_refs: { type: array, items: { type: string } }
+        diagnostics:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationMessage'
+
+    ErectionOwnership:
+      type: object
+      required: [bridge_id, side, owner_route_id, owner_node_id, arrival_date, resolution_source]
+      properties:
+        bridge_id: { type: string }
+        side: { type: string, enum: [left, right, both, unknown] }
+        owner_route_id: { type: string }
+        owner_node_id: { type: string }
+        arrival_date: { type: string, format: date }
+        resolution_source:
+          type: string
+          enum: [earliest_arrival, manual_override, actual_fact]
+        competing_occurrences:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompetingRouteOccurrence'
+
+    CompetingRouteOccurrence:
+      type: object
+      required: [route_id, route_node_id, arrival_date]
+      properties:
+        route_id: { type: string }
+        route_node_id: { type: string }
+        arrival_date: { type: string, format: date }
+
+    GirderSpanPlan:
+      type: object
+      required:
+        - task_id
+        - bridge_id
+        - work_section_id
+        - span_id
+        - route_id
+        - beam_yard_id
+        - erection_machine_id
+        - beam_type
+        - beam_count
+        - earliest_start_date
+      properties:
+        task_id: { type: string }
+        bridge_id: { type: string }
+        work_section_id: { type: string }
+        span_id: { type: string }
+        route_id: { type: string }
+        beam_yard_id: { type: string }
+        erection_machine_id: { type: string }
+        beam_type: { type: string }
+        beam_count: { type: integer, minimum: 1 }
+        earliest_start_date: { type: string, format: date }
+        suggested_latest_finish_date: { type: [string, 'null'], format: date }
+        planned_start_date: { type: [string, 'null'], format: date }
+        planned_finish_date: { type: [string, 'null'], format: date }
+        inventory_before: { type: number, minimum: 0 }
+        inventory_after: { type: number, minimum: 0 }
+        diagnostic_refs: { type: array, items: { type: string } }
+
+    PassageReleaseResult:
+      type: object
+      required: [workpoint_id, passable_date, controlling_source, status]
+      properties:
+        workpoint_id: { type: string }
+        passable_date: { type: [string, 'null'], format: date }
+        erection_buffer_date: { type: [string, 'null'], format: date }
+        explicit_readiness_date: { type: [string, 'null'], format: date }
+        linked_condition_finish_dates:
+          type: object
+          additionalProperties: { type: string, format: date }
+        controlling_source:
+          type: string
+          enum: [erection_buffer, explicit_readiness, linked_condition, none]
+        status: { type: string, enum: [ready, waiting, blocked] }
+
+    YardInventoryPoint:
+      type: object
+      required: [beam_yard_id, beam_type, date, opening_inventory, produced, consumed, closing_inventory]
+      properties:
+        beam_yard_id: { type: string }
+        beam_type: { type: string }
+        date: { type: string, format: date }
+        opening_inventory: { type: number, minimum: 0 }
+        produced: { type: number, minimum: 0 }
+        consumed: { type: number, minimum: 0 }
+        closing_inventory: { type: number, minimum: 0 }
+        max_inventory: { type: [number, 'null'], minimum: 0 }
+
+    RouteRun:
+      type: object
+      required: [route_id, beam_yard_id, erection_machine_id, start_date, finish_date, waiting_days]
+      properties:
+        route_id: { type: string }
+        beam_yard_id: { type: string }
+        erection_machine_id: { type: string }
+        start_date: { type: string, format: date }
+        finish_date: { type: string, format: date }
+        waiting_days: { type: integer, minimum: 0 }
+        event_refs: { type: array, items: { type: string } }
+
+    LatestFinishControl:
+      type: object
+      required: [entity_ref, controlled_by, latest_finish_date, mode]
+      properties:
+        entity_ref: { type: string }
+        controlled_by: { type: string }
+        latest_finish_date: { type: string, format: date }
+        mode: { type: string, const: soft }
+        priority: { type: integer, minimum: 1 }
+
+    IntegratedIterationRecord:
+      type: object
+      required:
+        - iteration_no
+        - input_fingerprint
+        - ownership_fingerprint
+        - date_state_fingerprint
+        - girder_result_id
+        - schedule_status
+      properties:
+        iteration_no: { type: integer, minimum: 1 }
+        input_fingerprint: { type: string }
+        ownership_fingerprint: { type: string }
+        date_state_fingerprint: { type: string }
+        girder_result_id: { type: string }
+        schedule_status:
+          type: string
+          enum: [feasible, infeasible, blocked]
+        changed_owner_refs: { type: array, items: { type: string } }
+        changed_date_refs: { type: array, items: { type: string } }
+        started_at: { type: [string, 'null'], format: date-time }
+        finished_at: { type: [string, 'null'], format: date-time }
+
+    GirderPlanningResult:
+      type: object
+      required: [result_id, status, ownerships, span_plans, diagnostics, input_fingerprint]
+      properties:
+        result_id: { type: string }
+        status: { type: string, enum: [ready, blocked] }
+        ownerships:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErectionOwnership'
+        span_plans:
+          type: array
+          items:
+            $ref: '#/components/schemas/GirderSpanPlan'
+        passage_releases:
+          type: array
+          items:
+            $ref: '#/components/schemas/PassageReleaseResult'
+        yard_inventory_series:
+          type: array
+          items:
+            $ref: '#/components/schemas/YardInventoryPoint'
+        route_runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/RouteRun'
+        latest_finish_controls:
+          type: array
+          items:
+            $ref: '#/components/schemas/LatestFinishControl'
+        diagnostics:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationMessage'
+        input_fingerprint: { type: string }
+
+    CreateIntegratedScheduleRequest:
+      type: object
+      required: [scenario_version_id, expected_input_fingerprint]
+      properties:
+        scenario_version_id: { type: string }
+        progress_snapshot_id: { type: [string, 'null'] }
+        expected_input_fingerprint: { type: string }
+        force_recompute: { type: boolean, default: false }
+
+    IntegratedCalculationSnapshot:
+      type: object
+      required:
+        - integrated_snapshot_id
+        - project_data_version_id
+        - scenario_version_id
+        - status
+        - iterations
+        - input_fingerprint
+        - diagnostics
+        - created_at
+      properties:
+        integrated_snapshot_id: { type: string }
+        project_data_version_id: { type: string }
+        scenario_version_id: { type: string }
+        progress_snapshot_id: { type: [string, 'null'] }
+        status:
+          type: string
+          enum: [running, converged, not_converged, infeasible, blocked, stale]
+        iterations:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegratedIterationRecord'
+        girder_result:
+          oneOf:
+            - $ref: '#/components/schemas/GirderPlanningResult'
+            - type: 'null'
+        generated_snapshot: { type: [object, 'null'] }
+        schedule_result: { type: [object, 'null'] }
+        input_fingerprint: { type: string }
+        diagnostics:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationMessage'
+        created_at: { type: string, format: date-time }
+
+    CreateBaselinePlanRequest:
+      type: object
+      required: [scenario, resource_plan, plan_result, confirmed_by, confirmation_reason]
+      properties:
+        scenario: { type: object }
+        resource_plan: { type: object }
+        plan_result: { type: object }
+        integrated_snapshot_id:
+          type: [string, 'null']
+          description: 启用架梁专项时必填，且快照必须为 converged、未失效、专项已确认
+        confirmed_by: { type: string }
+        confirmation_reason: { type: string }
+
+    YardInventoryActual:
+      type: object
+      required: [beam_yard_id, beam_type, cumulative_produced, observed_inventory, source]
+      properties:
+        beam_yard_id: { type: string }
+        beam_type: { type: string }
+        cumulative_produced: { type: number, minimum: 0 }
+        opening_inventory_adjustment: { type: number, default: 0 }
+        observed_inventory: { type: number, minimum: 0 }
+        adjustment_reason: { type: [string, 'null'] }
+        source: { type: string, enum: [manual, excel] }
+
+    GirderExecutionActual:
+      type: object
+      required: [span_task_id, status, erected_beam_count]
+      properties:
+        span_task_id: { type: string }
+        status:
+          type: string
+          enum: [not_started, in_progress, completed]
+        actual_route_id: { type: [string, 'null'] }
+        actual_start_date: { type: [string, 'null'], format: date }
+        actual_finish_date: { type: [string, 'null'], format: date }
+        erected_beam_count: { type: integer, minimum: 0 }
+        erection_machine_id: { type: [string, 'null'] }
+
+    GirderMachineActual:
+      type: object
+      required: [erection_machine_id, availability_status]
+      properties:
+        erection_machine_id: { type: string }
+        position_workpoint_id: { type: [string, 'null'] }
+        availability_status:
+          type: string
+          enum: [available, unavailable, maintenance]
+        expected_resume_date: { type: [string, 'null'], format: date }
+        reason: { type: [string, 'null'] }
+
+    PassageActual:
+      type: object
+      required: [workpoint_id, status]
+      properties:
+        workpoint_id: { type: string }
+        status: { type: string, enum: [closed, conditional, open] }
+        actual_open_date: { type: [string, 'null'], format: date }
+        restrictions: { type: [string, 'null'] }
+
+    CreateProgressSnapshotRequest:
+      type: object
+      required: [plan_version_id, status_date, submitted_by]
+      properties:
+        plan_version_id: { type: string }
+        status_date: { type: string, format: date }
+        entries:
+          type: array
+          items: { type: object }
+        yard_inventory_actuals:
+          type: array
+          items:
+            $ref: '#/components/schemas/YardInventoryActual'
+        girder_execution_actuals:
+          type: array
+          items:
+            $ref: '#/components/schemas/GirderExecutionActual'
+        girder_machine_actuals:
+          type: array
+          items:
+            $ref: '#/components/schemas/GirderMachineActual'
+        passage_actuals:
+          type: array
+          items:
+            $ref: '#/components/schemas/PassageActual'
+        submitted_by: { type: string }
+        correction_reason: { type: [string, 'null'] }
+        expected_revision_no: { type: [integer, 'null'], minimum: 1 }
+
+    CreateProgressSnapshotResponse:
+      type: object
+      required: [progress_snapshot, stale_forecast_ids, diagnostics]
+      properties:
+        progress_snapshot:
+          type: object
+          description: 现有 ProgressSnapshot，包含新增架梁实绩和物料平衡状态
+        stale_forecast_ids:
+          type: array
+          items: { type: string }
+        stale_integrated_snapshot_ids:
+          type: array
+          items: { type: string }
+        diagnostics:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationMessage'

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,6 +15,8 @@ from app.models import (  # noqa: E402
     AdoptAdjustmentRequest,
     CreateForecastRequest,
     CreateProgressSnapshotRequest,
+    GirderPlanningConfig,
+    IntegratedCalculationSnapshot,
     ProgressEntry,
 )
 from app.services.plan_control_repository import PlanControlConflictError, PlanControlRepository  # noqa: E402
@@ -722,6 +725,132 @@ def test_forecast_is_deduplicated_and_new_progress_marks_it_stale(tmp_path: Path
     )
     assert correction.stale_forecast_ids == [first.forecast_id]
     assert repository.get_forecast(first.forecast_id).status == "stale"
+
+
+def test_girder_plan_forecast_rebuilds_from_converged_integrated_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, baseline = _repository_and_baseline(tmp_path)
+    scenario = baseline.scenario_snapshot.model_copy(update={"girder_planning": GirderPlanningConfig(enabled=True)})
+    integrated_plan = baseline.model_copy(
+        update={
+            "plan_version_id": "plan-integrated-2",
+            "version_no": baseline.version_no + 1,
+            "scenario_snapshot": scenario,
+            "scenario_version_id": "scenario-version-1",
+            "integrated_snapshot_id": None,
+        }
+    )
+    repository.add_plan_version(integrated_plan)
+    scenario_version = SimpleNamespace(
+        scenario_version_id="scenario-version-1",
+        scenario_id=integrated_plan.source_scenario_id,
+        status="specialty_confirmed",
+        input_fingerprint="scenario-fingerprint",
+    )
+    monkeypatch.setattr(repository, "get_planning_scenario_version", lambda _: scenario_version)
+    integrated_snapshot = IntegratedCalculationSnapshot(
+        integrated_snapshot_id="integrated-after-actuals",
+        project_data_version_id="project-data-1",
+        scenario_version_id="scenario-version-1",
+        progress_snapshot_id="progress-after-actuals",
+        status="converged",
+        generated_snapshot=baseline.generated_snapshot,
+        schedule_result=baseline.schedule_result_snapshot,
+        input_fingerprint="integrated-fingerprint",
+        created_at=baseline.confirmed_at,
+    )
+    calls: list[CreateIntegratedScheduleRequest] = []
+
+    def fake_integrated(request: CreateIntegratedScheduleRequest, _repository):
+        calls.append(request)
+        return integrated_snapshot
+
+    monkeypatch.setattr(forecast_module, "solve_integrated_schedule", fake_integrated)
+    status_date = _progress_status_date(integrated_plan)
+    progress = create_progress_snapshot(
+        CreateProgressSnapshotRequest(
+            plan_version_id=integrated_plan.plan_version_id,
+            status_date=status_date,
+            submitted_by="现场填报人",
+            entries=[],
+        ),
+        repository,
+    )
+    forecast = create_forecast(
+        CreateForecastRequest(
+            plan_version_id=integrated_plan.plan_version_id,
+            progress_snapshot_id=progress.progress_snapshot.progress_snapshot_id,
+        ),
+        repository,
+    )
+
+    assert calls and calls[0].scenario_version_id == "scenario-version-1"
+    assert calls[0].progress_snapshot_id == progress.progress_snapshot.progress_snapshot_id
+    assert forecast.metrics["schedule_source"] == "integrated"
+    assert forecast.metrics["integrated_snapshot_id"] == "integrated-after-actuals"
+
+
+@pytest.mark.parametrize("snapshot_status", ["not_converged", "infeasible", "blocked"])
+def test_girder_baseline_publish_blocks_non_converged_integrated_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    snapshot_status: str,
+) -> None:
+    repository = PlanControlRepository(tmp_path / f"publish-{snapshot_status}.json")
+    request = solved_baseline_request()
+    scenario = request.scenario.model_copy(update={"girder_planning": GirderPlanningConfig(enabled=True)})
+    request = request.model_copy(update={"scenario": scenario, "integrated_snapshot_id": "integrated-blocked"})
+    monkeypatch.setattr(
+        repository,
+        "get_integrated_snapshot",
+        lambda _: IntegratedCalculationSnapshot(
+            integrated_snapshot_id="integrated-blocked",
+            project_data_version_id="project-data-1",
+            scenario_version_id="scenario-version-1",
+            status=snapshot_status,
+            input_fingerprint="integrated-fingerprint",
+            created_at=baseline_confirmed_at(request),
+        ),
+    )
+    monkeypatch.setattr(
+        repository,
+        "get_planning_scenario_version",
+        lambda _: SimpleNamespace(scenario_id=request.scenario.scenario_id),
+    )
+
+    with pytest.raises(PlanControlValidationError, match="已收敛"):
+        create_baseline_plan(request, repository)
+
+
+def baseline_confirmed_at(_request: CreateForecastRequest) -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def test_girder_baseline_publish_carries_unified_version_references(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repository = PlanControlRepository(tmp_path / "publish-converged.json")
+    request = solved_baseline_request()
+    scenario = request.scenario.model_copy(update={"girder_planning": GirderPlanningConfig(enabled=True)})
+    request = request.model_copy(update={"scenario": scenario, "integrated_snapshot_id": "integrated-converged"})
+    snapshot = IntegratedCalculationSnapshot(
+        integrated_snapshot_id="integrated-converged",
+        project_data_version_id="project-data-1",
+        scenario_version_id="scenario-version-1",
+        status="converged",
+        generated_snapshot=request.plan_result.generated,
+        schedule_result=request.plan_result.result,
+        input_fingerprint="integrated-fingerprint",
+        created_at=baseline_confirmed_at(request),
+    )
+    monkeypatch.setattr(repository, "get_integrated_snapshot", lambda _: snapshot)
+    monkeypatch.setattr(repository, "get_planning_scenario_version", lambda _: SimpleNamespace(scenario_id=request.scenario.scenario_id))
+
+    plan = create_baseline_plan(request, repository)
+
+    assert plan.project_data_version_id == "project-data-1"
+    assert plan.scenario_version_id == "scenario-version-1"
+    assert plan.integrated_snapshot_id == "integrated-converged"
 
 
 def test_adjustment_strategies_isolate_failure_and_only_expand_bottleneck(

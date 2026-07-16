@@ -33,6 +33,14 @@ import type {
   AdoptAdjustmentResponse,
   ScenarioInput,
   ScenarioSolveResult,
+  CreatePlanningScenarioVersionRequest,
+  CreateProjectDataVersionRequest,
+  GirderPlanningReadiness,
+  GirderPlanningResult,
+  GirderProgressImportPreview,
+  IntegratedCalculationSnapshot,
+  PlanningScenarioVersion,
+  ProjectDataVersion,
 } from "../types/scheduler";
 
 type ScenarioCompareRequest = {
@@ -204,4 +212,90 @@ export function saveProcessLibrary(request: ProcessLibrarySaveRequest): Promise<
 
 export function saveLocalScenarioConfig(request: LocalScenarioConfigSaveRequest): Promise<LocalScenarioConfig> {
   return apiPut<LocalScenarioConfig>("/api/local-scenario-config", request);
+}
+
+export function createProjectDataVersion(request: CreateProjectDataVersionRequest): Promise<ProjectDataVersion> {
+  return apiPost<ProjectDataVersion>("/api/project-data-versions", request);
+}
+
+export function listProjectDataVersions(projectId: string): Promise<ProjectDataVersion[]> {
+  return apiGet<ProjectDataVersion[]>(`/api/projects/${encodeURIComponent(projectId)}/data-versions`);
+}
+
+export function confirmProjectDataVersion(
+  projectDataVersionId: string,
+  request: { expected_input_fingerprint: string; confirmed_by: string; confirmation_reason: string },
+): Promise<ProjectDataVersion> {
+  return apiPost<ProjectDataVersion>(
+    `/api/project-data-versions/${encodeURIComponent(projectDataVersionId)}/confirm`,
+    request,
+  );
+}
+
+export function importGirderWorkpoints(payload: FormData): Promise<{
+  workpoints: unknown[];
+  source_evidence: unknown[];
+  field_conflicts: unknown[];
+  diagnostics: unknown[];
+}> {
+  return apiPostFormData("/api/girder-planning/import-workpoints", payload);
+}
+
+export function importGirderProgressActuals(payload: FormData): Promise<GirderProgressImportPreview> {
+  return apiPostFormData<GirderProgressImportPreview>("/api/girder-planning/import-progress", payload);
+}
+
+export function createPlanningScenarioVersion(
+  request: CreatePlanningScenarioVersionRequest,
+): Promise<PlanningScenarioVersion> {
+  return apiPost<PlanningScenarioVersion>("/api/planning-scenario-versions", request);
+}
+
+export function listPlanningScenarioVersions(projectId: string): Promise<PlanningScenarioVersion[]> {
+  return apiGet<PlanningScenarioVersion[]>(`/api/projects/${encodeURIComponent(projectId)}/planning-scenarios`);
+}
+
+export function confirmGirderSpecialty(
+  scenarioVersionId: string,
+  request: { expected_input_fingerprint: string; confirmed_by: string; confirmation_reason: string },
+): Promise<PlanningScenarioVersion> {
+  return apiPost<PlanningScenarioVersion>(
+    `/api/planning-scenario-versions/${encodeURIComponent(scenarioVersionId)}/confirm-specialty`,
+    request,
+  );
+}
+
+export function validateGirderPlanning(
+  scenarioVersionId: string,
+  expectedInputFingerprint: string,
+): Promise<GirderPlanningReadiness> {
+  return apiPost<GirderPlanningReadiness>("/api/girder-planning/validate", {
+    scenario_version_id: scenarioVersionId,
+    expected_input_fingerprint: expectedInputFingerprint,
+  });
+}
+
+export function previewGirderPlanning(
+  scenarioVersionId: string,
+  expectedInputFingerprint: string,
+): Promise<GirderPlanningResult> {
+  return apiPost<GirderPlanningResult>("/api/girder-planning/preview", {
+    scenario_version_id: scenarioVersionId,
+    expected_input_fingerprint: expectedInputFingerprint,
+  });
+}
+
+export function solveIntegratedSchedule(request: {
+  scenario_version_id: string;
+  progress_snapshot_id?: string | null;
+  expected_input_fingerprint: string;
+  force_recompute?: boolean;
+}): Promise<IntegratedCalculationSnapshot> {
+  return apiPost<IntegratedCalculationSnapshot>("/api/integrated-schedules", request);
+}
+
+export function getIntegratedSchedule(integratedSnapshotId: string): Promise<IntegratedCalculationSnapshot> {
+  return apiGet<IntegratedCalculationSnapshot>(
+    `/api/integrated-schedules/${encodeURIComponent(integratedSnapshotId)}`,
+  );
 }

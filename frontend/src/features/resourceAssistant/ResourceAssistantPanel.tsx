@@ -44,10 +44,12 @@ export function ResourceAssistantPanel({
   scenario,
   renderPlanDetail,
   onOpenPlanControl,
+  integratedSnapshotId,
 }: {
   scenario: ScenarioInput | null;
   renderPlanDetail?: (plan: ResourceAssistantPlan, result: ResourceAssistantPlanResult) => ReactNode;
   onOpenPlanControl?: () => void;
+  integratedSnapshotId?: string | null;
 }) {
   const [initial, setInitial] = useState<ResourceAssistantInitialResponse | null>(null);
   const [plans, setPlans] = useState<ResourceAssistantPlan[]>([]);
@@ -248,6 +250,10 @@ export function ResourceAssistantPanel({
       focusBaselineConfirmationInput(baselineReasonInputRef.current);
       return;
     }
+    if (scenario.girder_planning?.enabled && !integratedSnapshotId) {
+      setError("当前场景启用了架梁专项，请先在“架梁专项策划”完成专业确认和联合计算，再发布统一基线。");
+      return;
+    }
     setConfirmingBaseline(true);
     setError(null);
     try {
@@ -257,6 +263,7 @@ export function ResourceAssistantPanel({
         plan_result: planResult,
         confirmed_by: baselineConfirmedBy.trim(),
         confirmation_reason: baselineReason.trim(),
+        integrated_snapshot_id: scenario.girder_planning?.enabled ? integratedSnapshotId ?? null : null,
       });
       setBaselineVersionNo(version.version_no);
       setBaselinePlanId(planId);

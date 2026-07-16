@@ -1,0 +1,38 @@
+{
+  "schema_version": "girder-fixture/v1",
+  "fixtures": [
+    {
+      "id": "shared-bridge-multi-route",
+      "kind": "ownership",
+      "source_test": "backend/tests/test_girder_routes.py",
+      "expected": "same bridge side has one erection owner; later route occurrences are passage"
+    },
+    {
+      "id": "inventory-negative-balance",
+      "kind": "supply",
+      "source_test": "backend/tests/test_girder_supply.py",
+      "expected": "negative or over-consumed inventory blocks calculation"
+    },
+    {
+      "id": "passage-max-release-date",
+      "kind": "passage",
+      "source_test": "backend/tests/test_girder_passage.py",
+      "expected": "passage date is the maximum of erection buffer, explicit readiness and linked conditions"
+    },
+    {
+      "id": "integrated-state-repeat",
+      "kind": "integration",
+      "source_test": "backend/tests/test_integrated_schedule.py",
+      "expected": "stable input reuses one integrated snapshot"
+    }
+  ],
+  "performance_benchmark": {
+    "fixture": "performance-benchmark-v1.json",
+    "bridge_side_nodes": 50,
+    "erection_spans": 300,
+    "beam_yards": 2,
+    "enabled_routes": 2,
+    "schedule_tasks": 800,
+    "max_runtime_seconds": 600
+  }
+}
