@@ -1,0 +1,109 @@
+version: 1
+updated_at: "2026-07-17"
+authority: "00-governance/asset-policy/thread-roles"
+binding_rule: "仓库角色契约优先于 thread 标题和旧对话上下文"
+roles:
+  - id: G00
+    title: "G00｜项目总控与资产治理"
+    axis: governance
+    primary_stage: "00-governance"
+    thread_id: "019f6a15-15cd-7ad1-ba1c-6b17a1c4abf6"
+    contract: "G00.md"
+    primary_paths: ["AGENTS.md", "00-governance/"]
+    handoff_to: ["L01", "L02", "L03", "L05", "L06", "D01", "D02", "D03", "D04", "D05", "D06", "D07"]
+  - id: L01
+    title: "L01｜用户调研与证据总结"
+    axis: lifecycle
+    primary_stage: "01-discovery"
+    thread_id: "019f6a44-2b9e-75d2-a56d-6d786d5c3a72"
+    contract: "L01.md"
+    primary_paths: ["01-discovery/workpackages/"]
+    handoff_to: ["L02", "L05", "G00"]
+  - id: L02
+    title: "L02｜方案分析与产品决策"
+    axis: lifecycle
+    primary_stage: "02-solution-analysis"
+    thread_id: "019f6e02-d0c4-7590-bfc8-e5ed7d096fba"
+    contract: "L02.md"
+    primary_paths: ["02-solution-analysis/proposals/", "02-solution-analysis/decisions/"]
+    handoff_to: ["L03", "L05", "G00"]
+  - id: L03
+    title: "L03｜需求文档与规格管理"
+    axis: lifecycle
+    primary_stage: "03-requirements"
+    thread_id: "019f6e03-41bd-7751-a9dd-2deb90940b0e"
+    contract: "L03.md"
+    primary_paths: ["03-requirements/product/", "03-requirements/rules/", "03-requirements/specs/"]
+    handoff_to: ["D01", "D02", "D03", "D04", "D05", "D06", "D07", "L05", "G00"]
+  - id: L05
+    title: "L05｜客户验证与方案验收"
+    axis: lifecycle
+    primary_stage: "05-validation"
+    thread_id: "019f51c1-7660-7d00-ab6e-1a14610f9221"
+    contract: "L05.md"
+    primary_paths: ["05-validation/reports/", "05-validation/workpackages/"]
+    handoff_to: ["L02", "L03", "L06", "G00"]
+  - id: L06
+    title: "L06｜正式交付与演示传播"
+    axis: lifecycle
+    primary_stage: "06-delivery"
+    thread_id: "019f6e03-9d19-7773-9e8c-0c6fdbd55ce8"
+    contract: "L06.md"
+    primary_paths: ["06-delivery/deliverables/", "06-delivery/workpackages/", "06-delivery/presentations/"]
+    handoff_to: ["L01", "L02", "G00"]
+  - id: D01
+    title: "D01｜项目主数据与结构底座"
+    axis: demo-domain
+    primary_stage: "04-demo"
+    thread_id: "019f69ae-7dc5-7a92-9406-dfb88497d8d1"
+    contract: "D01.md"
+    primary_paths: ["04-demo/backend/app/project_master/", "04-demo/backend/app/importing/", "04-demo/backend/app/ontology/", "04-demo/frontend/src/features/projectMasterData/"]
+    handoff_to: ["D02", "D03", "D06", "G00"]
+  - id: D02
+    title: "D02｜综合排程算法内核"
+    axis: demo-domain
+    primary_stage: "04-demo"
+    thread_id: "019f6a33-9ee0-77f0-a78e-1b3b9efcc1f3"
+    contract: "D02.md"
+    primary_paths: ["04-demo/backend/app/scheduling/", "04-demo/backend/app/services/integrated_schedule.py"]
+    handoff_to: ["D03", "D04", "D05", "D06", "G00"]
+  - id: D03
+    title: "D03｜架梁专项与综合联算"
+    axis: demo-domain
+    primary_stage: "04-demo"
+    thread_id: "019f69bb-b598-7373-9fee-13801d11d0d4"
+    contract: "D03.md"
+    primary_paths: ["04-demo/backend/app/girder_planning/", "04-demo/backend/app/services/girder_schedule_adapter.py", "04-demo/frontend/src/features/girderPlanning/"]
+    handoff_to: ["D02", "D04", "D05", "D06", "G00"]
+  - id: D04
+    title: "D04｜计划管控与进度预测"
+    axis: demo-domain
+    primary_stage: "04-demo"
+    thread_id: "019f6a35-12d8-7922-9bed-a88961925c63"
+    contract: "D04.md"
+    primary_paths: ["04-demo/backend/app/plan_control/", "04-demo/backend/app/services/progress_forecast.py", "04-demo/frontend/src/features/planControl/", "04-demo/frontend/src/features/progressVisualization/"]
+    handoff_to: ["D02", "D03", "D05", "D06", "L05", "G00"]
+  - id: D05
+    title: "D05｜工作台与结果体验"
+    axis: demo-domain
+    primary_stage: "04-demo"
+    thread_id: "019f6a3a-60de-7db0-9308-f5df8a79ba8e"
+    contract: "D05.md"
+    primary_paths: ["04-demo/frontend/src/app/", "04-demo/frontend/src/components/", "04-demo/frontend/src/styles/", "04-demo/frontend/src/features/layout/", "04-demo/frontend/src/features/taskView/", "04-demo/frontend/src/features/scheduleResults/"]
+    handoff_to: ["D01", "D02", "D03", "D04", "D06", "D07", "G00"]
+  - id: D06
+    title: "D06｜架构契约与技术质量"
+    axis: demo-domain
+    primary_stage: "04-demo"
+    thread_id: "019f6a3c-1309-7113-8fb4-aa2c90f05346"
+    contract: "D06.md"
+    primary_paths: ["04-demo/backend/app/api/", "04-demo/backend/app/contracts/", "04-demo/frontend/src/api/", "04-demo/frontend/src/contracts/", "04-demo/backend/tests/", "04-demo/frontend/tests/", "04-demo/runtime/"]
+    handoff_to: ["D01", "D02", "D03", "D04", "D05", "D07", "L05", "G00"]
+  - id: D07
+    title: "D07｜AI 参数与资源助手"
+    axis: demo-domain
+    primary_stage: "04-demo"
+    thread_id: "019f6a3d-856b-7153-b16b-121977563b53"
+    contract: "D07.md"
+    primary_paths: ["04-demo/backend/app/assistants/", "04-demo/backend/app/services/ai_parameter_*", "04-demo/backend/app/services/ai_resource_*", "04-demo/frontend/src/features/assistant/", "04-demo/frontend/src/features/resourceAssistant/"]
+    handoff_to: ["D01", "D02", "D05", "D06", "G00"]

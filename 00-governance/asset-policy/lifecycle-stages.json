@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "ownership_model": "lifecycle-stage -> workpackage -> asset",
+  "stages": [
+    {
+      "id": "00-governance",
+      "purpose": "维护仓库架构、资产策略、治理工具、兼容入口和迁移历史",
+      "entry_criteria": ["任务影响仓库结构、协作规则、资产归属或治理门禁"],
+      "exit_criteria": ["治理契约可验证，迁移和回退边界可审计"],
+      "authoritative_asset_types": ["architecture", "governance-policy", "repository-tool", "migration-history"],
+      "workpackages": ["lifecycle-workspace-governance"],
+      "next_stages": ["01-discovery", "02-solution-analysis", "03-requirements", "04-demo", "05-validation", "06-delivery"]
+    },
+    {
+      "id": "01-discovery",
+      "purpose": "保存需求调研、客户访谈、来源数据和业务现状证据",
+      "entry_criteria": ["问题仍需用客户或来源材料确认"],
+      "exit_criteria": ["事实、推断、待确认问题和机会判断已分离"],
+      "authoritative_asset_types": ["research-source", "interview", "source-data-analysis", "research-summary"],
+      "workpackages": ["lugu-customer-research", "lugu-source-data-analysis"],
+      "next_stages": ["02-solution-analysis", "03-requirements"]
+    },
+    {
+      "id": "02-solution-analysis",
+      "purpose": "沉淀产品方向、方案比较、技术可行性和决策记录",
+      "entry_criteria": ["业务问题已有证据，需要比较解决路径"],
+      "exit_criteria": ["推荐方案、边界、风险和决策依据已明确"],
+      "authoritative_asset_types": ["proposal", "option-analysis", "decision-record", "feasibility-analysis"],
+      "workpackages": [],
+      "next_stages": ["03-requirements"]
+    },
+    {
+      "id": "03-requirements",
+      "purpose": "维护 PRD、算法规则、模板和 Spec Kit 规格化开发资产",
+      "entry_criteria": ["产品口径已确认并准备研发交底或规格化开发"],
+      "exit_criteria": ["需求可验收，规格、计划和任务通过门禁"],
+      "authoritative_asset_types": ["product-requirement", "algorithm-rule", "requirement-template", "feature-specification"],
+      "workpackages": [],
+      "next_stages": ["04-demo", "05-validation"]
+    },
+    {
+      "id": "04-demo",
+      "purpose": "维护 Demo 代码、运行入口、部署配置、样例和独立展示工具",
+      "entry_criteria": ["需求已确认进入实现或 Demo 验证"],
+      "exit_criteria": ["实现可运行、可测试且保持共享契约一致"],
+      "authoritative_asset_types": ["backend", "frontend", "demo-tool", "deployment", "reproducible-example"],
+      "workpackages": ["json-task-viewer", "schedule-result-viewer"],
+      "next_stages": ["05-validation", "06-delivery"]
+    },
+    {
+      "id": "05-validation",
+      "purpose": "聚合客户验证计划、输入、分析脚本、结果和验证报告",
+      "entry_criteria": ["方案或 Demo 需要用客户数据和验收场景验证"],
+      "exit_criteria": ["验证输入、步骤、结果、结论和限制可追溯"],
+      "authoritative_asset_types": ["validation-plan", "validation-input", "validation-script", "validation-result", "validation-report"],
+      "workpackages": ["json-schedule-review", "lugu-validation-material", "lugu-plan-granularity"],
+      "next_stages": ["02-solution-analysis", "03-requirements", "04-demo", "06-delivery"]
+    },
+    {
+      "id": "06-delivery",
+      "purpose": "维护正式交付物、案例总结、演示材料和历史版本",
+      "entry_criteria": ["成果已达到对外或正式留档标准"],
+      "exit_criteria": ["来源、版本、哈希、生成关系和维护状态已登记"],
+      "authoritative_asset_types": ["formal-deliverable", "case-study", "presentation", "release-material"],
+      "workpackages": ["ai-case-summary", "ai-ppt-system"],
+      "next_stages": ["01-discovery", "02-solution-analysis"]
+    }
+  ]
+}

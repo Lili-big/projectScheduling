@@ -1,0 +1,793 @@
+{
+  "feature": "045-lifecycle-workspace-governance",
+  "verified_at": "2026-07-17T10:41:22.140036+08:00",
+  "approval_text": "确认 T019，批准 1127 条清单全部执行，包括 9 条 043 规格及日志、用户输入、持久状态、缓存和临时入口的清单动作；不授权删除。",
+  "delete_authorized": false,
+  "reason": "保留批准时哈希与最终实施哈希的逐项审计链；不掩盖受控内容变化。",
+  "entries": [
+    {
+      "id": "M0001",
+      "source": ".agents/skills/demo-algorithm-explainer/SKILL.md",
+      "target": ".agents/skills/demo-algorithm-explainer/SKILL.md",
+      "approved_sha256": "9ee627182a25a32374a8c890c0d8996918df24e55212ac618b944ae8bc93f86b",
+      "verified_sha256": "946773043fc7b57e69cab4437abf2ddc21503ee03490394a251b92a870d07c77",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0003",
+      "source": ".agents/skills/speckit-analyze/SKILL.md",
+      "target": ".agents/skills/speckit-analyze/SKILL.md",
+      "approved_sha256": "4b315269b247cbc0c9338a44b54d4a8be96bf5b875b866edaf5d3e18faf3a09e",
+      "verified_sha256": "ef654af6678ec1d4513758457c6a2ffd0d59783d4937457a7184212a2a5b83fc",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0004",
+      "source": ".agents/skills/speckit-checklist/SKILL.md",
+      "target": ".agents/skills/speckit-checklist/SKILL.md",
+      "approved_sha256": "9e6e0df750a26039e4a51b63ba8b16f431c3bc362ce14c7c5cb04f8ba615fd93",
+      "verified_sha256": "bc2bc9a0f6ae4983429b40917b09eef41ec2b22988ed6a661808ea5f69e8fb4b",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0005",
+      "source": ".agents/skills/speckit-clarify/SKILL.md",
+      "target": ".agents/skills/speckit-clarify/SKILL.md",
+      "approved_sha256": "c74903b20c3df7cfe250d1a375337ee452b825b6f1e4adcd640dd6e34ed0ec2d",
+      "verified_sha256": "2ce72550ab176c421ad56fdf9993b417c5972f0b608be5cab148ab4f394fc3a1",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0006",
+      "source": ".agents/skills/speckit-constitution/SKILL.md",
+      "target": ".agents/skills/speckit-constitution/SKILL.md",
+      "approved_sha256": "9511a51425922afb30f93e3de29cd10c52caee6f362f2c73eea0ed84258e6a97",
+      "verified_sha256": "a7c6d5eba3ed2dae1f7fa868d3f8c08ce250bef885a245fd5ca3922a2ef6ab85",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0007",
+      "source": ".agents/skills/speckit-converge/SKILL.md",
+      "target": ".agents/skills/speckit-converge/SKILL.md",
+      "approved_sha256": "13e3a06d018b7a3322827edbd86df1f0ab9f3e92247ebc3ff5c1f800ebdd1c86",
+      "verified_sha256": "bdddf4ede21eb52be77caf0c59df7ac2b7cd5d24e7bdf9b8261b6f01f6dfe1c1",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0008",
+      "source": ".agents/skills/speckit-implement/SKILL.md",
+      "target": ".agents/skills/speckit-implement/SKILL.md",
+      "approved_sha256": "530ed87e598e9c1f2f5df5f0a6273db27617a6511e5de4e1496ec022f29c688a",
+      "verified_sha256": "b0bdf8d56817980eb196beddd12cf002d19528de5b2c920a3debf8bc5b00ed01",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0009",
+      "source": ".agents/skills/speckit-plan/SKILL.md",
+      "target": ".agents/skills/speckit-plan/SKILL.md",
+      "approved_sha256": "05f413792f8aca8c8fea042ba89b7659ac9f7ca9d93881903836fdf434ae8ff8",
+      "verified_sha256": "ffa12a9f199a574908d169db88615b8654f490ee5305cf9f52c45709d3e58cd0",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0010",
+      "source": ".agents/skills/speckit-specify/SKILL.md",
+      "target": ".agents/skills/speckit-specify/SKILL.md",
+      "approved_sha256": "2fef2cbc2e95610751d9ffc4f34c60a37d8565ce44bb78f5f40889bebd05e688",
+      "verified_sha256": "9ba7dc23c211ac23c3f2bfbe80fd4b8051f83d8990149d045b532e546eb50357",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0011",
+      "source": ".agents/skills/speckit-tasks/SKILL.md",
+      "target": ".agents/skills/speckit-tasks/SKILL.md",
+      "approved_sha256": "69f640491437d0bfaeb403b2eb9bc754d5e6471013f2ed1b208ddba118b3478f",
+      "verified_sha256": "389fd746ef10c675d9ef6a628ba41f41539027749442559d0e47e04f8bbd5848",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0012",
+      "source": ".agents/skills/speckit-taskstoissues/SKILL.md",
+      "target": ".agents/skills/speckit-taskstoissues/SKILL.md",
+      "approved_sha256": "c63ffb4cc0240c390aebd933ed7a71feeb4a1084c2030a1d863ddf53209e4bc7",
+      "verified_sha256": "b49f65d7029e3d6325c9de2b63cedeba05c67db275c5234900789d8a7be5345e",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0014",
+      "source": ".dockerignore",
+      "target": ".dockerignore",
+      "approved_sha256": "18bc29408d7fb67049ae07b8f757da3a74d1512a0980e0ebab49f3f188567544",
+      "verified_sha256": "16b540ec67975817249beb49c72c011eaa33dce9733a1407dd99232a6009d811",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0016",
+      "source": ".gitignore",
+      "target": ".gitignore",
+      "approved_sha256": "96c3e6357a1f025cc6911e4aad80ca8bf3be5cbd8ce33f3cfb77c80768609e42",
+      "verified_sha256": "4770240c8758513f6976b32787d2e4eeb0301ed6d48b08c3ee56f3b7f159b88b",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0079",
+      "source": ".netlifyignore",
+      "target": ".netlifyignore",
+      "approved_sha256": "3b77248e46806888f0719fd737af3567eb04b9d49a8092ad4c1aeec212a622a2",
+      "verified_sha256": "f525beb37faebf858a25cf713492c6394428d208a6909a179e00db4912cebe06",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0085",
+      "source": ".specify/feature.json",
+      "target": ".specify/feature.json",
+      "approved_sha256": "2ee9a3566f024e13a4f8132000c1a096348dc09252fe136f14de21ba07eb2450",
+      "verified_sha256": "26a62b114a09cdd4bbd180e07e8ce2b6235fb24aa793276f27382a775ed109d3",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0092",
+      "source": ".specify/scripts/powershell/common.ps1",
+      "target": ".specify/scripts/powershell/common.ps1",
+      "approved_sha256": "f9c5c30fe2ea81490688269ca3ccedda2dcaf33713940f0c612d7bded2eda6e3",
+      "verified_sha256": "396b683f4e8e8a43fbbd19f35983254f581b4fa981ff017c657eb4eff25445ea",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0093",
+      "source": ".specify/scripts/powershell/create-new-feature.ps1",
+      "target": ".specify/scripts/powershell/create-new-feature.ps1",
+      "approved_sha256": "6eb5f2680da6fb8931cc7e4b4564befc35128a91edf5eff490500ca67aa1afed",
+      "verified_sha256": "c2faeb1d5cc0fd79dce13e23b41d49322aa966b106d77677938279f7cd7f2846",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0096",
+      "source": ".specify/templates/checklist-template.md",
+      "target": ".specify/templates/checklist-template.md",
+      "approved_sha256": "a39fe44a965185432570492ab178e6850cb9a02aac977861677df2205181f752",
+      "verified_sha256": "e6c671e0a941cb525145984311ac3b1a22cd427b42e4bcd41dbe0ef27c5f37f2",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0097",
+      "source": ".specify/templates/constitution-template.md",
+      "target": ".specify/templates/constitution-template.md",
+      "approved_sha256": "cb8fc0a0ac130f4971b21c083149bd31163c13c4c9a752d9ab9581f22199f182",
+      "verified_sha256": "1796ddb8613ed16a90808f04dff6f52932072ef7d26d4879d798fb6726eb757d",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0098",
+      "source": ".specify/templates/plan-template.md",
+      "target": ".specify/templates/plan-template.md",
+      "approved_sha256": "28aad24aa75d0a3f19fd7650a4ab15bab27287e11772f41e3f83da62e091921c",
+      "verified_sha256": "2f64335df2a46a09e5e8008db52a518b29f7cc7b329fddcafe38b850f830fe11",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0099",
+      "source": ".specify/templates/spec-template.md",
+      "target": ".specify/templates/spec-template.md",
+      "approved_sha256": "b069b013c87b268e7a1347fb60c683a9d3ae3b7ade4769f6d2d78ef02cb5797f",
+      "verified_sha256": "e39a4bcd1ca5b816797db2ce493e796472215ec9bc54656c10d8ece04f14dd7c",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0100",
+      "source": ".specify/templates/tasks-template.md",
+      "target": ".specify/templates/tasks-template.md",
+      "approved_sha256": "db1f0295e69bfac26976d74b4a3c6455d0264931ad6241208b52aa1ec223f279",
+      "verified_sha256": "644bed4ef6c9c91f33f8ea81a533278ab2b3e44a36a0c8bbaf4926be7aebd5e2",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0104",
+      "source": "00-governance/asset-policy/cleanup-policy.json",
+      "target": "00-governance/asset-policy/cleanup-policy.json",
+      "approved_sha256": "0634a4e016568502e026dd4c39d5402d76dec381eabffff1692546445f66cf57",
+      "verified_sha256": "7d4c2c57338c0ae485ffede41710eed14f495a460ee281d221beb24b7c57d76f",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0106",
+      "source": "00-governance/asset-policy/root-compatibility.json",
+      "target": "00-governance/asset-policy/root-compatibility.json",
+      "approved_sha256": "dfd0425d4306b6786a68e941376b186c437ef33c5adee60e484d9e56ab57d2c5",
+      "verified_sha256": "be67d697a9cd301ba2f201cf68e6496bfc73ae26754ff9ffc9a204ddb1b1799a",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0107",
+      "source": "00-governance/repository-tools/build_lifecycle_migration_manifest.py",
+      "target": "00-governance/repository-tools/build_lifecycle_migration_manifest.py",
+      "approved_sha256": "cb6b83d65dcdf0977237bc292252f2011cf8c4a76ba9e4fc1705f025ee1d7ff4",
+      "verified_sha256": "26a585ba112e01e8c3659d658ac15a3fdd0a12b093563fa6f397f6183a79b2fd",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0108",
+      "source": "AGENTS.md",
+      "target": "AGENTS.md",
+      "approved_sha256": "e3a4a6f6d0b9526402350d877f63e46477bb6ea5a4e45b2eb9c754bd9e9803c6",
+      "verified_sha256": "cfb0b8fd0758716c0bbc22c875bb5d0ce3beb1750a4a02974a53abfbaf5aace1",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0109",
+      "source": "Dockerfile",
+      "target": "Dockerfile",
+      "approved_sha256": "c3b80cc2cea6caabef14e30251bde9ec1bae30e032bf79072e18b97048c7494f",
+      "verified_sha256": "0349db87cbac9b87c05d9efdd24cd1f4ca8d541f2e2e9912e787915225e51de5",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0110",
+      "source": "README.md",
+      "target": "README.md",
+      "approved_sha256": "709745c9a18723b4bcdb379a4d752a312b8ba3c4007fb8d5bd9238783a5af97c",
+      "verified_sha256": "8a950213d3f2910a93426908eb6ae8219b7de0de8b93fcc3b25e3b68721eef6f",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0111",
+      "source": "agent.md",
+      "target": "agent.md",
+      "approved_sha256": "922a3f8a06764d7433652c5f7b6056f3d13632d795d201041bb3f3071e98b176",
+      "verified_sha256": "fc6483a00292efb9bf7c84d991a84997a50b7567fd0cdfb3b4baff25730a85b1",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0175",
+      "source": "backend/app/bridge_import.py",
+      "target": "04-demo/backend/app/bridge_import.py",
+      "approved_sha256": "0deff855c4174e847f14cea37730c00eaaa2c83ea6c86e1c7d34ce631d1d27f5",
+      "verified_sha256": "b974569a84fe49e9440924496d7c88c40517b5df01c9d0a813593d8198880d63",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0178",
+      "source": "backend/app/config/environment.py",
+      "target": "04-demo/backend/app/config/environment.py",
+      "approved_sha256": "530ec52ff49e039319dde42c33a91961059294022fdf49bd6edda01271eeb1b5",
+      "verified_sha256": "79b45eeff8db512f186a60fcb2d4d658d3e55004e8994b759be0c9f951318b17",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0210",
+      "source": "backend/app/local_config.py",
+      "target": "04-demo/backend/app/local_config.py",
+      "approved_sha256": "0df757efac27ee066dda8ff04f58b3485a6381a76e80a38b59b62d37196a51db",
+      "verified_sha256": "8204b6a07630cc322ae707d51ea1486e1b4b1a8d4ee856891a68081674fc5a0c",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0211",
+      "source": "backend/app/local_scenario_config.py",
+      "target": "04-demo/backend/app/local_scenario_config.py",
+      "approved_sha256": "da1d46c697c168115cc052374444ae2f9464e210d24b194b1f23d2ab4d5bd28b",
+      "verified_sha256": "ba213def577161c4ef14a8bca05a2f20a72f12c7596f8b6e172eff304d6ee8a4",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0233",
+      "source": "backend/app/project_structure_params.py",
+      "target": "04-demo/backend/app/project_structure_params.py",
+      "approved_sha256": "a7c0c6a5e4359e54c9765ce90aa9c670e8eba63a32772ed5c819f4ec6acad6d5",
+      "verified_sha256": "0c705ea0ac98b19516b472af3ba82d4c9be8b90785a38edc9285f01288d98bc0",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0282",
+      "source": "backend/app/services/bridge_import_service.py",
+      "target": "04-demo/backend/app/services/bridge_import_service.py",
+      "approved_sha256": "6630ca95b865f7b4764fad7cd58d0cb96907f9b7061363ba3584c52bcc287302",
+      "verified_sha256": "fbf29facdacdf569e8e2062fff7fea092528b8d256ff7f2b28bc4ec5c14f1173",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0285",
+      "source": "backend/app/services/plan_control_repository.py",
+      "target": "04-demo/backend/app/services/plan_control_repository.py",
+      "approved_sha256": "c7885e335159f0c2be9c2de7238ddfc81a42aee9610385df4dea59caf2bf9ca8",
+      "verified_sha256": "78c4039201b423ad5dd10185ff61f31e61a17f49722f1ccc999f0d03230ae283",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0291",
+      "source": "backend/scripts/capture_architecture_baseline.py",
+      "target": "04-demo/backend/scripts/capture_architecture_baseline.py",
+      "approved_sha256": "0b81f8779958b0f471e931af522c4da7ba4cd2ac9c5e605648a1800007df29b3",
+      "verified_sha256": "2e3c347da75e135a896d2e8862450b8e2d1a3f35b7659dc8d1a78dbe28090a20",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0292",
+      "source": "backend/scripts/run_excel_case_solve.py",
+      "target": "04-demo/backend/scripts/run_excel_case_solve.py",
+      "approved_sha256": "f177c28174bf9a4efe8dd91cabf8317da02d6d4b58d62af85b65e3b61cd4beb5",
+      "verified_sha256": "22e1f4131980ba38feb57d60615bb1b25da09543facf316a3ad045158525300e",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0293",
+      "source": "backend/scripts/smoke_single_service.ps1",
+      "target": "04-demo/backend/scripts/smoke_single_service.ps1",
+      "approved_sha256": "035ae007088f204ac82f9fd43573f4e025d4c672bd9a45a8335512d9d476806c",
+      "verified_sha256": "2f286b5662e8016a7148cc1545e3dddef4ca9555efcfdb82850ad3a77040917d",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0297",
+      "source": "backend/tests/fixtures/architecture/backend-baseline.json",
+      "target": "04-demo/backend/tests/fixtures/architecture/backend-baseline.json",
+      "approved_sha256": "e1d23ec2df11d9aebbc00737a8969a20db4b23ab1ddb32697a64cbe0a9e66704",
+      "verified_sha256": "323638c114ceaa1879f659cf0bb77fbabfbe08ffa9bd9935fd6ba4b91797ef5a",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0299",
+      "source": "backend/tests/fixtures/girder_planning/fixture-manifest.json",
+      "target": "04-demo/backend/tests/fixtures/girder_planning/fixture-manifest.json",
+      "approved_sha256": "ea79f0a20ff5a0382cc25caab3a0fe9ff45071b5ccb2c300f142d8cbfc89ebc3",
+      "verified_sha256": "f5ce30535d2bab908f4605f2e0494103a599f038ceb4d507bacceb5a3354caaf",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0325",
+      "source": "backend/tests/test_ai_parameter_assistant_scope.py",
+      "target": "04-demo/backend/tests/test_ai_parameter_assistant_scope.py",
+      "approved_sha256": "70625aa09fc44b121a13350129e7a88dbc7ff58a65d2976837b3d14ed4102430",
+      "verified_sha256": "fb6d6277e0f1790772ae00e567806e2594d45d587970350b97b41ce304c9c5ac",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0330",
+      "source": "backend/tests/test_architecture_api_contract.py",
+      "target": "04-demo/backend/tests/test_architecture_api_contract.py",
+      "approved_sha256": "77edd3197fe51ee332963e2d4d40a5728671ede74af32e0f614feffb3ee72b81",
+      "verified_sha256": "94472038b85bc95d9643f03f4c3fcf22954594c93a0c56a478b48fa4cb883e23",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0332",
+      "source": "backend/tests/test_architecture_import_contract.py",
+      "target": "04-demo/backend/tests/test_architecture_import_contract.py",
+      "approved_sha256": "28e656f4d204b84098de1997d9b6893d780b61ddf5ecaa2b5d4d0126c404f0d5",
+      "verified_sha256": "eb855f2052c0a24a24391136192cce7dc1d603f51a09a6f9a6b6b9f658668538",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0334",
+      "source": "backend/tests/test_architecture_storage_contract.py",
+      "target": "04-demo/backend/tests/test_architecture_storage_contract.py",
+      "approved_sha256": "13cc843c3cfb0aa6c2de9b73ded8ef715887e6ca894bd455aa17ac6f6c300eb1",
+      "verified_sha256": "db4def46164d07f514c482142575b53ccc043390ef35617416e1cd0d8c989655",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0336",
+      "source": "backend/tests/test_bridge_import.py",
+      "target": "04-demo/backend/tests/test_bridge_import.py",
+      "approved_sha256": "f07236d9886679ffef0d49bfe640141fead313ba55c6d4978ddf392c079d02c0",
+      "verified_sha256": "f871166b84ecb021cf73e919734b1622808512c73eb3c813e14053a3e69c37e7",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0341",
+      "source": "backend/tests/test_docker_runtime_contract.py",
+      "target": "04-demo/backend/tests/test_docker_runtime_contract.py",
+      "approved_sha256": "3ea2ee0b0b66aa6d8e1d8285df7273b7ddc596ddcca4407ff38ead74bd76a348",
+      "verified_sha256": "48c1cece11a8f621579bbb5d493fa0e2de59a6f49535f4a1a83921dd1647c080",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0342",
+      "source": "backend/tests/test_documented_project_facts.py",
+      "target": "04-demo/backend/tests/test_documented_project_facts.py",
+      "approved_sha256": "9dcadbabcdfabba79ff3d4e7d5302394addfa25d87d68474c2c82cfd5b9c7182",
+      "verified_sha256": "d250193f3c44af82ecd7cfd636f9c7f745bc1531aa712ef2450540b3053fefba",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0368",
+      "source": "backend/tests/test_project_master_legacy_boundary.py",
+      "target": "04-demo/backend/tests/test_project_master_legacy_boundary.py",
+      "approved_sha256": "050a2c5db32814df94e871a5ccabcec065eda9f1a45bb34bc8de430da250001e",
+      "verified_sha256": "51da9c560838a41c2594e37895cd63260baeddc12834b6637598eae09de0d2ef",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0377",
+      "source": "deliverables/README.md",
+      "target": "06-delivery/deliverables/README.md",
+      "approved_sha256": "14e6455ed1e8dc97c3f1600aea780bc304132676e4bd771eecc3eaff0f5131f6",
+      "verified_sha256": "4baaa1856284cb3c6822fd1ab887698da889e5da7ac9081b5c28cd42be7746f9",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0383",
+      "source": "docs/architecture/decisions/0001-behavior-preserving-modular-monolith.md",
+      "target": "00-governance/architecture/decisions/0001-behavior-preserving-modular-monolith.md",
+      "approved_sha256": "2d794e03f9e858293dbb3e23c5ea1ff1894447a1db0872ec8c7609682f1fb811",
+      "verified_sha256": "03bd1732485fad5fe8a93f3019858142ca54ce84ff36d8cf3e3721116de0e1a4",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0385",
+      "source": "docs/architecture/module-map.md",
+      "target": "00-governance/architecture/module-map.md",
+      "approved_sha256": "389090b729b1ddb5c8e247eae1ddbfad0a0d071ff3cf49f9ab0adff4d7f0e3b2",
+      "verified_sha256": "77ab80cb617e409f570bbc72e162457595d69c62e257b4cf989c50bd661e1447",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0386",
+      "source": "docs/architecture/repository-governance.md",
+      "target": "00-governance/architecture/repository-governance.md",
+      "approved_sha256": "4c452ed45c041ed06837c9198ecb3301dda9deab574960ae9d186864130b851b",
+      "verified_sha256": "90552081495adeeebc1b9426439f9dc7f64e4ab88cb473f69561e4aff8a5fb6d",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0387",
+      "source": "docs/architecture/runtime-and-deployment.md",
+      "target": "00-governance/architecture/runtime-and-deployment.md",
+      "approved_sha256": "2b781efd6add15ee67c6bc6313b0517f3e3c98b0505dad0cac642aa10a46169a",
+      "verified_sha256": "e51c5ba63e3339bfb148e8eaf464bf22e9479dc3257d8646f7f895c7007916ce",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0388",
+      "source": "docs/architecture/system-context.md",
+      "target": "00-governance/architecture/system-context.md",
+      "approved_sha256": "366be0c1c77cf6df111083ea748d156c50a31c33ce20c1d270b2ba7dfe099204",
+      "verified_sha256": "549ca558d0bef48e9d887abc5bd734ca1e9b81a4720d561dcc94ffc9e88d1467",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0393",
+      "source": "docs/archive/path-migration.md",
+      "target": "00-governance/history/path-migration.md",
+      "approved_sha256": "161b917b1bd8db5dbca18bb296dbac300aee718682e85489a4a23b350e07ab0b",
+      "verified_sha256": "9c9df6959e0976c994be17440bc8de7216763bd2a6565e5445694600ec511148",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0395",
+      "source": "docs/engineering/工艺逻辑约束需求文档_v1.1.md",
+      "target": "03-requirements/rules/工艺逻辑约束需求文档_v1.1.md",
+      "approved_sha256": "5e7fdc0010d81bc44be072d07226fec6022f7dd78d076954a4e502302238be75",
+      "verified_sha256": "629f3144c6a7446f399067e2e921e567fa82f0d665ed20aa09bdb209d148aae5",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0396",
+      "source": "docs/engineering/排程算法当前实现交底文档_v1.2.md",
+      "target": "03-requirements/rules/排程算法当前实现交底文档_v1.2.md",
+      "approved_sha256": "db47ea6a4facdf3670b4d3190f5c346ec6dc3ad289675dcfd9110818318d93c2",
+      "verified_sha256": "5b53af5c008decb4d3f1bba8385555c1c33fdc22998e1bf269d38a40683d729c",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0414",
+      "source": "docs/validation/泸古项目客户验证计划_20260715.md",
+      "target": "05-validation/workpackages/lugu-validation-material/plans/泸古项目客户验证计划_20260715.md",
+      "approved_sha256": "2d6cb6d541ae1f146a07b4656030aae8d99e96324c51e6335c883d946b1d9c09",
+      "verified_sha256": "c83268bad69634bd37d5e3e1e851b7b13f8b62e9bf7169d9ea79a88bd078643b",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0418",
+      "source": "examples/README.md",
+      "target": "04-demo/examples/README.md",
+      "approved_sha256": "ffaa08393c78ea2ad25da581ce561d4cced669bd677e96757ea1fe7809c9c53f",
+      "verified_sha256": "7d505933dc4377372bffb0910f8d187e6ace7ef393b1637b201e4f8a65987e33",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0431",
+      "source": "frontend/scripts/captureArchitectureBaseline.mjs",
+      "target": "04-demo/frontend/scripts/captureArchitectureBaseline.mjs",
+      "approved_sha256": "aa713edabc5e5bfb7b94cd68c46620f72104d3e375d557c3df889862cb48ade7",
+      "verified_sha256": "32d63a8eb142e3990be33c9da548a18c19cbca191c044209511d246c6d0dca31",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0432",
+      "source": "frontend/scripts/checkBuildBudget.mjs",
+      "target": "04-demo/frontend/scripts/checkBuildBudget.mjs",
+      "approved_sha256": "2bc5b8571c5d4581b8f08aa40a15fb958fb6461f6a2a312cfd90ced5979ff7bf",
+      "verified_sha256": "06eced27afc2ecb13a14e715a7acc9b93663e0adab0eeb0ca126b15123ef194f",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0545",
+      "source": "frontend/tests/deploymentContract.test.mjs",
+      "target": "04-demo/frontend/tests/deploymentContract.test.mjs",
+      "approved_sha256": "bf06ae6357190827d07f86d30751ea50935cfc217a9bdbf80be0aea4f013568a",
+      "verified_sha256": "66339239c5b4eebde79f10f85e882afeea68a5969c1e7b17177a75ef0f66d698",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0547",
+      "source": "frontend/tests/fixtures/architecture/frontend-baseline.json",
+      "target": "04-demo/frontend/tests/fixtures/architecture/frontend-baseline.json",
+      "approved_sha256": "18b10f890165f0ae63f887bdd23961fc9f4d523f660d9f31abd9a35a81b19b9e",
+      "verified_sha256": "5e798301c904258005df522c6c81ca7a23f31364ed4c4f918b9f8bf135f2d338",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0560",
+      "source": "local-json-task-review/README.md",
+      "target": "04-demo/standalone/json-task-viewer/README.md",
+      "approved_sha256": "26f9b1f6a222ef5271cea42f9f22e4a6727a23e2cf310b3d3e16b738065065f0",
+      "verified_sha256": "029436f75e47c10d1c10e1a98377c6209dcf4dd0f0ea98917213b429a2686616",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0561",
+      "source": "local-json-task-review/engineering-result/README.md",
+      "target": "05-validation/workpackages/json-schedule-review/README.md",
+      "approved_sha256": "057413a8b0dacc868c55e79553c47ca2598363ab59632fc46ef0f36d5b6525f6",
+      "verified_sha256": "830feb99bc3da2c782dcc5282dc85bc9094795dc798d2c02d6b8aa3f5389223a",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0563",
+      "source": "local-json-task-review/engineering-result/output/固定资源最小工期结果.v1.html",
+      "target": "05-validation/workpackages/json-schedule-review/output/固定资源最小工期结果.v1.html",
+      "approved_sha256": "3a4daf1879482bf2f212982eee7438ecd587f4ea9e641a7f8d593f6694e57b47",
+      "verified_sha256": "f1cf5dc9a2e8416fb39ca4d3d79c0ca00e3c93f24bbee9ee87868e5005a5b735",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0564",
+      "source": "local-json-task-review/engineering-result/output/固定资源最小工期结果.v1.report.json",
+      "target": "05-validation/workpackages/json-schedule-review/output/固定资源最小工期结果.v1.report.json",
+      "approved_sha256": "52180740612d932bd83d6482a371a1a7ae4e3f4b01e759a71b1d2e31afbbe6b8",
+      "verified_sha256": "5b5c580d22a6fd301e6a6fd43b82032a651e0ebfd5d4858403aaa12cbd8b5641",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0580",
+      "source": "local-json-task-review/output/第一版本.html",
+      "target": "04-demo/standalone/json-task-viewer/output/第一版本.html",
+      "approved_sha256": "6135cf1348fde0445a65f15c3e867860d05479ef5ab32a478b29dde0fe4ee482",
+      "verified_sha256": "81e1d295c8ce9640d361b664a301856fc7850e5f5898fb1aa97f3f2a3aec9a4b",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0641",
+      "source": "netlify.toml",
+      "target": "netlify.toml",
+      "approved_sha256": "d10fdc88d012f38092bab6debd3d53b3560957ebe9f7ec1bd51419fe1d51867c",
+      "verified_sha256": "adbdebd9ff499401c79d93a18d27a788fa7497b1cd7586a4ef93a23ba70d98f7",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0657",
+      "source": "outputs/019f69ae-7dc5-7a92-9406-dfb88497d8d1/build_lugu_project_master.mjs",
+      "target": "05-validation/workpackages/lugu-validation-material/project-master/scripts/build_lugu_project_master.mjs",
+      "approved_sha256": "a59f6162f8bc15b94964501653a4b340cff284269e9b9d1b8f556c97edf16da6",
+      "verified_sha256": "24e4d9234553ea57e222c8b54d1f1c9b5b8b4193acd5435eb3cfd636022e56ef",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0658",
+      "source": "outputs/019f69ae-7dc5-7a92-9406-dfb88497d8d1/inspect_source_workbooks.mjs",
+      "target": "05-validation/workpackages/lugu-validation-material/project-master/scripts/inspect_source_workbooks.mjs",
+      "approved_sha256": "af1460a07cf1042c6483fbc5f9afb7afef9e8d0bc290a4dc7ec45e3aad5ab842",
+      "verified_sha256": "9afdb09dd5d2625efda31ea45cdb57d12541990356957614a346cc37c3c8b664",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0686",
+      "source": "package-lock.json",
+      "target": "package-lock.json",
+      "approved_sha256": "9aca184df5408b44894ecee878a065edf6622a63d340aee493ea6e823160d45c",
+      "verified_sha256": "f84ab3445a2c0814c93ae729e9bc60d7bbd880ff22939f0ee2c8e2fc66632b4f",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M0687",
+      "source": "package.json",
+      "target": "package.json",
+      "approved_sha256": "31e0ae372a9b95bfc81ec701a939781c1448f052e22873fd2ecdfa253b175820",
+      "verified_sha256": "ee0214c03be8bb3cf7c7d4ead3cc154784b19f36c69011fc76d01e000f36ea45",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1037",
+      "source": "specs/045-lifecycle-workspace-governance/implementation-log.md",
+      "target": "03-requirements/specs/045-lifecycle-workspace-governance/implementation-log.md",
+      "approved_sha256": "6feb6bd169c201811642669d34fc02e362ee22393a60975f40df58121753e6fe",
+      "verified_sha256": "5dc25fc43912913f897fd989daf7d44474e73a095d3a30c09da7d448b9ca5b8b",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1038",
+      "source": "specs/045-lifecycle-workspace-governance/plan.md",
+      "target": "03-requirements/specs/045-lifecycle-workspace-governance/plan.md",
+      "approved_sha256": "053866d823b70da8e42d2e54c767cf84b5fc028a5300629f3bf4819fdcb756f6",
+      "verified_sha256": "7aed4995d77ccf11fef1396c8e044fd6ce09bcda63e15b3bdd356796ce1466c4",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1040",
+      "source": "specs/045-lifecycle-workspace-governance/quickstart.md",
+      "target": "03-requirements/specs/045-lifecycle-workspace-governance/quickstart.md",
+      "approved_sha256": "73fb28d3e6e4733aa4b2a03dacbe80cdcd5ad12af32e19875646ce0d4dd08794",
+      "verified_sha256": "4f5e81b96d608005be718890d085a661d8b7c201e8883517e37ee47afc105ebc",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1043",
+      "source": "specs/045-lifecycle-workspace-governance/spec.md",
+      "target": "03-requirements/specs/045-lifecycle-workspace-governance/spec.md",
+      "approved_sha256": "4ccf89109022ec120e5c1caee63a3d6701763ea5a251d26623deea93bdab0c70",
+      "verified_sha256": "5d349f49032458198ed3de34282da3b6048abc5f55b95f0ba3c29bce4982448d",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1044",
+      "source": "specs/045-lifecycle-workspace-governance/tasks.md",
+      "target": "03-requirements/specs/045-lifecycle-workspace-governance/tasks.md",
+      "approved_sha256": "7eca966ee3dcf62f0899124140c3abfd553f63a7baeee4f7801628b8bd2f40e6",
+      "verified_sha256": "776c54dc231319d89254d4d3c34fedc6b39ef46fd8a40666ea0a293655d7fdc7",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1045",
+      "source": "specs/README.md",
+      "target": "03-requirements/specs/README.md",
+      "approved_sha256": "2c0f248b4fecaf2ce53b64c0187233758d83757df627cd7414aef4acc7502990",
+      "verified_sha256": "bcad3483d351fa3acc6f58cb7e98cbcffe0229dcc7a02f7bcb12afce5276fbda",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1047",
+      "source": "tools/ai-ppt-system/README.md",
+      "target": "06-delivery/presentations/ai-ppt-system/README.md",
+      "approved_sha256": "05eac8190689a217b5db435827f3f0fd95ed527c68f03ff5e84d1ad73071b2d7",
+      "verified_sha256": "5beccc5eb74d6bdad81466d96e8ba53d8ae0024c317fef0deacdf0c38f642b90",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1064",
+      "source": "tools/ai-ppt-system/package.json",
+      "target": "06-delivery/presentations/ai-ppt-system/package.json",
+      "approved_sha256": "29eacfcfbd769e43c12107ef4e0a7abfcae0e7754bf7f05f006aa1b2cc2309fe",
+      "verified_sha256": "99b4b06d007683739937bf77991f3c8e7246d190f6d4582ffbcd04f211cedbd9",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1072",
+      "source": "tools/ai-ppt-system/scripts/shared.ts",
+      "target": "06-delivery/presentations/ai-ppt-system/scripts/shared.ts",
+      "approved_sha256": "9bca57f230946b259a2aea75bf0968cf79f555df4f521734af012e96933ba41f",
+      "verified_sha256": "5591755f40bdc82d97fa86034c179061beef75aa53c9de3f69105c5609e049f7",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1094",
+      "source": "tools/delivery-builders/README.md",
+      "target": "04-demo/tools/delivery-builders/README.md",
+      "approved_sha256": "f5ecc6997ab479471b2484a057521efce14f477e6abc8ba3df9d337c0d6b5eb3",
+      "verified_sha256": "2540dbec43e0aa978cc907216363122f5ca57c0063b0d29f17ddede0a14474f4",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1099",
+      "source": "tools/delivery-builders/lugu-validation/build_validation_workbook.mjs",
+      "target": "05-validation/workpackages/lugu-validation-material/scripts/build_validation_workbook.mjs",
+      "approved_sha256": "1dbde1cfae612c850c4f8254bb18e3489089f648df6eef5f4b741d28f8cbd750",
+      "verified_sha256": "90e85d9fdc31c63a0bf0c1ebe217d386fad5fc3421375ec4a6df783aa369cd6f",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1100",
+      "source": "tools/delivery-builders/lugu-validation/verify_validation_workbook.mjs",
+      "target": "05-validation/workpackages/lugu-validation-material/scripts/verify_validation_workbook.mjs",
+      "approved_sha256": "dac34f1a3f107cba9b40da3072f8733f09b6ec4faad06300427985baf29199c6",
+      "verified_sha256": "6076482d62104cb330260aa243ff2342e44d7cfaecc9114633fdcf36bef3c532",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1110",
+      "source": "tools/repo-governance/build_asset_migration_manifest.py",
+      "target": "00-governance/repository-tools/build_asset_migration_manifest.py",
+      "approved_sha256": "2bd5354dce7cb4ebc30892dc69fdd795669669fdac10a536e7d8add1c9d3e791",
+      "verified_sha256": "748586ba396b1516e584d6361e7cc9ef60411ea7627b3d6d2d637aee9f93bebf",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1111",
+      "source": "tools/repo-governance/build_lifecycle_protected_assets.py",
+      "target": "00-governance/repository-tools/build_lifecycle_protected_assets.py",
+      "approved_sha256": "6622317633ef4f5c5f9ade9da9229d737bfb518109e66e7a42e6608cc9c188f9",
+      "verified_sha256": "1a0d19e321c0daf32e9959b4a64c666573052e652afd34d8386ab0f3049f3397",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1112",
+      "source": "tools/repo-governance/build_lifecycle_repository_baseline.py",
+      "target": "00-governance/repository-tools/build_lifecycle_repository_baseline.py",
+      "approved_sha256": "d484fd24cd45e42b9aaa7e6e100314e7815be503ea2e00d1df6e1575a0732b8a",
+      "verified_sha256": "a8cb7bf1867c6a9eb48a5f5ec63b34bd6f1bf51b5836f5ff41f9a4339721fe58",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1113",
+      "source": "tools/repo-governance/inventory_repository.py",
+      "target": "00-governance/repository-tools/inventory_repository.py",
+      "approved_sha256": "f011dee63500588dc0d81e698f503d6fc02dbc71ef8a22e60b32a39e04d6eb19",
+      "verified_sha256": "316efd32ceb145eb0ea3dcb232d9fede8986a00c39f7c5d9218280ee8c33dfb0",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1117",
+      "source": "tools/repo-governance/tests/test_deliverable_manifest.py",
+      "target": "00-governance/repository-tools/tests/test_deliverable_manifest.py",
+      "approved_sha256": "6304db7ac22f4e44f7e8078a2babeb94c75d65329a543307828982f8ccd8b0e6",
+      "verified_sha256": "462c81a9b058ae8a8c70e7d2751ce61e1ec565ecfd3008c4daf7d0dc100f2cb6",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1118",
+      "source": "tools/repo-governance/tests/test_document_index.py",
+      "target": "00-governance/repository-tools/tests/test_document_index.py",
+      "approved_sha256": "bda7b5cd821e0a25060e87b9929da2bdec2a47772f66e74b77ec078f97c17f9d",
+      "verified_sha256": "1051d53c3591ea1dd551dde3c13c2884758f1ae97338ea74d7cc10f49fa02b41",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1119",
+      "source": "tools/repo-governance/tests/test_lifecycle_root_layout.py",
+      "target": "00-governance/repository-tools/tests/test_lifecycle_root_layout.py",
+      "approved_sha256": "a99ddeefa378d84ed1429edb8c1edd13b8eabf99cae708b64d89f0dee2f1512f",
+      "verified_sha256": "3576285a9e33c4c99d8dc326e9dffcd0025f0963ae3129b838d20da1f33a01db",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1121",
+      "source": "tools/repo-governance/tests/test_path_compatibility.py",
+      "target": "00-governance/repository-tools/tests/test_path_compatibility.py",
+      "approved_sha256": "8f060a16c1ff5108e085a8533a5ab1d520f6c5784de781f6b8b41c8bbb32aecb",
+      "verified_sha256": "8aabc789b6af87401e107b51e4399736bd53e25e70af86a7ae05bd7b673580f8",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1122",
+      "source": "tools/repo-governance/tests/test_repository_layout.py",
+      "target": "00-governance/repository-tools/tests/test_repository_layout.py",
+      "approved_sha256": "7e229c05611d3794d725083762b36b713e9d97ef3d44c3926e45c8569b89629f",
+      "verified_sha256": "b3a0ef5b04265daa012ef9f1c0909b481fb2e3fafb5f9c23963d1ef6806aeb93",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1123",
+      "source": "tools/repo-governance/tests/test_workpackage_contract.py",
+      "target": "00-governance/repository-tools/tests/test_workpackage_contract.py",
+      "approved_sha256": "d377d8584e1e49401ad3cd6d4f9ca37c99afd6ed759e1c0a98952d088112ce9a",
+      "verified_sha256": "d65bad8ad912935b093cf8b8e6b56efca295d2dc4995f15987e1a4e8b4f3fe7b",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1125",
+      "source": "tools/repo-governance/validate_docs.py",
+      "target": "00-governance/repository-tools/validate_docs.py",
+      "approved_sha256": "297520c439e753d085fa9bd7871256899a0ace5d0c5602b7ccce8424ddb02c03",
+      "verified_sha256": "20e0a87e83e1957cca9756b459e22d5ccadde0fd3db84438b890242cd21588a3",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    },
+    {
+      "id": "M1126",
+      "source": "tools/repo-governance/validate_repository.py",
+      "target": "00-governance/repository-tools/validate_repository.py",
+      "approved_sha256": "1220185ae21ef13de3ac8fe47a8f7bef9cd2fe7367ca6d14bbc075a22ca52025",
+      "verified_sha256": "375455772d8e75733d07ae36b5cc85797b2221df763e8c5731d41ec947867e8a",
+      "reason": "批准迁移后为完成 045 路径兼容、文档或测试而发生的受控修改"
+    }
+  ]
+}

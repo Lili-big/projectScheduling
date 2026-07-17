@@ -1,0 +1,16 @@
+{
+  "id": "ai-case-summary",
+  "stage": "06-delivery",
+  "purpose": "归档 AI 驱动 Demo 快速验证与研发交付案例的多个历史版本。",
+  "status": "orphaned",
+  "inputs": ["history/AI驱动Demo快速验证与研发交付案例_v1.0.md"],
+  "entrypoints": [],
+  "results": [
+    "history/AI驱动Demo快速验证与研发交付案例_v1.2.md",
+    "history/AI驱动Demo快速验证与研发交付案例_申报版_v1.0.md"
+  ],
+  "owner": "产品案例沉淀",
+  "tracking_policy": "tracked",
+  "retention_policy": "现有 Markdown 历史版本保持跟踪；因未确认生成脚本和唯一当前版，不自动改写或清理。",
+  "related_workpackages": ["ai-ppt-system"]
+}

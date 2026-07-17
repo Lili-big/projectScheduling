@@ -142,6 +142,26 @@ function Save-FeatureJson {
     [System.IO.File]::WriteAllText($fjPath, $json, $utf8NoBom)
 }
 
+# Resolve the canonical lifecycle feature directory. Relative feature paths
+# must live below 03-requirements/specs after feature 045.
+function Resolve-LifecycleFeatureDirectory {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$FeatureDirectory
+    )
+
+    $normalized = $FeatureDirectory.Replace('\', '/').TrimStart([char[]]'./')
+    $lifecyclePrefix = '03-requirements/specs/'
+    if (-not [System.IO.Path]::IsPathRooted($FeatureDirectory) -and -not $normalized.StartsWith($lifecyclePrefix)) {
+        throw "Feature directory must use the canonical 03-requirements/specs path: $FeatureDirectory"
+    }
+    $candidate = $FeatureDirectory
+    if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+        $candidate = Join-Path $RepoRoot $candidate
+    }
+    return $candidate
+}
+
 function Get-FeaturePathsEnv {
     # Read-only callers (e.g. check-prerequisites.ps1 -PathsOnly) pass -NoPersist
     # so pure path resolution never writes .specify/feature.json, which would
@@ -159,11 +179,7 @@ function Get-FeaturePathsEnv {
     #   3. Error - no feature context available
     $featureJson = Join-Path $repoRoot '.specify/feature.json'
     if ($env:SPECIFY_FEATURE_DIRECTORY) {
-        $featureDir = $env:SPECIFY_FEATURE_DIRECTORY
-        # Normalize relative paths to absolute under repo root
-        if (-not [System.IO.Path]::IsPathRooted($featureDir)) {
-            $featureDir = Join-Path $repoRoot $featureDir
-        }
+        $featureDir = Resolve-LifecycleFeatureDirectory -RepoRoot $repoRoot -FeatureDirectory $env:SPECIFY_FEATURE_DIRECTORY
         # Persist to feature.json so future sessions without the env var still
         # work - unless the caller opted out for read-only resolution (#3025).
         if (-not $NoPersist) {
@@ -178,11 +194,7 @@ function Get-FeaturePathsEnv {
             exit 1
         }
         if ($featureConfig.feature_directory) {
-            $featureDir = $featureConfig.feature_directory
-            # Normalize relative paths to absolute under repo root
-            if (-not [System.IO.Path]::IsPathRooted($featureDir)) {
-                $featureDir = Join-Path $repoRoot $featureDir
-            }
+            $featureDir = Resolve-LifecycleFeatureDirectory -RepoRoot $repoRoot -FeatureDirectory $featureConfig.feature_directory
         } else {
             [Console]::Error.WriteLine("ERROR: Feature directory not found. Set SPECIFY_FEATURE_DIRECTORY or ensure .specify/feature.json contains feature_directory.")
             exit 1

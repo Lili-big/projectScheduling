@@ -1,0 +1,20 @@
+{
+  "feature": "045-lifecycle-workspace-governance",
+  "verified_at": "2026-07-17T10:41:22.140036+08:00",
+  "status": "pass",
+  "entries": 1127,
+  "feature_043_entries": 9,
+  "move_entries": 1017,
+  "static_entries": 110,
+  "hashed_entries": 1083,
+  "hash_refresh_entries": 98,
+  "source_conflicts": 0,
+  "recreated_compatibility_sources": [
+    "node_modules"
+  ],
+  "missing_targets": 0,
+  "tracking_errors": 0,
+  "delete_actions": 0,
+  "delete_authorized": false,
+  "manifest_status": "verified"
+}

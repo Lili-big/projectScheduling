@@ -1,0 +1,212 @@
+{
+  "mode": "dry-run",
+  "elapsed_seconds": 20.658539,
+  "threshold_seconds": 30,
+  "within_threshold": true,
+  "governance": {
+    "status": "pass",
+    "stages": 7,
+    "workpackages": 9,
+    "violations": [],
+    "warnings": [
+      {
+        "code": "retained-local-cache-root",
+        "path": "outputs",
+        "message": "仅允许已登记缓存原位保留，禁止新增业务资产"
+      }
+    ],
+    "counts": {
+      "violations": 0,
+      "warnings": 1
+    }
+  },
+  "cleanup": {
+    "mode": "dry-run",
+    "selected_categories": [],
+    "protected_classes": [
+      "persistent-state",
+      "user-input",
+      "formal-output"
+    ],
+    "candidate_count": 19,
+    "category_counts": {
+      "diagnostic-log": 1,
+      "cache": 13,
+      "rebuildable": 1,
+      "temporary": 4
+    },
+    "total_known_bytes": 44545972,
+    "size_unknown_count": 15,
+    "protected_candidate_count": 0,
+    "unknown_count": 0,
+    "unknown": [],
+    "deleted_count": 0,
+    "candidates": [
+      {
+        "category": "diagnostic-log",
+        "path": ".local-data/logs/legacy-unclassified",
+        "kind": "directory",
+        "file_count": 58,
+        "size_bytes": 17888272,
+        "protected": false
+      },
+      {
+        "category": "rebuildable",
+        "path": ".local-data/archive/rebuildable",
+        "kind": "directory",
+        "file_count": 54,
+        "size_bytes": 17023414,
+        "protected": false
+      },
+      {
+        "category": "cache",
+        "path": ".local-data/cache",
+        "kind": "directory",
+        "file_count": null,
+        "size_bytes": null,
+        "protected": false
+      },
+      {
+        "category": "cache",
+        "path": ".codex-tmp",
+        "kind": "directory",
+        "file_count": null,
+        "size_bytes": null,
+        "protected": false
+      },
+      {
+        "category": "cache",
+        "path": ".edge-profile",
+        "kind": "directory",
+        "file_count": null,
+        "size_bytes": null,
+        "protected": false
+      },
+      {
+        "category": "cache",
+        "path": ".netlify",
+        "kind": "directory",
+        "file_count": null,
+        "size_bytes": null,
+        "protected": false
+      },
+      {
+        "category": "cache",
+        "path": ".netlify-cli-runtime",
+        "kind": "directory",
+        "file_count": null,
+        "size_bytes": null,
+        "protected": false
+      },
+      {
+        "category": "cache",
+        "path": ".npm-cache",
+        "kind": "directory",
+        "file_count": null,
+        "size_bytes": null,
+        "protected": false
+      },
+      {
+        "category": "cache",
+        "path": ".npm-cache-netlify-deploy",
+        "kind": "directory",
+        "file_count": null,
+        "size_bytes": null,
+        "protected": false
+      },
+      {
+        "category": "cache",
+        "path": ".pip-cache",
+        "kind": "directory",
+        "file_count": null,
+        "size_bytes": null,
+        "protected": false
+      },
+      {
+        "category": "cache",
+        "path": ".playwright-cli",
+        "kind": "directory",
+        "file_count": null,
+        "size_bytes": null,
+        "protected": false
+      },
+      {
+        "category": "cache",
+        "path": ".skill-build",
+        "kind": "directory",
+        "file_count": null,
+        "size_bytes": null,
+        "protected": false
+      },
+      {
+        "category": "cache",
+        "path": ".venv",
+        "kind": "directory",
+        "file_count": null,
+        "size_bytes": null,
+        "protected": false
+      },
+      {
+        "category": "cache",
+        "path": "node_modules",
+        "kind": "directory",
+        "file_count": null,
+        "size_bytes": null,
+        "protected": false
+      },
+      {
+        "category": "cache",
+        "path": "outputs/lugu-validation-20260715",
+        "kind": "directory",
+        "file_count": null,
+        "size_bytes": null,
+        "protected": false
+      },
+      {
+        "category": "temporary",
+        "path": ".local-data/tmp",
+        "kind": "directory",
+        "file_count": 425,
+        "size_bytes": 9634286,
+        "protected": false
+      },
+      {
+        "category": "temporary",
+        "path": ".local-data/locks",
+        "kind": "directory",
+        "file_count": 0,
+        "size_bytes": 0,
+        "protected": false
+      },
+      {
+        "category": "temporary",
+        "path": ".netlify-deploy-staging",
+        "kind": "directory",
+        "file_count": null,
+        "size_bytes": null,
+        "protected": false
+      },
+      {
+        "category": "temporary",
+        "path": ".git-tmp-projectScheduling",
+        "kind": "directory",
+        "file_count": null,
+        "size_bytes": null,
+        "protected": false
+      }
+    ]
+  },
+  "protected_integrity": {
+    "classes": [
+      "formal-output",
+      "persistent-state",
+      "user-input"
+    ],
+    "files_before": 915,
+    "files_after": 915,
+    "changed": [],
+    "unchanged": true
+  },
+  "git_status_unchanged_during_dry_run": true,
+  "pass": true
+}

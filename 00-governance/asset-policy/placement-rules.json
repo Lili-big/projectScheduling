@@ -1,0 +1,122 @@
+{
+  "version": 1,
+  "decision_order": [
+    "stage",
+    "workpackage",
+    "asset_type",
+    "tracking_policy",
+    "retention_class",
+    "primary_owner"
+  ],
+  "required_classification": [
+    "stage",
+    "workpackage",
+    "asset_type",
+    "tracking_policy",
+    "retention_class",
+    "primary_owner"
+  ],
+  "allowed_stage_roots": [
+    "00-governance",
+    "01-discovery",
+    "02-solution-analysis",
+    "03-requirements",
+    "04-demo",
+    "05-validation",
+    "06-delivery"
+  ],
+  "forbidden_business_roots": [
+    "docs",
+    "tools",
+    "outputs",
+    "output",
+    "logs",
+    "artifacts",
+    "backend",
+    "frontend",
+    "specs",
+    "deliverables",
+    "examples",
+    "local-json-task-review"
+  ],
+  "forbidden_root_file_suffixes": [".py", ".js", ".mjs", ".mts", ".ts", ".tsx", ".log", ".json", ".html"],
+  "allowed_root_files_contract": "00-governance/asset-policy/root-compatibility.json",
+  "on_unknown_workpackage": "stop-and-create-workpackage-contract",
+  "unknown_asset_action": "fail-validation-and-request-classification",
+  "cross_stage_policy": "reference-only-primary-owner-unchanged",
+  "allow_multiple_primary_owners": false,
+  "task_routes": [
+    {
+      "id": "agent-thread-governance",
+      "stage": "00-governance",
+      "workpackage": "lifecycle-workspace-governance",
+      "asset_type": "agent-role-registry-or-role-contract",
+      "tracking_policy": "tracked",
+      "retention_class": "formal-output",
+      "primary_owner": "00-governance/asset-policy/thread-roles"
+    },
+    {
+      "id": "customer-research",
+      "stage": "01-discovery",
+      "workpackage": "existing-or-new-research-workpackage",
+      "asset_type": "research-source-or-summary",
+      "tracking_policy": "tracked",
+      "retention_class": "formal-output",
+      "primary_owner": "01-discovery/workpackages/<id>"
+    },
+    {
+      "id": "solution-proposal",
+      "stage": "02-solution-analysis",
+      "workpackage": null,
+      "asset_type": "proposal-or-decision",
+      "tracking_policy": "tracked",
+      "retention_class": "formal-output",
+      "primary_owner": "02-solution-analysis/proposals-or-decisions"
+    },
+    {
+      "id": "product-requirement",
+      "stage": "03-requirements",
+      "workpackage": "feature-specification-when-applicable",
+      "asset_type": "prd-rule-or-spec",
+      "tracking_policy": "tracked",
+      "retention_class": "formal-output",
+      "primary_owner": "03-requirements/product-rules-or-specs"
+    },
+    {
+      "id": "demo-implementation",
+      "stage": "04-demo",
+      "workpackage": "bridge-scheduling-demo-or-standalone-tool",
+      "asset_type": "source-code-test-example-or-runtime",
+      "tracking_policy": "tracked",
+      "retention_class": "formal-output",
+      "primary_owner": "04-demo/<component-or-workpackage>"
+    },
+    {
+      "id": "customer-validation",
+      "stage": "05-validation",
+      "workpackage": "required",
+      "asset_type": "validation-input-script-result-or-report",
+      "tracking_policy": "local-only",
+      "retention_class": "user-input",
+      "primary_owner": "05-validation/workpackages/<id>"
+    },
+    {
+      "id": "formal-delivery",
+      "stage": "06-delivery",
+      "workpackage": "existing-or-new-delivery-workpackage",
+      "asset_type": "deliverable-case-study-or-presentation",
+      "tracking_policy": "tracked",
+      "retention_class": "formal-output",
+      "primary_owner": "06-delivery/<deliverables-workpackages-or-presentations>"
+    }
+  ],
+  "local_asset_routes": {
+    "persistent-state": ".local-data/state",
+    "user-input": "workpackage input with local-only tracking",
+    "diagnostic-log": ".local-data/logs",
+    "rebuildable": ".local-data/archive/rebuildable",
+    "cache": ".local-data/cache",
+    "temporary": ".local-data/tmp",
+    "lock": ".local-data/locks"
+  }
+}

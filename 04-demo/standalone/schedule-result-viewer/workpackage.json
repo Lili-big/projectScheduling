@@ -1,0 +1,22 @@
+{
+  "id": "schedule-result-viewer",
+  "stage": "04-demo",
+  "purpose": "保存获准入库的固定排程结果样例及其零构建离线查看器。",
+  "status": "active",
+  "inputs": [
+    "fixed-resource-shortest-duration-20260707-134506.json",
+    "cpsat-result-third-version.json"
+  ],
+  "entrypoints": [
+    "fixed-resource-shortest-duration-viewer.html",
+    "cpsat-result-viewer.html"
+  ],
+  "results": [
+    "fixed-resource-shortest-duration-viewer.html",
+    "cpsat-result-viewer.html"
+  ],
+  "owner": "Demo 独立展示工具",
+  "tracking_policy": "tracked",
+  "retention_policy": "当前 JSON 样例和离线 HTML 均为批准的可复现 Demo 资产，保持版本跟踪。",
+  "related_workpackages": ["json-task-viewer"]
+}

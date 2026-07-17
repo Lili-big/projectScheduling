@@ -33,6 +33,10 @@ All user-facing Spec Kit outputs and generated Markdown artifacts in this reposi
 
 **Metaphor**: If your spec is code, the checklist is its unit test suite. You're testing whether the requirements are well-written, complete, unambiguous, and ready for implementation - NOT whether the implementation works.
 
+## Lifecycle Spec Path Policy
+
+Feature assets use the canonical `03-requirements/specs/<number>-<feature>` path. Do not create or resolve new features under a root `specs/` directory.
+
 ## User Input
 
 ```text

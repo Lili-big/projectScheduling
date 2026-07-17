@@ -1,4 +1,6 @@
 .venv/
+.codex-tmp/
+.skill-build/
 .npm-cache/
 .npm-cache-netlify-deploy/
 .netlify-deploy-staging/
@@ -11,15 +13,17 @@ __pycache__/
 deploy-*.zip
 logs/
 local-json-task-review/
-.local-data/
+/04-demo/standalone/json-task-viewer/input/
+/04-demo/standalone/json-task-viewer/output/
+/05-validation/workpackages/json-schedule-review/input/
+/05-validation/workpackages/json-schedule-review/output/
+/outputs/
+.local-data/*
+!.local-data/README.md
 .local.env
 .env
 *.local.env
-frontend/node_modules/
 node_modules/
-frontend/dist/
-backend/app/__pycache__/
-backend/tests/__pycache__/
 
 # Local Netlify folder
 .netlify

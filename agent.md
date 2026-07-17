@@ -4,7 +4,7 @@
 
 ## 1. 项目事实
 
-本项目是 `FastAPI + React + OR-Tools CP-SAT` 的桥梁施工排程模块化单体 Demo。前端维护 `ScenarioInput`，后端生成任务图和 `ScheduleInput`，求解器返回 `ScheduleResult`/`ScenarioSolveResult`，前端展示任务、甘特、资源、里程碑、目标拆解、诊断和方案比较。
+本项目是桥梁施工排程产品全生命周期工作区：`01-discovery` 调研、`02-solution-analysis` 方案、`03-requirements` 需求、`04-demo` 实现、`05-validation` 验证、`06-delivery` 交付，仓库规则由 `00-governance` 维护。主 Demo 是 `FastAPI + React + OR-Tools CP-SAT` 模块化单体；前端维护 `ScenarioInput`，后端生成任务图和 `ScheduleInput`，求解器返回 `ScheduleResult`/`ScenarioSolveResult`。
 
 ```text
 ScenarioInput
@@ -27,9 +27,9 @@ ScenarioInput
 
 1. 用户当前要求和明确约束。
 2. `AGENTS.md` 工作流门禁。
-3. `README.md`、本文件、[文档索引](./docs/README.md) 和相关 current 文档。
-4. [模块地图](./docs/architecture/module-map.md)、源码、测试、配置和运行结果。
-5. [规格索引](./specs/README.md) 与目标 `spec.md`/`plan.md`/`tasks.md`。
+3. `README.md`、本文件和目标生命周期阶段 README。
+4. [模块地图](./00-governance/architecture/module-map.md)、目标工作包、源码、测试、配置和运行结果。
+5. [规格索引](./03-requirements/specs/README.md) 与目标 `spec.md`/`plan.md`/`tasks.md`。
 
 解释当前实现时，代码和测试优先；评审/PRD 同时列出文档口径、代码事实和用户新要求。无法判断目标口径时，列出冲突并请求决策，不自行编造业务规则。
 
@@ -37,7 +37,7 @@ ScenarioInput
 
 042 已把主要全局热点收敛为兼容 façade。旧入口继续可用，新业务必须进入拥有该领域的模块。
 
-### 后端
+### 后端（根路径：`04-demo/backend/app/`）
 
 | 能力 | 当前入口/所有权 | 验证 |
 | --- | --- | --- |
@@ -52,7 +52,7 @@ ScenarioInput
 | 计划管控 | `plan_control/`；旧 services 兼容 | `test_plan_control_*`、`test_progress_forecast.py` |
 | 本地/发布配置 | `config/`、`default_scenario_config.json`；旧配置模块兼容 | 配置与存储契约测试 |
 
-### 前端
+### 前端（根路径：`04-demo/frontend/src/`）
 
 | 能力 | 当前入口/所有权 | 验证 |
 | --- | --- | --- |
@@ -65,18 +65,19 @@ ScenarioInput
 | 任务与结果 | `features/taskView`、`features/scheduleResults`；`Workspace.tsx` 负责组合 | presenter/纯函数测试 |
 | 样式 | `styles/tokens.css`、`base.css`、`layout.css` 与 feature CSS；`styles.css` 聚合 | 构建、视觉对比 |
 
-### 仓库资产
+### 生命周期仓库资产
 
 | 资产 | 当前所有权 | 验证 |
 | --- | --- | --- |
-| 产品/算法/验证/调研文档 | `docs/product`、`engineering`、`validation`、`research` | 文档索引与链接门禁 |
-| 可复现样例 | `examples/bridge-import`、`examples/result-viewer` | 导入测试、Docker 契约 |
-| PPT 与参考 API | `tools/ai-ppt-system`、`tools/demo-api-mirror` | 各工具 `verify` |
-| 交付物构建与正式文件 | `tools/delivery-builders`、`deliverables` | 固定构建、导入复核、二进制哈希 |
-| 预览/检查中间件 | `artifacts` | 默认忽略，不作为正式交付物 |
-| 本地数据和日志 | `.local-data` | Git 卫生、日志落点门禁 |
+| 调研与来源证据 | `01-discovery/` 及其工作包 | 来源、输入/结论分离、工作包契约 |
+| 方案与决策 | `02-solution-analysis/proposals/`、`decisions/` | 方案边界与引用检查 |
+| PRD、算法和规格 | `03-requirements/product/`、`rules/`、`specs/` | 文档、Spec Kit 门禁 |
+| Demo 代码与样例 | `04-demo/backend/`、`frontend/`、`examples/`、`standalone/` | 后端/前端/部署与工作包测试 |
+| 客户验证 | `05-validation/reports/`、`workpackages/` | 输入、脚本、结果和结论可追溯 |
+| 正式交付与演示 | `06-delivery/deliverables/`、`workpackages/`、`presentations/` | 版本、哈希和生成关系 |
+| 本地状态与生成物 | `.local-data/state|logs|cache|tmp|locks|archive` | 保护优先、默认 dry-run |
 
-更完整的所有权和依赖方向见 [模块地图](./docs/architecture/module-map.md) 与 [依赖规则](./docs/architecture/dependency-rules.md)。
+更完整的所有权和依赖方向见 [模块地图](./00-governance/architecture/module-map.md) 与 [依赖规则](./00-governance/architecture/dependency-rules.md)。工作包索引见 [`workpackages.json`](./00-governance/asset-policy/workpackages.json)。
 
 ## 4. 关键调用链
 
@@ -128,19 +129,19 @@ ScenarioInput -> initialize -> 三套资源计划
 基线计划 -> 进度快照 -> 预测 -> 调整建议 -> 采纳新版本
 ```
 
-仓储位于 `.local-data/plan-control-store.json`，具有版本冲突和稳定指纹语义，但仍是单机演示存储。
+仓储权威路径为 `.local-data/state/plan-control-store.json`，迁移期兼容旧路径；它具有版本冲突和稳定指纹语义，但仍是单机演示存储。
 
 ## 5. 契约与兼容边界
 
-- FastAPI 保持 45 个 `/api` 路由、方法、schema、状态码和错误 `detail`。
-- `uvicorn app.main:app --app-dir backend` 和 `app.main:app` 保持有效。
-- `backend/app/main.py`、`backend/app/models.py`、`backend/app/scenario.py`、`backend/app/solver.py` 是受测试保护的短兼容入口；`app.models`、`app.scenario`、`app.solver` 旧公开导入保持有效。
+- FastAPI 当前有 57 个 `/api` 操作；042 冻结的原有 45 个方法、schema、状态码和错误 `detail` 保持兼容，后续新增操作由当前架构基线继续冻结。
+- `uvicorn app.main:app --app-dir 04-demo/backend` 和 `app.main:app` 保持有效。
+- `04-demo/backend/app/main.py`、`04-demo/backend/app/models.py`、`04-demo/backend/app/scenario.py`、`04-demo/backend/app/solver.py` 是受测试保护的短兼容入口；`app.models`、`app.scenario`、`app.solver` 旧公开导入保持有效。
 - 前端 `src/App.tsx` 默认导出、`types/scheduler.ts` 导出和 `schedulerApi.ts` 40 个函数保持。
-- 配置合并顺序保持：代码默认 → `default_scenario_config.json` → `.local-data/scheduler-config.json`。
-- `.local-data/project-structure-params.json`、`.local-data/plan-control-store.json` 路径/schema 保持。
+- 配置合并顺序保持：代码默认 → `default_scenario_config.json` → `.local-data/state/scheduler-config.json`（兼容旧路径读取）。
+- `.local-data/state/project-structure-params.json`、`.local-data/state/plan-control-store.json` 的 schema 与兼容语义保持。
 - `stable_id`、`stable_fingerprint`、场景指纹和旧结果失效语义保持。
 - CP-SAT seed、worker、时间预算、warm start、阶段路由和资源搜索顺序不因纯重构变化。
-- Netlify 只发布静态前端；`tools/demo-api-mirror/api.mts` 是未部署参考镜像，不是正式 FastAPI 后端。
+- Netlify 只发布静态前端；`04-demo/tools/demo-api-mirror/api.mts` 是未部署参考镜像，不是正式 FastAPI 后端。
 
 架构门禁：
 
@@ -164,7 +165,7 @@ npm.cmd run verify:architecture
 | 计划管控 | `plan_control/` 或旧 services | 仓储版本、事实冻结、预测/调整 | repository + forecast 专项 |
 | 前端状态 | app controller/workflows | generated/solve/comparison/integrated 失效 | Node + 构建 |
 | 样式 | feature CSS / 聚合入口 | 导入顺序、弹层、响应式 | 构建 + 同视口视觉对比 |
-| 部署 | Dockerfile/netlify.toml/runtime 文档 | 样例数据、环境变量、健康/SPA | Docker/Netlify/单服务冒烟 |
+| 部署 | 根 Dockerfile/netlify.toml 与 `04-demo/runtime/` | 样例数据、环境变量、健康/SPA | Docker/Netlify/单服务冒烟 |
 
 ## 7. 算法解释规则
 
@@ -177,16 +178,16 @@ npm.cmd run verify:architecture
 - 诊断：解释/评价结果，不一定参与求解。
 - 展示转换：前端标签或聚合，不是业务规则。
 
-优先读取目标模块、`backend/tests/test_scheduler.py`、相关专项测试和 [算法当前实现文档](./docs/engineering/排程算法当前实现交底文档_v1.2.md)。不要把诊断指标写成目标项，也不要把 Demo 默认值写成正式产品规则。
+优先读取目标模块、`04-demo/backend/tests/test_scheduler.py`、相关专项测试和 [算法当前实现文档](./03-requirements/rules/排程算法当前实现交底文档_v1.2.md)。不要把诊断指标写成目标项，也不要把 Demo 默认值写成正式产品规则。
 
 ## 8. 运行与验证
 
 ```powershell
 # 后端全量
-.\.venv\Scripts\python.exe -m pytest backend\tests -q
+.\.venv\Scripts\python.exe -m pytest 04-demo\backend\tests -q
 
 # 前端测试和构建
-npm.cmd --workspace frontend test
+npm.cmd --workspace 04-demo/frontend test
 npm.cmd run build
 
 # 架构/仓库/文档
@@ -200,20 +201,21 @@ npm.cmd run verify
 
 ```powershell
 npm.cmd run build
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir backend
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir 04-demo/backend
 ```
 
-详细环境和部署边界见 [运行部署文档](./docs/architecture/runtime-and-deployment.md)，资产放置见 [仓库与资产治理](./docs/architecture/repository-governance.md)。
+详细环境和部署边界见 [运行部署文档](./00-governance/architecture/runtime-and-deployment.md)，资产放置见 [仓库与资产治理](./00-governance/architecture/repository-governance.md)。
 
-后台启动需要落盘日志时，统一使用 `tools/local-runtime/start_logged_process.ps1`，输出到 `.local-data/logs/<启动时间>/`。禁止在仓库根目录创建 `*.log`；历史根日志只能按 042 资产清单移动到 `.local-data/logs/legacy/`，不得未经确认删除。
+后台启动需要落盘日志时，统一使用 `04-demo/runtime/start_logged_process.ps1`，输出到 `.local-data/logs/<启动时间>/`。禁止在仓库根目录创建 `*.log`；历史日志只按批准清单移动到 `.local-data/logs/legacy-unclassified/`，不得未经确认删除。
 
 ## 9. 文档维护规则
 
 - `README.md`：项目定位、当前能力、快速启动、验证和最短地图。
 - `AGENTS.md`：工作分流与治理门禁，不写代码百科。
 - `agent.md`：当前事实、所有权、调用链和修改矩阵。
-- `docs/README.md`：文档状态、权威范围和替代关系。
-- `docs/architecture/`：系统、模块、依赖、运行与 ADR。
-- `specs/README.md`：规格状态；历史规格不移动不重编号。
+- 七阶段 README：阶段目的、进入/退出条件、权威资产和工作包索引。
+- `00-governance/architecture/`：系统、模块、依赖、运行与 ADR。
+- `03-requirements/specs/README.md`：规格状态；规格编号和历史内容保持。
+- 工作包 README / `workpackage.json`：输入、入口、成果、跟踪和保留策略。
 
 修改模块、API、命令、环境变量、部署或规格状态时，同批更新对应入口并运行文档门禁。资产移动、取消跟踪或交付件重分区必须先提供逐文件清单并取得用户二次确认。

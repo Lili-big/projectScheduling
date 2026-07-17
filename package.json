@@ -3,16 +3,17 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "frontend"
+    "04-demo/frontend"
   ],
   "scripts": {
-    "build": "npm --workspace frontend run build",
-    "frontend:dev": "npm --workspace frontend run dev",
-    "frontend:preview": "npm --workspace frontend run preview",
-    "typecheck": "npm --workspace frontend run typecheck",
-    "test": "python -m pytest backend/tests -q && npm --workspace frontend test",
-    "verify:build-budget": "npm --workspace frontend run verify:build-budget",
-    "verify:architecture": "python backend/scripts/capture_architecture_baseline.py --check backend/tests/fixtures/architecture/backend-baseline.json && node frontend/scripts/captureArchitectureBaseline.mjs --check frontend/tests/fixtures/architecture/frontend-baseline.json && python tools/repo-governance/validate_dependencies.py && python tools/repo-governance/validate_repository.py && python tools/repo-governance/validate_docs.py && python -m pytest tools/repo-governance/tests -q",
-    "verify": "npm run typecheck && npm test && npm run build && npm run verify:build-budget && npm run verify:architecture"
+    "build": "npm --workspace 04-demo/frontend run build",
+    "frontend:dev": "npm --workspace 04-demo/frontend run dev",
+    "frontend:preview": "npm --workspace 04-demo/frontend run preview",
+    "typecheck": "npm --workspace 04-demo/frontend run typecheck",
+    "test": "python -m pytest 04-demo/backend/tests -q && npm --workspace 04-demo/frontend test",
+    "verify:build-budget": "npm --workspace 04-demo/frontend run verify:build-budget",
+    "verify:lifecycle": "python 00-governance/repository-tools/validate_lifecycle_workspace.py && powershell.exe -NoProfile -ExecutionPolicy Bypass -File 00-governance/repository-tools/cleanup-workspace.ps1 -Json",
+    "verify:architecture": "python 04-demo/backend/scripts/capture_architecture_baseline.py --check 04-demo/backend/tests/fixtures/architecture/backend-baseline.json && node 04-demo/frontend/scripts/captureArchitectureBaseline.mjs --check 04-demo/frontend/tests/fixtures/architecture/frontend-baseline.json && python 00-governance/repository-tools/validate_dependencies.py && python 00-governance/repository-tools/validate_repository.py && python 00-governance/repository-tools/validate_docs.py && python -m pytest 00-governance/repository-tools/tests -q",
+    "verify": "npm run typecheck && npm test && npm run build && npm run verify:build-budget && npm run verify:architecture && npm run verify:lifecycle"
   }
 }

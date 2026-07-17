@@ -1,8 +1,22 @@
-# 桥梁施工排程综合 Demo
+# 桥梁施工排程产品全生命周期工作区
 
-本项目用 FastAPI、React 和 OR-Tools CP-SAT，把桥梁结构、工艺工效、工艺逻辑、资源、里程碑和求解策略组合成可解释的施工排程。当前仓库还包含 AI 参数输入、AI 资源方案、架梁专项联算和计划管控闭环的 Demo 能力。
+本仓库不再只是 Demo 代码集合，而是覆盖前期需求调研、过程方案分析、需求文档设计、Demo 实现、客户验证和正式交付的产品全生命周期工作区。FastAPI、React 和 OR-Tools CP-SAT Demo 是其中的实现与验证环节。
 
-项目适合产品验证、算法验证和研发交底；生产级用户权限、审计、项目隔离、正式数据接入与高可用不在当前实现范围。
+根目录按“阶段”表达业务所有权；每个可独立运行的专项再按工作包组织输入、脚本、成果与保留策略。项目仍适合产品验证、算法验证和研发交底；生产级用户权限、审计、项目隔离、正式数据接入与高可用不在当前实现范围。
+
+## 生命周期导航
+
+| 阶段 | 回答的问题 | 主要入口 |
+| --- | --- | --- |
+| [`00-governance`](./00-governance/README.md) | 仓库如何治理、归类、校验和回退？ | 架构、资产策略、治理工具、迁移历史 |
+| [`01-discovery`](./01-discovery/README.md) | 客户和来源材料说明了什么？ | 访谈、调研、来源数据分析 |
+| [`02-solution-analysis`](./02-solution-analysis/README.md) | 有哪些方案，为什么选择当前路径？ | 产品方向、融合方案、MVP、决策 |
+| [`03-requirements`](./03-requirements/README.md) | 已确认口径如何变成可验收需求？ | PRD、算法规则、Spec Kit 规格 |
+| [`04-demo`](./04-demo/README.md) | 如何实现并运行 Demo？ | 后端、前端、样例、独立展示工具 |
+| [`05-validation`](./05-validation/README.md) | 方案和结果如何用客户数据验证？ | 验证计划、脚本、结果、报告 |
+| [`06-delivery`](./06-delivery/README.md) | 哪些成果可正式交付和传播？ | 交付物、案例总结、演示材料 |
+
+最短查找路径：先选阶段，再打开阶段 README；独立专项继续进入其 `workpackage.json` 和 README。全仓工作包索引见 [`workpackages.json`](./00-governance/asset-policy/workpackages.json)。
 
 ## 快速启动
 
@@ -18,7 +32,7 @@ npm.cmd install --cache .npm-cache
 
 ```powershell
 npm.cmd run build
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir backend
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir 04-demo/backend
 ```
 
 - 页面：`http://127.0.0.1:8000/`
@@ -28,7 +42,7 @@ npm.cmd run build
 
 ```powershell
 # 窗口 A
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir backend --reload
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir 04-demo/backend --reload
 
 # 窗口 B
 npm.cmd run frontend:dev
@@ -47,7 +61,7 @@ npm.cmd run frontend:dev
 - 架梁专项：项目/方案版本、工作点与实绩导入、专项校验、预览和综合排程快照。
 - 计划管控：基线计划、进度快照、预测、调整建议和采纳的本地演示闭环。
 
-`specs/041-girder-scheduling-integration` 当前为 74/95：统一发布、完整架梁实绩滚动、黄金样例影子验证等 21 项仍未完成。入口文档不会把这些规格目标描述为已交付能力。
+`03-requirements/specs/041-girder-scheduling-integration` 当前为 74/95：统一发布、完整架梁实绩滚动、黄金样例影子验证等 21 项仍未完成。入口文档不会把这些规格目标描述为已交付能力。
 
 ## 核心链路
 
@@ -60,25 +74,30 @@ ScenarioInput
 
 主 HTTP 链路：`GET /api/demo-scenario` → `POST /api/generate-schedule-input` → `POST /api/solve-scenario`、`POST /api/solve-min-resources` 或 `POST /api/solve-resource-cost` → `POST /api/compare-scenarios`。
 
-FastAPI 当前公开 45 个 `/api` 路由。完整契约由 `backend/tests/fixtures/architecture/backend-baseline.json` 和架构测试冻结；不要只根据文档表格推断字段或状态码。
+FastAPI 当前公开 57 个 `/api` 操作；其中 042 冻结的原有 45 个兼容契约保持不变，后续功能新增 12 个。完整契约由 `04-demo/backend/tests/fixtures/architecture/backend-baseline.json` 和架构测试冻结；不要只根据文档表格推断字段或状态码。
 
 ## 目录地图
 
 ```text
-backend/app/       FastAPI、契约、场景生成、CP-SAT、助手、架梁和计划管控
-backend/tests/     后端行为、接口、导入、存储和性能回归
-frontend/src/      React 应用、features、领域纯函数、API 和共享类型
-frontend/tests/    前端工作流与兼容 Node 测试
-docs/              当前架构、PRD、算法、页面和调研材料
-specs/             Spec Kit 规格；历史路径和重复编号保持不变
-examples/          桥梁导入样例和离线结果查看器
-tools/             仓库治理、PPT、参考 API、交付物和本地运行工具
-deliverables/      经确认保留版本控制的正式交付物
-artifacts/         本地预览、检查和可再生成输出；默认忽略
-.local-data/       本地配置、存储、运行状态和日志；默认忽略
+00-governance/          架构、资产规则、治理工具和迁移历史
+01-discovery/           前期调研、访谈、来源数据和分析工作包
+02-solution-analysis/   产品方向、方案比较、技术可行性与决策
+03-requirements/        PRD、算法规则和 specs/<编号>-<功能名>
+04-demo/                主 Demo 后端/前端、样例、运行工具与独立展示
+05-validation/          客户验证计划、输入、脚本、结果和报告
+06-delivery/            正式交付物、案例总结与演示材料
+.local-data/            状态、日志、缓存、临时和可再生成归档；默认忽略
 ```
 
-详细所有权见 [模块地图](./docs/architecture/module-map.md)，文档状态见 [docs 索引](./docs/README.md)，规格状态见 [specs 索引](./specs/README.md)。开发/Agent 协作先读 `AGENTS.md`，项目事实和修改矩阵见 `agent.md`。
+详细所有权见 [模块地图](./00-governance/architecture/module-map.md)，规格状态见 [specs 索引](./03-requirements/specs/README.md)。开发/Agent 协作先读 `AGENTS.md`，项目事实和修改矩阵见 `agent.md`。
+
+## 新任务放到哪里
+
+1. 先声明业务阶段：调研、方案、需求、Demo、验证、交付或治理。
+2. 再判断是否属于现有工作包；属于则在其 `inputs/`、`scripts/`、`results/` 中归位。
+3. 不属于现有工作包且需要独立运行/理解时，使用 `00-governance/asset-policy/templates/workpackage/` 创建工作包。
+4. 日志、缓存、临时文件、本地状态和未批准客户输入进入 `.local-data/`，不在根目录新增 `*.log` 或孤立输出。
+5. 提交前运行生命周期治理校验；未知资产应失败并要求分类，而不是就地堆放。
 
 ## 配置与本地数据
 
@@ -97,13 +116,13 @@ Copy-Item .local.env.example .local.env
 - `SCHEDULER_CORS_ORIGINS`、`SCHEDULER_CORS_ORIGIN_REGEX`：后端跨域。
 - `VITE_API_BASE_URL`：生产前端连接完整后端的地址。
 
-场景配置合并顺序：代码默认值 → `backend/app/default_scenario_config.json` → `.local-data/scheduler-config.json`。
+场景配置合并顺序：代码默认值 → `04-demo/backend/app/default_scenario_config.json` → `.local-data/state/scheduler-config.json`。
 
 其他本地数据：
 
-- `.local-data/project-structure-params.json`：项目结构参数。
-- `.local-data/plan-control-store.json`：计划管控、项目/方案版本和联合快照。
-- `examples/bridge-import/渠溪河特大桥结构设计表.xlsx`：默认桥梁导入样例；读取器仍保留历史根路径兼容。
+- `.local-data/state/project-structure-params.json`：项目结构参数。
+- `.local-data/state/plan-control-store.json`：计划管控、项目/方案版本和联合快照。
+- `04-demo/examples/bridge-import/渠溪河特大桥结构设计表.xlsx`：默认桥梁导入样例。
 
 `.local.env` 和 `.local-data/` 已忽略，不要提交密钥或个人运行数据。
 
@@ -111,19 +130,19 @@ Copy-Item .local.env.example .local.env
 
 ```powershell
 # 后端后台启动；命令会返回 PID 和 stdout/stderr 的实际路径
-.\tools\local-runtime\start_logged_process.ps1 `
+.\04-demo\runtime\start_logged_process.ps1 `
   -Name backend `
   -FilePath .\.venv\Scripts\python.exe `
-  -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000', '--app-dir', 'backend')
+  -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000', '--app-dir', '04-demo/backend')
 ```
 
-原根目录 16 个历史日志已按确认清单移动到 `.local-data/logs/legacy/`，未删除且不提交 Git。详细规则见 [本地运行日志说明](./tools/local-runtime/README.md)。
+散落历史日志已按批准清单移动到 `.local-data/logs/legacy-unclassified/`，未删除且不提交 Git。详细规则见 [本地产物分区](./.local-data/README.md)。
 
 ## 验证
 
 ```powershell
 # 后端全量
-.\.venv\Scripts\python.exe -m pytest backend\tests -q
+.\.venv\Scripts\python.exe -m pytest 04-demo\backend\tests -q
 
 # 前端 Node 测试
 npm.cmd --workspace frontend test
@@ -138,7 +157,7 @@ npm.cmd run verify:architecture
 npm.cmd run verify
 
 # 单服务健康、静态资源和 SPA 回退
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\backend\scripts\smoke_single_service.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\04-demo\backend\scripts\smoke_single_service.ps1
 ```
 
 `verify:architecture` 只运行架构子门禁；日常完整检查优先使用 `npm.cmd run verify`。算法改动还必须提供固定输入/期望输出或性能样例。
@@ -146,16 +165,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\backend\scripts\smoke_
 ## 运行与部署
 
 - 本地开发：Vite `5173` + FastAPI `8000`。
-- 单服务演示：先构建 `frontend/dist`，再由 FastAPI 托管 SPA 和 API。
-- Docker：当前镜像启动 `app.main:app` 并复制 `examples/` 样例；读取器仍兼容历史根样例路径。详见 [运行部署边界](./docs/architecture/runtime-and-deployment.md)。
+- 单服务演示：先构建 `04-demo/frontend/dist`，再由 FastAPI 托管 SPA 和 API。
+- Docker：当前镜像启动 `app.main:app` 并复制 `04-demo/examples/` 样例。详见 [运行部署边界](./00-governance/architecture/runtime-and-deployment.md)。
 - Netlify：`netlify.toml` 只构建并发布静态前端。生产必须设置 `VITE_API_BASE_URL` 指向独立 FastAPI/OR-Tools 后端。
-- `tools/demo-api-mirror/api.mts` 是未部署的参考镜像，不能替代 45 路由 FastAPI 后端。
+- `04-demo/tools/demo-api-mirror/api.mts` 是未部署的参考镜像，不能替代当前 57 操作 FastAPI 后端。
 
 ## 维护规则
 
-- 不在 `app.main`、旧全局模型/场景/求解器或前端聚合入口继续新增无关业务；按 [依赖规则](./docs/architecture/dependency-rules.md) 找到所有权模块。
+- 不在 `app.main`、旧全局模型/场景/求解器或前端聚合入口继续新增无关业务；按 [依赖规则](./00-governance/architecture/dependency-rules.md) 找到所有权模块。
 - 修改共享字段时同步检查后端契约、前端 contracts、API、持久化兼容和测试。
 - 修改算法时明确硬约束、软目标、诊断和展示的区别。
 - 涉及算法、资源、工期、共享字段或跨前后端中大型改动，按 `AGENTS.md` 走完整 Spec Kit。
 - 不移动历史 specs，不批量删除/迁移资产；资产物理迁移必须提供逐文件清单并取得用户二次确认。
-- 新资产按 [仓库与资产治理](./docs/architecture/repository-governance.md) 放置；当前迁移映射见 [路径迁移记录](./docs/archive/path-migration.md)。
+- 新资产按 [仓库与资产治理](./00-governance/architecture/repository-governance.md) 放置；当前迁移映射见 [路径迁移记录](./00-governance/history/path-migration.md)。

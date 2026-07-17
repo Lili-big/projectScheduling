@@ -5,6 +5,8 @@ description: Explain bridge scheduling demo algorithm implementation when the us
 
 # Demo Algorithm Explainer
 
+> **发现兼容入口**：权威 Skill 已迁入 `04-demo/skills/demo-algorithm-explainer/SKILL.md`。每次调用必须先完整读取该文件并以其规则为准；本入口不再作为路径和规则的权威来源。
+
 ## Purpose
 
 Use this skill when the user asks how an algorithm in this bridge scheduling demo is implemented, how a scheduling result is calculated, how an objective or constraint works, or why an algorithm produced a certain outcome.
@@ -122,9 +124,9 @@ For a question like "资源连续性算法是怎么算的", answer in this style
 
 In this project, algorithm answers commonly need these anchors:
 
-- `backend/app/solver.py`: solver constraints, objectives, diagnostics, and result construction.
-- `backend/app/scenario.py`: scenario-to-task conversion and solve branch orchestration.
-- `backend/app/models.py`: shared inputs, outputs, strategy config, and objective term definitions.
-- `backend/tests/test_scheduler.py`: executable examples and expected behavior.
-- `frontend/src/app/App.tsx` and `frontend/src/types/scheduler.ts`: display parsing and frontend-facing metrics.
-- `docs/`: product and algorithm requirement docs, useful for vocabulary but not always implementation truth.
+- `04-demo/backend/app/scheduling/solver/`: solver constraints, objectives, diagnostics, and result construction.
+- `04-demo/backend/app/scheduling/generation/`: scenario-to-task conversion.
+- `04-demo/backend/app/contracts/`: shared inputs, outputs, strategy config, and objective definitions.
+- `04-demo/backend/tests/test_scheduler.py`: executable examples and expected behavior.
+- `04-demo/frontend/src/features/scheduleResults/` and `04-demo/frontend/src/contracts/`: display parsing and frontend metrics.
+- `03-requirements/rules/`: product and algorithm documents, useful for vocabulary but not always implementation truth.

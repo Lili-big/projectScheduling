@@ -1,0 +1,358 @@
+{
+  "format_version": 1,
+  "feature": "045-lifecycle-workspace-governance",
+  "generated_at": "2026-07-17T02:33:55.217817+08:00",
+  "default_action": "protect",
+  "deletion_authorized": false,
+  "protected_scopes": [
+    {
+      "path": "specs/042-repo-architecture-modernization",
+      "kind": "feature-scope",
+      "file_count": 16,
+      "sha256": "41a8221a351d5e7d9258cbdd7ca8e651cde25f362a3d97162a4bdf83b5ac21a7",
+      "protected": true,
+      "reason": "042 已完成架构迁移证据，内容和编号必须保持"
+    },
+    {
+      "path": "specs/043-unified-workpoint-structure",
+      "kind": "feature-scope",
+      "file_count": 9,
+      "sha256": "9d82768a158d83a5889f94ce5172f7e997748071633b5a7df148cdd0b5277f5a",
+      "protected": true,
+      "reason": "043 在 045 中需要单独确认后才能随规格树移动"
+    }
+  ],
+  "untracked_docx_count": 0,
+  "assets": [
+    {
+      "path": ".local-data/plan-control-store.json",
+      "kind": "persistent-json-state",
+      "tracking_policy": "local-only",
+      "size_bytes": 21466002,
+      "sha256": "c0e47f402084efcc3ea3f6fc2a175035712fe35f58aceeb08a929ae0f7b10010",
+      "protected": true,
+      "reason": "Demo 本地持久状态",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": ".local-data/project-master.db",
+      "kind": "persistent-database",
+      "tracking_policy": "local-only",
+      "size_bytes": 7127040,
+      "sha256": "f4fa0262d04ae73ed4878db5f09b13963854387c048045d1d3e088b55897839d",
+      "protected": true,
+      "reason": "数据库或验收快照，禁止自动删除",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": ".local-data/scheduler-config.json",
+      "kind": "persistent-json-state",
+      "tracking_policy": "local-only",
+      "size_bytes": 29599,
+      "sha256": "c26b8c0e96021d78f3067c5d32ee90d690855950dbd56b330d28d84c3d271ba3",
+      "protected": true,
+      "reason": "Demo 本地持久状态",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": ".local-data/tmp/042-lugu-validation-20260716-154636-957/泸古项目验证材料_20260715.xlsx",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "local-only",
+      "size_bytes": 31830,
+      "sha256": "b44a7fb8e5648e073997835dc8bf396ac2bbb7dcbff9dd8d79314da1786d8dd0",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": ".local.env",
+      "kind": "secret-local-config",
+      "tracking_policy": "local-only",
+      "size_bytes": 873,
+      "sha256": "6c5f39032ef601b3ab7784bda1ffa2d614c84ec47f34a85718e350da2494262e",
+      "protected": true,
+      "reason": "可能含凭据，只保留路径、大小和哈希，不迁移内容",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "artifacts/ai-ppt-system/output/pdf/deck.pdf",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "local-only",
+      "size_bytes": 2527782,
+      "sha256": "af03ba3ca31b8bd86a2051ef7e9c30bbc7ce16d1075b67f24d8181895953ab91",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "artifacts/ai-ppt-system/output/pptx/deck-company-dark.pptx",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "local-only",
+      "size_bytes": 974927,
+      "sha256": "fb90424493e8eedf28d40cf0cd2863b421e1999292fbb0d4a821e9ffcce0d3d8",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "artifacts/ai-ppt-system/output/pptx/deck-company-light.pptx",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "local-only",
+      "size_bytes": 721648,
+      "sha256": "6edc56879ce1a5c2d7c0302860f0632400abcaf389c0ca1b7ad2a11e111a8261",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "artifacts/ai-ppt-system/output/pptx/deck.pptx",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "local-only",
+      "size_bytes": 218813,
+      "sha256": "e7451c83b5bba0189e78838735bcaa990df0bfb72e5d7e983d3d7c9cd15a1329",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "artifacts/local-locks/~$项目上午调研验证记录_20260715.docx",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "local-only",
+      "size_bytes": 162,
+      "sha256": "2670d1d3645ffa81f715299dbd18223fedae3718e3de714a992a4ff8c78f7630",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "artifacts/lugu-validation/~$泸古项目验证材料_20260715.xlsx",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "local-only",
+      "size_bytes": 165,
+      "sha256": "50635652a084d84046900809192bec8f4fca0b219b87986925e64a5f6ac1c5bc",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "deliverables/awards/2026/AI最佳应用案例-王丽陈思汝吴经伟.xlsx",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "tracked",
+      "size_bytes": 12367,
+      "sha256": "5a09eacd1d4d7d0f4a989cecc9eaf1efc07c0ba353b7b1b0547846c0121ecebf",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "deliverables/awards/2026/斑马2026荣誉评优奖项申请表_AI最佳应用案例_名称更新.xlsx",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "tracked",
+      "size_bytes": 7659,
+      "sha256": "23799dedd1e309d37f620d22071ed0fdb26acdb2379327b8a3f8bc0d032b472c",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "deliverables/awards/2026/斑马2026荣誉评优奖项申请表_AI最佳应用案例_已填写.xlsx",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "tracked",
+      "size_bytes": 7648,
+      "sha256": "d12197485b6e876328bb60a7c19cfbc963b1ef2d3668c834e249658b50ab087e",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "deliverables/validation/lugu/泸古项目验证材料_20260715.xlsx",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "tracked",
+      "size_bytes": 31835,
+      "sha256": "0e8e89b39befebabcea0266b26e84fefcef8c2be4f77c21f20a602c674572e6c",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "docs/research/泸古项目上午调研验证记录_20260715.docx",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "tracked",
+      "size_bytes": 59292,
+      "sha256": "d96b3d0470ec9b3ae9dbe8d6a58c04fc416a5beb7a85714e4c7e983769fdc8fc",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "docs/research/泸古项目前期工期策划思路分析_20260715.docx",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "tracked",
+      "size_bytes": 39385,
+      "sha256": "1f5de5637c1bb932fb2ab1a845eafbd7d9511e5d9cf70b18bce4ead2c60aab07",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "docs/泸古项目计划管理方式变化验证记录_20260716_v3.docx",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "tracked",
+      "size_bytes": 45251,
+      "sha256": "b7f1371892c6ad69ece390ca01b7e8e50cf1c202ff55136c0fbd096c9e6bafdb",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "docs/泸古项目计划粒度验证记录_20260716.docx",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "tracked",
+      "size_bytes": 46099,
+      "sha256": "6e40c5667253c81b9da9a9eb15ec26e7f5bccd2d9a34012101e01d057b82db34",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "docs/泸古项目计划粒度验证记录_20260716_v2.docx",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "tracked",
+      "size_bytes": 47715,
+      "sha256": "d9ee2e28c3143237a69de4d794b8973c60cea8e9ecc1a967af778a6b2b0f7488",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "examples/bridge-import/渠溪河特大桥结构设计表.xlsx",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "tracked",
+      "size_bytes": 18094,
+      "sha256": "e5f433990044f8f7d23590b3fb448b4638a544c326ca53a81583065f5c4750a6",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "local-json-task-review/engineering-result/input/固定资源最小工期结果.v1.json",
+      "kind": "user-json-input",
+      "tracking_policy": "local-only",
+      "size_bytes": 44111,
+      "sha256": "a739479b60947750720bfcdf3c2ac34d06d525947924ff94f1afb41f6348a8b2",
+      "protected": true,
+      "reason": "独立 JSON 工作区输入，迁移前不得覆盖或删除",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "local-json-task-review/input/固定资源最小工期结果.json",
+      "kind": "user-json-input",
+      "tracking_policy": "local-only",
+      "size_bytes": 44111,
+      "sha256": "a739479b60947750720bfcdf3c2ac34d06d525947924ff94f1afb41f6348a8b2",
+      "protected": true,
+      "reason": "独立 JSON 工作区输入，迁移前不得覆盖或删除",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "local-json-task-review/input/第一版本.json",
+      "kind": "user-json-input",
+      "tracking_policy": "local-only",
+      "size_bytes": 176887,
+      "sha256": "ef96042d43ebb7e6933f89e8143af744dbdf9f7546e15561a93aed547ed33bde",
+      "protected": true,
+      "reason": "独立 JSON 工作区输入，迁移前不得覆盖或删除",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "local-json-task-review/input/第二版本(1).json",
+      "kind": "user-json-input",
+      "tracking_policy": "local-only",
+      "size_bytes": 2486371,
+      "sha256": "2bd5889d4ca7ad4cc3b2db15b720a024f603cb55db73f71db2b7d0ff57574db0",
+      "protected": true,
+      "reason": "独立 JSON 工作区输入，迁移前不得覆盖或删除",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "local-json-task-review/input/第二版本(2).json",
+      "kind": "user-json-input",
+      "tracking_policy": "local-only",
+      "size_bytes": 2058227,
+      "sha256": "b7462410ff92810234c16b1a08f37d1140917da63b82153057fa3342d8c5e4f3",
+      "protected": true,
+      "reason": "独立 JSON 工作区输入，迁移前不得覆盖或删除",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "local-json-task-review/input/第二版本.json",
+      "kind": "user-json-input",
+      "tracking_policy": "local-only",
+      "size_bytes": 220371,
+      "sha256": "ab0e5e85d5103ae8397de2e24d01593351111710bda0c0616fbfc8a92d8e37be",
+      "protected": true,
+      "reason": "独立 JSON 工作区输入，迁移前不得覆盖或删除",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "local-json-task-review/input/第二版本0701.json",
+      "kind": "user-json-input",
+      "tracking_policy": "local-only",
+      "size_bytes": 2061067,
+      "sha256": "20a108c8c934cc4beee24038620057450da2fb7e3f7ae33d3caece391622e781",
+      "protected": true,
+      "reason": "独立 JSON 工作区输入，迁移前不得覆盖或删除",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "local-json-task-review/input/第二版本0703.json",
+      "kind": "user-json-input",
+      "tracking_policy": "local-only",
+      "size_bytes": 245606,
+      "sha256": "1cf510bebbabfb3d2f2087b5f6802a7e2e6549505f7ca59a479f4d390e5d159b",
+      "protected": true,
+      "reason": "独立 JSON 工作区输入，迁移前不得覆盖或删除",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "outputs/019f69ae-7dc5-7a92-9406-dfb88497d8d1/lugu-project-master-acceptance.db",
+      "kind": "persistent-database",
+      "tracking_policy": "tracked",
+      "size_bytes": 7098368,
+      "sha256": "56156866904f0d05b4632b8f2e01995db4e133b94934ed83f89e917e81e01388",
+      "protected": true,
+      "reason": "数据库或验收快照，禁止自动删除",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "outputs/019f69ae-7dc5-7a92-9406-dfb88497d8d1/泸古TJ-1标统一工点及桥梁结构物导入数据.xlsx",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "tracked",
+      "size_bytes": 176630,
+      "sha256": "854c42db4a17172596448e9f0146fa98b66834a809d5fd864e861f4bfcadebee",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "tools/ai-ppt-system/assets/company-template/company-template.pptx",
+      "kind": "formal-or-source-binary",
+      "tracking_policy": "tracked",
+      "size_bytes": 6734454,
+      "sha256": "7c949fafd6a57eff9216dd89f42081e7ff87ba542a28bffd2111382f23cf8f55",
+      "protected": true,
+      "reason": "二进制只能按清单和哈希迁移，不得自动清理",
+      "allowed_action": "keep-unless-separately-approved"
+    },
+    {
+      "path": "泸古1标架梁工点导入模板.xlsx",
+      "kind": "root-customer-template",
+      "tracking_policy": "tracked",
+      "size_bytes": 7933,
+      "sha256": "5b7dbc0035d2c5a1d46ed4230f8b4851adc3a88f8b2eae440c9dcb0338e1c8be",
+      "protected": true,
+      "reason": "根目录客户模板需单独确认目标工作包",
+      "allowed_action": "keep-unless-separately-approved"
+    }
+  ]
+}

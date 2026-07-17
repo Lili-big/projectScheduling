@@ -1,0 +1,13 @@
+{
+  "id": "ai-ppt-system",
+  "stage": "06-delivery",
+  "purpose": "把结构化演示规格稳定渲染为 PPTX、HTML、PDF、PNG 和 Marp 成果。",
+  "status": "active",
+  "inputs": ["input/outline.md"],
+  "entrypoints": ["scripts/outline-to-spec.ts", "scripts/spec-to-pptx.ts", "package.json"],
+  "results": ["specs/slide_spec.json"],
+  "owner": "演示材料交付",
+  "tracking_policy": "tracked",
+  "retention_policy": "工具、模板、输入和结构化规格跟踪；渲染结果进入 .local-data/archive/rebuildable 并保持忽略。",
+  "related_workpackages": ["ai-case-summary"]
+}

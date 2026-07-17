@@ -1,0 +1,13 @@
+{
+  "id": "replace-me",
+  "stage": "00-governance",
+  "purpose": "复制模板后替换为工作包的单一目的。",
+  "status": "active",
+  "inputs": [],
+  "entrypoints": [],
+  "results": [],
+  "owner": "replace-me",
+  "tracking_policy": "tracked",
+  "retention_policy": "分别声明用户输入、正式成果、日志、缓存和临时文件的保留规则。",
+  "related_workpackages": []
+}

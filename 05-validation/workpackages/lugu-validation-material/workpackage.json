@@ -1,0 +1,16 @@
+{
+  "id": "lugu-validation-material",
+  "stage": "05-validation",
+  "purpose": "生成、检查并保存泸古客户验证工作簿及统一工点主数据验证成果。",
+  "status": "active",
+  "inputs": ["plans/泸古项目客户验证计划_20260715.md"],
+  "entrypoints": ["scripts/build_validation_workbook.mjs", "scripts/verify_validation_workbook.mjs"],
+  "results": [
+    "project-master/results/泸古TJ-1标统一工点及桥梁结构物导入数据.xlsx",
+    "project-master/results/泸古TJ-1标统一主数据_mapping-report.json"
+  ],
+  "owner": "客户验证材料",
+  "tracking_policy": "tracked",
+  "retention_policy": "验证计划、构建校验脚本和获准结果跟踪；本地数据库、预览缓存按本地保留策略管理。",
+  "related_workpackages": ["lugu-source-data-analysis", "lugu-plan-granularity"]
+}

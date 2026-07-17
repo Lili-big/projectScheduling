@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "discovery_root": ".agents/skills",
+  "entries": [
+    {
+      "name": "demo-algorithm-explainer",
+      "stage": "04-demo",
+      "discovery_path": ".agents/skills/demo-algorithm-explainer/SKILL.md",
+      "authoritative_path": "04-demo/skills/demo-algorithm-explainer/SKILL.md",
+      "maintenance": "业务解释规则在 04-demo 维护；发现入口只负责路由。"
+    },
+    {
+      "name": "speckit-analyze",
+      "stage": "03-requirements",
+      "discovery_path": ".agents/skills/speckit-analyze/SKILL.md",
+      "authoritative_path": ".agents/skills/speckit-analyze/SKILL.md",
+      "maintenance": "使用 03-requirements/specs 作为默认规格根。"
+    },
+    {
+      "name": "speckit-checklist",
+      "stage": "03-requirements",
+      "discovery_path": ".agents/skills/speckit-checklist/SKILL.md",
+      "authoritative_path": ".agents/skills/speckit-checklist/SKILL.md",
+      "maintenance": "检查表包含生命周期与工作包元数据。"
+    },
+    {
+      "name": "speckit-clarify",
+      "stage": "03-requirements",
+      "discovery_path": ".agents/skills/speckit-clarify/SKILL.md",
+      "authoritative_path": ".agents/skills/speckit-clarify/SKILL.md",
+      "maintenance": "澄清结果写回目标功能 spec。"
+    },
+    {
+      "name": "speckit-constitution",
+      "stage": "00-governance",
+      "discovery_path": ".agents/skills/speckit-constitution/SKILL.md",
+      "authoritative_path": ".agents/skills/speckit-constitution/SKILL.md",
+      "maintenance": "治理原则同步生命周期资产规则。"
+    },
+    {
+      "name": "speckit-converge",
+      "stage": "03-requirements",
+      "discovery_path": ".agents/skills/speckit-converge/SKILL.md",
+      "authoritative_path": ".agents/skills/speckit-converge/SKILL.md",
+      "maintenance": "收敛报告写入目标功能目录。"
+    },
+    {
+      "name": "speckit-implement",
+      "stage": "03-requirements",
+      "discovery_path": ".agents/skills/speckit-implement/SKILL.md",
+      "authoritative_path": ".agents/skills/speckit-implement/SKILL.md",
+      "maintenance": "按 tasks.md 执行并保持任务状态同步。"
+    },
+    {
+      "name": "speckit-plan",
+      "stage": "03-requirements",
+      "discovery_path": ".agents/skills/speckit-plan/SKILL.md",
+      "authoritative_path": ".agents/skills/speckit-plan/SKILL.md",
+      "maintenance": "计划必须声明生命周期归属。"
+    },
+    {
+      "name": "speckit-specify",
+      "stage": "03-requirements",
+      "discovery_path": ".agents/skills/speckit-specify/SKILL.md",
+      "authoritative_path": ".agents/skills/speckit-specify/SKILL.md",
+      "maintenance": "规格默认创建在 03-requirements/specs。"
+    },
+    {
+      "name": "speckit-tasks",
+      "stage": "03-requirements",
+      "discovery_path": ".agents/skills/speckit-tasks/SKILL.md",
+      "authoritative_path": ".agents/skills/speckit-tasks/SKILL.md",
+      "maintenance": "任务路径使用七阶段目录。"
+    },
+    {
+      "name": "speckit-taskstoissues",
+      "stage": "03-requirements",
+      "discovery_path": ".agents/skills/speckit-taskstoissues/SKILL.md",
+      "authoritative_path": ".agents/skills/speckit-taskstoissues/SKILL.md",
+      "maintenance": "只转换已确认任务，不改变资产主归属。"
+    }
+  ]
+}

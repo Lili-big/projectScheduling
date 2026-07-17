@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "default_mode": "dry-run",
+  "classification_priority": [
+    "persistent-state",
+    "user-input",
+    "formal-output",
+    "diagnostic-log",
+    "rebuildable",
+    "cache",
+    "temporary"
+  ],
+  "on_classification_conflict": "select-highest-protection-and-report",
+  "conflict_examples": [
+    {
+      "path": ".local-data/state/debug.log",
+      "matches": ["persistent-state", "diagnostic-log"],
+      "resolved_class": "persistent-state"
+    },
+    {
+      "path": "05-validation/workpackages/example/input/cache.json",
+      "matches": ["user-input", "cache"],
+      "resolved_class": "user-input"
+    }
+  ],
+  "rules": [
+    {
+      "pattern": ".local-data/state/**",
+      "retention_class": "persistent-state",
+      "protected": true,
+      "reason": "数据库、配置和运行状态不可自动删除"
+    },
+    {
+      "pattern": "01-discovery/**/input*/**;04-demo/**/input*/**;05-validation/**/input*/**;06-delivery/**/input*/**",
+      "retention_class": "user-input",
+      "protected": true,
+      "reason": "客户或维护者提供的输入必须单独确认"
+    },
+    {
+      "pattern": "00-governance/**;01-discovery/**/results/**;02-solution-analysis/**;03-requirements/**;04-demo/**;05-validation/**/results/**;05-validation/reports/**;06-delivery/**",
+      "retention_class": "formal-output",
+      "protected": true,
+      "reason": "正式交付物和批准成果只允许版本化替换"
+    },
+    {
+      "pattern": ".local-data/logs/**",
+      "retention_class": "diagnostic-log",
+      "protected": false,
+      "reason": "诊断日志可归档或清理，但必须先确认活动进程和保留范围",
+      "requires_process_check": true
+    },
+    {
+      "pattern": ".local-data/archive/rebuildable/**",
+      "retention_class": "rebuildable",
+      "protected": false,
+      "reason": "截图、预览、检查结果和构建输出可由权威输入重建"
+    },
+    {
+      "pattern": ".local-data/cache/**;.codex-tmp/**;.edge-profile/**;.netlify/**;.netlify-cli-runtime/**;.npm-cache/**;.npm-cache-netlify-deploy/**;.pip-cache/**;.playwright-cli/**;.skill-build/**;.venv/**;node_modules/**;outputs/lugu-validation-20260715/**",
+      "retention_class": "cache",
+      "protected": false,
+      "reason": "依赖和工具缓存可按锁文件或命令重建"
+    },
+    {
+      "pattern": ".local-data/tmp/**;.local-data/locks/**;.netlify-deploy-staging/**;.git-tmp-projectScheduling/**",
+      "retention_class": "temporary",
+      "protected": false,
+      "reason": "临时文件和锁仅在确认无活动进程后处理"
+    }
+  ]
+}

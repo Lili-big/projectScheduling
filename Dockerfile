@@ -9,8 +9,8 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY backend ./backend
-COPY examples ./examples
+COPY 04-demo/backend ./backend
+COPY 04-demo/examples ./examples
 
 EXPOSE 8000
 

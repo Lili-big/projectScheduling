@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "ownership_model": "lifecycle-stage -> workpackage -> asset",
+  "packages": [
+    {
+      "id": "lugu-customer-research",
+      "stage": "01-discovery",
+      "path": "01-discovery/workpackages/lugu-customer-research",
+      "status": "active",
+      "purpose": "客户访谈、规划逻辑分析与调研报告"
+    },
+    {
+      "id": "lugu-source-data-analysis",
+      "stage": "01-discovery",
+      "path": "01-discovery/workpackages/lugu-source-data-analysis",
+      "status": "active",
+      "purpose": "来源工作簿结构和桥梁进度数据画像"
+    },
+    {
+      "id": "json-task-viewer",
+      "stage": "04-demo",
+      "path": "04-demo/standalone/json-task-viewer",
+      "status": "active",
+      "purpose": "通用 JSON 任务离线展示"
+    },
+    {
+      "id": "schedule-result-viewer",
+      "stage": "04-demo",
+      "path": "04-demo/standalone/schedule-result-viewer",
+      "status": "active",
+      "purpose": "批准排程结果样例的零构建离线查看"
+    },
+    {
+      "id": "json-schedule-review",
+      "stage": "05-validation",
+      "path": "05-validation/workpackages/json-schedule-review",
+      "status": "active",
+      "purpose": "真实工程 JSON 排程结果评审"
+    },
+    {
+      "id": "lugu-validation-material",
+      "stage": "05-validation",
+      "path": "05-validation/workpackages/lugu-validation-material",
+      "status": "active",
+      "purpose": "客户验证工作簿和统一工点主数据验证"
+    },
+    {
+      "id": "lugu-plan-granularity",
+      "stage": "05-validation",
+      "path": "05-validation/workpackages/lugu-plan-granularity",
+      "status": "active",
+      "purpose": "计划版本、粒度和管理方式变化验证"
+    },
+    {
+      "id": "ai-case-summary",
+      "stage": "06-delivery",
+      "path": "06-delivery/workpackages/ai-case-summary",
+      "status": "orphaned",
+      "purpose": "AI Demo 与研发交付案例历史版本归档"
+    },
+    {
+      "id": "ai-ppt-system",
+      "stage": "06-delivery",
+      "path": "06-delivery/presentations/ai-ppt-system",
+      "status": "active",
+      "purpose": "企业级演示材料结构化生成与稳定渲染"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id": "json-task-viewer",
+  "stage": "04-demo",
+  "purpose": "把通用排程 JSON 转换为可离线打开的任务视图，独立于主 Demo 运行。",
+  "status": "active",
+  "inputs": ["input/第一版本.json"],
+  "entrypoints": ["scripts/build-task-view-html.mjs", "生成任务视图.cmd"],
+  "results": ["output/第一版本.html"],
+  "owner": "Demo 独立展示工具",
+  "tracking_policy": "tracked",
+  "retention_policy": "README 和脚本跟踪；客户/用户输入仅本地保留；HTML 与截图属于可再生成输出并忽略。",
+  "related_workpackages": ["schedule-result-viewer", "json-schedule-review"]
+}
