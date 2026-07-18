@@ -40,6 +40,7 @@ from ..contracts import (
     ScheduledTask,
     Task,
     ValidationMessage,
+    WorkpointResourceOverride,
     WorkSectionSide,
 )
 from ..scenario import generate_schedule_input_from_scenario, solve_ai_strict_fixed_resource_scenario
@@ -128,6 +129,7 @@ def initialize_resource_assistant(request: ResourceAssistantInitialRequest) -> R
 
     plans = _plans_from_payload_or_fallback(
         scenario=request.scenario,
+        project_profile=profile,
         raw_plans=raw_plan_payload,
         generation_source=generation_source,
         reference_examples=reference_examples,
@@ -165,37 +167,129 @@ def initialize_resource_assistant(request: ResourceAssistantInitialRequest) -> R
 
 def update_resource_plan(request: ResourceAssistantUpdatePlanRequest) -> ResourceAssistantUpdatePlanResponse:
     plan = request.resource_plan
-    diagnostics: list[ValidationMessage] = []
     if plan is None:
         raise ValueError("resource_plan is required for resource assistant plan update.")
-    pools_by_type = {pool.type: pool.model_copy(deep=True) for pool in plan.resource_pools}
-    for resource_type, quantity_value in request.resource_updates.items():
-        pool = pools_by_type.get(resource_type)
-        if pool is None:
-            diagnostics.append(
-                ValidationMessage(level="warning", subject_id=resource_type, message=f"资源类型 {resource_type} 不在当前方案中，已忽略。")
-            )
-            continue
-        quantity = max(0, int(quantity_value or 0))
-        max_quantity = max(quantity, int(pool.max_quantity or 0))
-        pools_by_type[resource_type] = pool.model_copy(update={"quantity": quantity, "max_quantity": max_quantity})
+    pools = [pool.model_copy(deep=True) for pool in plan.resource_pools]
+    pools = _apply_legacy_project_quantity_updates(pools, request.resource_updates)
+    pools = _apply_scoped_quantity_updates(pools, request.scoped_resource_updates)
 
     updated = plan.model_copy(
         update={
             "generation_source": "user_adjusted",
-            "resource_pools": list(pools_by_type.values()),
+            "resource_pools": pools,
             "changed_from_standard": True,
             "solve_status": "stale",
-            "stale_reason": "资源数量已调整，原求解结果和推荐解释需要重新计算。",
-            "validation_messages": _validate_plan_resource_pools(list(pools_by_type.values())),
+            "stale_reason": "资源数量建议已采纳，旧求解结果、指标对比和推荐解释均已失效，需要重新求解。",
+            "validation_messages": _validate_plan_resource_pools(pools),
         }
     )
     return ResourceAssistantUpdatePlanResponse(
         resource_plan=updated,
         invalidated_result_ids=[request.plan_id],
         generation_source="user_adjusted",
-        diagnostics=diagnostics,
+        diagnostics=[],
     )
+
+
+def _apply_legacy_project_quantity_updates(
+    pools: list[ResourcePool],
+    updates: dict[str, int],
+) -> list[ResourcePool]:
+    updated = list(pools)
+    for resource_type, raw_quantity in updates.items():
+        matching = [(index, pool) for index, pool in enumerate(updated) if pool.type == resource_type]
+        if not matching:
+            raise ValueError(f"资源类型 {resource_type} 不在当前方案中。")
+        if len(matching) != 1:
+            raise ValueError(f"资源类型 {resource_type} 对应多个资源池，旧 resource_updates 无法唯一定位。")
+        index, pool = matching[0]
+        if pool.scope_mode != "PROJECT_SHARED":
+            raise ValueError(
+                f"资源类型 {resource_type} 为工点独享，旧 resource_updates 只兼容项目共享；请使用 scoped_resource_updates。"
+            )
+        _ensure_quantity_editable(pool)
+        quantity = _validated_quantity(raw_quantity, pool.max_quantity, subject=f"资源类型 {resource_type}")
+        updated[index] = pool.model_copy(deep=True, update={"quantity": quantity})
+    return updated
+
+
+def _apply_scoped_quantity_updates(
+    pools: list[ResourcePool],
+    updates: list[Any],
+) -> list[ResourcePool]:
+    updated = list(pools)
+    indexes_by_id = {pool.id: index for index, pool in enumerate(updated)}
+    if len(indexes_by_id) != len(updated):
+        raise ValueError("当前资源方案包含重复资源池 ID，无法安全应用数量建议。")
+    seen: set[tuple[str, str | None]] = set()
+    for item in updates:
+        key = (item.resource_pool_id, item.workpoint_id)
+        if key in seen:
+            raise ValueError(f"资源池 {item.resource_pool_id} 的同一作用域数量更新重复。")
+        seen.add(key)
+        index = indexes_by_id.get(item.resource_pool_id)
+        if index is None:
+            raise ValueError(f"资源池 {item.resource_pool_id} 不在当前方案中。")
+        pool = updated[index]
+        _ensure_quantity_editable(pool)
+        if pool.scope_mode == "PROJECT_SHARED":
+            if item.workpoint_id is not None:
+                raise ValueError(f"项目共享资源池 {pool.id} 不接受工点 {item.workpoint_id} 数量。")
+            quantity = _validated_quantity(item.quantity, pool.max_quantity, subject=f"资源池 {pool.id}")
+            updated[index] = pool.model_copy(deep=True, update={"quantity": quantity})
+            continue
+
+        workpoint_id = str(item.workpoint_id or "").strip()
+        if not workpoint_id:
+            raise ValueError(f"工点独享资源池 {pool.id} 必须指定 workpoint_id。")
+        allowed_workpoints = _plan_authorized_workpoint_ids(pool)
+        if workpoint_id not in allowed_workpoints:
+            raise ValueError(f"工点 {workpoint_id} 不在资源池 {pool.id} 的获准范围内。")
+        overrides = {override.workpoint_id: override for override in pool.workpoint_overrides}
+        existing = overrides.get(workpoint_id)
+        effective_max = existing.max_quantity if existing and existing.max_quantity is not None else pool.max_quantity
+        quantity = _validated_quantity(
+            item.quantity,
+            effective_max,
+            subject=f"资源池 {pool.id} / 工点 {workpoint_id}",
+        )
+        overrides[workpoint_id] = (
+            existing.model_copy(deep=True, update={"quantity": quantity})
+            if existing is not None
+            else WorkpointResourceOverride(workpoint_id=workpoint_id, quantity=quantity)
+        )
+        updated[index] = pool.model_copy(
+            deep=True,
+            update={"workpoint_overrides": sorted(overrides.values(), key=lambda override: override.workpoint_id)},
+        )
+    return updated
+
+
+def _ensure_quantity_editable(pool: ResourcePool) -> None:
+    if not pool.enabled:
+        raise ValueError(f"资源池 {pool.id} 已禁用，不能应用数量建议。")
+    if pool.resource_mode != "LIMITED":
+        raise ValueError(f"资源池 {pool.id} 为 UNLIMITED，不能应用有限数量建议。")
+
+
+def _validated_quantity(raw_quantity: Any, maximum: int | None, *, subject: str) -> int:
+    if isinstance(raw_quantity, bool):
+        raise ValueError(f"{subject} 的数量必须是非负整数。")
+    try:
+        quantity = int(raw_quantity)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{subject} 的数量必须是非负整数。") from exc
+    if quantity < 0:
+        raise ValueError(f"{subject} 的数量必须是非负整数。")
+    if maximum is not None and quantity > int(maximum):
+        raise ValueError(f"{subject} 的数量 {quantity} 超过上限 {maximum}。")
+    return quantity
+
+
+def _plan_authorized_workpoint_ids(pool: ResourcePool) -> set[str]:
+    if pool.authorized_workpoint_ids is not None:
+        return set(pool.authorized_workpoint_ids)
+    return {override.workpoint_id for override in pool.workpoint_overrides}
 
 
 def batch_solve_resource_plans(request: ResourceAssistantBatchSolveRequest) -> ResourceAssistantBatchSolveResponse:
@@ -289,7 +383,11 @@ def build_project_profile(scenario: ScenarioInput, generated: GeneratedScheduleI
     ]
     continuous_groups = _continuous_beam_groups_for_project(scenario)
     control_piers = _control_piers_for_project(scenario, generated.schedule_input.tasks, continuous_groups)
-    resource_types = _resource_type_profile(scenario.resource_pools, generated.schedule_input.tasks)
+    resource_types = _resource_type_profile(
+        scenario.resource_pools,
+        generated.schedule_input.tasks,
+        workpoint_ids=sorted(bridge.id for bridge in project.bridges if bridge.workpoint_type == "bridge"),
+    )
     critical_path_candidates = _critical_path_candidates(generated.schedule_input.tasks, control_piers, continuous_groups)
     constraint_hints = _constraint_hints(scenario, control_piers, continuous_groups)
     return ResourceAssistantProjectProfile(
@@ -565,6 +663,9 @@ def build_llm_generation_context(profile: ResourceAssistantProjectProfile, scena
         "rules": [
             "一次性输出 economy、balanced、crash 三套方案。",
             "只能输出 current_resource_pools 中存在的资源类型。",
+            "PROJECT_SHARED 只能在 resource_quantities 中输出项目总量。",
+            "WORKPOINT_EXCLUSIVE 只能在 scoped_resource_quantities 中按 resource_pool_id + workpoint_id 输出工点数量。",
+            "不得改变 scope_mode、authorized_workpoint_ids、workpoint_overrides 或新增工点。",
             "桩机必须按工艺资源类型分别给数量。",
             "任何实际工作量为零、未映射、禁用或数据异常的资源，economy、balanced、crash 均必须为 0。",
             "资源数量必须是非负整数，不得超过 current_resource_pools 中的原始 max_quantity。",
@@ -626,6 +727,8 @@ def _deterministic_resource_baseline(
         pier_values = (economy, balanced, crash)
 
     for pool in scenario.resource_pools:
+        if pool.scope_mode != "PROJECT_SHARED":
+            continue
         state = states[pool.type]
         if state["status"] not in {"ACTIVE", "UNLIMITED"}:
             values = (0, 0, 0)
@@ -659,6 +762,49 @@ def _deterministic_resource_baseline(
     return result
 
 
+def _deterministic_scoped_resource_baseline(
+    scenario: ScenarioInput,
+    profile: ResourceAssistantProjectProfile,
+) -> dict[str, list[dict[str, Any]]]:
+    profile_by_pool = {
+        str(item.get("resource_pool_id")): item
+        for item in profile.resource_types
+        if item.get("scope_mode") == "WORKPOINT_EXCLUSIVE"
+    }
+    result: dict[str, list[dict[str, Any]]] = {
+        "economy": [],
+        "balanced": [],
+        "crash": [],
+    }
+    for pool in scenario.resource_pools:
+        if pool.scope_mode != "WORKPOINT_EXCLUSIVE":
+            continue
+        profile_item = profile_by_pool.get(pool.id, {})
+        for workpoint in profile_item.get("workpoint_quantities", []):
+            current = max(0, int(workpoint.get("quantity") or 0))
+            maximum = max(current, int(workpoint.get("max_quantity") or current))
+            active = bool(workpoint.get("enabled")) and int(workpoint.get("task_count") or 0) > 0
+            values = (
+                (0, 0, 0)
+                if not active
+                else (math.ceil(current * 0.75), current, math.ceil(current * 1.25))
+            )
+            previous = 0
+            for profile_name, raw_value in zip(("economy", "balanced", "crash"), values):
+                quantity = min(max(previous, int(raw_value)), maximum)
+                previous = quantity
+                result[profile_name].append(
+                    {
+                        "resource_pool_id": pool.id,
+                        "workpoint_id": str(workpoint["workpoint_id"]),
+                        "quantity": quantity,
+                    }
+                )
+    for profile_name in result:
+        result[profile_name].sort(key=lambda item: (item["resource_pool_id"], item["workpoint_id"]))
+    return result
+
+
 def _validate_raw_plan_payload(
     raw_plans: list[dict[str, Any]] | None,
     scenario: ScenarioInput,
@@ -672,56 +818,146 @@ def _validate_raw_plan_payload(
     if len(raw_plans) != 3 or set(raw_by_profile) != set(expected_profiles):
         errors.append({"code": "INVALID_PROFILE_SET", "expected": "恰好包含 economy、balanced、crash 三个唯一方案"})
         return errors
-    pools = {pool.type: pool for pool in scenario.resource_pools}
+    pools_by_type: dict[str, list[ResourcePool]] = defaultdict(list)
+    pools_by_id = {pool.id: pool for pool in scenario.resource_pools}
+    for pool in scenario.resource_pools:
+        pools_by_type[pool.type].append(pool)
+    shared_types = {pool.type for pool in scenario.resource_pools if pool.scope_mode == "PROJECT_SHARED"}
+    project_workpoint_ids = sorted(
+        bridge.id for bridge in scenario.project.bridges if bridge.workpoint_type == "bridge"
+    )
+    expected_scoped_keys = {
+        (pool.id, workpoint_id)
+        for pool in scenario.resource_pools
+        if pool.scope_mode == "WORKPOINT_EXCLUSIVE"
+        for workpoint_id in _scenario_authorized_workpoint_ids(pool, project_workpoint_ids)
+    }
+    workpoint_states = {
+        (str(item.get("resource_pool_id")), str(workpoint.get("workpoint_id"))): workpoint
+        for item in profile.resource_types
+        for workpoint in item.get("workpoint_quantities", [])
+    }
     states = _resource_workload_states(scenario, profile)
-    parsed: dict[str, dict[str, int]] = {}
+    parsed_shared: dict[str, dict[str, int]] = {}
+    parsed_scoped: dict[str, dict[tuple[str, str], int]] = {}
+    forbidden_scope_fields = {"scope_mode", "authorized_workpoint_ids", "workpoint_overrides"}
     for profile_name in expected_profiles:
         raw = raw_by_profile[profile_name]
+        for field in sorted(forbidden_scope_fields.intersection(raw)):
+            errors.append(
+                {
+                    "code": "SCOPE_CHANGE_NOT_ALLOWED",
+                    "profile": profile_name,
+                    "field": field,
+                    "expected": "AI 只能建议数量，不得输出或改变作用域字段",
+                }
+            )
         quantities = raw.get("resource_quantities")
         if not isinstance(quantities, dict):
             errors.append({"code": "INVALID_RESOURCE_MAP", "profile": profile_name, "expected": "resource_quantities 必须是对象"})
-            continue
-        parsed[profile_name] = {}
+            quantities = {}
+        parsed_shared[profile_name] = {}
         for resource_type, value in quantities.items():
-            if resource_type not in pools:
+            matching_pools = pools_by_type.get(resource_type, [])
+            if not matching_pools:
                 errors.append({"code": "UNKNOWN_RESOURCE_TYPE", "profile": profile_name, "resource_type": resource_type, "actual": value, "expected": "仅允许 current_resource_pools 中的资源类型"})
+                continue
+            if any(pool.scope_mode == "WORKPOINT_EXCLUSIVE" for pool in matching_pools):
+                errors.append({"code": "LEGACY_MAP_FOR_EXCLUSIVE", "profile": profile_name, "resource_type": resource_type, "expected": "工点独享资源必须使用 scoped_resource_quantities"})
+                continue
+            if len(matching_pools) != 1:
+                errors.append({"code": "AMBIGUOUS_RESOURCE_TYPE", "profile": profile_name, "resource_type": resource_type, "expected": "共享资源类型必须唯一定位一个资源池"})
                 continue
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 errors.append({"code": "INVALID_QUANTITY", "profile": profile_name, "resource_type": resource_type, "actual": value, "expected": "非负整数"})
                 continue
-            parsed[profile_name][resource_type] = value
-            pool = pools[resource_type]
+            parsed_shared[profile_name][resource_type] = value
+            pool = matching_pools[0]
             if states[resource_type]["status"] not in {"ACTIVE", "UNLIMITED"} and value != 0:
                 errors.append({"code": "ZERO_WORKLOAD_NONZERO", "profile": profile_name, "resource_type": resource_type, "actual": value, "expected": 0})
             if pool.max_quantity is not None and value > pool.max_quantity:
                 errors.append({"code": "MAX_QUANTITY_EXCEEDED", "profile": profile_name, "resource_type": resource_type, "actual": value, "expected": f"<= {pool.max_quantity}"})
-        missing = set(pools) - set(quantities)
+        missing = shared_types - set(quantities)
         for resource_type in sorted(missing):
             errors.append({"code": "MISSING_RESOURCE_TYPE", "profile": profile_name, "resource_type": resource_type, "expected": "完整输出所有当前资源类型"})
+
+        scoped_items = raw.get("scoped_resource_quantities", [])
+        if not isinstance(scoped_items, list):
+            errors.append({"code": "INVALID_SCOPED_RESOURCE_LIST", "profile": profile_name, "expected": "scoped_resource_quantities 必须是数组"})
+            scoped_items = []
+        parsed_scoped[profile_name] = {}
+        seen_scoped: set[tuple[str, str]] = set()
+        for item in scoped_items:
+            if not isinstance(item, dict):
+                errors.append({"code": "INVALID_SCOPED_RESOURCE_ITEM", "profile": profile_name})
+                continue
+            for field in sorted(forbidden_scope_fields.intersection(item)):
+                errors.append({"code": "SCOPE_CHANGE_NOT_ALLOWED", "profile": profile_name, "field": field, "expected": "结构化建议只允许 resource_pool_id、workpoint_id、quantity"})
+            pool_id = str(item.get("resource_pool_id") or "").strip()
+            workpoint_id = str(item.get("workpoint_id") or "").strip()
+            pool = pools_by_id.get(pool_id)
+            if pool is None:
+                errors.append({"code": "UNKNOWN_RESOURCE_POOL", "profile": profile_name, "resource_pool_id": pool_id})
+                continue
+            if pool.scope_mode != "WORKPOINT_EXCLUSIVE":
+                errors.append({"code": "SCOPED_UPDATE_FOR_SHARED", "profile": profile_name, "resource_pool_id": pool_id, "expected": "项目共享资源必须在 resource_quantities 中输出项目总量"})
+                continue
+            allowed_workpoints = _scenario_authorized_workpoint_ids(pool, project_workpoint_ids)
+            if not workpoint_id or workpoint_id not in allowed_workpoints:
+                errors.append({"code": "UNKNOWN_WORKPOINT", "profile": profile_name, "resource_pool_id": pool_id, "workpoint_id": workpoint_id})
+                continue
+            key = (pool_id, workpoint_id)
+            if key in seen_scoped:
+                errors.append({"code": "DUPLICATE_SCOPED_UPDATE", "profile": profile_name, "resource_pool_id": pool_id, "workpoint_id": workpoint_id})
+                continue
+            seen_scoped.add(key)
+            value = item.get("quantity")
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                errors.append({"code": "INVALID_QUANTITY", "profile": profile_name, "resource_pool_id": pool_id, "workpoint_id": workpoint_id, "actual": value, "expected": "非负整数"})
+                continue
+            override = next((candidate for candidate in pool.workpoint_overrides if candidate.workpoint_id == workpoint_id), None)
+            maximum = override.max_quantity if override and override.max_quantity is not None else pool.max_quantity
+            if maximum is not None and value > maximum:
+                errors.append({"code": "MAX_QUANTITY_EXCEEDED", "profile": profile_name, "resource_pool_id": pool_id, "workpoint_id": workpoint_id, "actual": value, "expected": f"<= {maximum}"})
+            state = workpoint_states.get(key, {})
+            if (not state.get("enabled") or int(state.get("task_count") or 0) <= 0) and value != 0:
+                errors.append({"code": "ZERO_WORKLOAD_NONZERO", "profile": profile_name, "resource_pool_id": pool_id, "workpoint_id": workpoint_id, "actual": value, "expected": 0})
+            parsed_scoped[profile_name][key] = value
+        for pool_id, workpoint_id in sorted(expected_scoped_keys - seen_scoped):
+            errors.append({"code": "MISSING_SCOPED_RESOURCE", "profile": profile_name, "resource_pool_id": pool_id, "workpoint_id": workpoint_id})
         if not isinstance(raw.get("organization_strategy"), str):
             errors.append({"code": "INVALID_STRATEGY_TYPE", "profile": profile_name, "expected": "organization_strategy 必须是字符串"})
-    for resource_type in pools:
-        if all(resource_type in parsed.get(name, {}) for name in expected_profiles):
-            values = [parsed[name][resource_type] for name in expected_profiles]
+    for resource_type in shared_types:
+        if all(resource_type in parsed_shared.get(name, {}) for name in expected_profiles):
+            values = [parsed_shared[name][resource_type] for name in expected_profiles]
             if values != sorted(values):
                 errors.append({"code": "NON_MONOTONIC_QUANTITY", "resource_type": resource_type, "actual": values, "expected": "economy <= balanced <= crash"})
+    for pool_id, workpoint_id in sorted(expected_scoped_keys):
+        key = (pool_id, workpoint_id)
+        if all(key in parsed_scoped.get(name, {}) for name in expected_profiles):
+            values = [parsed_scoped[name][key] for name in expected_profiles]
+            if values != sorted(values):
+                errors.append({"code": "NON_MONOTONIC_QUANTITY", "resource_pool_id": pool_id, "workpoint_id": workpoint_id, "actual": values, "expected": "economy <= balanced <= crash"})
     return errors
 
 
 def _plans_from_payload_or_fallback(
     *,
     scenario: ScenarioInput,
+    project_profile: ResourceAssistantProjectProfile,
     raw_plans: list[dict[str, Any]] | None,
     generation_source: str,
     reference_examples: list[ResourceAssistantReferenceExample],
 ) -> list[ResourceAssistantPlan]:
     raw_by_profile = _raw_plans_by_profile(raw_plans or [])
     if not raw_by_profile:
+        scoped_baseline = _deterministic_scoped_resource_baseline(scenario, project_profile)
         raw_by_profile = {
             example.profile: {
                 "profile": example.profile,
                 "positioning": PROFILE_POSITIONING[example.profile],
                 "resource_quantities": example.resource_quantities,
+                "scoped_resource_quantities": scoped_baseline[example.profile],
                 "organization_strategy": _fallback_strategy(example.profile),
                 "generation_rationale": "未配置或未成功调用外部大模型，使用本地参考样例生成演示初始值。",
                 "applicable_scenarios": _fallback_applicable_scenarios(example.profile),
@@ -736,7 +972,8 @@ def _plans_from_payload_or_fallback(
     for profile in ("economy", "balanced", "crash"):
         raw = raw_by_profile.get(profile) or {}
         quantities = _resource_quantities_from_raw(raw)
-        pools = _resource_pools_with_quantities(scenario.resource_pools, quantities)
+        scoped_quantities = _scoped_resource_quantities_from_raw(raw)
+        pools = _resource_pools_with_quantities(scenario.resource_pools, quantities, scoped_quantities)
         validation_messages = _validate_plan_resource_pools(pools, allowed_types={pool.type for pool in scenario.resource_pools})
         plans.append(
             ResourceAssistantPlan(
@@ -781,9 +1018,44 @@ def _resource_quantities_from_raw(raw: dict[str, Any]) -> dict[str, int]:
     return quantities
 
 
-def _resource_pools_with_quantities(base_pools: list[ResourcePool], quantities: dict[str, int]) -> list[ResourcePool]:
+def _scoped_resource_quantities_from_raw(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    value = raw.get("scoped_resource_quantities") or []
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _resource_pools_with_quantities(
+    base_pools: list[ResourcePool],
+    quantities: dict[str, int],
+    scoped_quantities: list[dict[str, Any]],
+) -> list[ResourcePool]:
+    scoped_by_pool: dict[str, dict[str, int]] = defaultdict(dict)
+    for item in scoped_quantities:
+        pool_id = str(item.get("resource_pool_id") or "")
+        workpoint_id = str(item.get("workpoint_id") or "")
+        if pool_id and workpoint_id:
+            scoped_by_pool[pool_id][workpoint_id] = max(0, int(item.get("quantity") or 0))
     updated: list[ResourcePool] = []
     for pool in base_pools:
+        if pool.scope_mode == "WORKPOINT_EXCLUSIVE":
+            overrides = {override.workpoint_id: override.model_copy(deep=True) for override in pool.workpoint_overrides}
+            for workpoint_id, raw_quantity in scoped_by_pool.get(pool.id, {}).items():
+                existing = overrides.get(workpoint_id)
+                maximum = existing.max_quantity if existing and existing.max_quantity is not None else pool.max_quantity
+                quantity = min(raw_quantity, int(maximum)) if maximum is not None else raw_quantity
+                overrides[workpoint_id] = (
+                    existing.model_copy(deep=True, update={"quantity": quantity})
+                    if existing is not None
+                    else WorkpointResourceOverride(workpoint_id=workpoint_id, quantity=quantity)
+                )
+            updated.append(
+                pool.model_copy(
+                    deep=True,
+                    update={"workpoint_overrides": sorted(overrides.values(), key=lambda item: item.workpoint_id)},
+                )
+            )
+            continue
         quantity = 0 if not pool.enabled else quantities.get(pool.type, pool.quantity or 0)
         quantity = max(0, int(quantity or 0))
         if pool.max_quantity is not None:
@@ -1059,20 +1331,59 @@ def _support_index_from_text(value: str | None) -> int | None:
         return None
 
 
-def _resource_type_profile(resource_pools: list[ResourcePool], tasks: list[Task]) -> list[dict[str, Any]]:
+def _resource_type_profile(
+    resource_pools: list[ResourcePool],
+    tasks: list[Task],
+    *,
+    workpoint_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
     demand: dict[str, dict[str, Any]] = defaultdict(lambda: {"task_count": 0, "duration_days": 0, "component_types": set()})
+    demand_by_workpoint: dict[tuple[str, str], dict[str, int]] = defaultdict(
+        lambda: {"task_count": 0, "duration_days": 0}
+    )
     for task in tasks:
         for resource_type in task.compatible_resource_types:
             demand[resource_type]["task_count"] += 1
             demand[resource_type]["duration_days"] += task.duration_days
             demand[resource_type]["component_types"].add(task.component_type)
+            if task.bridge_id:
+                demand_by_workpoint[(resource_type, task.bridge_id)]["task_count"] += 1
+                demand_by_workpoint[(resource_type, task.bridge_id)]["duration_days"] += task.duration_days
     result: list[dict[str, Any]] = []
     for pool in sorted(resource_pools, key=lambda item: item.label):
         item = demand.get(pool.type, {"task_count": 0, "duration_days": 0, "component_types": set()})
+        authorized_ids = _scenario_authorized_workpoint_ids(pool, workpoint_ids or [])
+        overrides = {override.workpoint_id: override for override in pool.workpoint_overrides}
+        workpoint_quantities: list[dict[str, Any]] = []
+        if pool.scope_mode == "WORKPOINT_EXCLUSIVE":
+            for workpoint_id in authorized_ids:
+                override = overrides.get(workpoint_id)
+                workpoint_demand = demand_by_workpoint[(pool.type, workpoint_id)]
+                workpoint_quantities.append(
+                    {
+                        "resource_pool_id": pool.id,
+                        "workpoint_id": workpoint_id,
+                        "enabled": pool.enabled if override is None or override.enabled is None else override.enabled,
+                        "quantity": pool.quantity if override is None or override.quantity is None else override.quantity,
+                        "max_quantity": (
+                            pool.max_quantity
+                            if override is None or override.max_quantity is None
+                            else override.max_quantity
+                        ),
+                        "inheritance_source": "global" if override is None else "overridden",
+                        "task_count": workpoint_demand["task_count"],
+                        "duration_days": workpoint_demand["duration_days"],
+                    }
+                )
         result.append(
             {
+                "resource_pool_id": pool.id,
                 "resource_type": pool.type,
                 "label": pool.label,
+                "scope_mode": pool.scope_mode,
+                "authorized_workpoint_ids": authorized_ids,
+                "quantity_semantics": "project_total" if pool.scope_mode == "PROJECT_SHARED" else "per_workpoint",
+                "workpoint_quantities": workpoint_quantities,
                 "quantity": pool.quantity,
                 "max_quantity": pool.max_quantity,
                 "resource_mode": pool.resource_mode,
@@ -1084,6 +1395,12 @@ def _resource_type_profile(resource_pools: list[ResourcePool], tasks: list[Task]
             }
         )
     return result
+
+
+def _scenario_authorized_workpoint_ids(pool: ResourcePool, project_workpoint_ids: list[str]) -> list[str]:
+    if pool.authorized_workpoint_ids is None:
+        return sorted(set(project_workpoint_ids))
+    return sorted(set(pool.authorized_workpoint_ids))
 
 
 def _critical_path_candidates(

@@ -13,12 +13,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import app.main as main_module  # noqa: E402
 from app.main import (  # noqa: E402
+    create_adjustment_proposals_endpoint,
     create_baseline_plan_endpoint,
     create_forecast_endpoint,
     create_progress_snapshot_endpoint,
     get_plan_control_project_endpoint,
 )
 from app.models import (  # noqa: E402
+    CreateAdjustmentRequest,
     CreateForecastRequest,
     CreateProgressSnapshotRequest,
     ProgressEntry,
@@ -193,6 +195,84 @@ def test_plan_control_forecast_api_returns_execution_summary_and_critical_nodes(
     assert summary.latest_forecast is not None
     assert summary.latest_forecast.forecast_id == forecast.forecast_id
     assert summary.latest_forecast.critical_nodes == forecast.critical_nodes
+
+
+def test_resource_semantic_change_stales_old_plan_forecast_and_proposals_but_preserves_history(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(default_plan_control_repository, "path", tmp_path / "plan-control-resource-stale.json")
+    initial_request = solved_baseline_request()
+    baseline = create_baseline_plan_endpoint(initial_request)
+    snapshot = create_progress_snapshot_endpoint(
+        CreateProgressSnapshotRequest(
+            plan_version_id=baseline.plan_version_id,
+            status_date=_progress_status_date(baseline),
+            submitted_by="填报人",
+            entries=[],
+        )
+    ).progress_snapshot
+    forecast = create_forecast_endpoint(
+        CreateForecastRequest(
+            plan_version_id=baseline.plan_version_id,
+            progress_snapshot_id=snapshot.progress_snapshot_id,
+        )
+    )
+    comparison = create_adjustment_proposals_endpoint(
+        forecast.forecast_id,
+        CreateAdjustmentRequest(max_resource_increments={}),
+    )
+
+    changed_request = solved_baseline_request()
+    changed_pool = changed_request.resource_plan.resource_pools[0]
+    changed_quantity = (changed_pool.quantity or 0) + 1
+    changed_max_quantity = max(changed_pool.max_quantity or 0, changed_quantity)
+    pool_updates = {"quantity": changed_quantity, "max_quantity": changed_max_quantity}
+    changed_request.resource_plan = changed_request.resource_plan.model_copy(
+        update={
+            "resource_pools": [
+                pool.model_copy(update=pool_updates) if pool.id == changed_pool.id else pool
+                for pool in changed_request.resource_plan.resource_pools
+            ]
+        }
+    )
+    changed_request.scenario = changed_request.scenario.model_copy(
+        update={
+            "resource_pools": [
+                pool.model_copy(update=pool_updates) if pool.id == changed_pool.id else pool
+                for pool in changed_request.scenario.resource_pools
+            ]
+        }
+    )
+    changed_request.confirmation_reason = "资源投入变化后发布新基线"
+    replacement = create_baseline_plan_endpoint(changed_request)
+
+    store = default_plan_control_repository.load()
+    plans = {item.plan_version_id: item for item in store.plan_versions}
+    forecasts = {item.forecast_id: item for item in store.forecasts}
+    proposal_ids = {item.proposal_id for item in comparison.proposals}
+
+    assert plans[baseline.plan_version_id].status == "stale"
+    assert plans[replacement.plan_version_id].status == "active"
+    assert forecasts[forecast.forecast_id].status == "stale"
+    assert proposal_ids
+    assert all(item.status == "stale" for item in store.adjustment_proposals if item.proposal_id in proposal_ids)
+    assert any(item.progress_snapshot_id == snapshot.progress_snapshot_id for item in store.progress_snapshots)
+    assert len(store.plan_versions) == 2
+    with pytest.raises(HTTPException) as stale_forecast:
+        create_forecast_endpoint(
+            CreateForecastRequest(
+                plan_version_id=baseline.plan_version_id,
+                progress_snapshot_id=snapshot.progress_snapshot_id,
+            )
+        )
+    assert stale_forecast.value.status_code == 409
+    with pytest.raises(HTTPException) as stale_proposals:
+        create_adjustment_proposals_endpoint(
+            forecast.forecast_id,
+            CreateAdjustmentRequest(max_resource_increments={}),
+        )
+    assert stale_proposals.value.status_code == 409
 
 
 @pytest.mark.parametrize(

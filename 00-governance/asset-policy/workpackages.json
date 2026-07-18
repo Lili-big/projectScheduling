@@ -17,6 +17,13 @@
       "purpose": "来源工作簿结构和桥梁进度数据画像"
     },
     {
+      "id": "infrastructure-version-research-2026q2",
+      "stage": "01-discovery",
+      "path": "01-discovery/workpackages/infrastructure-version-research-2026q2",
+      "status": "orphaned",
+      "purpose": "基建版本 2026 Q2 历史客户调研整理稿和脱敏迁移索引"
+    },
+    {
       "id": "json-task-viewer",
       "stage": "04-demo",
       "path": "04-demo/standalone/json-task-viewer",
@@ -50,6 +57,13 @@
       "path": "05-validation/workpackages/lugu-plan-granularity",
       "status": "active",
       "purpose": "计划版本、粒度和管理方式变化验证"
+    },
+    {
+      "id": "dianfengwu-tj03-product-validation-2026q2",
+      "stage": "05-validation",
+      "path": "05-validation/workpackages/dianfengwu-tj03-product-validation-2026q2",
+      "status": "orphaned",
+      "purpose": "垫丰武 TJ03 2026 Q2 历史客户验证记录和脱敏迁移索引"
     },
     {
       "id": "ai-case-summary",

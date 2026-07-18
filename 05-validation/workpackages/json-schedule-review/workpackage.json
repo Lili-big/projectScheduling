@@ -9,7 +9,7 @@
     "output/固定资源最小工期结果.v1.report.json",
     "output/固定资源最小工期结果.v1.html"
   ],
-  "owner": "排程结果验证",
+  "owner": "L01｜客户调研与验证闭环（排程结果验证）",
   "tracking_policy": "tracked",
   "retention_policy": "README 和脚本跟踪；真实输入 local-only；报告和 HTML 可再生成并忽略。",
   "related_workpackages": ["json-task-viewer"]

@@ -183,6 +183,13 @@
   font-size: 12px;
 }
 
+.resource-plan-resource small {
+  display: block;
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 10px;
+}
+
 .resource-plan-resource input {
   width: 68px;
 }

@@ -1,4 +1,13 @@
-import type { ProcessTemplate, ResourceCostType, ResourceMode, ResourcePool, ScenarioInput, Task } from "../contracts";
+import type {
+  ProcessTemplate,
+  ResourceCostType,
+  ResourceMode,
+  ResourcePool,
+  ResourceScopeMode,
+  ScenarioInput,
+  Task,
+  WorkpointResourceOverride,
+} from "../contracts";
 import {
   defaultResourceTypeByComponent,
   keyResourceComponentTypes,
@@ -72,6 +81,52 @@ export function resourcePoolBillingPeriodDays(pool: ResourcePool): number {
 
 const mechanicalPileResourceTypes = new Set(["rotary_drill", "circulation_drill", "impact_drill"]);
 
+export type EffectiveWorkpointResource = {
+  workpointId: string;
+  enabled: boolean;
+  quantity: number;
+  maxQuantity: number;
+  inheritanceSource: "inherited" | "overridden";
+};
+
+export const resourceScopeLabels: Record<ResourceScopeMode, string> = {
+  PROJECT_SHARED: "项目共享",
+  WORKPOINT_EXCLUSIVE: "工点独享",
+};
+
+function normalizeResourceScopeMode(value: ResourceScopeMode | undefined): ResourceScopeMode {
+  return value === "WORKPOINT_EXCLUSIVE" ? value : "PROJECT_SHARED";
+}
+
+function normalizeWorkpointIds(values: string[] | null | undefined): string[] | null {
+  if (values == null) return null;
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort();
+}
+
+function normalizedOverride(override: WorkpointResourceOverride): WorkpointResourceOverride | null {
+  const workpointId = override.workpoint_id.trim();
+  if (!workpointId) return null;
+  const normalized: WorkpointResourceOverride = { workpoint_id: workpointId };
+  if (override.enabled != null) normalized.enabled = Boolean(override.enabled);
+  if (override.quantity != null) normalized.quantity = normalizeResourceQuantity(override.quantity);
+  if (override.max_quantity != null) normalized.max_quantity = normalizeResourceQuantity(override.max_quantity);
+  return Object.keys(normalized).length > 1 ? normalized : null;
+}
+
+function normalizeWorkpointOverrides(values: WorkpointResourceOverride[] | undefined): WorkpointResourceOverride[] {
+  const byWorkpoint = new Map<string, WorkpointResourceOverride>();
+  for (const value of values ?? []) {
+    const normalized = normalizedOverride(value);
+    if (normalized) byWorkpoint.set(normalized.workpoint_id, normalized);
+  }
+  return [...byWorkpoint.values()].sort((left, right) => left.workpoint_id.localeCompare(right.workpoint_id));
+}
+
+function normalizeResourceQuantity(value: unknown): number {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.trunc(number)) : 0;
+}
+
 function normalizedParallelRuleDescription(pool: ResourcePool): string {
   if (mechanicalPileResourceTypes.has(pool.type)) {
     return "机械桩基资源：按同桥同幅同墩同工艺形成墩组，组内由同一台设备负责；不再配置并行上限。";
@@ -82,31 +137,116 @@ function normalizedParallelRuleDescription(pool: ResourcePool): string {
   return String(pool.parallel_rule_description ?? "");
 }
 
-export function normalizeLimitedResourcePool(pool: ResourcePool): ResourcePool {
-  const quantity = Math.max(0, resourcePoolQuantity(pool));
-  const rawMaxQuantity = typeof pool.max_quantity === "number" && Number.isFinite(pool.max_quantity)
-    ? pool.max_quantity
-    : quantity;
+export function normalizeResourcePoolForWorkspace(pool: ResourcePool): ResourcePool {
+  const resourceMode = resourcePoolMode(pool);
+  const quantity = resourceMode === "LIMITED" ? normalizeResourceQuantity(pool.quantity) : pool.quantity;
+  const normalizedQuantity = typeof quantity === "number" ? quantity : 0;
+  const maxQuantity = resourceMode === "LIMITED"
+    ? Math.max(normalizedQuantity, normalizeResourceQuantity(pool.max_quantity ?? normalizedQuantity))
+    : pool.max_quantity;
   return {
     ...pool,
-    resource_mode: "LIMITED",
+    resource_mode: resourceMode,
+    scope_mode: normalizeResourceScopeMode(pool.scope_mode),
     quantity,
-    max_quantity: Math.max(quantity, rawMaxQuantity),
+    max_quantity: maxQuantity,
+    authorized_workpoint_ids: normalizeWorkpointIds(pool.authorized_workpoint_ids),
+    workpoint_overrides: normalizeWorkpointOverrides(pool.workpoint_overrides),
     calendar_id: pool.calendar_id || "continuous",
     same_structure_resource_binding: Boolean(pool.same_structure_resource_binding),
     parallel_rule_description: normalizedParallelRuleDescription(pool),
   };
 }
 
+export function effectiveWorkpointResource(pool: ResourcePool, workpointId: string): EffectiveWorkpointResource {
+  const normalized = normalizeResourcePoolForWorkspace(pool);
+  const override = normalized.workpoint_overrides?.find((item) => item.workpoint_id === workpointId);
+  const quantity = override?.quantity ?? resourcePoolQuantity(normalized);
+  const maxQuantity = Math.max(quantity, override?.max_quantity ?? resourcePoolUsableLimit(normalized));
+  return {
+    workpointId,
+    enabled: override?.enabled ?? normalized.enabled,
+    quantity,
+    maxQuantity,
+    inheritanceSource: override ? "overridden" : "inherited",
+  };
+}
+
+export function setWorkpointResourceOverride(
+  pool: ResourcePool,
+  workpointId: string,
+  patch: Omit<Partial<WorkpointResourceOverride>, "workpoint_id">,
+): ResourcePool {
+  const normalized = normalizeResourcePoolForWorkspace(pool);
+  const current = normalized.workpoint_overrides?.find((item) => item.workpoint_id === workpointId) ?? { workpoint_id: workpointId };
+  const next = normalizedOverride({ ...current, ...patch, workpoint_id: workpointId });
+  const remaining = (normalized.workpoint_overrides ?? []).filter((item) => item.workpoint_id !== workpointId);
+  return normalizeResourcePoolForWorkspace({
+    ...normalized,
+    workpoint_overrides: next ? [...remaining, next] : remaining,
+  });
+}
+
+export function restoreWorkpointResourceInheritance(pool: ResourcePool, workpointId: string): ResourcePool {
+  return normalizeResourcePoolForWorkspace({
+    ...pool,
+    workpoint_overrides: (pool.workpoint_overrides ?? []).filter((item) => item.workpoint_id !== workpointId),
+  });
+}
+
+export function resourcePoolScopeIssues(pool: ResourcePool, authoritativeWorkpointIds: string[]): string[] {
+  const authoritative = new Set(authoritativeWorkpointIds);
+  const referenced = [
+    ...(pool.authorized_workpoint_ids ?? []),
+    ...(pool.workpoint_overrides ?? []).map((item) => item.workpoint_id),
+  ];
+  const issues = new Set<string>();
+  if (referenced.some((workpointId) => !authoritative.has(workpointId))) {
+    issues.add("配置包含当前项目主数据版本之外的工点");
+  }
+  const overrideIds = (pool.workpoint_overrides ?? []).map((item) => item.workpoint_id);
+  if (new Set(overrideIds).size !== overrideIds.length) issues.add("同一工点存在重复覆盖");
+  return [...issues];
+}
+
+export function resourcePoolsSemanticFingerprint(pools: ResourcePool[]): string {
+  return JSON.stringify(
+    pools
+      .map(normalizeResourcePoolForWorkspace)
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((pool) => ({
+        id: pool.id,
+        type: pool.type,
+        resource_mode: pool.resource_mode,
+        scope_mode: pool.scope_mode,
+        quantity: pool.quantity,
+        max_quantity: pool.max_quantity,
+        authorized_workpoint_ids: pool.authorized_workpoint_ids,
+        workpoint_overrides: pool.workpoint_overrides,
+        calendar_id: pool.calendar_id,
+        enabled: pool.enabled,
+        compatible_process_ids: [...pool.compatible_process_ids].sort(),
+        cost_type: pool.cost_type,
+        incremental_unit_cost: pool.incremental_unit_cost,
+        billing_period_days: pool.billing_period_days,
+        same_structure_resource_binding: pool.same_structure_resource_binding,
+      })),
+  );
+}
+
+export function normalizeLimitedResourcePool(pool: ResourcePool): ResourcePool {
+  return normalizeResourcePoolForWorkspace({ ...pool, resource_mode: "LIMITED" });
+}
+
 export function normalizeScenarioResourcePools(scenario: ScenarioInput): ScenarioInput {
   return {
     ...scenario,
-    resource_pools: scenario.resource_pools.map(normalizeLimitedResourcePool),
+    resource_pools: scenario.resource_pools.map(normalizeResourcePoolForWorkspace),
   };
 }
 
 export function taskResourceTypesLabel(task: Task, resourcePools: ResourcePool[]): string {
-  if (!task.compatible_resource_types.length) return "-";
+  if (!task.compatible_resource_types.length) return "默认充足";
   return resourceTypesLabel(task.compatible_resource_types, resourcePools, " / ");
 }
 

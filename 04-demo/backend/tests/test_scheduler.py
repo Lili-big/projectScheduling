@@ -1220,6 +1220,75 @@ def test_scenario_pile_method_selects_process_template() -> None:
     assert task.compatible_resource_types == ["impact_drill"]
 
 
+def test_abutment_body_uses_standard_process_and_missing_pool_default_sufficient_semantics() -> None:
+    scenario = default_scenario()
+    section = scenario.project.bridges[0].work_sections[0]
+    section.structures = [_abutment_structure(0), _abutment_structure(1)]
+    section.upper_structures = []
+    scenario.logic_rules = []
+    scenario.upper_structure_logic_rules = []
+    scenario.milestones = []
+    assert all(pool.type != "abutment_team" for pool in scenario.resource_pools)
+
+    generated = generate_schedule_input_from_scenario(scenario)
+    abutment_tasks = [task for task in generated.schedule_input.tasks if task.component_type == "abutment_body"]
+
+    assert len(abutment_tasks) == 2
+    assert {task.process_name for task in abutment_tasks} == {"桥台施工"}
+    assert {task.productivity_rule_id for task in abutment_tasks} == {
+        "abutment_body_standard:abutment_body_standard-default"
+    }
+    assert {task.quantity for task in abutment_tasks} == {1}
+    assert {task.quantity_label for task in abutment_tasks} == {"1个"}
+    assert {task.duration_days for task in abutment_tasks} == {15}
+    assert all(task.compatible_resource_types == [] for task in abutment_tasks)
+    assert all(resource.type != "abutment_team" for resource in generated.schedule_input.resources)
+
+
+def test_missing_abutment_process_reports_generic_error_without_cap_beam_fallback() -> None:
+    scenario = default_scenario()
+    section = scenario.project.bridges[0].work_sections[0]
+    section.structures = [
+        _abutment_structure(0),
+        StructureModel(
+            id="PIER-01",
+            name="Pier 01",
+            structure_type="pier",
+            order=1,
+            components=[
+                ComponentModel(
+                    id="PIER-01-CAP-BEAM",
+                    name="Pier 01 cap beam",
+                    component_type="cap_beam",
+                    quantity=1,
+                    quantity_label="1个",
+                )
+            ],
+        ),
+    ]
+    section.upper_structures = []
+    scenario.logic_rules = []
+    scenario.upper_structure_logic_rules = []
+    scenario.milestones = []
+    scenario.process_library = [
+        process for process in scenario.process_library if process.id != "abutment_body_standard"
+    ]
+
+    generated = generate_schedule_input_from_scenario(scenario)
+
+    assert not any(task.component_type == "abutment_body" for task in generated.schedule_input.tasks)
+    assert any(
+        message.level == "error"
+        and message.subject_id == "A00-BODY"
+        and "没有匹配的工艺模板" in message.message
+        for message in generated.validation
+    )
+    cap_beam_task = next(task for task in generated.schedule_input.tasks if task.component_type == "cap_beam")
+    assert cap_beam_task.process_name == "盖梁施工"
+    assert cap_beam_task.productivity_rule_id == "cap_beam_standard:cap_beam_standard-default"
+    assert cap_beam_task.duration_days == 10
+
+
 def test_all_unlimited_resources_do_not_generate_resource_waiting() -> None:
     pytest.importorskip("ortools")
     scenario = _small_resource_scenario()
@@ -1653,7 +1722,10 @@ def test_fixed_resource_shortest_returns_resource_increment_recommendation_when_
     assert alternative.result.stats["recommended_schedule_source"] == "minimum_resources_control_priority_balanced"
     assert alternative.result.stats["recommended_resource_counts"][0]["added_quantity"] == 1
     assert len(alternative.generated.schedule_input.resources) == 2
-    assert {allocation.resource_id for allocation in alternative.result.resource_allocations} <= {"cap_team_1", "cap_team_2"}
+    assert {allocation.resource_id for allocation in alternative.result.resource_allocations} <= {
+        "pool-cap::project::1",
+        "pool-cap::project::2",
+    }
     _assert_alternative_output(
         solved.result,
         status="output",

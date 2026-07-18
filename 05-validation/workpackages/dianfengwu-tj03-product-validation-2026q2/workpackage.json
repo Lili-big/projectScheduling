@@ -1,0 +1,14 @@
+{
+  "id": "dianfengwu-tj03-product-validation-2026q2",
+  "stage": "05-validation",
+  "purpose": "保存旧作业空间迁入的垫丰武 TJ03 历史客户验证记录及其脱敏迁移索引。",
+  "status": "orphaned",
+  "inputs": ["inputs/legacy-pdf-summaries/"],
+  "entrypoints": [],
+  "results": ["asset-index.md"],
+  "owner": "L01｜客户调研与验证闭环（历史客户验证）",
+  "tracking_policy": "tracked",
+  "retention_policy": "工作包契约和脱敏索引跟踪；含客户信息的 PDF 与本地源文件映射保持 local-only，迁移或替换前核对 SHA-256。",
+  "related_workpackages": ["infrastructure-version-research-2026q2"]
+}
+

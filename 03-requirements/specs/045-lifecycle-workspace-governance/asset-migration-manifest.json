@@ -7230,7 +7230,7 @@
     {
       "id": "M0409",
       "source": "docs/research/泸古项目上午调研验证记录_20260715.docx",
-      "target": "01-discovery/workpackages/lugu-customer-research/results/泸古项目上午调研验证记录_20260715.docx",
+      "target": "01-discovery/workpackages/lugu-customer-research/results/泸古项目7月15日上午调研验证记录_20260715.docx",
       "stage": "01-discovery",
       "workpackage": "lugu-customer-research",
       "action": "git-move",
@@ -7240,13 +7240,13 @@
       "references": [
         "history:specs/042-repo-architecture-modernization/asset-migration-manifest.json"
       ],
-      "rollback": "将 01-discovery/workpackages/lugu-customer-research/results/泸古项目上午调研验证记录_20260715.docx 移回 docs/research/泸古项目上午调研验证记录_20260715.docx，并恢复 Git 跟踪",
+      "rollback": "将 01-discovery/workpackages/lugu-customer-research/results/泸古项目7月15日上午调研验证记录_20260715.docx 移回 docs/research/泸古项目上午调研验证记录_20260715.docx，并恢复 Git 跟踪",
       "status": "verified"
     },
     {
       "id": "M0410",
       "source": "docs/research/泸古项目前期工期策划思路分析_20260715.docx",
-      "target": "01-discovery/workpackages/lugu-customer-research/results/泸古项目前期工期策划思路分析_20260715.docx",
+      "target": "01-discovery/workpackages/lugu-customer-research/results/泸古项目7月16日前期工期策划思路分析_20260715.docx",
       "stage": "01-discovery",
       "workpackage": "lugu-customer-research",
       "action": "git-move",
@@ -7256,7 +7256,7 @@
       "references": [
         "history:specs/042-repo-architecture-modernization/asset-migration-manifest.json"
       ],
-      "rollback": "将 01-discovery/workpackages/lugu-customer-research/results/泸古项目前期工期策划思路分析_20260715.docx 移回 docs/research/泸古项目前期工期策划思路分析_20260715.docx，并恢复 Git 跟踪",
+      "rollback": "将 01-discovery/workpackages/lugu-customer-research/results/泸古项目7月16日前期工期策划思路分析_20260715.docx 移回 docs/research/泸古项目前期工期策划思路分析_20260715.docx，并恢复 Git 跟踪",
       "status": "verified"
     },
     {

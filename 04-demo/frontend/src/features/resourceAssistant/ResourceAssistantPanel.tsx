@@ -12,7 +12,6 @@ import { createBaselinePlan } from "../../api/planControlApi";
 import {
   invalidatedAfterPlanChange,
   llmConfigStatusLabel,
-  normalizePlanResourceQuantity,
   resourceAssistantProfileLabels,
   resourceAssistantStatusLabels,
   resourceAssistantStatusTone,
@@ -76,7 +75,11 @@ export function ResourceAssistantPanel({
   const baselineConfirmedByInputRef = useRef<HTMLInputElement | null>(null);
   const baselineReasonInputRef = useRef<HTMLInputElement | null>(null);
   const scenarioFingerprint = useMemo(
-    () => (scenario ? `${scenario.scenario_id}:${scenario.project.start_date}:${scenario.resource_pools.length}` : "empty"),
+    () => resourceAssistantScenarioFingerprint(scenario),
+    [scenario],
+  );
+  const workpointLabels = useMemo(
+    () => Object.fromEntries((scenario?.project.bridges ?? []).map((bridge) => [bridge.id, bridge.name])),
     [scenario],
   );
 
@@ -274,21 +277,29 @@ export function ResourceAssistantPanel({
     }
   }
 
-  async function handleQuantityChange(planId: string, resourceType: string, quantity: number) {
+  async function handleQuantityChange(
+    planId: string,
+    resourcePoolId: string,
+    resourceType: string,
+    workpointId: string | null,
+    quantity: number,
+  ) {
     const plan = plansRef.current.find((item) => item.scenario_id === planId);
     if (!plan) return;
-    const optimistic = normalizePlanResourceQuantity(plan, resourceType, quantity);
-    replacePlans(plansRef.current.map((item) => (item.scenario_id === planId ? optimistic : item)));
-    replaceResults(invalidatedAfterPlanChange(resultsRef.current, planId));
-    if (detailPlanId === planId) setDetailPlanId(null);
-    invalidateComparisonAndRecommendation();
+    setError(null);
     try {
       const response = await updateAiResourceAssistantPlan({
         plan_id: planId,
-        resource_updates: { [resourceType]: quantity },
+        resource_updates: workpointId === null ? { [resourceType]: quantity } : {},
+        scoped_resource_updates: workpointId === null
+          ? []
+          : [{ resource_pool_id: resourcePoolId, workpoint_id: workpointId, quantity }],
         resource_plan: plan,
       });
       replacePlans(plansRef.current.map((item) => (item.scenario_id === planId ? response.resource_plan : item)));
+      replaceResults(invalidatedAfterPlanChange(resultsRef.current, planId));
+      if (detailPlanId === planId) setDetailPlanId(null);
+      invalidateComparisonAndRecommendation();
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "资源数量更新失败");
     }
@@ -399,7 +410,9 @@ export function ResourceAssistantPanel({
               }}
               confirmingBaseline={confirmingBaseline && selectedPlanId === plan.scenario_id}
               baselineVersionNo={baselinePlanId === plan.scenario_id ? baselineVersionNo : null}
-              onQuantityChange={(resourceType, quantity) => handleQuantityChange(plan.scenario_id, resourceType, quantity)}
+              workpointLabels={workpointLabels}
+              onQuantityChange={(resourcePoolId, resourceType, workpointId, quantity) =>
+                handleQuantityChange(plan.scenario_id, resourcePoolId, resourceType, workpointId, quantity)}
             />
           ))}
         </section>
@@ -427,6 +440,31 @@ function focusBaselineConfirmationInput(input: HTMLInputElement | null) {
   window.requestAnimationFrame(() => {
     input?.scrollIntoView({ behavior: "smooth", block: "center" });
     input?.focus({ preventScroll: true });
+  });
+}
+
+function resourceAssistantScenarioFingerprint(scenario: ScenarioInput | null): string {
+  if (!scenario) return "empty";
+  const resourcePools = scenario.resource_pools
+    .map((pool) => ({
+      id: pool.id,
+      scope_mode: pool.scope_mode ?? "PROJECT_SHARED",
+      authorized_workpoint_ids: pool.authorized_workpoint_ids === null
+        ? null
+        : [...(pool.authorized_workpoint_ids ?? [])].sort(),
+      workpoint_overrides: [...(pool.workpoint_overrides ?? [])]
+        .sort((left, right) => left.workpoint_id.localeCompare(right.workpoint_id)),
+      quantity: pool.quantity,
+      max_quantity: pool.max_quantity ?? null,
+      enabled: pool.enabled,
+      calendar_id: pool.calendar_id,
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  return JSON.stringify({
+    scenario_id: scenario.scenario_id,
+    project_data_version_id: scenario.project_data_version_id ?? null,
+    start_date: scenario.project.start_date,
+    resource_pools: resourcePools,
   });
 }
 

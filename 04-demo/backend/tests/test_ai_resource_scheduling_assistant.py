@@ -31,6 +31,7 @@ from app.models import (  # noqa: E402
     ResourceAssistantProjectProfile,
     ResourceAssistantSecondaryStageSummary,
     ResourceAssistantUpdatePlanRequest,
+    ResourcePool,
     ScheduleInput,
     ScheduleResult,
     ScenarioSolveResult,
@@ -377,6 +378,37 @@ def test_raw_plan_validation_rejects_invalid_llm_values(mutate, expected_code) -
     assert expected_code in {issue["code"] for issue in issues}
 
 
+def _scenario_with_exclusive_resource_pool():
+    scenario = default_scenario_with_process_library()
+    workpoint_ids = sorted(bridge.id for bridge in scenario.project.bridges[:2])
+    source_pool = next(pool for pool in scenario.resource_pools if pool.type == "rotary_drill")
+    exclusive_pool = ResourcePool.model_validate(
+        {
+            **source_pool.model_dump(mode="json"),
+            "scope_mode": "WORKPOINT_EXCLUSIVE",
+            "quantity": 1,
+            "max_quantity": 3,
+            "authorized_workpoint_ids": workpoint_ids,
+            "workpoint_overrides": [
+                {"workpoint_id": workpoint_ids[0], "quantity": 2, "max_quantity": 3},
+            ],
+        }
+    )
+    resource_pools = [exclusive_pool if pool.id == source_pool.id else pool for pool in scenario.resource_pools]
+    return scenario.model_copy(update={"resource_pools": resource_pools}), source_pool.id, workpoint_ids
+
+
+def _plan_with_resource_pools(*pools: ResourcePool) -> ResourceAssistantPlan:
+    return ResourceAssistantPlan(
+        scenario_id="plan-scope-test",
+        scenario_name="作用域测试方案",
+        profile="custom",
+        positioning="测试共享与独享数量更新。",
+        resource_pools=list(pools),
+        solve_status="feasible",
+    )
+
+
 def test_update_resource_plan_marks_result_stale_and_normalizes_max_quantity(monkeypatch) -> None:
     monkeypatch.setenv("AI_RESOURCE_ASSISTANT_PROVIDER", "local")
     scenario = default_scenario_with_process_library()
@@ -387,16 +419,225 @@ def test_update_resource_plan_marks_result_stale_and_normalizes_max_quantity(mon
         ResourceAssistantUpdatePlanRequest(
             plan_id=plan.scenario_id,
             resource_plan=plan,
-            resource_updates={"cast_in_place_continuous_beam_team": 12},
+            resource_updates={"cast_in_place_continuous_beam_team": 1},
         )
     )
 
     pool = next(pool for pool in response.resource_plan.resource_pools if pool.type == "cast_in_place_continuous_beam_team")
-    assert pool.quantity == 12
-    assert pool.max_quantity >= 12
+    assert pool.quantity == 1
+    assert pool.max_quantity == next(
+        item.max_quantity for item in plan.resource_pools if item.type == "cast_in_place_continuous_beam_team"
+    )
     assert response.resource_plan.solve_status == "stale"
     assert response.resource_plan.generation_source == "user_adjusted"
     assert response.invalidated_result_ids == [plan.scenario_id]
+    assert "推荐解释" in (response.resource_plan.stale_reason or "")
+
+
+def test_local_plans_keep_shared_project_quantity_and_exclusive_workpoint_quantities(monkeypatch) -> None:
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_PROVIDER", "local")
+    scenario, pool_id, workpoint_ids = _scenario_with_exclusive_resource_pool()
+
+    response = initialize_resource_assistant(
+        ResourceAssistantInitialRequest(scenario=scenario, generation_mode="local_fallback_only")
+    )
+
+    context_item = next(
+        item for item in response.project_profile.resource_types if item["resource_pool_id"] == pool_id
+    )
+    assert context_item["scope_mode"] == "WORKPOINT_EXCLUSIVE"
+    assert [item["workpoint_id"] for item in context_item["workpoint_quantities"]] == workpoint_ids
+    for plan in response.resource_plans:
+        pool = next(item for item in plan.resource_pools if item.id == pool_id)
+        assert pool.scope_mode == "WORKPOINT_EXCLUSIVE"
+        assert pool.authorized_workpoint_ids == workpoint_ids
+        overrides = {item.workpoint_id: item for item in pool.workpoint_overrides}
+        assert set(overrides) == set(workpoint_ids)
+        assert all(item.quantity is not None for item in overrides.values())
+        assert all(0 <= int(item.quantity or 0) <= int(item.max_quantity or pool.max_quantity or 0) for item in overrides.values())
+
+
+def test_update_resource_plan_applies_legacy_map_only_to_shared_project_quantity() -> None:
+    plan = _plan_with_resource_pools(
+        ResourcePool(
+            id="pool-shared",
+            type="shared_team",
+            label="共享班组",
+            scope_mode="PROJECT_SHARED",
+            quantity=1,
+            max_quantity=3,
+            authorized_workpoint_ids=["WP-A", "WP-B"],
+        )
+    )
+
+    response = update_resource_plan(
+        ResourceAssistantUpdatePlanRequest(
+            plan_id=plan.scenario_id,
+            resource_plan=plan,
+            resource_updates={"shared_team": 2},
+        )
+    )
+
+    pool = response.resource_plan.resource_pools[0]
+    assert pool.quantity == 2
+    assert pool.max_quantity == 3
+    assert pool.scope_mode == "PROJECT_SHARED"
+    assert pool.authorized_workpoint_ids == ["WP-A", "WP-B"]
+    assert response.resource_plan.solve_status == "stale"
+    assert response.invalidated_result_ids == [plan.scenario_id]
+
+
+def test_update_resource_plan_applies_structured_quantity_to_one_exclusive_workpoint() -> None:
+    plan = _plan_with_resource_pools(
+        ResourcePool.model_validate(
+            {
+                "id": "pool-exclusive",
+                "type": "exclusive_team",
+                "label": "独享班组",
+                "scope_mode": "WORKPOINT_EXCLUSIVE",
+                "quantity": 1,
+                "max_quantity": 4,
+                "authorized_workpoint_ids": ["WP-A", "WP-B"],
+                "workpoint_overrides": [
+                    {"workpoint_id": "WP-A", "quantity": 2, "max_quantity": 3},
+                ],
+            }
+        )
+    )
+
+    response = update_resource_plan(
+        ResourceAssistantUpdatePlanRequest(
+            plan_id=plan.scenario_id,
+            resource_plan=plan,
+            scoped_resource_updates=[
+                {"resource_pool_id": "pool-exclusive", "workpoint_id": "WP-B", "quantity": 3}
+            ],
+        )
+    )
+
+    pool = response.resource_plan.resource_pools[0]
+    overrides = {item.workpoint_id: item for item in pool.workpoint_overrides}
+    assert pool.quantity == 1
+    assert pool.max_quantity == 4
+    assert pool.scope_mode == "WORKPOINT_EXCLUSIVE"
+    assert pool.authorized_workpoint_ids == ["WP-A", "WP-B"]
+    assert overrides["WP-A"].quantity == 2
+    assert overrides["WP-B"].quantity == 3
+    assert response.resource_plan.solve_status == "stale"
+    assert "推荐解释" in (response.resource_plan.stale_reason or "")
+
+
+@pytest.mark.parametrize(
+    ("plan", "request_updates", "expected_message"),
+    [
+        (
+            _plan_with_resource_pools(
+                ResourcePool(id="pool-shared", type="shared_team", label="共享班组", quantity=1, max_quantity=2)
+            ),
+            {"resource_updates": {"unknown_team": 1}},
+            "不在当前方案",
+        ),
+        (
+            _plan_with_resource_pools(
+                ResourcePool(
+                    id="pool-exclusive",
+                    type="exclusive_team",
+                    label="独享班组",
+                    scope_mode="WORKPOINT_EXCLUSIVE",
+                    quantity=1,
+                    max_quantity=2,
+                    authorized_workpoint_ids=["WP-A"],
+                )
+            ),
+            {"resource_updates": {"exclusive_team": 1}},
+            "旧 resource_updates",
+        ),
+        (
+            _plan_with_resource_pools(
+                ResourcePool(id="pool-shared", type="shared_team", label="共享班组", quantity=1, max_quantity=2)
+            ),
+            {"scoped_resource_updates": [{"resource_pool_id": "unknown-pool", "quantity": 1}]},
+            "资源池 unknown-pool",
+        ),
+        (
+            _plan_with_resource_pools(
+                ResourcePool(
+                    id="pool-exclusive",
+                    type="exclusive_team",
+                    label="独享班组",
+                    scope_mode="WORKPOINT_EXCLUSIVE",
+                    quantity=1,
+                    max_quantity=2,
+                    authorized_workpoint_ids=["WP-A"],
+                )
+            ),
+            {
+                "scoped_resource_updates": [
+                    {"resource_pool_id": "pool-exclusive", "workpoint_id": "WP-X", "quantity": 1}
+                ]
+            },
+            "工点 WP-X",
+        ),
+        (
+            _plan_with_resource_pools(
+                ResourcePool(id="pool-shared", type="shared_team", label="共享班组", quantity=1, max_quantity=2)
+            ),
+            {"resource_updates": {"shared_team": 3}},
+            "超过上限",
+        ),
+        (
+            _plan_with_resource_pools(
+                ResourcePool(
+                    id="pool-exclusive",
+                    type="exclusive_team",
+                    label="独享班组",
+                    scope_mode="WORKPOINT_EXCLUSIVE",
+                    quantity=1,
+                    max_quantity=2,
+                    authorized_workpoint_ids=["WP-A"],
+                )
+            ),
+            {
+                "scoped_resource_updates": [
+                    {"resource_pool_id": "pool-exclusive", "workpoint_id": "WP-A", "quantity": 3}
+                ]
+            },
+            "超过上限",
+        ),
+    ],
+)
+def test_update_resource_plan_rejects_illegal_quantity_updates(plan, request_updates, expected_message) -> None:
+    with pytest.raises(ValueError, match=expected_message):
+        update_resource_plan(
+            ResourceAssistantUpdatePlanRequest(
+                plan_id=plan.scenario_id,
+                resource_plan=plan,
+                **request_updates,
+            )
+        )
+
+
+def test_raw_plan_validation_rejects_scope_mutation_and_legacy_map_for_exclusive_pool() -> None:
+    scenario, _pool_id, _workpoint_ids = _scenario_with_exclusive_resource_pool()
+    profile = assistant_module.build_project_profile(scenario)
+    plans = [
+        {
+            "profile": profile_name,
+            "resource_quantities": {
+                pool.type: int(pool.quantity or 0)
+                for pool in scenario.resource_pools
+            },
+            "scope_mode": "PROJECT_SHARED",
+            "organization_strategy": "保持既有作用域。",
+        }
+        for profile_name in ("economy", "balanced", "crash")
+    ]
+
+    issues = assistant_module._validate_raw_plan_payload(plans, scenario, profile)
+    codes = {issue["code"] for issue in issues}
+
+    assert "SCOPE_CHANGE_NOT_ALLOWED" in codes
+    assert "LEGACY_MAP_FOR_EXCLUSIVE" in codes
 
 
 def test_user_adjusted_plan_solve_uses_default_15_second_budget(monkeypatch) -> None:

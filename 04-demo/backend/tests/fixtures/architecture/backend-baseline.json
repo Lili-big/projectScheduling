@@ -1170,7 +1170,7 @@
     ]
   },
   "models": {
-    "count": 153,
+    "count": 155,
     "schemas": {
       "AbutmentConfig": {
         "properties": {
@@ -5795,6 +5795,34 @@
                 "title": "Calendar Id",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              },
+              "exclusive_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Exclusive Workpoint Id"
+              },
               "same_structure_resource_binding": {
                 "default": false,
                 "title": "Same Structure Resource Binding",
@@ -6059,6 +6087,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -6084,6 +6121,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -7432,6 +7491,58 @@
               "name"
             ],
             "title": "WorkSection",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           },
           "YardInventoryPoint": {
@@ -8946,6 +9057,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -8971,6 +9091,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -9547,6 +9689,58 @@
               "name"
             ],
             "title": "WorkSection",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           }
         },
@@ -10801,6 +10995,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -10826,6 +11029,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -11468,6 +11693,58 @@
               "name"
             ],
             "title": "WorkSection",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           }
         },
@@ -15365,6 +15642,34 @@
                 "title": "Calendar Id",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              },
+              "exclusive_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Exclusive Workpoint Id"
+              },
               "same_structure_resource_binding": {
                 "default": false,
                 "title": "Same Structure Resource Binding",
@@ -16227,6 +16532,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -16252,6 +16566,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -17553,6 +17889,58 @@
             ],
             "title": "WorkSection",
             "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
+            "type": "object"
           }
         },
         "properties": {
@@ -18772,6 +19160,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -18797,6 +19194,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -19373,6 +19792,58 @@
               "name"
             ],
             "title": "WorkSection",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           }
         },
@@ -22024,6 +22495,34 @@
                 "title": "Calendar Id",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              },
+              "exclusive_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Exclusive Workpoint Id"
+              },
               "same_structure_resource_binding": {
                 "default": false,
                 "title": "Same Structure Resource Binding",
@@ -24317,6 +24816,34 @@
                 "default": "continuous",
                 "title": "Calendar Id",
                 "type": "string"
+              },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              },
+              "exclusive_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Exclusive Workpoint Id"
               },
               "same_structure_resource_binding": {
                 "default": false,
@@ -28578,6 +29105,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -28603,6 +29139,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -29179,6 +29737,58 @@
               "name"
             ],
             "title": "WorkSection",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           }
         },
@@ -30086,6 +30696,34 @@
                 "default": "continuous",
                 "title": "Calendar Id",
                 "type": "string"
+              },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              },
+              "exclusive_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Exclusive Workpoint Id"
               },
               "same_structure_resource_binding": {
                 "default": false,
@@ -31710,6 +32348,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -31735,6 +32382,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -31850,6 +32519,58 @@
               "id"
             ],
             "title": "UpperStructureLogicRule",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           }
         },
@@ -32302,6 +33023,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -32327,6 +33057,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -32442,6 +33194,58 @@
               "id"
             ],
             "title": "UpperStructureLogicRule",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           }
         },
@@ -33952,6 +34756,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -33977,6 +34790,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -34553,6 +35388,58 @@
               "name"
             ],
             "title": "WorkSection",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           }
         },
@@ -37843,6 +38730,34 @@
                 "title": "Calendar Id",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              },
+              "exclusive_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Exclusive Workpoint Id"
+              },
               "same_structure_resource_binding": {
                 "default": false,
                 "title": "Same Structure Resource Binding",
@@ -38107,6 +39022,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -38132,6 +39056,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -39480,6 +40426,58 @@
               "name"
             ],
             "title": "WorkSection",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           },
           "YardInventoryActual": {
@@ -43393,6 +44391,34 @@
                 "title": "Calendar Id",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              },
+              "exclusive_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Exclusive Workpoint Id"
+              },
               "same_structure_resource_binding": {
                 "default": false,
                 "title": "Same Structure Resource Binding",
@@ -43657,6 +44683,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -43682,6 +44717,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -45112,6 +46169,58 @@
               "name"
             ],
             "title": "WorkSection",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           },
           "YardInventoryActual": {
@@ -47031,6 +48140,34 @@
                 "title": "Calendar Id",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              },
+              "exclusive_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Exclusive Workpoint Id"
+              },
               "same_structure_resource_binding": {
                 "default": false,
                 "title": "Same Structure Resource Binding",
@@ -47295,6 +48432,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -47320,6 +48466,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -48670,6 +49838,58 @@
             "title": "WorkSection",
             "type": "object"
           },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
+            "type": "object"
+          },
           "YardInventoryPoint": {
             "properties": {
               "beam_yard_id": {
@@ -50010,6 +51230,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -50035,6 +51264,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -50611,6 +51862,58 @@
               "name"
             ],
             "title": "WorkSection",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           }
         },
@@ -52139,6 +53442,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -52164,6 +53476,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -52740,6 +54074,58 @@
               "name"
             ],
             "title": "WorkSection",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           }
         },
@@ -53937,6 +55323,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -53962,6 +55357,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -54538,6 +55955,58 @@
               "name"
             ],
             "title": "WorkSection",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           }
         },
@@ -58426,6 +59895,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -58451,6 +59929,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -59027,6 +60527,58 @@
               "name"
             ],
             "title": "WorkSection",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           }
         },
@@ -60168,6 +61720,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -60193,6 +61754,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -60769,6 +62352,58 @@
               "name"
             ],
             "title": "WorkSection",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           }
         },
@@ -61708,6 +63343,34 @@
             "default": "continuous",
             "title": "Calendar Id",
             "type": "string"
+          },
+          "scope_mode": {
+            "default": "PROJECT_SHARED",
+            "enum": [
+              "PROJECT_SHARED",
+              "WORKPOINT_EXCLUSIVE"
+            ],
+            "title": "Scope Mode",
+            "type": "string"
+          },
+          "eligible_workpoint_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Eligible Workpoint Ids",
+            "type": "array"
+          },
+          "exclusive_workpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Exclusive Workpoint Id"
           },
           "same_structure_resource_binding": {
             "default": false,
@@ -63030,6 +64693,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -63055,6 +64727,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -63698,6 +65392,58 @@
             ],
             "title": "WorkSection",
             "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
+            "type": "object"
           }
         },
         "properties": {
@@ -64096,6 +65842,34 @@
                 "default": "continuous",
                 "title": "Calendar Id",
                 "type": "string"
+              },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              },
+              "exclusive_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Exclusive Workpoint Id"
               },
               "same_structure_resource_binding": {
                 "default": false,
@@ -65361,6 +67135,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -65386,6 +67169,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -66256,6 +68061,58 @@
               "message"
             ],
             "title": "ValidationMessage",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           }
         },
@@ -68015,6 +69872,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -68040,6 +69906,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -68617,6 +70505,58 @@
             ],
             "title": "WorkSection",
             "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
+            "type": "object"
           }
         },
         "properties": {
@@ -69158,6 +71098,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -69183,6 +71132,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -69307,6 +71278,58 @@
               "message"
             ],
             "title": "ValidationMessage",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           }
         },
@@ -69712,6 +71735,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -69737,6 +71769,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -69861,6 +71915,58 @@
               "message"
             ],
             "title": "ValidationMessage",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           }
         },
@@ -70359,6 +72465,34 @@
                 "default": "continuous",
                 "title": "Calendar Id",
                 "type": "string"
+              },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              },
+              "exclusive_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Exclusive Workpoint Id"
               },
               "same_structure_resource_binding": {
                 "default": false,
@@ -73056,6 +75190,34 @@
                 "title": "Calendar Id",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              },
+              "exclusive_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Exclusive Workpoint Id"
+              },
               "same_structure_resource_binding": {
                 "default": false,
                 "title": "Same Structure Resource Binding",
@@ -73875,6 +76037,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -73900,6 +76071,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -74770,6 +76963,58 @@
               "message"
             ],
             "title": "ValidationMessage",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           }
         },
@@ -76147,6 +78392,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -76172,6 +78426,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -76815,6 +79091,58 @@
             ],
             "title": "WorkSection",
             "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
+            "type": "object"
           }
         },
         "properties": {
@@ -77204,6 +79532,34 @@
                 "default": "continuous",
                 "title": "Calendar Id",
                 "type": "string"
+              },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              },
+              "exclusive_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Exclusive Workpoint Id"
               },
               "same_structure_resource_binding": {
                 "default": false,
@@ -78024,6 +80380,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -78049,6 +80414,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -78920,6 +81307,58 @@
             ],
             "title": "ValidationMessage",
             "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
+            "type": "object"
           }
         },
         "properties": {
@@ -79137,6 +81576,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -79162,6 +81610,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -79220,6 +81690,38 @@
               "label"
             ],
             "title": "ResourcePool",
+            "type": "object"
+          },
+          "ScopedResourceQuantityUpdate": {
+            "properties": {
+              "resource_pool_id": {
+                "minLength": 1,
+                "title": "Resource Pool Id",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "quantity": {
+                "minimum": 0,
+                "title": "Quantity",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "resource_pool_id",
+              "quantity"
+            ],
+            "title": "ScopedResourceQuantityUpdate",
             "type": "object"
           },
           "ValidationMessage": {
@@ -79287,6 +81789,58 @@
             ],
             "title": "ValidationMessage",
             "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
+            "type": "object"
           }
         },
         "properties": {
@@ -79300,6 +81854,13 @@
             },
             "title": "Resource Updates",
             "type": "object"
+          },
+          "scoped_resource_updates": {
+            "items": {
+              "$ref": "#/$defs/ScopedResourceQuantityUpdate"
+            },
+            "title": "Scoped Resource Updates",
+            "type": "array"
           },
           "resource_plan": {
             "anyOf": [
@@ -79468,6 +82029,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -79493,6 +82063,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -79617,6 +82209,58 @@
               "message"
             ],
             "title": "ValidationMessage",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           }
         },
@@ -80821,6 +83465,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -80846,6 +83499,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -81423,6 +84098,58 @@
             ],
             "title": "WorkSection",
             "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
+            "type": "object"
           }
         },
         "properties": {
@@ -81450,6 +84177,60 @@
         "type": "object"
       },
       "ResourcePool": {
+        "$defs": {
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
+            "type": "object"
+          }
+        },
         "properties": {
           "id": {
             "title": "Id",
@@ -81470,6 +84251,15 @@
               "UNLIMITED"
             ],
             "title": "Resource Mode",
+            "type": "string"
+          },
+          "scope_mode": {
+            "default": "PROJECT_SHARED",
+            "enum": [
+              "PROJECT_SHARED",
+              "WORKPOINT_EXCLUSIVE"
+            ],
+            "title": "Scope Mode",
             "type": "string"
           },
           "quantity": {
@@ -81497,6 +84287,28 @@
             ],
             "default": null,
             "title": "Max Quantity"
+          },
+          "authorized_workpoint_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Authorized Workpoint Ids"
+          },
+          "workpoint_overrides": {
+            "items": {
+              "$ref": "#/$defs/WorkpointResourceOverride"
+            },
+            "title": "Workpoint Overrides",
+            "type": "array"
           },
           "calendar_id": {
             "default": "continuous",
@@ -81977,6 +84789,34 @@
                 "default": "continuous",
                 "title": "Calendar Id",
                 "type": "string"
+              },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              },
+              "exclusive_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Exclusive Workpoint Id"
               },
               "same_structure_resource_binding": {
                 "default": false,
@@ -83289,6 +86129,34 @@
                 "default": "continuous",
                 "title": "Calendar Id",
                 "type": "string"
+              },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              },
+              "exclusive_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Exclusive Workpoint Id"
               },
               "same_structure_resource_binding": {
                 "default": false,
@@ -85461,6 +88329,15 @@
                 "title": "Resource Mode",
                 "type": "string"
               },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
               "quantity": {
                 "anyOf": [
                   {
@@ -85486,6 +88363,28 @@
                 ],
                 "default": null,
                 "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
               },
               "calendar_id": {
                 "default": "continuous",
@@ -85953,6 +88852,58 @@
               "name"
             ],
             "title": "WorkSection",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
             "type": "object"
           }
         },
@@ -86436,6 +89387,34 @@
                 "default": "continuous",
                 "title": "Calendar Id",
                 "type": "string"
+              },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              },
+              "exclusive_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Exclusive Workpoint Id"
               },
               "same_structure_resource_binding": {
                 "default": false,
@@ -87675,6 +90654,34 @@
                 "default": "continuous",
                 "title": "Calendar Id",
                 "type": "string"
+              },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              },
+              "exclusive_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Exclusive Workpoint Id"
               },
               "same_structure_resource_binding": {
                 "default": false,
@@ -89070,6 +92077,38 @@
           "finish_date"
         ],
         "title": "ScheduledTask",
+        "type": "object"
+      },
+      "ScopedResourceQuantityUpdate": {
+        "properties": {
+          "resource_pool_id": {
+            "minLength": 1,
+            "title": "Resource Pool Id",
+            "type": "string"
+          },
+          "workpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workpoint Id"
+          },
+          "quantity": {
+            "minimum": 0,
+            "title": "Quantity",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "resource_pool_id",
+          "quantity"
+        ],
+        "title": "ScopedResourceQuantityUpdate",
         "type": "object"
       },
       "SourceEvidence": {
@@ -90887,6 +93926,58 @@
         "title": "WorkSection",
         "type": "object"
       },
+      "WorkpointResourceOverride": {
+        "properties": {
+          "workpoint_id": {
+            "minLength": 1,
+            "title": "Workpoint Id",
+            "type": "string"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Enabled"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Quantity"
+          },
+          "max_quantity": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Quantity"
+          }
+        },
+        "required": [
+          "workpoint_id"
+        ],
+        "title": "WorkpointResourceOverride",
+        "type": "object"
+      },
       "YardInventoryActual": {
         "properties": {
           "beam_yard_id": {
@@ -91613,6 +94704,10 @@
         "kind": "class"
       },
       {
+        "name": "ScopedResourceQuantityUpdate",
+        "kind": "class"
+      },
+      {
         "name": "SourceEvidence",
         "kind": "class"
       },
@@ -91654,6 +94749,10 @@
       },
       {
         "name": "WorkSection",
+        "kind": "class"
+      },
+      {
+        "name": "WorkpointResourceOverride",
         "kind": "class"
       },
       {
@@ -91739,6 +94838,14 @@
         "kind": "constant"
       },
       {
+        "name": "EffectiveResourcePool",
+        "kind": "class"
+      },
+      {
+        "name": "EffectiveResourceResolution",
+        "kind": "class"
+      },
+      {
         "name": "FIXED_RESOURCE_SOLVE_MODE",
         "kind": "constant"
       },
@@ -91813,6 +94920,10 @@
       {
         "name": "ProjectBridge",
         "kind": "class"
+      },
+      {
+        "name": "RESOURCE_SCOPE_RULE_VERSION",
+        "kind": "constant"
       },
       {
         "name": "Resource",
@@ -91915,11 +95026,19 @@
         "kind": "class"
       },
       {
+        "name": "expand_effective_resource_pools",
+        "kind": "function"
+      },
+      {
         "name": "expand_resource_pools",
         "kind": "function"
       },
       {
         "name": "generate_schedule_input_from_scenario",
+        "kind": "function"
+      },
+      {
+        "name": "resolve_effective_resource_pools",
         "kind": "function"
       },
       {
@@ -92057,6 +95176,10 @@
         "kind": "constant"
       },
       {
+        "name": "RESOURCE_SCOPE_RULE_VERSION",
+        "kind": "constant"
+      },
+      {
         "name": "Resource",
         "kind": "class"
       },
@@ -92178,8 +95301,8 @@
     ]
   },
   "fixed_scenario": {
-    "scenario_sha256": "e29a2f9f9e789bc2a6bcb3a1038b34fb579d47ae461fe804b2b9e498423d9b15",
-    "generated_sha256": "2dc7cbe69a24ded2f0a6a14bd6f521b397505a94ed8fe4f35eabaeea3939280d",
+    "scenario_sha256": "1fb0a2f27228d447ed47c9268e4f8d67d0696c5993ef13eedd407782b7ffb485",
+    "generated_sha256": "2105d28d32ee9919bf0e8058e436bf6ef1ea89411ae373a60ce7033cd5a57b6f",
     "task_count": 68,
     "resource_pool_count": 8,
     "milestone_count": 1

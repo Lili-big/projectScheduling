@@ -1,0 +1,165 @@
+{
+  "version": {
+    "version_id": "pmv-abutment-baseline",
+    "project_id": "project-abutment-baseline",
+    "version_no": 1,
+    "status": "confirmed",
+    "content_fingerprint": "sha256:abutment-projection-baseline",
+    "source_batch_id": "batch-abutment-baseline",
+    "counts": {"workpoints": 1, "structures": 5, "components": 6, "errors": 0, "warnings": 0},
+    "created_at": "2026-07-17T08:00:00+08:00",
+    "created_by": "fixture",
+    "confirmed_at": "2026-07-17T08:05:00+08:00",
+    "confirmed_by": "fixture-reviewer"
+  },
+  "snapshot": {
+    "workpoints": [
+      {
+        "workpoint_id": "WP-ABUTMENT-BASELINE",
+        "workpoint_name": "固定投影样例桥",
+        "workpoint_type": "bridge",
+        "alignment_code": "Z1",
+        "start_mileage_m": 1000,
+        "end_mileage_m": 1600,
+        "sort_order": 1,
+        "schedule_support": "bridge_supported",
+        "structures": [
+          {
+            "structure_id": "ST-AB-HIST",
+            "workpoint_id": "WP-ABUTMENT-BASELINE",
+            "structure_name": "历史来源结构甲",
+            "structure_category": "substructure",
+            "structure_type": "bridge_abutment",
+            "side": "left",
+            "section_code": "WS-LEFT",
+            "section_name": "左幅工区",
+            "sort_order": 1,
+            "parameters": [{"parameter_code": "support_no", "value_type": "text", "value": "S-HIST", "sort_order": 1}],
+            "components": [
+              {
+                "component_id": "CP-AB-HIST-PILE",
+                "structure_id": "ST-AB-HIST",
+                "component_name": "来源构件甲一",
+                "component_type": "pile",
+                "quantity": 4,
+                "unit": "根",
+                "enabled": true,
+                "sort_order": 1,
+                "parameters": [{"parameter_code": "diameter_m", "value_type": "number", "value": 1.8, "unit": "m", "sort_order": 1}]
+              },
+              {
+                "component_id": "CP-AB-HIST-BODY",
+                "structure_id": "ST-AB-HIST",
+                "component_name": "历史非桩来源构件",
+                "component_type": "cap_beam",
+                "quantity": 1,
+                "unit": "个",
+                "enabled": true,
+                "sort_order": 2,
+                "parameters": [{"parameter_code": "height_m", "value_type": "number", "value": 6.5, "unit": "m", "sort_order": 1}]
+              }
+            ]
+          },
+          {
+            "structure_id": "ST-AB-PILE-ONLY",
+            "workpoint_id": "WP-ABUTMENT-BASELINE",
+            "structure_name": "仅桩来源结构",
+            "structure_category": "substructure",
+            "structure_type": "bridge_abutment",
+            "side": "right",
+            "section_code": "WS-RIGHT",
+            "section_name": "右幅工区",
+            "sort_order": 2,
+            "parameters": [{"parameter_code": "support_no", "value_type": "text", "value": "S-PILE", "sort_order": 1}],
+            "components": [
+              {
+                "component_id": "CP-AB-PILE-ONLY",
+                "structure_id": "ST-AB-PILE-ONLY",
+                "component_name": "唯一来源构件",
+                "component_type": "pile",
+                "quantity": 6,
+                "unit": "根",
+                "enabled": true,
+                "sort_order": 1,
+                "parameters": [{"parameter_code": "length_m", "value_type": "number", "value": 32, "unit": "m", "sort_order": 1}]
+              }
+            ]
+          },
+          {
+            "structure_id": "ST-PIER-CAP",
+            "workpoint_id": "WP-ABUTMENT-BASELINE",
+            "structure_name": "桥墩来源结构",
+            "structure_category": "substructure",
+            "structure_type": "bridge_pier",
+            "side": "left",
+            "section_code": "WS-LEFT",
+            "section_name": "左幅工区",
+            "sort_order": 3,
+            "parameters": [{"parameter_code": "support_no", "value_type": "text", "value": "S-PIER", "sort_order": 1}],
+            "components": [
+              {
+                "component_id": "CP-PIER-CAP",
+                "structure_id": "ST-PIER-CAP",
+                "component_name": "桥墩非桩来源构件",
+                "component_type": "cap_beam",
+                "quantity": 1,
+                "unit": "个",
+                "enabled": true,
+                "sort_order": 1,
+                "parameters": [{"parameter_code": "height_m", "value_type": "number", "value": 12, "unit": "m", "sort_order": 1}]
+              }
+            ]
+          },
+          {
+            "structure_id": "ST-AB-PARALLEL-A",
+            "workpoint_id": "WP-ABUTMENT-BASELINE",
+            "structure_name": "并行来源结构甲",
+            "structure_category": "substructure",
+            "structure_type": "bridge_abutment",
+            "side": "left",
+            "section_code": "WS-LEFT",
+            "section_name": "左幅工区",
+            "sort_order": 4,
+            "components": [
+              {
+                "component_id": "CP-AB-PARALLEL-A",
+                "structure_id": "ST-AB-PARALLEL-A",
+                "component_name": "并行来源构件甲",
+                "component_type": "abutment_body",
+                "quantity": 1,
+                "unit": "个",
+                "enabled": true,
+                "sort_order": 1,
+                "parameters": [{"parameter_code": "height_m", "value_type": "number", "value": 5, "unit": "m", "sort_order": 1}]
+              }
+            ]
+          },
+          {
+            "structure_id": "ST-AB-PARALLEL-B",
+            "workpoint_id": "WP-ABUTMENT-BASELINE",
+            "structure_name": "并行来源结构乙",
+            "structure_category": "substructure",
+            "structure_type": "bridge_abutment",
+            "side": "right",
+            "section_code": "WS-RIGHT",
+            "section_name": "右幅工区",
+            "sort_order": 5,
+            "components": [
+              {
+                "component_id": "CP-AB-PARALLEL-B",
+                "structure_id": "ST-AB-PARALLEL-B",
+                "component_name": "并行来源构件乙",
+                "component_type": "abutment_body",
+                "quantity": 1,
+                "unit": "个",
+                "enabled": true,
+                "sort_order": 1,
+                "parameters": [{"parameter_code": "height_m", "value_type": "number", "value": 5.5, "unit": "m", "sort_order": 1}]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

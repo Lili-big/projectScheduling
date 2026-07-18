@@ -39,6 +39,7 @@ LogicScope = Literal["same_structure", "structure_sequence"]
 LogicSeverity = Literal["error", "warning"]
 PileMethod = Literal["rotary_drill", "impact_drill", "manual_pile"]
 ResourceMode = Literal["LIMITED", "UNLIMITED"]
+ResourceScopeMode = Literal["PROJECT_SHARED", "WORKPOINT_EXCLUSIVE"]
 ResourceCostType = Literal["none", "monthly_rental", "one_time_purchase"]
 MilestoneLevel = Literal["contract", "control", "internal"]
 MilestoneMode = Literal["hard", "soft"]
@@ -399,6 +400,29 @@ class UpperStructureLogicRule(BaseModel):
     note: str = ""
 
 
+def _normalized_workpoint_ids(values: list[str]) -> list[str]:
+    normalized = [value.strip() for value in values]
+    if any(not value for value in normalized):
+        raise ValueError("workpoint ids must not be blank")
+    return sorted(set(normalized))
+
+
+class WorkpointResourceOverride(BaseModel):
+    workpoint_id: str = Field(min_length=1)
+    enabled: bool | None = None
+    quantity: int | None = Field(default=None, ge=0)
+    max_quantity: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def normalize_override(self) -> "WorkpointResourceOverride":
+        self.workpoint_id = self.workpoint_id.strip()
+        if not self.workpoint_id:
+            raise ValueError("workpoint_id must not be blank")
+        if self.quantity is not None and self.max_quantity is not None and self.max_quantity < self.quantity:
+            self.max_quantity = self.quantity
+        return self
+
+
 class Resource(BaseModel):
     id: str
     name: str
@@ -407,8 +431,29 @@ class Resource(BaseModel):
     pool_label: str | None = None
     enabled: bool = True
     calendar_id: str = "continuous"
+    scope_mode: ResourceScopeMode = "PROJECT_SHARED"
+    eligible_workpoint_ids: list[str] = Field(default_factory=list)
+    exclusive_workpoint_id: str | None = None
     same_structure_resource_binding: bool = False
     parallel_rule_description: str = ""
+
+    @model_validator(mode="after")
+    def normalize_resource_scope(self) -> "Resource":
+        self.eligible_workpoint_ids = _normalized_workpoint_ids(self.eligible_workpoint_ids)
+        if self.exclusive_workpoint_id is not None:
+            self.exclusive_workpoint_id = self.exclusive_workpoint_id.strip()
+            if not self.exclusive_workpoint_id:
+                raise ValueError("exclusive_workpoint_id must not be blank")
+        if self.scope_mode == "PROJECT_SHARED" and self.exclusive_workpoint_id is not None:
+            raise ValueError("PROJECT_SHARED resource must not set exclusive_workpoint_id")
+        if self.scope_mode == "WORKPOINT_EXCLUSIVE":
+            if self.exclusive_workpoint_id is None:
+                raise ValueError("WORKPOINT_EXCLUSIVE resource requires exclusive_workpoint_id")
+            if self.eligible_workpoint_ids != [self.exclusive_workpoint_id]:
+                raise ValueError(
+                    "WORKPOINT_EXCLUSIVE resource eligible_workpoint_ids must contain only exclusive_workpoint_id"
+                )
+        return self
 
 
 class Task(BaseModel):
@@ -600,8 +645,11 @@ class ResourcePool(BaseModel):
     type: str
     label: str
     resource_mode: ResourceMode = "LIMITED"
+    scope_mode: ResourceScopeMode = "PROJECT_SHARED"
     quantity: int | None = Field(default=0, ge=0)
     max_quantity: int | None = Field(default=None, ge=0)
+    authorized_workpoint_ids: list[str] | None = None
+    workpoint_overrides: list[WorkpointResourceOverride] = Field(default_factory=list)
     calendar_id: str = "continuous"
     enabled: bool = True
     compatible_process_ids: list[str] = []
@@ -613,11 +661,17 @@ class ResourcePool(BaseModel):
 
     @model_validator(mode="after")
     def ensure_max_quantity(self) -> "ResourcePool":
-        if self.resource_mode == "UNLIMITED":
-            return self
-        quantity = self.quantity or 0
-        if self.max_quantity is None or self.max_quantity < quantity:
-            self.max_quantity = quantity
+        if self.authorized_workpoint_ids is not None:
+            self.authorized_workpoint_ids = _normalized_workpoint_ids(self.authorized_workpoint_ids)
+        workpoint_ids = [item.workpoint_id for item in self.workpoint_overrides]
+        duplicate_ids = sorted({item for item in workpoint_ids if workpoint_ids.count(item) > 1})
+        if duplicate_ids:
+            raise ValueError(f"duplicate workpoint_overrides: {', '.join(duplicate_ids)}")
+        self.workpoint_overrides = sorted(self.workpoint_overrides, key=lambda item: item.workpoint_id)
+        if self.resource_mode != "UNLIMITED":
+            quantity = self.quantity or 0
+            if self.max_quantity is None or self.max_quantity < quantity:
+                self.max_quantity = quantity
         return self
 
 
@@ -1236,9 +1290,16 @@ class ResourceAssistantInitialResponse(BaseModel):
     diagnostics: list[ValidationMessage] = Field(default_factory=list)
 
 
+class ScopedResourceQuantityUpdate(BaseModel):
+    resource_pool_id: str = Field(min_length=1)
+    workpoint_id: str | None = None
+    quantity: int = Field(ge=0)
+
+
 class ResourceAssistantUpdatePlanRequest(BaseModel):
     plan_id: str
     resource_updates: dict[str, int] = Field(default_factory=dict)
+    scoped_resource_updates: list[ScopedResourceQuantityUpdate] = Field(default_factory=list)
     resource_plan: ResourceAssistantPlan | None = None
 
 

@@ -289,12 +289,15 @@ def _plan_generation_instruction() -> str:
         "你是桥梁施工资源配置方案助手。只返回 JSON，不输出 Markdown。"
         "你需要在同一次响应中生成 economy、balanced、crash 三套资源配置初始方案。"
         "输入中的 reference_examples 是当前项目的确定性三方案基线；resource_types 是唯一允许输出的资源类型。"
+        "PROJECT_SHARED 资源只在 resource_quantities 中输出项目总量；WORKPOINT_EXCLUSIVE 资源只在 "
+        "scoped_resource_quantities 中按 resource_pool_id 和 workpoint_id 输出工点数量。"
+        "不得输出或修改 scope_mode、authorized_workpoint_ids、workpoint_overrides，不得新增资源池或工点。"
         "实际工作量为零、未映射、禁用或数据异常的资源在三个方案中都必须输出 0，不得扩充。"
         "所有数量必须是非负整数，不得超过 current_resource_pools 中原始 max_quantity，"
         "同类有效资源必须满足 economy 不高于 balanced、balanced 不高于 crash。"
         "organization_strategy 必须是字符串；如果收到 validation_errors，必须逐项纠正后完整重发三个方案。"
         "不得生成最终施工计划，不得生成任务起止日期，不得判断哪个方案最优。"
-        "每个方案必须包含 profile、positioning、resource_quantities、organization_strategy、"
+        "每个方案必须包含 profile、positioning、resource_quantities、scoped_resource_quantities、organization_strategy、"
         "generation_rationale、applicable_scenarios、expected_risks。"
     )
 
@@ -306,6 +309,9 @@ def _plan_generation_output_schema() -> dict[str, Any]:
                 "profile": "economy",
                 "positioning": "经济方案",
                 "resource_quantities": {"rotary_drill": 4, "pier_body_team": 6},
+                "scoped_resource_quantities": [
+                    {"resource_pool_id": "pool-exclusive", "workpoint_id": "WP-A", "quantity": 2}
+                ],
                 "organization_strategy": "优先保证控制墩，普通墩顺序推进。",
                 "generation_rationale": "参考工程画像和经济方案样例。",
                 "applicable_scenarios": "成本敏感、节点压力较低。",

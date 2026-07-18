@@ -43,6 +43,8 @@ from .plan_control_repository import (
     PlanControlConflictError,
     PlanControlRepository,
     default_plan_control_repository,
+    plan_input_fingerprint,
+    resource_semantics_fingerprint,
 )
 from .integrated_schedule import solve_integrated_schedule
 
@@ -88,14 +90,7 @@ def create_baseline_plan(
     project_id = request.scenario.scenario_id
     version_no = repository.next_version_no(project_id)
     confirmed_at = _now()
-    fingerprint = _stable_id(
-        "plan-input",
-        {
-            "scenario": request.scenario.model_dump(mode="json"),
-            "resource_plan": request.resource_plan.model_dump(mode="json"),
-            "result": result.model_dump(mode="json"),
-        },
-    )
+    fingerprint = plan_input_fingerprint(request.scenario, request.resource_plan, result)
     version = PlanVersion(
         plan_version_id=_stable_id("plan", {"project_id": project_id, "version_no": version_no, "at": confirmed_at}),
         project_id=project_id,
@@ -469,6 +464,8 @@ def create_forecast(
     repository: PlanControlRepository = default_plan_control_repository,
 ) -> ForecastSchedule:
     plan = repository.get_plan_version(request.plan_version_id)
+    if plan.status == "stale":
+        raise PlanControlConflictError("计划版本已经失效，请基于当前资源配置重新发布计划。")
     snapshot = repository.get_progress_snapshot(request.progress_snapshot_id)
     if snapshot.plan_version_id != plan.plan_version_id or not snapshot.is_current:
         raise PlanControlConflictError("进度快照不属于当前计划版本或已经不是当前修订。")
@@ -698,7 +695,17 @@ def _solve_forecast(
     created_at = _now()
     input_fingerprint = _stable_id(
         "forecast-input",
-        {"plan": plan.input_fingerprint, "snapshot": snapshot.model_dump(mode="json"), "strategy": strategy, "parameters": parameters},
+        {
+            "plan": plan.input_fingerprint,
+            "resource_semantics": resource_semantics_fingerprint(
+                plan.scenario_snapshot,
+                plan.resource_plan_snapshot,
+                plan.generated_snapshot,
+            ),
+            "snapshot": snapshot.model_dump(mode="json"),
+            "strategy": strategy,
+            "parameters": parameters,
+        },
     )
     return ForecastSchedule(
         forecast_id=_stable_id("forecast", {"input": input_fingerprint, "at": created_at}),
@@ -1177,7 +1184,17 @@ def _failed_strategy_forecast(
     created_at = _now()
     fingerprint = _stable_id(
         "forecast-input",
-        {"plan": plan.input_fingerprint, "snapshot": snapshot.progress_snapshot_id, "strategy": strategy, "parameters": parameters},
+        {
+            "plan": plan.input_fingerprint,
+            "resource_semantics": resource_semantics_fingerprint(
+                plan.scenario_snapshot,
+                plan.resource_plan_snapshot,
+                plan.generated_snapshot,
+            ),
+            "snapshot": snapshot.progress_snapshot_id,
+            "strategy": strategy,
+            "parameters": parameters,
+        },
     )
     message = ValidationMessage(level="error", message=f"{strategy} 策略求解失败：{exc}")
     return ForecastSchedule(
@@ -1277,7 +1294,11 @@ def adopt_adjustment(
         generated_snapshot=generated_snapshot,
         schedule_result_snapshot=result.model_copy(deep=True),
         resource_plan_snapshot=resource_plan_snapshot,
-        input_fingerprint=_stable_id("plan-input", {"source": source.input_fingerprint, "proposal": proposal.model_dump(mode="json")}),
+        input_fingerprint=plan_input_fingerprint(
+            source.scenario_snapshot,
+            resource_plan_snapshot,
+            result,
+        ),
         confirmed_by=request.confirmed_by.strip(),
         confirmed_at=confirmed_at,
         confirmation_reason=request.adoption_reason.strip(),

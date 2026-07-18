@@ -47,6 +47,12 @@ from ..solver.engine import (
     solve_resource_cost_schedule,
 )
 from ...wbs import build_precedence_links, calculate_duration
+from ..domain.resource_scope import (
+    RESOURCE_SCOPE_RULE_VERSION,
+    EffectiveResourcePool,
+    EffectiveResourceResolution,
+    resolve_effective_resource_pools,
+)
 
 
 CONTINUOUS_BEAM_STRUCTURE_CODE = "castInPlaceContinuousBoxGirder"
@@ -179,7 +185,13 @@ def generate_schedule_input_from_scenario(
 ) -> GeneratedScheduleInput:
     validation: list[ValidationMessage] = []
     tasks, generated_links = _build_tasks(scenario, validation, include_girder_erection=include_girder_erection)
-    tasks = _apply_required_resource_types(tasks, scenario.resource_pools, validation)
+    resource_resolution = resolve_effective_resource_pools(
+        project_data_version_id=scenario.project_data_version_id,
+        bridges=scenario.project.bridges,
+        resource_pools=scenario.resource_pools,
+    )
+    validation.extend(resource_resolution.diagnostics)
+    tasks = _apply_required_resource_types(tasks, resource_resolution, validation)
     same_structure_rules = [rule for rule in scenario.logic_rules if rule.scope == "same_structure"]
     precedence_links, link_messages = build_precedence_links(tasks, same_structure_rules)
     precedence_links.extend(generated_links)
@@ -192,7 +204,10 @@ def generate_schedule_input_from_scenario(
     precedence_links.extend(sequence_links)
     validation.extend(sequence_messages)
 
-    resources, resource_messages = expand_resource_pools(scenario.resource_pools, use_max_quantity=use_max_resources)
+    resources, resource_messages = expand_effective_resource_pools(
+        resource_resolution.pools,
+        use_max_quantity=use_max_resources,
+    )
     validation.extend(resource_messages)
     validation.extend(_validate_calendars(scenario))
 
@@ -229,8 +244,30 @@ def generate_schedule_input_from_scenario(
             "resource_pool_count": len(scenario.resource_pools),
             "milestone_count": len(scenario.milestones),
             "continuous_beam_task_count": sum(1 for task in tasks if task.structure_type == "continuous_beam"),
+            "resource_scope_rule_version": RESOURCE_SCOPE_RULE_VERSION,
+            "shared_effective_pool_count": resource_resolution.shared_effective_pool_count,
+            "exclusive_effective_pool_count": resource_resolution.exclusive_effective_pool_count,
+            "inherited_workpoint_count": resource_resolution.inherited_workpoint_count,
+            "project_shared_transfer_time_days": 0,
+            **_project_master_source_summary(scenario.project.bridges),
         },
     )
+
+
+def _project_master_source_summary(bridges: list[ProjectBridge]) -> dict[str, str]:
+    source_values = {
+        key: {
+            str(bridge.import_source[key])
+            for bridge in bridges
+            if bridge.import_source.get(key) not in {None, ""}
+        }
+        for key in ("project_data_version_id", "scheduling_projection_version")
+    }
+    return {
+        key: next(iter(values))
+        for key, values in source_values.items()
+        if len(values) == 1
+    }
 
 
 def solve_scenario(scenario: ScenarioInput) -> ScenarioSolveResult:
@@ -253,8 +290,10 @@ def solve_scenario(scenario: ScenarioInput) -> ScenarioSolveResult:
     else:
         result, alternative_results = _solve_fixed_resources_shortest_scenario(scenario, generated)
 
+    _apply_resource_scope_diagnostics(result, scenario, generated)
     _apply_request_timing(result, started_at)
     for alternative in alternative_results:
+        _apply_resource_scope_diagnostics(alternative.result, scenario, alternative.generated)
         _apply_request_timing(alternative.result, started_at)
         alternative.metrics.update(_scenario_metrics(alternative.generated, alternative.result))
     diagnostics = _build_diagnostics(generated.validation, result)
@@ -370,6 +409,7 @@ def solve_ai_strict_fixed_resource_scenario(scenario: ScenarioInput) -> Scenario
             "resource_expansion_attempted": False,
         }
     )
+    _apply_resource_scope_diagnostics(result, scenario, generated)
     _apply_request_timing(result, started_at)
     diagnostics = _build_diagnostics(generated.validation, result)
     return ScenarioSolveResult(
@@ -1906,6 +1946,7 @@ def solve_min_resources_scenario(request: MinResourcesSolveRequest) -> ScenarioS
     else:
         result = solve_min_resources_schedule(generated.schedule_input, fallback_target_days=request.fallback_target_days)
 
+    _apply_resource_scope_diagnostics(result, scenario, generated)
     _apply_request_timing(result, started_at)
     diagnostics = _build_diagnostics(generated.validation, result)
     return ScenarioSolveResult(
@@ -1934,10 +1975,11 @@ def solve_resource_cost_scenario(request: ResourceCostSolveRequest) -> ScenarioS
     else:
         result = solve_resource_cost_schedule(
             generated.schedule_input,
-            _resource_linear_costs_by_pool(scenario.resource_pools),
+            _resource_linear_costs_by_pool(scenario),
             fallback_target_days=request.fallback_target_days,
         )
 
+    _apply_resource_scope_diagnostics(result, scenario, generated)
     _apply_request_timing(result, started_at)
     diagnostics = _build_diagnostics(generated.validation, result)
     return ScenarioSolveResult(
@@ -1991,11 +2033,14 @@ def compare_scenarios(request: ScenarioCompareRequest) -> ScenarioCompareRespons
 
 def _apply_required_resource_types(
     tasks: list[Task],
-    resource_pools: list[ResourcePool],
+    resource_resolution: EffectiveResourceResolution,
     validation: list[ValidationMessage],
 ) -> list[Task]:
-    pools_by_type = {pool.type: pool for pool in resource_pools}
+    pools_by_type: dict[str, list[EffectiveResourcePool]] = defaultdict(list)
+    for pool in resource_resolution.pools:
+        pools_by_type[pool.resource_type].append(pool)
     warning_keys: set[str] = set()
+    error_keys: set[str] = set()
     return [
         task.model_copy(
             update={
@@ -2004,6 +2049,7 @@ def _apply_required_resource_types(
                     pools_by_type,
                     validation,
                     warning_keys,
+                    error_keys,
                 )
             }
         )
@@ -2013,9 +2059,10 @@ def _apply_required_resource_types(
 
 def _required_resource_types_for_task(
     task: Task,
-    pools_by_type: dict[str, ResourcePool],
+    pools_by_type: dict[str, list[EffectiveResourcePool]],
     validation: list[ValidationMessage],
     warning_keys: set[str],
+    error_keys: set[str],
 ) -> list[str]:
     if task.properties.get("resource_neutral"):
         return []
@@ -2024,16 +2071,43 @@ def _required_resource_types_for_task(
     if not default_resource_type:
         return []
 
-    pool = pools_by_type.get(default_resource_type)
-    if _is_limited_pool_available(pool):
+    type_pools = pools_by_type.get(default_resource_type, [])
+    matching_pools = [
+        pool
+        for pool in type_pools
+        if task.bridge_id is not None and task.bridge_id in pool.eligible_workpoint_ids
+    ]
+    if any(_is_limited_pool_available(pool) for pool in matching_pools):
+        return [default_resource_type]
+
+    if any(_is_limited_pool_available(pool) for pool in type_pools):
+        _append_scoped_resource_error(
+            task,
+            default_resource_type,
+            type_pools,
+            validation,
+            error_keys,
+        )
         return [default_resource_type]
 
     if task.component_type in KEY_RESOURCE_COMPONENT_TYPES:
-        _append_unbounded_resource_warning(task, default_resource_type, pool, validation, warning_keys)
+        _append_unbounded_resource_warning(
+            task,
+            default_resource_type,
+            matching_pools[0] if matching_pools else (type_pools[0] if type_pools else None),
+            validation,
+            warning_keys,
+        )
         return []
 
-    if pool is not None and pool.resource_mode == "LIMITED":
-        _append_unbounded_resource_warning(task, default_resource_type, pool, validation, warning_keys)
+    if type_pools and any(pool.resource_mode == "LIMITED" for pool in type_pools):
+        _append_unbounded_resource_warning(
+            task,
+            default_resource_type,
+            matching_pools[0] if matching_pools else type_pools[0],
+            validation,
+            warning_keys,
+        )
     return []
 
 
@@ -2057,17 +2131,43 @@ def _method_id_from_process_id(process_id: str) -> str | None:
     return None
 
 
-def _is_limited_pool_available(pool: ResourcePool | None) -> bool:
+def _is_limited_pool_available(pool: EffectiveResourcePool | None) -> bool:
     if not pool or not pool.enabled or pool.resource_mode != "LIMITED":
         return False
-    usable_limit = pool.max_quantity if pool.max_quantity is not None else pool.quantity
-    return (usable_limit or 0) > 0
+    return pool.max_quantity > 0
+
+
+def _append_scoped_resource_error(
+    task: Task,
+    resource_type: str,
+    pools: list[EffectiveResourcePool],
+    validation: list[ValidationMessage],
+    error_keys: set[str],
+) -> None:
+    key = f"{task.id}:{resource_type}"
+    if key in error_keys:
+        return
+    error_keys.add(key)
+    pool_ids = sorted({pool.source_pool_id for pool in pools})
+    reason = "缺少桥梁工点身份" if not task.bridge_id else f"工点 {task.bridge_id} 不在获准范围"
+    validation.append(
+        ValidationMessage(
+            level="error",
+            code="RESOURCE_SCOPE_NO_LEGAL_CANDIDATE",
+            subject_id=task.id,
+            entity_refs=[task.id, *pool_ids],
+            message=(
+                f"工作项“{task.name}”需要受限资源类型 {resource_type}，但{reason}，"
+                "无法生成合法工点资源候选。"
+            ),
+        )
+    )
 
 
 def _append_unbounded_resource_warning(
     task: Task,
     resource_type: str,
-    pool: ResourcePool | None,
+    pool: EffectiveResourcePool | None,
     validation: list[ValidationMessage],
     warning_keys: set[str],
 ) -> None:
@@ -2080,21 +2180,20 @@ def _append_unbounded_resource_warning(
     validation.append(
         ValidationMessage(
             level="warning",
-            subject_id=pool.id if pool else resource_type,
+            subject_id=pool.source_pool_id if pool else resource_type,
             message=f"资源“{label}”{reason}，相关工作项按资源默认充足处理，不产生资源等待。",
         )
     )
 
 
-def _resource_unbounded_reason(pool: ResourcePool | None) -> str:
+def _resource_unbounded_reason(pool: EffectiveResourcePool | None) -> str:
     if pool is None:
         return "未配置"
     if not pool.enabled:
         return "未启用"
     if pool.resource_mode == "UNLIMITED":
         return "设置为默认充足"
-    usable_limit = pool.max_quantity if pool.max_quantity is not None else pool.quantity
-    if (usable_limit or 0) <= 0:
+    if pool.max_quantity <= 0:
         return "资源上限为 0"
     return "不可用"
 
@@ -2129,23 +2228,151 @@ def expand_resource_pools(resource_pools: list[ResourcePool], *, use_max_quantit
     return resources, validation
 
 
-def _resource_linear_costs_by_pool(resource_pools: list[ResourcePool]) -> dict[str, dict[str, Any]]:
-    costs_by_pool: dict[str, dict[str, Any]] = {}
-    for pool in resource_pools:
+def expand_effective_resource_pools(
+    effective_pools: tuple[EffectiveResourcePool, ...] | list[EffectiveResourcePool],
+    *,
+    use_max_quantity: bool = False,
+) -> tuple[list[Resource], list[ValidationMessage]]:
+    resources: list[Resource] = []
+    validation: list[ValidationMessage] = []
+    for pool in effective_pools:
         if not pool.enabled or pool.resource_mode == "UNLIMITED":
             continue
-        current_quantity = pool.quantity or 0
-        costs_by_pool[pool.id] = {
-            "resource_pool_id": pool.id,
+        quantity = pool.max_quantity if use_max_quantity else pool.quantity
+        for index in range(1, quantity + 1):
+            instance_scope = "project" if pool.scope_mode == "PROJECT_SHARED" else f"workpoint::{pool.workpoint_id}"
+            resources.append(
+                Resource(
+                    id=f"{pool.source_pool_id}::{instance_scope}::{index}",
+                    name=(
+                        f"{pool.label}{index}"
+                        if pool.workpoint_id is None
+                        else f"{pool.label}（{pool.workpoint_id}）{index}"
+                    ),
+                    type=pool.resource_type,
+                    pool_id=pool.source_pool_id,
+                    pool_label=pool.label,
+                    enabled=True,
+                    calendar_id=pool.calendar_id,
+                    scope_mode=pool.scope_mode,
+                    eligible_workpoint_ids=list(pool.eligible_workpoint_ids),
+                    exclusive_workpoint_id=pool.workpoint_id,
+                    same_structure_resource_binding=pool.same_structure_resource_binding,
+                    parallel_rule_description=pool.parallel_rule_description,
+                )
+            )
+        if quantity == 0:
+            quantity_label = "最大数量" if use_max_quantity else "默认数量"
+            validation.append(
+                ValidationMessage(
+                    level="warning",
+                    subject_id=pool.effective_pool_id,
+                    message=f"资源池“{pool.label}”的{quantity_label}为 0。",
+                )
+            )
+    return resources, validation
+
+
+def _resource_linear_costs_by_pool(scenario: ScenarioInput) -> dict[str, dict[str, Any]]:
+    costs_by_pool: dict[str, dict[str, Any]] = {}
+    resolution = resolve_effective_resource_pools(
+        project_data_version_id=scenario.project_data_version_id,
+        bridges=scenario.project.bridges,
+        resource_pools=scenario.resource_pools,
+    )
+    for pool in resolution.pools:
+        if not pool.enabled or pool.resource_mode == "UNLIMITED":
+            continue
+        costs_by_pool[pool.effective_pool_id] = {
+            "resource_pool_id": pool.effective_pool_id,
+            "source_pool_id": pool.source_pool_id,
             "label": pool.label,
-            "resource_type": pool.type,
-            "current_quantity": current_quantity,
-            "max_quantity": pool.max_quantity if pool.max_quantity is not None else current_quantity,
+            "resource_type": pool.resource_type,
+            "scope_mode": pool.scope_mode,
+            "workpoint_id": pool.workpoint_id,
+            "current_quantity": pool.quantity,
+            "max_quantity": pool.max_quantity,
             "cost_type": pool.cost_type,
             "incremental_unit_cost": pool.incremental_unit_cost,
             "billing_period_days": pool.billing_period_days,
         }
     return costs_by_pool
+
+
+def _apply_resource_scope_diagnostics(
+    result: ScheduleResult,
+    scenario: ScenarioInput,
+    generated: GeneratedScheduleInput,
+) -> None:
+    resolution = resolve_effective_resource_pools(
+        project_data_version_id=scenario.project_data_version_id,
+        bridges=scenario.project.bridges,
+        resource_pools=scenario.resource_pools,
+    )
+    raw_recommendations = (
+        result.stats.get("recommended_resource_counts")
+        or result.objective_breakdown.get("recommended_resource_counts")
+        or []
+    )
+    recommended_by_pool = {
+        str(item.get("resource_pool_id")): int(item.get("recommended_quantity") or 0)
+        for item in raw_recommendations
+        if isinstance(item, dict) and item.get("resource_pool_id")
+    }
+    groups = [
+        {
+            "resource_pool_id": pool.effective_pool_id,
+            "source_pool_id": pool.source_pool_id,
+            "label": pool.label,
+            "resource_type": pool.resource_type,
+            "scope_mode": pool.scope_mode,
+            "workpoint_id": pool.workpoint_id,
+            "eligible_workpoint_ids": list(pool.eligible_workpoint_ids),
+            "inheritance_source": pool.inheritance_source,
+            "current_quantity": pool.quantity,
+            "recommended_quantity": recommended_by_pool.get(pool.effective_pool_id, pool.quantity),
+            "max_quantity": pool.max_quantity,
+        }
+        for pool in resolution.pools
+    ]
+    resource_by_id = {resource.id: resource for resource in generated.schedule_input.resources}
+    task_by_id = {task.id: task for task in generated.schedule_input.tasks}
+    allocations = []
+    for allocation in result.resource_allocations:
+        resource = resource_by_id.get(allocation.resource_id)
+        task = task_by_id.get(allocation.task_id)
+        if resource is None:
+            continue
+        allocations.append(
+            {
+                "resource_id": allocation.resource_id,
+                "task_id": allocation.task_id,
+                "workpoint_id": task.bridge_id if task else None,
+                "scope_mode": resource.scope_mode,
+                "eligible_workpoint_ids": list(resource.eligible_workpoint_ids),
+                "exclusive_workpoint_id": resource.exclusive_workpoint_id,
+            }
+        )
+    result.stats["resource_scope_diagnostics"] = {
+        "rule_version": RESOURCE_SCOPE_RULE_VERSION,
+        "project_shared_transfer_time_days": 0,
+        "groups": groups,
+        "allocations": allocations,
+    }
+    has_cross_workpoint_shared_pool = any(
+        pool.scope_mode == "PROJECT_SHARED" and len(pool.eligible_workpoint_ids) > 1
+        for pool in resolution.pools
+    )
+    if has_cross_workpoint_shared_pool and not any(
+        message.code == "PROJECT_SHARED_TRANSFER_ZERO_DAYS" for message in result.validation
+    ):
+        result.validation.append(
+            ValidationMessage(
+                level="info",
+                code="PROJECT_SHARED_TRANSFER_ZERO_DAYS",
+                message="项目共享资源跨工点串行使用，转场时间按 0 天处理。",
+            )
+        )
 
 
 def _inferred_control_levels(scenario: ScenarioInput) -> dict[str, ControlLevel]:

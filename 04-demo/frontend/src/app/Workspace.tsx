@@ -24,7 +24,11 @@ import {
   getDemoScenario,
   saveLocalScenarioConfig,
 } from "../api/scenarioApi";
-import { getCurrentProjectMasterVersion } from "../api/projectMasterApi";
+import {
+  getCurrentProjectMasterVersion,
+  getProjectMasterWorkpoint,
+  listProjectMasterWorkpoints,
+} from "../api/projectMasterApi";
 import {
   compareScenarios,
   generateScheduleInput,
@@ -101,6 +105,7 @@ import type {
   ResourceAssistantPlan,
   ResourceAssistantPlanResult,
   IntegratedCalculationSnapshot,
+  ProjectMasterWorkpoint,
 } from "../contracts";
 
 import {
@@ -150,12 +155,15 @@ import {
   defaultResourceTypeForTask,
   isLimitedResourcePoolAvailable,
   normalizeLimitedResourcePool,
+  normalizeResourcePoolForWorkspace,
   normalizeScenarioResourcePools,
   processResourceLabel,
   resourcePoolBillingPeriodDays,
   resourcePoolCostType,
   resourcePoolMode,
   resourcePoolQuantity,
+  resourcePoolScopeIssues,
+  resourcePoolsSemanticFingerprint,
   resourcePoolUnitCost,
   resourcePoolUsableLimit,
   resourceTypeLabel,
@@ -166,7 +174,7 @@ import { mergeUpperStructureLogicRules } from "../domain/upperStructureLogic";
 import { SideNavigation, WorkspaceTabStrip } from "../features/layout/WorkspaceNavigation";
 import { ProcessTab } from "../features/process/ProcessTab";
 import { LogicTab } from "../features/logic/LogicTab";
-import { ResourcesTab } from "../features/resources/ResourcesTab";
+import { ResourcesTab, type ResourceWorkpointState } from "../features/resources/ResourcesTab";
 import { MilestonesTab } from "../features/milestones/MilestonesTab";
 import { ParameterAssistantPanel } from "../features/assistant/parameter";
 import { ResourceAssistantPanel } from "../features/resourceAssistant/ResourceAssistantPanel";
@@ -183,8 +191,20 @@ import {
 } from "../components/common/PredecessorPopover";
 import type { PredecessorDetail } from "../components/common/PredecessorPopover";
 import { DateRangePicker } from "../components/common/DateRangePicker";
-import { filterTaskViewRows, TaskViewWorkspace } from "../features/taskView";
-import { formatScheduleStatus, ScheduleResultsWorkspace } from "../features/scheduleResults";
+import {
+  buildProjectMasterTaskViewMaps,
+  createProjectMasterDisplayCoordinator,
+  createProjectMasterDisplayIdentity,
+  filterTaskViewRows,
+  TaskViewWorkspace,
+  type ProjectMasterDisplayState,
+  type TaskViewProjectMasterMaps,
+} from "../features/taskView";
+import {
+  buildResourceScopeResult,
+  formatScheduleStatus,
+  ScheduleResultsWorkspace,
+} from "../features/scheduleResults";
 import {
   generateScheduleWorkflow,
   loadScenarioWorkflow,
@@ -357,6 +377,23 @@ export default function App() {
   const [resourcesDirty, setResourcesDirty] = useState(false);
   const [milestonesDirty, setMilestonesDirty] = useState(false);
   const [integratedSnapshot, setIntegratedSnapshot] = useState<IntegratedCalculationSnapshot | null>(null);
+  const [resourceWorkpointState, setResourceWorkpointState] = useState<ResourceWorkpointState>({
+    status: "ready",
+    versionId: "",
+    workpoints: [],
+  });
+  const [resourceWorkpointReloadToken, setResourceWorkpointReloadToken] = useState(0);
+  const [resourceSaveError, setResourceSaveError] = useState<string | null>(null);
+  const resourceWorkpointRequestRef = useRef(0);
+  const scenarioRef = useRef<ScenarioInput | null>(scenario);
+  scenarioRef.current = scenario;
+  const currentResourceWorkpoints = useMemo(
+    () => resourceWorkpointState.status === "ready"
+      && resourceWorkpointState.versionId === (scenario?.project_data_version_id ?? "")
+      ? resourceWorkpointState.workpoints
+      : [],
+    [resourceWorkpointState, scenario?.project_data_version_id],
+  );
 
   useEffect(() => {
     void loadScenario();
@@ -381,8 +418,32 @@ export default function App() {
       setSolveResultScenarioFingerprint(null);
       setComparison(null);
       setIntegratedSnapshot(null);
+      setSavedResults([]);
     },
   });
+
+  useEffect(() => {
+    const versionId = scenario?.project_data_version_id ?? "";
+    const requestId = ++resourceWorkpointRequestRef.current;
+    setResourceSaveError(null);
+    if (!versionId) {
+      setResourceWorkpointState({ status: "ready", versionId: "", workpoints: [] });
+      return;
+    }
+    setResourceWorkpointState({ status: "loading", versionId });
+    void loadAllBridgeWorkpoints(versionId)
+      .then((workpoints) => {
+        if (requestId !== resourceWorkpointRequestRef.current) return;
+        setResourceWorkpointState({ status: "ready", versionId, workpoints });
+      })
+      .catch((loadError) => {
+        if (requestId !== resourceWorkpointRequestRef.current) return;
+        setResourceWorkpointState({ status: "error", versionId, message: errorText(loadError) });
+      });
+    return () => {
+      if (requestId === resourceWorkpointRequestRef.current) resourceWorkpointRequestRef.current += 1;
+    };
+  }, [resourceWorkpointReloadToken, scenario?.project_data_version_id]);
 
   useEffect(() => {
     if (activeTab !== "tasks" || !scenario || !scenarioFingerprint || currentGenerated || busy) return;
@@ -667,30 +728,65 @@ export default function App() {
   }
 
   async function saveCurrentResourceConfig() {
-    await saveCurrentLocalScenarioConfig("savingResources");
+    if (!scenario) return;
+    setResourceSaveError(null);
+    const validationError = currentResourceScopeSaveError(scenario);
+    if (validationError) {
+      setResourceSaveError(validationError);
+      return;
+    }
+    await saveCurrentLocalScenarioConfig("savingResources", setResourceSaveError);
   }
 
   async function saveCurrentMilestoneConfig() {
     await saveCurrentLocalScenarioConfig("savingMilestones");
   }
 
-  async function saveCurrentLocalScenarioConfig(busyState: Exclude<BusyState, null>) {
+  async function saveCurrentLocalScenarioConfig(
+    busyState: Exclude<BusyState, null>,
+    onSaveError?: (message: string) => void,
+  ) {
     if (!scenario) return;
+    const validationError = currentResourceScopeSaveError(scenario);
+    if (validationError) {
+      (onSaveError ?? setError)(validationError);
+      return;
+    }
+    const requestVersionId = scenario.project_data_version_id ?? "";
+    const requestResourceFingerprint = resourcePoolsSemanticFingerprint(scenario.resource_pools);
     setBusy(busyState);
     setError(null);
     try {
       const config = await saveLocalScenarioConfig(localScenarioConfigFromScenario(scenario));
+      const latestScenario = scenarioRef.current;
+      const responseIsCurrent = Boolean(
+        latestScenario
+        && (latestScenario.project_data_version_id ?? "") === requestVersionId
+        && resourcePoolsSemanticFingerprint(latestScenario.resource_pools) === requestResourceFingerprint,
+      );
+      if (!responseIsCurrent) return;
       setScenario((current) => (current ? normalizeScenarioForWorkspace({ ...current, ...config }) : current));
       setProcessLibraryDirty(false);
       setLogicDirty(false);
       setResourcesDirty(false);
       setMilestonesDirty(false);
+      setResourceSaveError(null);
       clearGeneratedOutputs();
     } catch (err) {
-      setError(errorText(err));
+      (onSaveError ?? setError)(errorText(err));
     } finally {
-      setBusy(null);
+      setBusy((current) => (current === busyState ? null : current));
     }
+  }
+
+  function currentResourceScopeSaveError(requestScenario: ScenarioInput): string | null {
+    const versionId = requestScenario.project_data_version_id ?? "";
+    if (resourceWorkpointState.status !== "ready" || resourceWorkpointState.versionId !== versionId) {
+      return "当前项目主数据版本的权威桥梁工点尚未就绪";
+    }
+    const authoritativeIds = resourceWorkpointState.workpoints.map((workpoint) => workpoint.workpoint_id);
+    const issues = requestScenario.resource_pools.flatMap((pool) => resourcePoolScopeIssues(pool, authoritativeIds));
+    return issues[0] ?? null;
   }
 
   function clearGeneratedOutputs() {
@@ -699,6 +795,8 @@ export default function App() {
     setSolveResult(null);
     setSolveResultScenarioFingerprint(null);
     setComparison(null);
+    setSavedResults([]);
+    setIntegratedSnapshot(null);
   }
 
   function updateLogic(index: number, patch: Partial<LogicRule>) {
@@ -731,12 +829,15 @@ export default function App() {
 
   function updateResourcePool(index: number, patch: Partial<ResourcePool>) {
     setResourcesDirty(true);
+    setResourceSaveError(null);
     setScenario((current) =>
       current
         ? {
             ...current,
             resource_pools: current.resource_pools.map((pool, poolIndex) =>
-              poolIndex === index ? normalizeLimitedResourcePool({ ...pool, ...patch }) : normalizeLimitedResourcePool(pool),
+              poolIndex === index
+                ? normalizeResourcePoolForWorkspace({ ...pool, ...patch })
+                : normalizeResourcePoolForWorkspace(pool),
             ),
           }
         : current,
@@ -856,10 +957,13 @@ export default function App() {
         {scenario && activeTab === "resources" && (
           <ResourcesTab
             scenario={scenario}
+            workpointState={resourceWorkpointState}
+            onRetryWorkpoints={() => setResourceWorkpointReloadToken((current) => current + 1)}
             onUpdateResourcePool={updateResourcePool}
             onSaveLocalConfig={saveCurrentResourceConfig}
             savingLocalConfig={busy === "savingResources"}
             localConfigDirty={resourcesDirty}
+            saveError={resourceSaveError}
           />
         )}
         {activeTab === "resourceAssistant" && (
@@ -873,6 +977,7 @@ export default function App() {
                 scenario={resourceAssistantDetailScenario(scenario, plan)}
                 generated={planResult.generated ?? null}
                 solveResult={resourceAssistantDetailSolveResult(plan, planResult)}
+                resourceWorkpoints={currentResourceWorkpoints}
                 externalDiagnostics={planResult.diagnostics}
                 onPatchScenario={() => undefined}
                 onPatchProject={() => undefined}
@@ -919,6 +1024,7 @@ export default function App() {
             scenario={scenario}
             generated={currentGenerated}
             solveResult={currentSolveResult}
+            resourceWorkpoints={currentResourceWorkpoints}
             onPatchScenario={patchScenario}
             onPatchProject={patchProject}
             onSolveCurrent={solveCurrent}
@@ -964,12 +1070,47 @@ function TaskViewTab({
   const [collapsedTaskGroups, setCollapsedTaskGroups] = useState<Set<string>>(() => new Set());
   const [openPredecessorTaskId, setOpenPredecessorTaskId] = useState<string | null>(null);
   const [predecessorAnchorRect, setPredecessorAnchorRect] = useState<DOMRect | null>(null);
+  const [projectMasterDisplayState, setProjectMasterDisplayState] = useState<ProjectMasterDisplayState | null>(null);
   const predecessorHoverOpenTimerRef = useRef<number | null>(null);
   const predecessorHoverCloseTimerRef = useRef<number | null>(null);
   const generatedForDetails = solveResult?.generated ?? generated;
+  const projectMasterDisplayCoordinator = useMemo(
+    () => createProjectMasterDisplayCoordinator(getProjectMasterWorkpoint),
+    [],
+  );
+  const projectMasterWorkpointIds = useMemo(() => {
+    return Array.from(new Set(
+      (generatedForDetails?.schedule_input.tasks ?? [])
+        .map((task) => task.bridge_id)
+        .filter((bridgeId): bridgeId is string => typeof bridgeId === "string" && bridgeId.length > 0),
+    )).sort();
+  }, [generatedForDetails]);
+  const projectMasterDisplayIdentity = useMemo(
+    () => scenario.project_data_version_id && generatedForDetails
+      ? createProjectMasterDisplayIdentity(scenario.project_data_version_id, projectMasterWorkpointIds)
+      : null,
+    [generatedForDetails, projectMasterWorkpointIds, scenario.project_data_version_id],
+  );
+  const currentProjectMasterDisplayState = projectMasterDisplayIdentity
+    && projectMasterDisplayState?.identity.requestKey === projectMasterDisplayIdentity.requestKey
+    ? projectMasterDisplayState
+    : null;
+  const projectMasterDisplayStatus = projectMasterDisplayIdentity
+    ? currentProjectMasterDisplayState?.status ?? "loading"
+    : "ready";
+  const projectMasterWorkpoints = currentProjectMasterDisplayState?.status === "ready"
+    ? currentProjectMasterDisplayState.workpoints
+    : [];
+  const projectMasterMaps = useMemo(
+    () => buildProjectMasterTaskViewMaps(projectMasterWorkpoints),
+    [projectMasterWorkpoints],
+  );
   const workSectionDisplayById = useMemo(
-    () => buildWorkSectionDisplayById(scenario.project),
-    [scenario.project],
+    () => buildWorkSectionDisplayById(
+      projectMasterDisplayIdentity ? null : scenario.project,
+      projectMasterMaps,
+    ),
+    [projectMasterDisplayIdentity, projectMasterMaps, scenario.project],
   );
   const linksBySuccessor = useMemo(
     () => buildPredecessorLinksBySuccessor(generatedForDetails),
@@ -980,8 +1121,25 @@ function TaskViewTab({
     [generatedForDetails],
   );
   const rows = useMemo(
-    () => buildTaskViewRows(generatedForDetails, scenario, linksBySuccessor, workSectionDisplayById),
-    [generatedForDetails, linksBySuccessor, scenario, workSectionDisplayById],
+    () => projectMasterDisplayStatus === "ready"
+      ? buildTaskViewRows(
+        generatedForDetails,
+        scenario,
+        linksBySuccessor,
+        workSectionDisplayById,
+        projectMasterMaps,
+        Boolean(projectMasterDisplayIdentity),
+      )
+      : [],
+    [
+      generatedForDetails,
+      linksBySuccessor,
+      projectMasterDisplayIdentity,
+      projectMasterDisplayStatus,
+      projectMasterMaps,
+      scenario,
+      workSectionDisplayById,
+    ],
   );
   const filteredRows = useMemo(() => filterTaskViewRows(rows, filters), [filters, rows]);
   const structureParents = useMemo(() => buildTaskViewStructureParents(filteredRows, scenario), [filteredRows, scenario]);
@@ -992,6 +1150,29 @@ function TaskViewTab({
   useEffect(() => () => {
     clearPredecessorHoverTimers(predecessorHoverOpenTimerRef, predecessorHoverCloseTimerRef);
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = projectMasterDisplayCoordinator.subscribe(setProjectMasterDisplayState);
+    return unsubscribe;
+  }, [projectMasterDisplayCoordinator]);
+
+  useEffect(() => {
+    if (!projectMasterDisplayIdentity) {
+      setProjectMasterDisplayState(null);
+      return;
+    }
+    void projectMasterDisplayCoordinator.setIdentity(
+      projectMasterDisplayIdentity.projectDataVersionId,
+      projectMasterDisplayIdentity.workpointIds,
+    ).then(() => {
+      const state = projectMasterDisplayCoordinator.getState();
+      if (state) setProjectMasterDisplayState(state);
+    });
+  }, [projectMasterDisplayCoordinator, projectMasterDisplayIdentity]);
+
+  function retryProjectMasterDisplay() {
+    void projectMasterDisplayCoordinator.retry();
+  }
 
   function closePredecessorPopover() {
     setOpenPredecessorTaskId(null);
@@ -1125,7 +1306,7 @@ function TaskViewTab({
             {structureParameterLabelForTask(row.task, editableComponent) || "-"}
           </td>
           <td>{row.task.quantity_label || displayValue(row.task.quantity)}</td>
-          <td>{effectiveTaskDurationDays(row.task, scenario)} 天</td>
+          <td>{row.task.duration_days} 天</td>
           <td className="duration-expression" title={durationExpression(row.task, scenario)}>
             {durationExpression(row.task, scenario)}
           </td>
@@ -1202,7 +1383,10 @@ function TaskViewTab({
   }
 
   return (
-    <TaskViewWorkspace>
+    <TaskViewWorkspace
+      displayStatus={projectMasterDisplayStatus}
+      onRetry={retryProjectMasterDisplay}
+    >
       <section className="panel full task-view-header-panel">
         <PanelTitle
           title="任务视图"
@@ -1303,6 +1487,7 @@ function ResultsTab({
   scenario,
   generated,
   solveResult,
+  resourceWorkpoints,
   externalDiagnostics = [],
   onPatchScenario,
   onPatchProject,
@@ -1319,6 +1504,7 @@ function ResultsTab({
   scenario: ScenarioInput | null;
   generated: GeneratedScheduleInput | null;
   solveResult: ScenarioSolveResult | null;
+  resourceWorkpoints: ProjectMasterWorkpoint[];
   externalDiagnostics?: ValidationMessage[];
   onPatchScenario: (patch: Partial<ScenarioInput>) => void;
   onPatchProject: (patch: Partial<ProjectModel>) => void;
@@ -1366,6 +1552,15 @@ function ResultsTab({
   const planSortLabel = planListSortOptions.find((option) => option.value === ganttMode)?.label ?? "按时间";
   const resourcePoolsForDisplay = scenario?.resource_pools ?? [];
   const resourceAllocations = useMemo(() => result?.resource_allocations ?? [], [result]);
+  const resourceScopeResult = useMemo(
+    () => buildResourceScopeResult({
+      generated: generatedForDetails,
+      result,
+      resourcePools: resourcePoolsForDisplay,
+      workpoints: resourceWorkpoints,
+    }),
+    [generatedForDetails, resourcePoolsForDisplay, resourceWorkpoints, result],
+  );
   const workSectionDisplayById = useMemo(
     () => buildWorkSectionDisplayById(scenario?.project ?? null),
     [scenario?.project],
@@ -1632,6 +1827,44 @@ function ResultsTab({
         <Metric label="工作项" value={summary.tasks} tone="neutral" icon={<CheckCircle2 size={18} />} />
         <Metric label="求解耗时" value={summary.elapsed} tone="neutral" icon={<Timer size={18} />} />
         <Metric label="资源 / 里程碑" value={summary.resourcesAndMilestones} tone="neutral" icon={<Flag size={18} />} />
+      </section>
+
+      <section className="panel full resource-scope-result-panel">
+        <PanelTitle title="资源作用域结果" subtitle="展示求解输入中的显式作用域、权威分配工点和数量口径" />
+        {resourceScopeResult.showProjectSharedNotice && (
+          <div className="resource-shared-result-notice" role="note">
+            {resourceScopeResult.notice}
+          </div>
+        )}
+        <div className="table-wrap short">
+          <table className="resource-scope-result-table">
+            <thead>
+              <tr>
+                <th>资源</th>
+                <th>作用域</th>
+                <th>分配工点</th>
+                <th>当前数量</th>
+                <th>推荐数量</th>
+              </tr>
+            </thead>
+            <tbody>
+              {resourceScopeResult.rows.map((row) => (
+                <tr key={row.key}>
+                  <td>{row.resourceLabel}</td>
+                  <td>{row.scopeLabel}</td>
+                  <td>{row.workpointLabel}</td>
+                  <td>{row.currentQuantity ?? "不可用"}</td>
+                  <td>{row.recommendedQuantity ?? "未提供"}</td>
+                </tr>
+              ))}
+              {!resourceScopeResult.rows.length && (
+                <tr>
+                  <td colSpan={5}>尚无可展示的资源作用域结果</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       {refinementSummary && (
@@ -2629,23 +2862,32 @@ type WorkSectionDisplay = {
   shortLabel: string;
 };
 
-function buildWorkSectionDisplayById(project: ProjectModel | null): Map<string, WorkSectionDisplay> {
+function buildWorkSectionDisplayById(
+  project: ProjectModel | null,
+  projectMasterMaps?: TaskViewProjectMasterMaps,
+): Map<string, WorkSectionDisplay> {
   const result = new Map<string, WorkSectionDisplay>();
-  if (!project) return result;
-  for (const bridge of project.bridges) {
-    for (const section of bridge.work_sections) {
-      const hasSide = section.side && section.side !== "none";
-      const label = hasSide ? sideLabels[section.side] : section.name || "-";
-      const shortLabel = section.side === "left" ? "左" : section.side === "right" ? "右" : label;
-      result.set(section.id, { label, shortLabel });
+  if (project) {
+    for (const bridge of project.bridges) {
+      for (const section of bridge.work_sections) {
+        const label = sideLabels[section.side];
+        const shortLabel = section.side === "left" ? "左" : section.side === "right" ? "右" : label;
+        result.set(section.id, { label, shortLabel });
+      }
+    }
+  }
+  if (projectMasterMaps) {
+    for (const [sectionId, section] of projectMasterMaps.sections) {
+      const shortLabel = section.sideLabel === "左幅" ? "左" : section.sideLabel === "右幅" ? "右" : section.sideLabel;
+      result.set(sectionId, { label: section.sideLabel, shortLabel });
     }
   }
   return result;
 }
 
 function workSectionLabelForTask(task: Task, workSectionDisplayById: Map<string, WorkSectionDisplay>): string {
-  if (!task.work_section_id) return "-";
-  return workSectionDisplayById.get(task.work_section_id)?.label ?? "-";
+  if (!task.work_section_id) return "名称不可用";
+  return workSectionDisplayById.get(task.work_section_id)?.label ?? "名称不可用";
 }
 
 function buildPredecessorLinksBySuccessor(generated: GeneratedScheduleInput | null): Map<string, PrecedenceLink[]> {
@@ -2663,15 +2905,20 @@ function buildTaskViewRows(
   scenario: ScenarioInput | null,
   linksBySuccessor: Map<string, PrecedenceLink[]>,
   workSectionDisplayById: Map<string, WorkSectionDisplay>,
+  projectMasterMaps: TaskViewProjectMasterMaps,
+  useProjectMasterAuthority: boolean,
 ): TaskViewRow[] {
   if (!generated) return [];
-  const projectMaps = buildTaskViewProjectMaps(scenario?.project ?? null);
+  const projectMaps = buildTaskViewProjectMaps(
+    useProjectMasterAuthority ? null : scenario?.project ?? null,
+    projectMasterMaps,
+  );
   const rows = generated.schedule_input.tasks.map((task) => {
     const bridge = task.bridge_id ? projectMaps.bridges.get(task.bridge_id) : undefined;
     const section = task.work_section_id ? projectMaps.sections.get(task.work_section_id) : undefined;
     const structure = projectMaps.structures.get(task.structure_id);
-    const bridgeName = bridge?.name ?? task.bridge_id ?? "-";
-    const sectionName = section?.name ?? task.work_section_id ?? "-";
+    const bridgeName = bridge?.name ?? "名称不可用";
+    const sectionName = section?.name ?? "名称不可用";
     const sideLabel = workSectionLabelForTask(task, workSectionDisplayById);
     const structureLabel = structure?.label ?? task.structure_name;
     const continuousParent = continuousTaskParentDisplay(task, projectMaps.continuousBeamGroups);
@@ -2705,35 +2952,41 @@ function buildTaskViewRows(
   return sortTaskViewRows(rows);
 }
 
-function buildTaskViewProjectMaps(project: ProjectModel | null) {
+function buildTaskViewProjectMaps(
+  project: ProjectModel | null,
+  projectMasterMaps: TaskViewProjectMasterMaps,
+) {
   const bridges = new Map<string, { name: string; order: number }>();
   const sections = new Map<string, { name: string; order: number }>();
   const structures = new Map<string, { label: string; order: number }>();
   const continuousBeamGroups = new Map<string, { id: string; label: string }>();
 
-  if (!project) return { bridges, sections, structures, continuousBeamGroups };
-  for (const bridge of project.bridges) {
-    bridges.set(bridge.id, { name: bridge.name, order: bridge.order });
-    for (const section of bridge.work_sections) {
-      sections.set(section.id, { name: section.name, order: section.order });
-      for (const uppers of groupUpperStructures(section.upper_structures ?? [], isContinuousBeamUpper)) {
-        const groupIndex = upperGroupIndex(uppers[0]);
-        continuousBeamGroups.set(
-          continuousTaskParentKey(bridge.id, section.id, groupIndex),
-          {
-            id: continuousTaskParentId(bridge.id, section.id, groupIndex),
-            label: continuousBeamGroupLabel(section, uppers),
-          },
-        );
-      }
-      for (const structure of section.structures) {
-        structures.set(structure.id, {
-          label: structure.support_no ?? structure.name,
-          order: structure.order,
-        });
+  if (project) {
+    for (const bridge of project.bridges) {
+      bridges.set(bridge.id, { name: bridge.name, order: bridge.order });
+      for (const section of bridge.work_sections) {
+        sections.set(section.id, { name: section.name, order: section.order });
+        for (const uppers of groupUpperStructures(section.upper_structures ?? [], isContinuousBeamUpper)) {
+          const groupIndex = upperGroupIndex(uppers[0]);
+          continuousBeamGroups.set(
+            continuousTaskParentKey(bridge.id, section.id, groupIndex),
+            {
+              id: continuousTaskParentId(bridge.id, section.id, groupIndex),
+              label: continuousBeamGroupLabel(section, uppers),
+            },
+          );
+        }
+        for (const structure of section.structures) {
+          structures.set(structure.id, {
+            label: structure.support_no ?? structure.name,
+            order: structure.order,
+          });
+        }
       }
     }
   }
+  for (const [bridgeId, bridge] of projectMasterMaps.bridges) bridges.set(bridgeId, bridge);
+  for (const [sectionId, section] of projectMasterMaps.sections) sections.set(sectionId, section);
   return { bridges, sections, structures, continuousBeamGroups };
 }
 
@@ -4614,6 +4867,25 @@ function toggleStringSet(current: Set<string>, value: string): Set<string> {
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+async function loadAllBridgeWorkpoints(versionId: string): Promise<ProjectMasterWorkpoint[]> {
+  const pageSize = 200;
+  const workpoints: ProjectMasterWorkpoint[] = [];
+  for (let page = 1; ; page += 1) {
+    const response = await listProjectMasterWorkpoints(versionId, {
+      page,
+      pageSize,
+      workpointType: "bridge",
+    });
+    workpoints.push(...response.items.filter((workpoint) => workpoint.workpoint_type === "bridge"));
+    if (workpoints.length >= response.total || response.items.length < pageSize) break;
+  }
+  return workpoints.sort((left, right) => (
+    left.sort_order - right.sort_order
+    || left.workpoint_name.localeCompare(right.workpoint_name)
+    || left.workpoint_id.localeCompare(right.workpoint_id)
+  ));
 }
 
 function scenarioFingerprintForSolve(scenario: ScenarioInput): string {

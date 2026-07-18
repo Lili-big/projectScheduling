@@ -8,9 +8,9 @@ from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
 
-ROOT = Path(__file__).resolve().parents[2]
-TEMPLATE = ROOT / "docs" / "泸古项目上午调研验证记录_20260715.docx"
-OUTPUT = ROOT / "docs" / "泸古项目前期工期策划思路分析_20260715.docx"
+WORKPACKAGE = Path(__file__).resolve().parents[1]
+TEMPLATE = WORKPACKAGE / "results" / "泸古项目7月15日上午调研验证记录_20260715.docx"
+OUTPUT = WORKPACKAGE / "results" / "泸古项目7月16日前期工期策划思路分析_20260715.docx"
 
 COLORS = {
     "navy": "1F4D78",

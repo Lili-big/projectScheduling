@@ -25,6 +25,7 @@ from ._models import (
     ResourceCostType,
     ResourceGuaranteeMode,
     ResourceMode,
+    ResourceScopeMode,
     ScheduleStrategy,
     StructureType,
     ValidationMessage,

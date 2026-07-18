@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from app.services.plan_control_repository import (  # noqa: E402
     PlanControlRepository,
     PlanControlRepositoryError,
+    plan_input_fingerprint,
 )
 from app.models import (  # noqa: E402
     ConfirmProjectDataVersionRequest,
@@ -23,6 +24,7 @@ from app.models import (  # noqa: E402
     CreateProjectDataVersionRequest,
     GirderPlanningConfig,
     ProgressEntry,
+    WorkpointResourceOverride,
 )
 from app.services.progress_forecast import create_baseline_plan, create_progress_snapshot  # noqa: E402
 from app.services.progress_forecast import PlanControlValidationError  # noqa: E402
@@ -38,6 +40,114 @@ def _drop_structure_parameter_labels(value) -> None:
     elif isinstance(value, list):
         for nested in value:
             _drop_structure_parameter_labels(nested)
+
+
+def _replace_resource_pool(request, pool_id: str, updates: dict) -> None:
+    request.scenario = request.scenario.model_copy(
+        update={
+            "resource_pools": [
+                pool.model_copy(update=updates) if pool.id == pool_id else pool
+                for pool in request.scenario.resource_pools
+            ]
+        }
+    )
+    request.resource_plan = request.resource_plan.model_copy(
+        update={
+            "resource_pools": [
+                pool.model_copy(update=updates) if pool.id == pool_id else pool
+                for pool in request.resource_plan.resource_pools
+            ]
+        }
+    )
+
+
+def _fingerprint_for_request(request) -> str:
+    assert request.plan_result.result is not None
+    return plan_input_fingerprint(request.scenario, request.resource_plan, request.plan_result.result)
+
+
+def test_plan_input_fingerprint_normalizes_resource_collection_order() -> None:
+    left = solved_baseline_request()
+    right = solved_baseline_request()
+    pool_id = left.resource_plan.resource_pools[0].id
+    left_overrides = [
+        WorkpointResourceOverride(workpoint_id="workpoint-a", quantity=1, max_quantity=2),
+        WorkpointResourceOverride(workpoint_id="workpoint-b", quantity=2, max_quantity=3),
+    ]
+    common = {
+        "scope_mode": "WORKPOINT_EXCLUSIVE",
+        "authorized_workpoint_ids": ["workpoint-a", "workpoint-b", "workpoint-a"],
+        "workpoint_overrides": left_overrides,
+    }
+    _replace_resource_pool(left, pool_id, common)
+    _replace_resource_pool(
+        right,
+        pool_id,
+        {
+            **common,
+            "authorized_workpoint_ids": ["workpoint-b", "workpoint-a"],
+            "workpoint_overrides": list(reversed(left_overrides)),
+        },
+    )
+    right.scenario = right.scenario.model_copy(
+        update={
+            "resource_pools": list(reversed(right.scenario.resource_pools)),
+            "resource_calendars": list(reversed(right.scenario.resource_calendars)),
+        }
+    )
+    right.resource_plan = right.resource_plan.model_copy(
+        update={"resource_pools": list(reversed(right.resource_plan.resource_pools))}
+    )
+
+    assert _fingerprint_for_request(left) == _fingerprint_for_request(right)
+
+
+@pytest.mark.parametrize(
+    "semantic_change",
+    ["scope_mode", "authorized_workpoint_ids", "workpoint_overrides", "quantity", "max_quantity", "enabled", "calendar_id"],
+)
+def test_plan_input_fingerprint_changes_for_every_resource_semantic_field(semantic_change: str) -> None:
+    base = solved_baseline_request()
+    changed = solved_baseline_request()
+    pool_id = base.resource_plan.resource_pools[0].id
+    base_pool = base.resource_plan.resource_pools[0]
+    base_quantity = base_pool.quantity or 0
+    base_max_quantity = max(base_pool.max_quantity or 0, base_quantity + 2)
+    common = {
+        "scope_mode": "WORKPOINT_EXCLUSIVE",
+        "authorized_workpoint_ids": ["workpoint-a", "workpoint-b"],
+        "workpoint_overrides": [
+            WorkpointResourceOverride(
+                workpoint_id="workpoint-a",
+                quantity=base_quantity,
+                max_quantity=base_max_quantity,
+            )
+        ],
+        "quantity": base_quantity,
+        "max_quantity": base_max_quantity,
+        "enabled": True,
+        "calendar_id": "continuous",
+    }
+    _replace_resource_pool(base, pool_id, common)
+    _replace_resource_pool(changed, pool_id, common)
+    updates = {
+        "scope_mode": "PROJECT_SHARED",
+        "authorized_workpoint_ids": ["workpoint-a"],
+        "workpoint_overrides": [
+            WorkpointResourceOverride(
+                workpoint_id="workpoint-a",
+                quantity=base_quantity + 1,
+                max_quantity=base_max_quantity + 1,
+            )
+        ],
+        "quantity": base_quantity + 1,
+        "max_quantity": base_max_quantity + 1,
+        "enabled": False,
+        "calendar_id": "weekday",
+    }
+    _replace_resource_pool(changed, pool_id, {semantic_change: updates[semantic_change]})
+
+    assert _fingerprint_for_request(base) != _fingerprint_for_request(changed)
 
 
 def test_repository_persists_unicode_and_returns_active_plan(tmp_path: Path) -> None:

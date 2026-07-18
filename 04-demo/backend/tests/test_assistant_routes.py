@@ -11,7 +11,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.api.routers import assistants  # noqa: E402
-from app.models import ResourceAssistantResultsRequest  # noqa: E402
+from app.models import ResourceAssistantResultsRequest, ResourceAssistantUpdatePlanRequest  # noqa: E402
 
 
 def test_resource_assistant_value_error_maps_to_422(monkeypatch) -> None:
@@ -20,6 +20,18 @@ def test_resource_assistant_value_error_maps_to_422(monkeypatch) -> None:
         assistants.compare_resource_plan_results_endpoint(ResourceAssistantResultsRequest(resource_plans=[], plan_results=[]))
     assert exc_info.value.status_code == 422
     assert exc_info.value.detail == "缺少结果"
+
+
+def test_resource_assistant_illegal_update_maps_to_422(monkeypatch) -> None:
+    monkeypatch.setattr(
+        assistants,
+        "update_resource_plan",
+        lambda _request: (_ for _ in ()).throw(ValueError("未知资源类型")),
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        assistants.update_resource_plan_endpoint(ResourceAssistantUpdatePlanRequest(plan_id="plan-1"))
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "未知资源类型"
 
 
 def test_assistant_routes_keep_expected_status_contracts() -> None:

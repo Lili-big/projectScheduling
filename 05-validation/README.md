@@ -2,7 +2,7 @@
 
 ## 目的
 
-维护验证计划、客户输入、分析或生成脚本、验证结果和结论，使方案与 Demo 的判断可以复现。
+维护验证计划、客户输入、分析或生成脚本、验证结果和结论，使方案与 Demo 的判断可以复现。本阶段是 L01“客户调研与验证闭环”的验证侧。
 
 ## 进入条件
 
@@ -19,15 +19,22 @@
 - `reports/`：通用验证报告。
 - `workpackages/`：按验证主题组织的输入、脚本、结果和说明。
 
+## 角色与闭环
+
+- 主责角色：`L01｜客户调研与验证闭环`。
+- 验证问题必须引用 `01-discovery/` 的调研证据，或引用 `02-solution-analysis/`、`03-requirements/`、`04-demo/` 中待验证的明确假设。
+- 不通过项回流 L02/L03 或对应 D 角色，通过项进入 L06；验证结论不反向覆盖调研原文。
+
 ## 工作包索引
 
 - [`json-schedule-review`](workpackages/json-schedule-review/)：真实 JSON 工程结果评审。
 - [`lugu-validation-material`](workpackages/lugu-validation-material/)：泸古验证材料构建与校验。
 - [`lugu-plan-granularity`](workpackages/lugu-plan-granularity/)：泸古计划粒度比较。
+- [`dianfengwu-tj03-product-validation-2026q2`](workpackages/dianfengwu-tj03-product-validation-2026q2/)：垫丰武 TJ03 2026 Q2 历史客户验证记录。
 
 ## 相邻阶段
 
-- 上一阶段：[04-demo](../04-demo/README.md)。
+- 上游可来自 [01-discovery](../01-discovery/README.md)、`02-solution-analysis`、`03-requirements` 或 [04-demo](../04-demo/README.md)。
 - 下一阶段：[06-delivery](../06-delivery/README.md)；结论不通过时回流 `02-solution-analysis` 或 `03-requirements`。
 
 ## 禁止内容

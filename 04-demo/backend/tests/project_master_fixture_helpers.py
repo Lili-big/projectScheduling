@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from copy import deepcopy
+import json
 import sys
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 from openpyxl import load_workbook
 
@@ -10,7 +13,31 @@ from openpyxl import load_workbook
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_ROOT))
 
+from app.contracts.project_master import ProjectMasterSnapshot, ProjectMasterVersionSummary  # noqa: E402
 from app.project_master.workbook import create_template_bytes  # noqa: E402
+
+
+ABUTMENT_PROJECTION_BASELINE = (
+    Path(__file__).parent / "fixtures" / "project_master" / "abutment-projection-baseline.json"
+)
+
+
+def load_abutment_projection_baseline() -> dict[str, Any]:
+    return deepcopy(json.loads(ABUTMENT_PROJECTION_BASELINE.read_text(encoding="utf-8")))
+
+
+def abutment_projection_snapshot() -> ProjectMasterSnapshot:
+    payload = load_abutment_projection_baseline()
+    return ProjectMasterSnapshot.model_validate(payload["snapshot"]).model_copy(deep=True)
+
+
+def confirmed_abutment_version_summary() -> ProjectMasterVersionSummary:
+    payload = load_abutment_projection_baseline()
+    return ProjectMasterVersionSummary.model_validate(payload["version"]).model_copy(deep=True)
+
+
+def confirmed_abutment_projection() -> tuple[ProjectMasterVersionSummary, ProjectMasterSnapshot]:
+    return confirmed_abutment_version_summary(), abutment_projection_snapshot()
 
 
 def valid_project_master_workbook(*, workpoint_name: str = "一号特大桥", zero_quantity: bool = False) -> bytes:

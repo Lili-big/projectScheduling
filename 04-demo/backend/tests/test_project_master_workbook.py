@@ -72,3 +72,67 @@ def test_fast_reader_keeps_side_and_non_negative_quantity_validation() -> None:
 
     assert "STRUCTURE_SIDE_INVALID" in codes
     assert "FIELD_TYPE_INVALID" in codes
+
+
+def test_abutment_body_and_cap_beam_workbook_round_trip_keep_shared_validation() -> None:
+    workbook = load_workbook(BytesIO(valid_project_master_workbook()))
+    components = workbook["构件参数"]
+    components.append(
+        ["CP-AB-BODY", "ST-S-A0", "来源构件甲", "abutment_body", 1, "个", "是", 2, None, None, None, 6.5]
+    )
+    components.append(
+        ["CP-PIER-CAP", "ST-L-P1", "来源构件乙", "cap_beam", 1, "个", "是", 2, None, None, None, 12]
+    )
+    components.append(
+        ["CP-AB-DISABLED", "ST-S-A0", "来源构件丙", "abutment_body", 1, "个", "否", 3]
+    )
+    output = BytesIO()
+    workbook.save(output)
+
+    snapshot, parse_issues, fingerprint = parse_workbook(output.getvalue())
+    issues = [*parse_issues, *validate_snapshot(snapshot)]
+    assert not [item for item in issues if item.severity == "error"]
+
+    by_id = {
+        component.component_id: component
+        for workpoint in snapshot.workpoints
+        for structure in workpoint.structures
+        for component in structure.components
+    }
+    assert by_id["CP-AB-BODY"].component_type == "abutment_body"
+    assert by_id["CP-PIER-CAP"].component_type == "cap_beam"
+    assert by_id["CP-AB-DISABLED"].enabled is False
+
+    restored, restored_issues, restored_fingerprint = parse_workbook(export_snapshot(snapshot))
+    assert not [item for item in [*restored_issues, *validate_snapshot(restored)] if item.severity == "error"]
+    assert restored_fingerprint == fingerprint
+    restored_disabled = next(
+        component
+        for workpoint in restored.workpoints
+        for structure in workpoint.structures
+        for component in structure.components
+        if component.component_id == "CP-AB-DISABLED"
+    )
+    assert restored_disabled.enabled is False
+
+
+def test_abutment_workbook_invalid_identity_and_quantity_use_generic_errors() -> None:
+    workbook = load_workbook(BytesIO(valid_project_master_workbook()))
+    components = workbook["构件参数"]
+    components.append([None, "ST-S-A0", "缺少标识构件", "abutment_body", 1, "个", "是", 2])
+    components.append(["CP-AB-NEG", "ST-S-A0", "无效数量构件", "abutment_body", -1, "个", "是", 3])
+    output = BytesIO()
+    workbook.save(output)
+
+    snapshot, parse_issues, _ = parse_workbook(output.getvalue())
+    issues = [*parse_issues, *validate_snapshot(snapshot)]
+    codes = {item.issue_code for item in issues if item.severity == "error"}
+
+    assert {"REQUIRED_FIELD", "FIELD_TYPE_INVALID"} <= codes
+    component_ids = {
+        component.component_id
+        for workpoint in snapshot.workpoints
+        for structure in workpoint.structures
+        for component in structure.components
+    }
+    assert "CP-AB-NEG" not in component_ids

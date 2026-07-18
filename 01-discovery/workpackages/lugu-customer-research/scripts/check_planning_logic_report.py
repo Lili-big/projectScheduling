@@ -5,8 +5,8 @@ from docx import Document
 from docx.oxml.ns import qn
 
 
-ROOT = Path(__file__).resolve().parents[2]
-PATH = ROOT / "docs" / "泸古项目前期工期策划思路分析_20260715.docx"
+WORKPACKAGE = Path(__file__).resolve().parents[1]
+PATH = WORKPACKAGE / "results" / "泸古项目7月16日前期工期策划思路分析_20260715.docx"
 
 with ZipFile(PATH) as archive:
     bad = archive.testzip()

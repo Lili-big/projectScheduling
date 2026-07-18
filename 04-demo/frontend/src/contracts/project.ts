@@ -10,10 +10,12 @@ export type {
   Resource,
   ResourceCalendar,
   ResourcePool,
+  ResourceScopeMode,
   ScenarioInput,
   StructureModel,
   TaskOverride,
   UpperStructureLogicRule,
   UpperStructureModel,
   WorkSection,
+  WorkpointResourceOverride,
 } from "./scheduler";

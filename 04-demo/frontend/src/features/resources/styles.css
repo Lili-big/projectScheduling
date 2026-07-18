@@ -1,0 +1,129 @@
+.resource-scope-panel {
+  overflow: hidden;
+}
+
+.resource-scope-state {
+  margin: 0 14px 14px;
+  min-height: 46px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #475569;
+  background: #f8fafc;
+}
+
+.resource-scope-state.error {
+  border-color: #fecaca;
+  color: #b91c1c;
+  background: #fef2f2;
+}
+
+.resource-scope-state button {
+  margin-left: auto;
+}
+
+.resource-scope-list {
+  padding: 0 14px 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.resource-scope-card {
+  border: 1px solid #dbe5ef;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.resource-scope-card-header,
+.resource-scope-defaults {
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.resource-scope-card-header {
+  justify-content: space-between;
+  background: #f8fafc;
+}
+
+.resource-scope-defaults {
+  flex-wrap: wrap;
+  border-top: 1px solid #e5edf5;
+}
+
+.resource-scope-defaults label {
+  min-width: 160px;
+  display: grid;
+  gap: 5px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.resource-scope-defaults input,
+.resource-scope-defaults select {
+  height: 32px;
+}
+
+.resource-scope-authority-summary {
+  min-width: 180px;
+  display: grid;
+  gap: 5px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.resource-scope-authority-summary strong {
+  color: #0f2742;
+  font-size: 13px;
+}
+
+.resource-shared-notice {
+  margin: 0 12px 12px;
+  border-radius: 7px;
+  padding: 9px 11px;
+  color: #0f766e;
+  background: #ecfdf5;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.resource-workpoint-table-wrap {
+  overflow: auto;
+  border-top: 1px solid #e5edf5;
+}
+
+.resource-workpoint-table {
+  min-width: 900px;
+}
+
+.resource-workpoint-table th,
+.resource-workpoint-table td {
+  padding: 8px 10px;
+}
+
+.resource-workpoint-table input[type="number"] {
+  width: 88px;
+}
+
+.resource-restore-button {
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .resource-scope-card-header {
+    align-items: flex-start;
+  }
+
+  .resource-scope-defaults label,
+  .resource-scope-authority-summary {
+    min-width: min(100%, 220px);
+    flex: 1 1 180px;
+  }
+}

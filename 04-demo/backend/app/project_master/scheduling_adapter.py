@@ -13,6 +13,10 @@ from ..contracts import (
     WorkSection,
 )
 from ..contracts.project_master import ProjectMasterSnapshot, ProjectMasterVersionSummary
+from .definitions import COMPONENT_TYPES as PROJECT_MASTER_COMPONENT_TYPES
+
+
+SCHEDULING_PROJECTION_VERSION = "project-master-scheduling/v2"
 
 
 _COMPONENT_TYPES = {
@@ -105,6 +109,7 @@ def project_model_from_master(
                     "project_data_version_id": version.version_id,
                     "content_fingerprint": version.content_fingerprint,
                     "source_batch_id": version.source_batch_id,
+                    "scheduling_projection_version": SCHEDULING_PROJECTION_VERSION,
                 },
                 work_sections=sorted(sections.values(), key=lambda item: (item.order, item.id)),
             )
@@ -124,7 +129,10 @@ def _lower_structure(structure, diagnostics: list[ValidationMessage]) -> Structu
     parameters = _parameters(structure.parameters)
     components: list[ComponentModel] = []
     for component in sorted(structure.components, key=lambda item: (item.sort_order, item.component_id)):
-        component_type = _COMPONENT_TYPES.get(component.component_type)
+        component_type = _projected_lower_component_type(
+            structure_type=structure.structure_type,
+            component_type=component.component_type,
+        )
         if component_type is None:
             diagnostics.append(
                 _message(
@@ -166,6 +174,14 @@ def _lower_structure(structure, diagnostics: list[ValidationMessage]) -> Structu
         control_level=control_level,
         components=components,
     )
+
+
+def _projected_lower_component_type(*, structure_type: str, component_type: str) -> str | None:
+    if component_type not in PROJECT_MASTER_COMPONENT_TYPES:
+        return None
+    if structure_type == "bridge_abutment":
+        return "pile" if component_type == "pile" else "abutment_body"
+    return _COMPONENT_TYPES.get(component_type)
 
 
 def _upper_structure(structure, diagnostics: list[ValidationMessage]) -> UpperStructureComponent | None:
@@ -246,4 +262,4 @@ def _message(level: str, code: str, message: str, subject_id: str) -> Validation
     )
 
 
-__all__ = ["project_model_from_master"]
+__all__ = ["SCHEDULING_PROJECTION_VERSION", "project_model_from_master"]

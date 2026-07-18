@@ -18,7 +18,7 @@
 
 - `architecture/`：架构说明与当前结构事实。
 - `asset-policy/`：阶段、工作包、放置和清理策略。
-- `asset-policy/thread-roles/`：常驻 Codex thread 的角色注册表、职责契约和修改方式。
+- `asset-policy/thread-roles/`：Codex 常驻 Thread、单需求工作项、能力契约与 Subagent 策略。
 - `repository-tools/`：仓库校验、迁移和安全清理工具。
 - `history/`：旧路径映射与历史治理记录。
 
@@ -45,4 +45,4 @@
 
 ## 维护触发条件
 
-新增根目录、阶段、工作包、资产类别、常驻 thread 角色、兼容入口或清理类别时必须更新本 README、`asset-policy/` 和对应测试。
+新增根目录、阶段、工作包、资产类别、常驻 Thread、工作项/能力契约、兼容入口或清理类别时必须更新本 README、`asset-policy/` 和对应测试。

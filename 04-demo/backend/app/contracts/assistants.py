@@ -47,6 +47,7 @@ from ._models import (
     ResourceAssistantSecondaryStageSummary,
     ResourceAssistantSingleSolveRequest,
     ResourceAssistantSingleSolveResponse,
+    ScopedResourceQuantityUpdate,
     ResourceAssistantTransferPenalty,
     ResourceAssistantUpdatePlanRequest,
     ResourceAssistantUpdatePlanResponse,

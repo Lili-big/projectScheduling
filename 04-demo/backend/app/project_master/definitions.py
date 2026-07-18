@@ -34,6 +34,7 @@ COMPONENT_TYPES: dict[str, dict[str, Any]] = {
     "cap": {"display_name": "承台", "units": ["个", "m3"]},
     "tie_beam": {"display_name": "系梁", "units": ["个", "m3"]},
     "pier_body": {"display_name": "墩身", "units": ["个", "根", "m"]},
+    "abutment_body": {"display_name": "桥台", "units": ["个", "m3"]},
     "cap_beam": {"display_name": "盖梁", "units": ["个", "m3"]},
     "precast_beam": {"display_name": "预制梁", "units": ["片", "榀"]},
     "cast_in_place_box_beam": {"display_name": "现浇箱梁", "units": ["联", "m"]},

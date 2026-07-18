@@ -19,6 +19,11 @@ python .\01-discovery\workpackages\lugu-source-data-analysis\scripts\analyze_bri
 - `results/bridge_schedule_structure.json`
 - `results/bridge_progress_profile.json`
 
+## 闭环归属
+
+- 主责角色：`L01｜客户调研与验证闭环`。
+- 本工作包保存来源结构证据；用于客户验证时由 `05-validation/workpackages/lugu-validation-material/` 引用，不复制第二份来源模板。
+
 ## 跟踪与保留
 
 当前来源样例、脚本和结构化分析结果均经批准跟踪；替换真实客户数据时必须重新判断是否仅本地保留。

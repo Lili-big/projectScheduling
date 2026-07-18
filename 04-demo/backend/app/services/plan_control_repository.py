@@ -4,8 +4,9 @@ import json
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from ..contracts import (
     AdjustmentProposal,
@@ -26,10 +27,88 @@ from ..contracts import (
 )
 from ..girder_planning.fingerprints import stable_fingerprint, stable_id
 from ..local_paths import REPOSITORY_ROOT, state_path
+from ..project_master.scheduling_adapter import SCHEDULING_PROJECTION_VERSION
 
 
 PROJECT_ROOT = REPOSITORY_ROOT
 PLAN_CONTROL_STORE_PATH = state_path("plan-control-store.json")
+
+
+_RESOURCE_SET_COLLECTIONS = {
+    "authorized_workpoint_ids",
+    "eligible_workpoint_ids",
+    "compatible_process_ids",
+    "working_weekdays",
+    "blackout_dates",
+}
+_RESOURCE_OBJECT_COLLECTION_KEYS = {
+    "resource_pools": "id",
+    "resource_calendars": "id",
+    "resources": "id",
+    "workpoint_overrides": "workpoint_id",
+}
+
+
+def _canonical_resource_fingerprint_value(value: Any, *, field_name: str | None = None) -> Any:
+    if isinstance(value, BaseModel):
+        return _canonical_resource_fingerprint_value(value.model_dump(mode="json", exclude_none=False))
+    if isinstance(value, dict):
+        return {
+            str(key): _canonical_resource_fingerprint_value(nested, field_name=str(key))
+            for key, nested in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        normalized = [_canonical_resource_fingerprint_value(item) for item in value]
+        if field_name in _RESOURCE_SET_COLLECTIONS:
+            unique = {
+                json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")): item
+                for item in normalized
+            }
+            return [unique[key] for key in sorted(unique)]
+        object_key = _RESOURCE_OBJECT_COLLECTION_KEYS.get(field_name or "")
+        if object_key:
+            return sorted(
+                normalized,
+                key=lambda item: (
+                    str(item.get(object_key, "")) if isinstance(item, dict) else "",
+                    json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                ),
+            )
+        return normalized
+    return value
+
+
+def plan_input_fingerprint(scenario: Any, resource_plan: Any, result: Any) -> str:
+    """Return a stable plan fingerprint while treating resource collections as sets."""
+
+    payload = _canonical_resource_fingerprint_value(
+        {
+            "scenario": scenario,
+            "resource_plan": resource_plan,
+            "result": result,
+        }
+    )
+    return stable_id("plan-input", payload)
+
+
+def resource_semantics_fingerprint(
+    scenario: Any,
+    resource_plan: Any,
+    generated_snapshot: Any | None = None,
+) -> str:
+    payload: dict[str, Any] = {
+        "scenario": {
+            "resource_pools": scenario.resource_pools,
+            "resource_calendars": scenario.resource_calendars,
+        },
+        "resource_plan": {"resource_pools": resource_plan.resource_pools},
+    }
+    if generated_snapshot is not None:
+        payload["generated"] = {"resources": generated_snapshot.schedule_input.resources}
+    return stable_fingerprint(
+        _canonical_resource_fingerprint_value(payload),
+        prefix="resource-semantics",
+    )
 
 
 class PlanControlRepositoryError(RuntimeError):
@@ -51,7 +130,10 @@ class PlanControlRepository:
 
     def load(self) -> PlanControlStore:
         with self._lock:
-            return self._load_unlocked()
+            store = self._load_unlocked()
+            if self._mark_stale_project_master_projections(store):
+                self._write_unlocked(store)
+            return store
 
     def list_project_data_versions(self, project_id: str) -> list[ProjectDataVersion]:
         return sorted(
@@ -369,6 +451,7 @@ class PlanControlRepository:
     def add_integrated_snapshot(self, snapshot: IntegratedCalculationSnapshot) -> IntegratedCalculationSnapshot:
         with self._lock:
             store = self._load_unlocked()
+            self._mark_stale_project_master_projections(store)
             existing = next(
                 (
                     item
@@ -379,6 +462,8 @@ class PlanControlRepository:
             )
             if existing is not None:
                 return existing
+            if self._has_stale_project_master_projection(snapshot):
+                snapshot = snapshot.model_copy(update={"status": "stale"})
             store.integrated_calculation_snapshots.append(snapshot)
             self._write_unlocked(store)
             return snapshot
@@ -437,6 +522,7 @@ class PlanControlRepository:
     def add_plan_version(self, version: PlanVersion) -> PlanVersion:
         with self._lock:
             store = self._load_unlocked()
+            self._mark_stale_project_master_projections(store)
             if any(item.plan_version_id == version.plan_version_id for item in store.plan_versions):
                 raise PlanControlConflictError("计划版本已存在。")
             if any(
@@ -446,13 +532,27 @@ class PlanControlRepository:
                 for item in store.plan_versions
             ):
                 raise PlanControlConflictError("计划版本号冲突，请刷新后重试。")
+            if self._has_stale_project_master_projection(version):
+                version = version.model_copy(update={"status": "stale"})
             if version.status == "active":
+                new_resource_fingerprint = self._plan_resource_semantics_fingerprint(version)
+                stale_plan_ids = {
+                    item.plan_version_id
+                    for item in store.plan_versions
+                    if item.project_id == version.project_id
+                    and item.plan_type == version.plan_type
+                    and item.status == "active"
+                    and self._plan_resource_semantics_fingerprint(item) != new_resource_fingerprint
+                }
                 store.plan_versions = [
-                    item.model_copy(update={"status": "superseded"})
+                    item.model_copy(
+                        update={"status": "stale" if item.plan_version_id in stale_plan_ids else "superseded"}
+                    )
                     if item.project_id == version.project_id and item.plan_type == version.plan_type and item.status == "active"
                     else item
                     for item in store.plan_versions
                 ]
+                self._mark_plan_dependents_stale(store, stale_plan_ids)
             store.plan_versions.append(version)
             self._write_unlocked(store)
         return version
@@ -602,6 +702,65 @@ class PlanControlRepository:
             return PlanControlStore.model_validate(raw)
         except (OSError, json.JSONDecodeError, ValidationError) as exc:
             raise PlanControlRepositoryError(f"计划管控本地存储读取失败：{exc}") from exc
+
+    @staticmethod
+    def _has_stale_project_master_projection(value: IntegratedCalculationSnapshot | PlanVersion) -> bool:
+        project_data_version_id = value.project_data_version_id
+        if not project_data_version_id or not project_data_version_id.startswith("pmv-"):
+            return False
+        generated = value.generated_snapshot
+        if generated is None:
+            return True
+        return generated.source_summary.get("scheduling_projection_version") != SCHEDULING_PROJECTION_VERSION
+
+    def _mark_stale_project_master_projections(self, store: PlanControlStore) -> bool:
+        changed = False
+        integrated_snapshots: list[IntegratedCalculationSnapshot] = []
+        for snapshot in store.integrated_calculation_snapshots:
+            if snapshot.status != "stale" and self._has_stale_project_master_projection(snapshot):
+                snapshot = snapshot.model_copy(update={"status": "stale"})
+                changed = True
+            integrated_snapshots.append(snapshot)
+        store.integrated_calculation_snapshots = integrated_snapshots
+
+        plan_versions: list[PlanVersion] = []
+        for version in store.plan_versions:
+            if version.status != "stale" and self._has_stale_project_master_projection(version):
+                version = version.model_copy(update={"status": "stale"})
+                changed = True
+            plan_versions.append(version)
+        store.plan_versions = plan_versions
+        return changed
+
+    @staticmethod
+    def _plan_resource_semantics_fingerprint(version: PlanVersion) -> str:
+        return resource_semantics_fingerprint(
+            version.scenario_snapshot,
+            version.resource_plan_snapshot,
+            version.generated_snapshot,
+        )
+
+    @staticmethod
+    def _mark_plan_dependents_stale(store: PlanControlStore, plan_version_ids: set[str]) -> None:
+        if not plan_version_ids:
+            return
+        forecast_ids = {
+            item.forecast_id
+            for item in store.forecasts
+            if item.plan_version_id in plan_version_ids
+        }
+        store.forecasts = [
+            item.model_copy(update={"status": "stale"})
+            if item.plan_version_id in plan_version_ids and item.status != "stale"
+            else item
+            for item in store.forecasts
+        ]
+        store.adjustment_proposals = [
+            item.model_copy(update={"status": "stale"})
+            if item.forecast_id in forecast_ids and item.status != "stale"
+            else item
+            for item in store.adjustment_proposals
+        ]
 
     def _write_unlocked(self, store: PlanControlStore) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

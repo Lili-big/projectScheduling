@@ -4,6 +4,20 @@
   padding-top: 16px;
 }
 
+.resource-shared-result-notice {
+  margin: 0 14px 12px;
+  border-radius: 7px;
+  padding: 10px 12px;
+  color: #0f766e;
+  background: #ecfdf5;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.resource-scope-result-table {
+  min-width: 720px;
+}
+
 .resource-simulation-heading {
   display: flex;
   align-items: baseline;

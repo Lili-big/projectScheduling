@@ -17,7 +17,7 @@
       "entry_criteria": ["问题仍需用客户或来源材料确认"],
       "exit_criteria": ["事实、推断、待确认问题和机会判断已分离"],
       "authoritative_asset_types": ["research-source", "interview", "source-data-analysis", "research-summary"],
-      "workpackages": ["lugu-customer-research", "lugu-source-data-analysis"],
+      "workpackages": ["lugu-customer-research", "lugu-source-data-analysis", "infrastructure-version-research-2026q2"],
       "next_stages": ["02-solution-analysis", "03-requirements"]
     },
     {
@@ -53,7 +53,7 @@
       "entry_criteria": ["方案或 Demo 需要用客户数据和验收场景验证"],
       "exit_criteria": ["验证输入、步骤、结果、结论和限制可追溯"],
       "authoritative_asset_types": ["validation-plan", "validation-input", "validation-script", "validation-result", "validation-report"],
-      "workpackages": ["json-schedule-review", "lugu-validation-material", "lugu-plan-granularity"],
+      "workpackages": ["json-schedule-review", "lugu-validation-material", "lugu-plan-granularity", "dianfengwu-tj03-product-validation-2026q2"],
       "next_stages": ["02-solution-analysis", "03-requirements", "04-demo", "06-delivery"]
     },
     {

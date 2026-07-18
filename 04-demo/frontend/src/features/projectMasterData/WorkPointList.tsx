@@ -28,7 +28,7 @@ export function WorkPointList({
       <div className="project-master-filter-row">
         <label>
           <Search size={15} />
-          <input value={keyword} placeholder="搜索工点名称或 ID" onChange={(event) => onKeywordChange(event.target.value)} />
+          <input value={keyword} placeholder="搜索工点名称" onChange={(event) => onKeywordChange(event.target.value)} />
         </label>
         <select value={workpointType} onChange={(event) => onTypeChange(event.target.value as ProjectMasterWorkpointType | "")}>
           <option value="">全部类型</option>
@@ -47,8 +47,7 @@ export function WorkPointList({
             key={item.workpoint_id}
           >
             <span>
-              <strong>{item.workpoint_name}</strong>
-              <em>{item.workpoint_id}</em>
+              <strong title={item.workpoint_name}>{item.workpoint_name}</strong>
             </span>
             <span>
               <b>{projectMasterWorkpointTypeLabels[item.workpoint_type]}</b>

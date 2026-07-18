@@ -27,6 +27,7 @@ from ...contracts import (
     effective_objective_weights,
     objective_terms_used,
 )
+from ..domain.resource_scope import RESOURCE_SCOPE_RULE_VERSION
 
 CONTINUITY_PRIMARY_WEIGHT = 1_000_000
 CONTROL_NODE_LATE_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["control_node_late"]
@@ -782,6 +783,8 @@ def _add_capacity_continuous_beam_team_span_constraints(
 
         choices = []
         for group in groups:
+            if not _workpoint_matches_resource_group(span.bridge_id, group):
+                continue
             group_key = str(group["key"])
             assigned = model.NewBoolVar(f"capacity_assign_continuous_span_{index}_{_safe(group_key)}")
             assignment_vars[(span.span_group_id, group_key)] = assigned
@@ -795,7 +798,18 @@ def _add_capacity_continuous_beam_team_span_constraints(
             )
             intervals_by_group[group_key].append(interval)
             demands_by_group[group_key].append(1)
-        model.AddExactlyOne(choices)
+        if choices:
+            model.AddExactlyOne(choices)
+        else:
+            validation.append(
+                ValidationMessage(
+                    level="error",
+                    code="RESOURCE_SCOPE_NO_LEGAL_CANDIDATE",
+                    subject_id=span.span_group_id,
+                    entity_refs=[span.span_group_id, span.bridge_id],
+                    message=f"连续梁联 {span.display_name} 没有当前工点可用的受限班组资源。",
+                )
+            )
 
     return {
         "spans": spans,
@@ -901,7 +915,7 @@ def _capacity_continuous_span_payload(
 
 
 def _resource_parallel_group_key(resource: Resource) -> str:
-    return resource.pool_id or resource.type
+    return _resource_group_key(resource)
 
 
 def _same_structure_resource_rule_key(task: Task, resource_group_key: str) -> tuple[str, str, str, str]:
@@ -1893,6 +1907,8 @@ def _add_capacity_same_structure_parallel_rules(
         seen_group_keys: set[str] = set()
         for resource_type in task.compatible_resource_types:
             for group in groups_by_type.get(resource_type, []):
+                if not _task_matches_resource_group(task, group):
+                    continue
                 group_key = group["key"]
                 if group_key in seen_group_keys:
                     continue
@@ -2177,7 +2193,7 @@ def solve_shortest_duration_schedule(
     started_at = time.perf_counter()
     enabled_resources = [resource for resource in schedule_input.resources if resource.enabled]
     resource_candidates = _resource_candidates_by_task(schedule_input.tasks, enabled_resources)
-    validation = _validate_resource_coverage(schedule_input.tasks, resource_candidates)
+    validation = _validate_resource_coverage(schedule_input.tasks, resource_candidates, enabled_resources)
     validation.extend(_execution_constraint_validation(schedule_input, resource_candidates))
     if any(message.level == "error" for message in validation):
         return ScheduleResult(
@@ -2420,6 +2436,10 @@ def solve_shortest_duration_schedule(
         "primary_weight": CONTINUITY_PRIMARY_WEIGHT,
     }
     stats["continuous_beam_team_spans"] = continuous_span_payload
+    stats["resource_scope_diagnostics"] = _resource_scope_diagnostics(
+        schedule_input,
+        allocations,
+    )
 
     return ScheduleResult(
         status=status,
@@ -2526,7 +2546,7 @@ def solve_control_priority_schedule(
 
     enabled_resources = [resource for resource in schedule_input.resources if resource.enabled]
     resource_candidates = _resource_candidates_by_task(schedule_input.tasks, enabled_resources)
-    validation = _validate_resource_coverage(schedule_input.tasks, resource_candidates)
+    validation = _validate_resource_coverage(schedule_input.tasks, resource_candidates, enabled_resources)
     validation.extend(_execution_constraint_validation(schedule_input, resource_candidates))
     if any(message.level == "error" for message in validation):
         return ScheduleResult(
@@ -2996,6 +3016,10 @@ def solve_control_priority_schedule(
     validation.extend(_validate_milestone_results(milestone_results))
     continuity_metrics = _build_continuity_metrics(scheduled_tasks)
     validation.extend(_continuity_validation_messages(continuity_metrics))
+    stats["resource_scope_diagnostics"] = _resource_scope_diagnostics(
+        schedule_input,
+        allocations,
+    )
     soft_milestone_penalty = sum(
         result.penalty
         for result in milestone_results
@@ -5210,7 +5234,7 @@ def solve_min_resources_schedule(
 
     enabled_resources = [resource for resource in schedule_input.resources if resource.enabled]
     resource_candidates = _resource_candidates_by_task(schedule_input.tasks, enabled_resources)
-    validation = _validate_resource_coverage(schedule_input.tasks, resource_candidates)
+    validation = _validate_resource_coverage(schedule_input.tasks, resource_candidates, enabled_resources)
     if any(message.level == "error" for message in validation):
         return ScheduleResult(
             status="INFEASIBLE",
@@ -6134,7 +6158,7 @@ def solve_resource_cost_schedule(
 ) -> ScheduleResult:
     enabled_resources = [resource for resource in schedule_input.resources if resource.enabled]
     resource_candidates = _resource_candidates_by_task(schedule_input.tasks, enabled_resources)
-    validation = _validate_resource_coverage(schedule_input.tasks, resource_candidates)
+    validation = _validate_resource_coverage(schedule_input.tasks, resource_candidates, enabled_resources)
     if any(message.level == "error" for message in validation):
         return ScheduleResult(
             status="INFEASIBLE",
@@ -6401,7 +6425,7 @@ def _solve_resource_model(
     if effective_limits:
         enabled_resources = _apply_resource_limits(enabled_resources, effective_limits)
     resource_candidates = _resource_candidates_by_task(schedule_input.tasks, enabled_resources)
-    validation = _validate_resource_coverage(schedule_input.tasks, resource_candidates)
+    validation = _validate_resource_coverage(schedule_input.tasks, resource_candidates, enabled_resources)
 
     model = cp_model.CpModel()
     horizon = _build_horizon(schedule_input)
@@ -6606,6 +6630,8 @@ def _solve_capacity_model(
         seen_group_keys: set[str] = set()
         for resource_type in task.compatible_resource_types:
             for group in groups_by_type.get(resource_type, []):
+                if not _task_matches_resource_group(task, group):
+                    continue
                 if _is_continuous_beam_task(task) and resource_type == CONTINUOUS_BEAM_RESOURCE_TYPE:
                     continue
                 if group["key"] in seen_group_keys:
@@ -7012,6 +7038,11 @@ def _capacity_model_result(
             "primary_weight": CONTINUITY_PRIMARY_WEIGHT,
         },
         "continuous_beam_team_spans": continuous_span_payload,
+        "resource_scope_diagnostics": _resource_scope_diagnostics(
+            schedule_input,
+            allocations,
+            recommended_counts=fixed_counts,
+        ),
     }
     return ScheduleResult(
         status=solved["status"],
@@ -7782,6 +7813,40 @@ def _resource_sort_key(resource: Resource) -> tuple[Any, ...]:
     return _resource_sort_tuple(resource.id, resource.name)
 
 
+def _resource_group_key(resource: Resource) -> str:
+    base_key = resource.pool_id or resource.type
+    if resource.scope_mode == "WORKPOINT_EXCLUSIVE" and resource.exclusive_workpoint_id is not None:
+        return f"{base_key}::workpoint::{resource.exclusive_workpoint_id}"
+    return base_key
+
+
+def _resource_matches_task(task: Task, resource: Resource) -> bool:
+    if resource.type not in task.compatible_resource_types:
+        return False
+    if not resource.eligible_workpoint_ids:
+        return True
+    if task.bridge_id is None or task.bridge_id not in resource.eligible_workpoint_ids:
+        return False
+    if resource.scope_mode == "WORKPOINT_EXCLUSIVE":
+        return task.bridge_id == resource.exclusive_workpoint_id
+    return True
+
+
+def _workpoint_matches_resource_group(workpoint_id: str | None, group: dict[str, Any]) -> bool:
+    eligible_workpoint_ids = group.get("eligible_workpoint_ids") or []
+    if not eligible_workpoint_ids:
+        return True
+    if workpoint_id is None or workpoint_id not in eligible_workpoint_ids:
+        return False
+    if group.get("scope_mode") == "WORKPOINT_EXCLUSIVE":
+        return workpoint_id == group.get("exclusive_workpoint_id")
+    return True
+
+
+def _task_matches_resource_group(task: Task, group: dict[str, Any]) -> bool:
+    return _workpoint_matches_resource_group(task.bridge_id, group)
+
+
 def _resource_sort_tuple(resource_id: str, resource_name: str | None) -> tuple[Any, ...]:
     index = _extract_first_int(resource_id) or _extract_first_int(resource_name) or 9999
     return (resource_id.split("_")[0], index, resource_name or "", resource_id)
@@ -7946,7 +8011,9 @@ def _resource_capacity_lower_bound_diagnostics(
         scoped_tasks = [
             task
             for task in schedule_input.tasks
-            if task.id in scoped_task_ids and resource_type in task.compatible_resource_types
+            if task.id in scoped_task_ids
+            and resource_type in task.compatible_resource_types
+            and _task_matches_resource_group(task, group)
         ]
         total_duration = sum(task.duration_days for task in scoped_tasks)
         if total_duration <= 0:
@@ -7984,7 +8051,9 @@ def _resource_capacity_exclusive_lower_bound_diagnostics(
         scoped_tasks = [
             task
             for task in schedule_input.tasks
-            if task.id in scoped_task_ids and set(task.compatible_resource_types) == {resource_type}
+            if task.id in scoped_task_ids
+            and set(task.compatible_resource_types) == {resource_type}
+            and _task_matches_resource_group(task, group)
         ]
         total_duration = sum(task.duration_days for task in scoped_tasks)
         if total_duration <= 0:
@@ -8066,12 +8135,16 @@ def _workface_parallelism_diagnostics(schedule_input: ScheduleInput) -> list[dic
 def _resource_groups(resources: list[Resource]) -> list[dict[str, Any]]:
     groups: dict[str, dict[str, Any]] = {}
     for resource in sorted(resources, key=_resource_sort_key):
-        key = resource.pool_id or resource.type
+        key = _resource_group_key(resource)
         if key not in groups:
             groups[key] = {
                 "key": key,
+                "source_pool_id": resource.pool_id or resource.type,
                 "label": resource.pool_label or resource.type,
                 "resource_type": resource.type,
+                "scope_mode": resource.scope_mode,
+                "eligible_workpoint_ids": list(resource.eligible_workpoint_ids),
+                "exclusive_workpoint_id": resource.exclusive_workpoint_id,
                 "max_quantity": 0,
                 "resources": [],
                 "same_structure_resource_binding": False,
@@ -8079,12 +8152,60 @@ def _resource_groups(resources: list[Resource]) -> list[dict[str, Any]]:
             }
         groups[key]["resources"].append(resource)
         groups[key]["max_quantity"] += 1
+        groups[key]["eligible_workpoint_ids"] = sorted(
+            set(groups[key]["eligible_workpoint_ids"]) | set(resource.eligible_workpoint_ids)
+        )
         groups[key]["same_structure_resource_binding"] = (
             groups[key]["same_structure_resource_binding"] or resource.same_structure_resource_binding
         )
         if not groups[key]["parallel_rule_description"] and resource.parallel_rule_description:
             groups[key]["parallel_rule_description"] = resource.parallel_rule_description
     return sorted(groups.values(), key=lambda group: (group["resource_type"], group["key"], group["label"]))
+
+
+def _resource_scope_diagnostics(
+    schedule_input: ScheduleInput,
+    allocations: list[ResourceAllocation],
+    *,
+    recommended_counts: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    enabled_resources = [resource for resource in schedule_input.resources if resource.enabled]
+    groups = _resource_groups(enabled_resources)
+    resource_by_id = {resource.id: resource for resource in enabled_resources}
+    task_by_id = {task.id: task for task in schedule_input.tasks}
+    return {
+        "rule_version": RESOURCE_SCOPE_RULE_VERSION,
+        "project_shared_transfer_time_days": 0,
+        "groups": [
+            {
+                "resource_pool_id": group["key"],
+                "source_pool_id": group["source_pool_id"],
+                "label": group["label"],
+                "resource_type": group["resource_type"],
+                "scope_mode": group["scope_mode"],
+                "workpoint_id": group["exclusive_workpoint_id"],
+                "eligible_workpoint_ids": list(group["eligible_workpoint_ids"]),
+                "current_quantity": group["max_quantity"],
+                "recommended_quantity": (recommended_counts or {}).get(group["key"], group["max_quantity"]),
+                "max_quantity": group["max_quantity"],
+            }
+            for group in groups
+        ],
+        "allocations": [
+            {
+                "resource_id": allocation.resource_id,
+                "task_id": allocation.task_id,
+                "workpoint_id": task_by_id[allocation.task_id].bridge_id
+                if allocation.task_id in task_by_id
+                else None,
+                "scope_mode": resource_by_id[allocation.resource_id].scope_mode,
+                "eligible_workpoint_ids": list(resource_by_id[allocation.resource_id].eligible_workpoint_ids),
+                "exclusive_workpoint_id": resource_by_id[allocation.resource_id].exclusive_workpoint_id,
+            }
+            for allocation in allocations
+            if allocation.resource_id in resource_by_id
+        ],
+    }
 
 
 def _normalized_minimum_resource_counts(
@@ -8104,7 +8225,7 @@ def _apply_resource_limits(resources: list[Resource], limits: dict[str, int]) ->
     used_counts: dict[str, int] = defaultdict(int)
     limited: list[Resource] = []
     for resource in sorted(resources, key=_resource_sort_key):
-        key = resource.pool_id or resource.type
+        key = _resource_group_key(resource)
         limit = limits.get(key)
         if limit is None:
             limited.append(resource)
@@ -8134,13 +8255,18 @@ def _resource_candidates_by_task(
     candidates: dict[str, list[Resource]] = {}
     ordered_resources = sorted(resources, key=_resource_sort_key)
     for task in tasks:
-        compatible_types = set(task.compatible_resource_types)
-        candidates[task.id] = [resource for resource in ordered_resources if resource.type in compatible_types]
+        candidates[task.id] = [
+            resource
+            for resource in ordered_resources
+            if _resource_matches_task(task, resource)
+        ]
     return candidates
 
 
 def _validate_resource_coverage(
-    tasks: list[Task], candidates: dict[str, list[Resource]]
+    tasks: list[Task],
+    candidates: dict[str, list[Resource]],
+    resources: list[Resource] | None = None,
 ) -> list[ValidationMessage]:
     messages: list[ValidationMessage] = []
     constrained_task_count = 0
@@ -8151,13 +8277,23 @@ def _validate_resource_coverage(
         constrained_task_count += 1
         if not candidates.get(task.id):
             missing_candidate_count += 1
+            has_explicit_scoped_type = any(
+                resource.eligible_workpoint_ids
+                and resource.type in task.compatible_resource_types
+                for resource in (resources or [])
+            )
             messages.append(
                 ValidationMessage(
-                    level="warning",
+                    level="error" if has_explicit_scoped_type else "warning",
+                    code="RESOURCE_SCOPE_NO_LEGAL_CANDIDATE" if has_explicit_scoped_type else None,
                     subject_id=task.id,
                     message=(
                         f"“{task.name}”需要以下资源类型之一：{', '.join(task.compatible_resource_types)}，"
-                        "但当前没有启用的受限兼容资源，已按资源默认充足处理。"
+                        + (
+                            "但任务缺少合法工点候选，受限资源作用域校验已阻断求解。"
+                            if has_explicit_scoped_type
+                            else "但当前没有启用的受限兼容资源，已按资源默认充足处理。"
+                        )
                     ),
                 )
             )

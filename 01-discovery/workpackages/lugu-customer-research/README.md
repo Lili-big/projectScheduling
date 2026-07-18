@@ -18,8 +18,13 @@ python .\01-discovery\workpackages\lugu-customer-research\scripts\build_planning
 
 ## 成果
 
-- `results/泸古项目上午调研验证记录_20260715.docx`
-- `results/泸古项目前期工期策划思路分析_20260715.docx`
+- `results/泸古项目7月15日上午调研验证记录_20260715.docx`
+- `results/泸古项目7月16日前期工期策划思路分析_20260715.docx`
+
+## 闭环归属
+
+- 主责角色：`L01｜客户调研与验证闭环`。
+- 本工作包保存调研事实和问题；需要验证的假设在 `05-validation/` 对应工作包中建立引用、判定标准和结论，当前关联 `lugu-validation-material`。
 
 ## 跟踪与保留
 

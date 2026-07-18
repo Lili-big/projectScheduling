@@ -21,6 +21,11 @@ python .\05-validation\workpackages\lugu-plan-granularity\scripts\build_plan_gra
 - `results/plan_version_comparison.json`
 - `results/泸古项目计划粒度验证记录_20260716_v2.docx`
 
+## 闭环归属
+
+- 主责角色：`L01｜客户调研与验证闭环`。
+- 验证记录必须保留假设、判定标准和来源；不通过项回流 L02/L03，通过项可进入 L06。
+
 ## 跟踪与保留
 
 分析脚本、结构化结果和确认版验证记录跟踪；临时渲染、解包或检查结果进入本地归档。

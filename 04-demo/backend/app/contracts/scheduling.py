@@ -7,6 +7,7 @@ from ._models import (
     GeneratedScheduleInput,
     ImportBridgeParamsResponse,
     MinResourcesSolveRequest,
+    Resource,
     ResourceAllocation,
     ResourceCostSolveRequest,
     ScenarioInput,

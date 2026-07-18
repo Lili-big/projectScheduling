@@ -23,6 +23,11 @@ node .\05-validation\workpackages\json-schedule-review\scripts\build-engineering
 - `output/固定资源最小工期结果.v1.report.json`
 - `output/固定资源最小工期结果.v1.html`
 
+## 闭环归属
+
+- 主责角色：`L01｜客户调研与验证闭环`。
+- 复核结论必须注明验证问题和来源；不通过项回流对应 D 角色或 L03，通过项可作为 L06 交付证据。
+
 ## 跟踪与保留
 
 README、描述文件和脚本跟踪；`input/` 是 local-only 用户输入；`output/` 是 ignored/rebuildable。清理工具不得把输入列为删除候选。

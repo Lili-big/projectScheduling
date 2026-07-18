@@ -17,6 +17,7 @@ from ._models import (
     Resource,
     ResourceCalendar,
     ResourcePool,
+    ResourceScopeMode,
     ScenarioInput,
     ScheduleStrategyConfig,
     StructureModel,
@@ -25,6 +26,7 @@ from ._models import (
     UpperStructureComponent,
     UpperStructureLogicRule,
     WorkSection,
+    WorkpointResourceOverride,
 )
 
 __all__ = [name for name in globals() if not name.startswith("_")]

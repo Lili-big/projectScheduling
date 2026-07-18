@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import date
 from pathlib import Path
 
 
@@ -10,9 +11,15 @@ sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.contracts.project_master import ConfirmProjectMasterVersionRequest  # noqa: E402
 from app.project_master.repository import ProjectMasterRepository  # noqa: E402
-from app.project_master.scheduling_adapter import project_model_from_master  # noqa: E402
+from app.project_master.scheduling_adapter import (  # noqa: E402
+    SCHEDULING_PROJECTION_VERSION,
+    project_model_from_master,
+)
 from app.project_master.service import ProjectMasterService  # noqa: E402
-from project_master_fixture_helpers import valid_project_master_workbook  # noqa: E402
+from project_master_fixture_helpers import (  # noqa: E402
+    confirmed_abutment_projection,
+    valid_project_master_workbook,
+)
 
 
 BASELINE = Path(__file__).parent / "fixtures" / "project_master" / "bridge-projection-baseline.json"
@@ -82,3 +89,79 @@ def test_draft_version_cannot_be_projected(tmp_path: Path) -> None:
             project_name="测试项目",
             start_date=__import__("datetime").date(2026, 1, 1),
         )
+
+
+def test_abutment_projection_uses_parent_structure_type_and_preserves_source_fields() -> None:
+    version, snapshot = confirmed_abutment_projection()
+
+    project, diagnostics = project_model_from_master(
+        version=version,
+        snapshot=snapshot,
+        project_name="桥台投影测试项目",
+        start_date=date(2026, 1, 1),
+    )
+
+    structures = {
+        structure.id: structure
+        for bridge in project.bridges
+        for section in bridge.work_sections
+        for structure in section.structures
+    }
+    components = {
+        component.id: component
+        for structure in structures.values()
+        for component in structure.components
+    }
+
+    historical_body = components["CP-AB-HIST-BODY"]
+    assert historical_body.component_type == "abutment_body"
+    assert historical_body.quantity == 1
+    assert historical_body.quantity_label == "1个"
+    assert historical_body.enabled is True
+    assert historical_body.properties == {
+        "height_m": 6.5,
+        "unit": "个",
+        "project_master_structure_id": "ST-AB-HIST",
+        "project_master_component_id": "CP-AB-HIST-BODY",
+    }
+
+    historical_pile = components["CP-AB-HIST-PILE"]
+    assert historical_pile.component_type == "pile"
+    assert historical_pile.quantity == 4
+    assert historical_pile.properties["diameter_m"] == 1.8
+    assert historical_pile.properties["project_master_structure_id"] == "ST-AB-HIST"
+    assert historical_pile.properties["project_master_component_id"] == "CP-AB-HIST-PILE"
+
+    assert components["CP-PIER-CAP"].component_type == "cap_beam"
+    assert [component.id for component in structures["ST-AB-PILE-ONLY"].components] == [
+        "CP-AB-PILE-ONLY"
+    ]
+    assert components["CP-AB-PARALLEL-A"].component_type == "abutment_body"
+    assert components["CP-AB-PARALLEL-B"].component_type == "abutment_body"
+    assert not [item for item in diagnostics if item.code == "PROJECT_MASTER_COMPONENT_NOT_SCHEDULED"]
+
+
+def test_project_master_projection_is_repeatable_and_carries_one_stable_projection_version() -> None:
+    version, snapshot = confirmed_abutment_projection()
+    source_before = snapshot.model_dump_json()
+
+    first, first_diagnostics = project_model_from_master(
+        version=version,
+        snapshot=snapshot,
+        project_name="重复投影测试项目",
+        start_date=date(2026, 1, 1),
+    )
+    second, second_diagnostics = project_model_from_master(
+        version=version,
+        snapshot=snapshot,
+        project_name="重复投影测试项目",
+        start_date=date(2026, 1, 1),
+    )
+
+    assert snapshot.model_dump_json() == source_before
+    assert first == second
+    assert first_diagnostics == second_diagnostics
+    assert {
+        bridge.import_source["scheduling_projection_version"]
+        for bridge in first.bridges
+    } == {SCHEDULING_PROJECTION_VERSION}

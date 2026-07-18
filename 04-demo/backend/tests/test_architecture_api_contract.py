@@ -31,3 +31,40 @@ def test_all_api_routes_match_the_frozen_openapi_contract() -> None:
 def test_compatibility_routes_remain_available() -> None:
     routes = {(item["method"], item["path"]) for item in _route_manifest(app)}
     assert {("GET", "/api/demo"), ("POST", "/api/generate-wbs"), ("POST", "/api/solve")} <= routes
+
+
+def test_resource_scope_reuses_the_five_existing_api_contracts() -> None:
+    routes = _route_manifest(app)
+    by_operation = {(item["method"], item["path"]): item for item in routes}
+    expected = {
+        ("PUT", "/api/local-scenario-config"): (
+            "#/components/schemas/LocalScenarioConfigSaveRequest",
+            "#/components/schemas/LocalScenarioConfigResponse",
+        ),
+        ("POST", "/api/generate-schedule-input"): (
+            "#/components/schemas/ScenarioInput-Input",
+            "#/components/schemas/GeneratedScheduleInput-Output",
+        ),
+        ("POST", "/api/solve-scenario"): (
+            "#/components/schemas/ScenarioInput-Input",
+            "#/components/schemas/ScenarioSolveResult-Output",
+        ),
+        ("POST", "/api/solve-min-resources"): (
+            "#/components/schemas/MinResourcesSolveRequest",
+            "#/components/schemas/ScenarioSolveResult-Output",
+        ),
+        ("POST", "/api/ai-resource-assistant/update-plan"): (
+            "#/components/schemas/ResourceAssistantUpdatePlanRequest",
+            "#/components/schemas/ResourceAssistantUpdatePlanResponse",
+        ),
+    }
+
+    for operation, (request_ref, response_ref) in expected.items():
+        assert operation in by_operation
+        route = by_operation[operation]
+        assert route["request_schema"] == {"$ref": request_ref}
+        assert route["responses"]["200"]["json_schema"] == {"$ref": response_ref}
+        assert route["responses"]["422"]["json_schema"] == {
+            "$ref": "#/components/schemas/HTTPValidationError"
+        }
+        assert sum(1 for item in routes if (item["method"], item["path"]) == operation) == 1

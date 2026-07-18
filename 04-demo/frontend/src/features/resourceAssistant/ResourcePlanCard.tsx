@@ -1,5 +1,5 @@
 import { AlertCircle, CheckCircle2, Eye, Loader2, Play, SlidersHorizontal } from "lucide-react";
-import type { ResourceAssistantPlan, ResourceAssistantPlanResult } from "../../contracts";
+import type { ResourceAssistantPlan, ResourceAssistantPlanResult, ResourcePool } from "../../contracts";
 import {
   editableResourcePools,
   metricsSummary,
@@ -27,6 +27,7 @@ export function ResourcePlanCard({
   onConfirmBaseline,
   confirmingBaseline,
   baselineVersionNo,
+  workpointLabels,
   onQuantityChange,
 }: {
   plan: ResourceAssistantPlan;
@@ -40,7 +41,8 @@ export function ResourcePlanCard({
   onConfirmBaseline?: () => void;
   confirmingBaseline?: boolean;
   baselineVersionNo?: number | null;
-  onQuantityChange: (resourceType: string, quantity: number) => void;
+  workpointLabels?: Record<string, string>;
+  onQuantityChange: (resourcePoolId: string, resourceType: string, workpointId: string | null, quantity: number) => void;
 }) {
   const statusTone = resourceAssistantStatusTone(plan.solve_status);
   const outcomeStatus = resourceAssistantScheduleOutcomeStatus(result);
@@ -75,15 +77,19 @@ export function ResourcePlanCard({
         </div>
       )}
       <div className="resource-plan-resources">
-        {editableResourcePools(plan).map((pool) => (
-          <label className="resource-plan-resource" key={pool.id}>
-            <span>{resourceAssistantResourceLabel(pool.type, plan.resource_pools)}</span>
+        {editableResourceRows(plan, workpointLabels).map((row) => (
+          <label className="resource-plan-resource" key={row.key}>
+            <span title={row.label}>
+              {row.label}
+              <small>{row.workpointId === null ? "项目共享总量" : "工点独享数量"}</small>
+            </span>
             <input
               type="number"
               min={0}
-              value={pool.quantity ?? 0}
+              max={row.maxQuantity ?? undefined}
+              value={row.quantity}
               disabled={disabled}
-              onChange={(event) => onQuantityChange(pool.type, Number(event.target.value))}
+              onChange={(event) => onQuantityChange(row.pool.id, row.pool.type, row.workpointId, Number(event.target.value))}
             />
           </label>
         ))}
@@ -126,4 +132,47 @@ export function ResourcePlanCard({
       {plan.stale_reason && <div className="resource-plan-stale">{plan.stale_reason}</div>}
     </article>
   );
+}
+
+type ResourceQuantityRow = {
+  key: string;
+  pool: ResourcePool;
+  workpointId: string | null;
+  label: string;
+  quantity: number;
+  maxQuantity: number | null;
+};
+
+function editableResourceRows(
+  plan: ResourceAssistantPlan,
+  workpointLabels: Record<string, string> = {},
+): ResourceQuantityRow[] {
+  const rows: ResourceQuantityRow[] = [];
+  for (const pool of editableResourcePools(plan)) {
+    if ((pool.scope_mode ?? "PROJECT_SHARED") === "PROJECT_SHARED") {
+      rows.push({
+        key: `${pool.id}:project`,
+        pool,
+        workpointId: null,
+        label: resourceAssistantResourceLabel(pool.type, plan.resource_pools),
+        quantity: pool.quantity ?? 0,
+        maxQuantity: pool.max_quantity ?? null,
+      });
+      continue;
+    }
+    const overrides = Object.fromEntries((pool.workpoint_overrides ?? []).map((item) => [item.workpoint_id, item]));
+    const workpointIds = pool.authorized_workpoint_ids ?? Object.keys(overrides).sort();
+    for (const workpointId of workpointIds) {
+      const override = overrides[workpointId];
+      rows.push({
+        key: `${pool.id}:${workpointId}`,
+        pool,
+        workpointId,
+        label: `${resourceAssistantResourceLabel(pool.type, plan.resource_pools)} · ${workpointLabels[workpointId] ?? workpointId}`,
+        quantity: override?.quantity ?? pool.quantity ?? 0,
+        maxQuantity: override?.max_quantity ?? pool.max_quantity ?? null,
+      });
+    }
+  }
+  return rows;
 }

@@ -4,6 +4,7 @@ export type {
   ControlLevel,
   DiagnosticMetric,
   RelationshipType,
+  ResourceScopeMode,
   ValidationMessage,
   WorkPointType,
   WorkSectionSide,

@@ -17,6 +17,7 @@ export type RelationshipType = "FS" | "SS" | "FF" | "SF";
 export type WorkPointType = "road" | "bridge" | "tunnel";
 export type WorkSectionSide = "left" | "right" | "none";
 export type ResourceMode = "LIMITED" | "UNLIMITED";
+export type ResourceScopeMode = "PROJECT_SHARED" | "WORKPOINT_EXCLUSIVE";
 export type ResourceCostType = "none" | "monthly_rental" | "one_time_purchase";
 export type ControlLevel = "control" | "key" | "normal" | "rough";
 export type BalanceBucket = "week" | "month";
@@ -319,13 +320,23 @@ export type ResourceCalendar = {
   blackout_dates: string[];
 };
 
+export type WorkpointResourceOverride = {
+  workpoint_id: string;
+  enabled?: boolean | null;
+  quantity?: number | null;
+  max_quantity?: number | null;
+};
+
 export type ResourcePool = {
   id: string;
   type: string;
   label: string;
   resource_mode?: ResourceMode;
+  scope_mode?: ResourceScopeMode;
   quantity: number | null;
   max_quantity?: number | null;
+  authorized_workpoint_ids?: string[] | null;
+  workpoint_overrides?: WorkpointResourceOverride[];
   calendar_id: string;
   enabled: boolean;
   compatible_process_ids: string[];
@@ -576,6 +587,9 @@ export type Resource = {
   pool_label?: string | null;
   enabled: boolean;
   calendar_id: string;
+  scope_mode?: ResourceScopeMode;
+  eligible_workpoint_ids: string[];
+  exclusive_workpoint_id?: string | null;
   same_structure_resource_binding?: boolean;
   parallel_rule_description?: string;
 };
@@ -946,9 +960,16 @@ export type ResourceAssistantInitialResponse = {
   diagnostics: ValidationMessage[];
 };
 
+export type ScopedResourceQuantityUpdate = {
+  resource_pool_id: string;
+  workpoint_id?: string | null;
+  quantity: number;
+};
+
 export type ResourceAssistantUpdatePlanRequest = {
   plan_id: string;
   resource_updates: Record<string, number>;
+  scoped_resource_updates?: ScopedResourceQuantityUpdate[];
   resource_plan?: ResourceAssistantPlan | null;
 };
 

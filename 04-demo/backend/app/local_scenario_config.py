@@ -22,7 +22,7 @@ PROJECT_ROOT = REPOSITORY_ROOT
 LOCAL_DATA_DIR = LOCAL_DATA_ROOT
 LOCAL_SCENARIO_CONFIG_PATH = state_path("scheduler-config.json")
 BUNDLED_SCENARIO_CONFIG_PATH = Path(__file__).resolve().with_name("default_scenario_config.json")
-SCHEMA_VERSION = "local-scheduler-config/v1"
+SCHEMA_VERSION = "local-scheduler-config/v2"
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
@@ -78,8 +78,12 @@ def apply_scenario_config(
         )
 
     if "resource_pools" in config:
-        saved_resource_pools = _validate_list(config["resource_pools"], ResourcePool, "resource_pools")
-        next_scenario.resource_pools = _merge_by_id(next_scenario.resource_pools, saved_resource_pools)
+        saved_resource_pools = _normalize_resource_pools(
+            _validate_list(config["resource_pools"], ResourcePool, "resource_pools")
+        )
+        next_scenario.resource_pools = _normalize_resource_pools(
+            _merge_by_id(_normalize_resource_pools(next_scenario.resource_pools), saved_resource_pools)
+        )
 
     if "milestones" in config:
         saved_milestones = _validate_list(config["milestones"], MilestoneConstraint, "milestones")
@@ -133,12 +137,13 @@ def save_local_scenario_config(
 
     config = _read_config(path)
     upgraded_process_library = upgrade_process_library(process_library)
+    normalized_resource_pools = _normalize_resource_pools(resource_pools)
     config.update(
         {
             "process_library": _dump_models(upgraded_process_library),
             "logic_rules": _dump_models(logic_rules),
             "upper_structure_logic_rules": _dump_models(upper_structure_logic_rules),
-            "resource_pools": _dump_models(resource_pools),
+            "resource_pools": _dump_models(normalized_resource_pools),
             "milestones": _dump_models(milestones or []),
         }
     )
@@ -147,7 +152,7 @@ def save_local_scenario_config(
         "process_library": upgraded_process_library,
         "logic_rules": logic_rules,
         "upper_structure_logic_rules": upper_structure_logic_rules,
-        "resource_pools": resource_pools,
+        "resource_pools": normalized_resource_pools,
         "milestones": milestones or [],
     }
 
@@ -198,3 +203,7 @@ def _merge_by_id(defaults: list[ModelT], saved: list[ModelT]) -> list[ModelT]:
 
 def _dump_models(items: Iterable[BaseModel]) -> list[dict[str, Any]]:
     return [item.model_dump(mode="json") for item in items]
+
+
+def _normalize_resource_pools(items: Iterable[ResourcePool]) -> list[ResourcePool]:
+    return [ResourcePool.model_validate(item.model_dump(mode="python")) for item in items]

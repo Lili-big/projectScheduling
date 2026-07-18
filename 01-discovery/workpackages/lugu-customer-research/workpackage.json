@@ -6,10 +6,10 @@
   "inputs": ["inputs/泸古项目客户访谈提纲_20260715.md"],
   "entrypoints": ["scripts/build_report.py", "scripts/build_planning_logic_report.py"],
   "results": [
-    "results/泸古项目上午调研验证记录_20260715.docx",
-    "results/泸古项目前期工期策划思路分析_20260715.docx"
+    "results/泸古项目7月15日上午调研验证记录_20260715.docx",
+    "results/泸古项目7月16日前期工期策划思路分析_20260715.docx"
   ],
-  "owner": "产品调研",
+  "owner": "L01｜客户调研与验证闭环（客户调研）",
   "tracking_policy": "tracked",
   "retention_policy": "调研提纲、可复用脚本和经确认报告跟踪；临时转录和中间文件放本地数据区。",
   "related_workpackages": ["lugu-source-data-analysis", "lugu-validation-material"]

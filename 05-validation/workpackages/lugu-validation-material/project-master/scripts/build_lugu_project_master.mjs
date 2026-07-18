@@ -304,6 +304,10 @@ function addAggregatedComponent(map, kind, values) {
   }
 }
 
+function projectedSubstructureComponentType(structureType, componentType) {
+  return structureType === "bridge_abutment" && componentType !== "pile" ? "abutment_body" : componentType;
+}
+
 function parseSpecialStructures(specialSheet) {
   const result = [];
   let current = null;
@@ -474,9 +478,10 @@ function parseBridge(config, sheet, workpoint, specialDefinitions, structureObje
           pier: ["墩柱", "pier_body", "根"],
           columnTie: ["柱系梁", "tie_beam", "个"],
           spacer: ["隔板", "other", "个"],
-          capBeam: [support.token.isAbutment ? "台帽" : "盖梁", "cap_beam", "个"],
+          capBeam: [structureType === "bridge_abutment" ? "台帽" : "盖梁", "cap_beam", "个"],
         };
-        const [label, type, unit] = definitions[component.kind];
+        const [label, sourceType, unit] = definitions[component.kind];
+        const type = projectedSubstructureComponentType(structureType, sourceType);
         componentObjects.push({
           component_id: `CP-${structureId.replace(/^ST-/, "")}-${String(componentOrder).padStart(2, "0")}`,
           structure_id: structureId,
@@ -799,7 +804,7 @@ writeDataSheet(
   componentObjects,
   [34, 28, 36, 30, 12, 10, 12, 10, 64, 12, 12, 12, 30],
   [
-    { column: "D", values: ["pile", "cap", "tie_beam", "pier_body", "cap_beam", "precast_beam", "cast_in_place_box_beam", "cast_in_place_continuous_beam", "other"] },
+    { column: "D", values: ["pile", "cap", "tie_beam", "pier_body", "abutment_body", "cap_beam", "precast_beam", "cast_in_place_box_beam", "cast_in_place_continuous_beam", "other"] },
     { column: "G", values: ["是", "否"] },
   ],
 );
