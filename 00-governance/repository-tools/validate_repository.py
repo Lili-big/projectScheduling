@@ -15,8 +15,8 @@ SPEC = ROOT / "03-requirements/specs/042-repo-architecture-modernization"
 FORBIDDEN_TRACKED = re.compile(r"(^|/)(\.local\.env|\.env|node_modules|dist|__pycache__|\.pytest_cache|logs)(/|$)|(^|/)~\$|\.log$|\.pyc$")
 STANDARD_ROOT = {
     ".agents", ".codex", ".dockerignore", ".gitignore", ".local.env.example", ".netlifyignore", ".specify",
-    ".local-data", "00-governance", "01-discovery", "02-solution-analysis", "03-requirements", "04-demo",
-    "05-validation", "06-delivery", "AGENTS.md", "agent.md", "README.md", "Dockerfile", "netlify.toml",
+    ".local-data", "00-governance", "01-customer-validation", "02-solution-analysis", "03-requirements", "04-demo",
+    "06-delivery", "AGENTS.md", "agent.md", "README.md", "Dockerfile", "netlify.toml",
     "package-lock.json", "package.json", "pytest.ini", "requirements.txt",
 }
 LEGACY_ROOT_PENDING_ASSET_APPROVAL = {".netlify-cli-runtime"}

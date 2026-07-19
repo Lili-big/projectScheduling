@@ -174,6 +174,7 @@
       "ResourcePath",
       "ResourcePathStep",
       "ResourcePool",
+      "ResourcePoolQuantityResult",
       "ResourceScopeMode",
       "ResourceSearchRange",
       "RouteRun",
@@ -261,7 +262,7 @@
   },
   "build": {
     "output_path": "04-demo/frontend/dist",
-    "total_bytes": 0
+    "total_bytes": 6103796
   },
   "npm_locks": [
     {

@@ -280,7 +280,6 @@ export function ResourceAssistantPanel({
   async function handleQuantityChange(
     planId: string,
     resourcePoolId: string,
-    resourceType: string,
     workpointId: string | null,
     quantity: number,
   ) {
@@ -290,10 +289,8 @@ export function ResourceAssistantPanel({
     try {
       const response = await updateAiResourceAssistantPlan({
         plan_id: planId,
-        resource_updates: workpointId === null ? { [resourceType]: quantity } : {},
-        scoped_resource_updates: workpointId === null
-          ? []
-          : [{ resource_pool_id: resourcePoolId, workpoint_id: workpointId, quantity }],
+        resource_updates: {},
+        scoped_resource_updates: [{ resource_pool_id: resourcePoolId, workpoint_id: workpointId, quantity }],
         resource_plan: plan,
       });
       replacePlans(plansRef.current.map((item) => (item.scenario_id === planId ? response.resource_plan : item)));
@@ -411,8 +408,8 @@ export function ResourceAssistantPanel({
               confirmingBaseline={confirmingBaseline && selectedPlanId === plan.scenario_id}
               baselineVersionNo={baselinePlanId === plan.scenario_id ? baselineVersionNo : null}
               workpointLabels={workpointLabels}
-              onQuantityChange={(resourcePoolId, resourceType, workpointId, quantity) =>
-                handleQuantityChange(plan.scenario_id, resourcePoolId, resourceType, workpointId, quantity)}
+              onQuantityChange={(resourcePoolId, workpointId, quantity) =>
+                handleQuantityChange(plan.scenario_id, resourcePoolId, workpointId, quantity)}
             />
           ))}
         </section>
@@ -449,6 +446,7 @@ function resourceAssistantScenarioFingerprint(scenario: ScenarioInput | null): s
     .map((pool) => ({
       id: pool.id,
       scope_mode: pool.scope_mode ?? "PROJECT_SHARED",
+      workpoint_id: pool.workpoint_id ?? null,
       authorized_workpoint_ids: pool.authorized_workpoint_ids === null
         ? null
         : [...(pool.authorized_workpoint_ids ?? [])].sort(),

@@ -17,20 +17,21 @@ import {
 import { resourceCostTypeLabels } from "./constants";
 
 export function applyRequiredResourceTypesToTasks(tasks: Task[], resourcePools: ResourcePool[]): Task[] {
-  const poolsByType = new Map(resourcePools.map((pool) => [pool.type, pool]));
+  const poolsByType = new Map<string, ResourcePool[]>();
+  for (const pool of resourcePools) poolsByType.set(pool.type, [...(poolsByType.get(pool.type) ?? []), pool]);
   return tasks.map((task) => ({
     ...task,
     compatible_resource_types: requiredResourceTypesForTask(task, poolsByType),
   }));
 }
 
-export function requiredResourceTypesForTask(task: Task, poolsByType: Map<string, ResourcePool>): string[] {
+export function requiredResourceTypesForTask(task: Task, poolsByType: Map<string, ResourcePool[]>): string[] {
   const resourceType = defaultResourceTypeForTask(task);
   if (!resourceType) return [];
-  const pool = poolsByType.get(resourceType);
-  if (isLimitedResourcePoolAvailable(pool)) return [resourceType];
+  const pools = poolsByType.get(resourceType) ?? [];
+  if (pools.some(isLimitedResourcePoolAvailable)) return [resourceType];
   if (keyResourceComponentTypes.has(task.component_type)) return [];
-  if (pool && resourcePoolMode(pool) === "LIMITED") return [];
+  if (pools.some((pool) => resourcePoolMode(pool) === "LIMITED")) return [];
   return [];
 }
 
@@ -49,7 +50,7 @@ export function methodIdFromProcessId(processId: string): string | null {
 }
 
 export function isLimitedResourcePoolAvailable(pool: ResourcePool | undefined): boolean {
-  return Boolean(pool && pool.enabled && resourcePoolMode(pool) === "LIMITED" && resourcePoolUsableLimit(pool) > 0);
+  return Boolean(pool && pool.enabled && resourcePoolMode(pool) === "LIMITED" && resourcePoolQuantity(pool) > 0);
 }
 
 export function resourcePoolMode(pool: ResourcePool): ResourceMode {
@@ -87,6 +88,14 @@ export type EffectiveWorkpointResource = {
   quantity: number;
   maxQuantity: number;
   inheritanceSource: "inherited" | "overridden";
+};
+
+export type ResourceCatalogItem = {
+  type: string;
+  label: string;
+  defaultCalendarId: string;
+  defaultMaxQuantity: number;
+  applicableProcessIds: string[];
 };
 
 export const resourceScopeLabels: Record<ResourceScopeMode, string> = {
@@ -144,19 +153,107 @@ export function normalizeResourcePoolForWorkspace(pool: ResourcePool): ResourceP
   const maxQuantity = resourceMode === "LIMITED"
     ? Math.max(normalizedQuantity, normalizeResourceQuantity(pool.max_quantity ?? normalizedQuantity))
     : pool.max_quantity;
+  const scopeMode = normalizeResourceScopeMode(pool.scope_mode);
+  const workpointId = typeof pool.workpoint_id === "string" && pool.workpoint_id.trim() ? pool.workpoint_id.trim() : null;
+  const isCanonicalLocal = scopeMode === "WORKPOINT_EXCLUSIVE" && workpointId !== null;
   return {
     ...pool,
     resource_mode: resourceMode,
-    scope_mode: normalizeResourceScopeMode(pool.scope_mode),
+    scope_mode: scopeMode,
+    workpoint_id: scopeMode === "PROJECT_SHARED" ? null : workpointId,
     quantity,
     max_quantity: maxQuantity,
-    authorized_workpoint_ids: normalizeWorkpointIds(pool.authorized_workpoint_ids),
-    workpoint_overrides: normalizeWorkpointOverrides(pool.workpoint_overrides),
+    authorized_workpoint_ids: isCanonicalLocal ? null : normalizeWorkpointIds(pool.authorized_workpoint_ids),
+    workpoint_overrides: isCanonicalLocal ? [] : normalizeWorkpointOverrides(pool.workpoint_overrides),
     calendar_id: pool.calendar_id || "continuous",
     same_structure_resource_binding: Boolean(pool.same_structure_resource_binding),
     parallel_rule_description: normalizedParallelRuleDescription(pool),
   };
 }
+
+export function isWorkpointLocalPool(pool: ResourcePool): boolean {
+  return (pool.scope_mode ?? "PROJECT_SHARED") === "WORKPOINT_EXCLUSIVE" && Boolean(pool.workpoint_id?.trim());
+}
+
+export function localResourcePoolsForWorkpoint(pools: ResourcePool[], workpointId: string): ResourcePool[] {
+  return pools
+    .map(normalizeResourcePoolForWorkspace)
+    .filter((pool) => isWorkpointLocalPool(pool) && pool.workpoint_id === workpointId)
+    .sort((left, right) => left.type.localeCompare(right.type) || left.id.localeCompare(right.id));
+}
+
+export function sharedResourcePools(pools: ResourcePool[]): ResourcePool[] {
+  return pools
+    .map(normalizeResourcePoolForWorkspace)
+    .filter((pool) => (pool.scope_mode ?? "PROJECT_SHARED") === "PROJECT_SHARED")
+    .sort((left, right) => left.type.localeCompare(right.type) || left.id.localeCompare(right.id));
+}
+
+type WorkpointLocalResourceInput = Pick<ResourcePool, "id" | "type" | "label" | "quantity" | "max_quantity" | "enabled">
+  & Partial<Pick<ResourcePool, "calendar_id" | "compatible_process_ids">>;
+
+export function upsertWorkpointLocalResource(
+  pools: ResourcePool[],
+  workpointId: string,
+  input: WorkpointLocalResourceInput,
+): ResourcePool[] {
+  const existing = pools.find((pool) => isWorkpointLocalPool(pool) && pool.workpoint_id === workpointId && pool.type === input.type);
+  const next = normalizeResourcePoolForWorkspace({
+    ...(existing ?? {}),
+    ...input,
+    id: existing?.id ?? input.id,
+    resource_mode: "LIMITED",
+    scope_mode: "WORKPOINT_EXCLUSIVE",
+    workpoint_id: workpointId,
+    authorized_workpoint_ids: null,
+    workpoint_overrides: [],
+    calendar_id: input.calendar_id ?? existing?.calendar_id ?? "continuous",
+    compatible_process_ids: input.compatible_process_ids ?? existing?.compatible_process_ids ?? [],
+  });
+  return [...pools.filter((pool) => pool.id !== next.id && pool !== existing), next]
+    .map(normalizeResourcePoolForWorkspace)
+    .sort((left, right) => left.id.localeCompare(right.id));
+}
+
+export function removeResourcePoolById(pools: ResourcePool[], poolId: string): ResourcePool[] {
+  return pools.filter((pool) => pool.id !== poolId).map(normalizeResourcePoolForWorkspace);
+}
+
+export function upsertResourcePoolById(pools: ResourcePool[], poolId: string, patch: Partial<ResourcePool>): ResourcePool[] {
+  return pools.map((pool) => pool.id === poolId
+    ? normalizeResourcePoolForWorkspace({ ...pool, ...patch, id: pool.id })
+    : normalizeResourcePoolForWorkspace(pool));
+}
+
+export function resourceCatalogProjection(processes: ProcessTemplate[], pools: ResourcePool[]): ResourceCatalogItem[] {
+  const catalog = new Map<string, ResourceCatalogItem>();
+  for (const process of processes) {
+    const type = defaultResourceTypeForProcess(process);
+    if (!type || excludedResourceCatalogTypes.has(type)) continue;
+    const existing = catalog.get(type);
+    catalog.set(type, {
+      type,
+      label: existing?.label ?? resourceTypeLabel(type, pools),
+      defaultCalendarId: existing?.defaultCalendarId ?? "continuous",
+      defaultMaxQuantity: existing?.defaultMaxQuantity ?? 0,
+      applicableProcessIds: Array.from(new Set([...(existing?.applicableProcessIds ?? []), process.id])).sort(),
+    });
+  }
+  for (const pool of pools.map(normalizeResourcePoolForWorkspace)) {
+    if (excludedResourceCatalogTypes.has(pool.type)) continue;
+    const existing = catalog.get(pool.type);
+    catalog.set(pool.type, {
+      type: pool.type,
+      label: pool.label || existing?.label || pool.type,
+      defaultCalendarId: pool.calendar_id || existing?.defaultCalendarId || "continuous",
+      defaultMaxQuantity: Math.max(existing?.defaultMaxQuantity ?? 0, resourcePoolUsableLimit(pool)),
+      applicableProcessIds: Array.from(new Set([...(existing?.applicableProcessIds ?? []), ...pool.compatible_process_ids])).sort(),
+    });
+  }
+  return [...catalog.values()].sort((left, right) => left.type.localeCompare(right.type));
+}
+
+const excludedResourceCatalogTypes = new Set(["girder_erector", "beam_yard", "beam_yard_production_line"]);
 
 export function effectiveWorkpointResource(pool: ResourcePool, workpointId: string): EffectiveWorkpointResource {
   const normalized = normalizeResourcePoolForWorkspace(pool);
@@ -196,17 +293,34 @@ export function restoreWorkpointResourceInheritance(pool: ResourcePool, workpoin
 
 export function resourcePoolScopeIssues(pool: ResourcePool, authoritativeWorkpointIds: string[]): string[] {
   const authoritative = new Set(authoritativeWorkpointIds);
+  const normalized = normalizeResourcePoolForWorkspace(pool);
   const referenced = [
+    ...(normalized.workpoint_id ? [normalized.workpoint_id] : []),
     ...(pool.authorized_workpoint_ids ?? []),
     ...(pool.workpoint_overrides ?? []).map((item) => item.workpoint_id),
   ];
   const issues = new Set<string>();
+  if (normalized.scope_mode === "PROJECT_SHARED" && normalized.authorized_workpoint_ids?.length === 0) {
+    issues.add("共享池至少选择一个可流转工点，或选择全部工点");
+  }
+  if (isWorkpointLocalPool(normalized) && !authoritative.has(normalized.workpoint_id ?? "")) {
+    issues.add("工点资源不属于当前项目主数据版本");
+  }
   if (referenced.some((workpointId) => !authoritative.has(workpointId))) {
     issues.add("配置包含当前项目主数据版本之外的工点");
   }
   const overrideIds = (pool.workpoint_overrides ?? []).map((item) => item.workpoint_id);
   if (new Set(overrideIds).size !== overrideIds.length) issues.add("同一工点存在重复覆盖");
   return [...issues];
+}
+
+export function resourcePoolsScopeIssues(pools: ResourcePool[], authoritativeWorkpointIds: string[]): string[] {
+  const issues = pools.flatMap((pool) => resourcePoolScopeIssues(pool, authoritativeWorkpointIds));
+  const ids = pools.map((pool) => pool.id);
+  if (new Set(ids).size !== ids.length) issues.push("资源池 ID 重复");
+  const localKeys = pools.filter(isWorkpointLocalPool).map((pool) => `${pool.workpoint_id}\u0000${pool.type}`);
+  if (new Set(localKeys).size !== localKeys.length) issues.push("同一工点同一资源类型只能维护一条本地记录");
+  return Array.from(new Set(issues));
 }
 
 export function resourcePoolsSemanticFingerprint(pools: ResourcePool[]): string {
@@ -219,6 +333,7 @@ export function resourcePoolsSemanticFingerprint(pools: ResourcePool[]): string 
         type: pool.type,
         resource_mode: pool.resource_mode,
         scope_mode: pool.scope_mode,
+        workpoint_id: pool.workpoint_id ?? null,
         quantity: pool.quantity,
         max_quantity: pool.max_quantity,
         authorized_workpoint_ids: pool.authorized_workpoint_ids,

@@ -6,7 +6,7 @@
 
 ## 进入条件
 
-- `01-discovery` 已说明真实业务问题和证据。
+- `01-customer-validation` 已说明真实业务问题和证据。
 - 存在两个以上可选路径，或需要评估价值、可行性、风险与范围。
 
 ## 退出条件
@@ -16,8 +16,7 @@
 
 ## 权威资产
 
-- `proposals/`：长期目标、融合方案、MVP 与工程化方案。
-- `decisions/`：后续新增的正式决策记录。
+- `proposals/`：长期目标、融合方案、MVP、工程化方案和当前正式决策记录。
 
 ## 工作包索引
 
@@ -25,7 +24,7 @@
 
 ## 相邻阶段
 
-- 上一阶段：[01-discovery](../01-discovery/README.md)。
+- 上一阶段：[01-customer-validation](../01-customer-validation/README.md)。
 - 下一阶段：[03-requirements](../03-requirements/README.md)。治理入口位于 `00-governance`。
 
 ## 禁止内容

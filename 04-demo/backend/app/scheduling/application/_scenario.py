@@ -191,7 +191,12 @@ def generate_schedule_input_from_scenario(
         resource_pools=scenario.resource_pools,
     )
     validation.extend(resource_resolution.diagnostics)
-    tasks = _apply_required_resource_types(tasks, resource_resolution, validation)
+    tasks = _apply_required_resource_types(
+        tasks,
+        resource_resolution,
+        validation,
+        use_max_quantity=use_max_resources,
+    )
     same_structure_rules = [rule for rule in scenario.logic_rules if rule.scope == "same_structure"]
     precedence_links, link_messages = build_precedence_links(tasks, same_structure_rules)
     precedence_links.extend(generated_links)
@@ -2035,6 +2040,8 @@ def _apply_required_resource_types(
     tasks: list[Task],
     resource_resolution: EffectiveResourceResolution,
     validation: list[ValidationMessage],
+    *,
+    use_max_quantity: bool = False,
 ) -> list[Task]:
     pools_by_type: dict[str, list[EffectiveResourcePool]] = defaultdict(list)
     for pool in resource_resolution.pools:
@@ -2050,6 +2057,7 @@ def _apply_required_resource_types(
                     validation,
                     warning_keys,
                     error_keys,
+                    use_max_quantity=use_max_quantity,
                 )
             }
         )
@@ -2063,6 +2071,8 @@ def _required_resource_types_for_task(
     validation: list[ValidationMessage],
     warning_keys: set[str],
     error_keys: set[str],
+    *,
+    use_max_quantity: bool,
 ) -> list[str]:
     if task.properties.get("resource_neutral"):
         return []
@@ -2077,38 +2087,50 @@ def _required_resource_types_for_task(
         for pool in type_pools
         if task.bridge_id is not None and task.bridge_id in pool.eligible_workpoint_ids
     ]
-    if any(_is_limited_pool_available(pool) for pool in matching_pools):
+    if any(
+        _is_limited_pool_available(pool, use_max_quantity=use_max_quantity)
+        for pool in matching_pools
+    ):
         return [default_resource_type]
 
-    if any(_is_limited_pool_available(pool) for pool in type_pools):
+    matching_unlimited_pool = next(
+        (
+            pool
+            for pool in matching_pools
+            if pool.enabled and pool.resource_mode == "UNLIMITED"
+        ),
+        None,
+    )
+    if matching_unlimited_pool is not None:
+        _append_unbounded_resource_warning(
+            task,
+            default_resource_type,
+            matching_unlimited_pool,
+            validation,
+            warning_keys,
+        )
+        return []
+
+    if type_pools:
         _append_scoped_resource_error(
             task,
             default_resource_type,
             type_pools,
             validation,
             error_keys,
+            use_max_quantity=use_max_quantity,
         )
         return [default_resource_type]
 
-    if task.component_type in KEY_RESOURCE_COMPONENT_TYPES:
-        _append_unbounded_resource_warning(
-            task,
-            default_resource_type,
-            matching_pools[0] if matching_pools else (type_pools[0] if type_pools else None),
-            validation,
-            warning_keys,
-        )
-        return []
-
-    if type_pools and any(pool.resource_mode == "LIMITED" for pool in type_pools):
-        _append_unbounded_resource_warning(
-            task,
-            default_resource_type,
-            matching_pools[0] if matching_pools else type_pools[0],
-            validation,
-            warning_keys,
-        )
-    return []
+    _append_scoped_resource_error(
+        task,
+        default_resource_type,
+        type_pools,
+        validation,
+        error_keys,
+        use_max_quantity=use_max_quantity,
+    )
+    return [default_resource_type]
 
 
 def _default_resource_type_for_task(task: Task) -> str | None:
@@ -2131,10 +2153,13 @@ def _method_id_from_process_id(process_id: str) -> str | None:
     return None
 
 
-def _is_limited_pool_available(pool: EffectiveResourcePool | None) -> bool:
+def _is_limited_pool_available(
+    pool: EffectiveResourcePool | None, *, use_max_quantity: bool
+) -> bool:
     if not pool or not pool.enabled or pool.resource_mode != "LIMITED":
         return False
-    return pool.max_quantity > 0
+    quantity = pool.max_quantity if use_max_quantity else pool.quantity
+    return quantity > 0
 
 
 def _append_scoped_resource_error(
@@ -2143,25 +2168,83 @@ def _append_scoped_resource_error(
     pools: list[EffectiveResourcePool],
     validation: list[ValidationMessage],
     error_keys: set[str],
+    *,
+    use_max_quantity: bool,
 ) -> None:
     key = f"{task.id}:{resource_type}"
     if key in error_keys:
         return
     error_keys.add(key)
     pool_ids = sorted({pool.source_pool_id for pool in pools})
-    reason = "缺少桥梁工点身份" if not task.bridge_id else f"工点 {task.bridge_id} 不在获准范围"
+    reason_codes = _resource_gap_reason_codes(
+        task,
+        pools,
+        use_max_quantity=use_max_quantity,
+    )
+    entity_refs = [task.id]
+    if task.bridge_id:
+        entity_refs.append(task.bridge_id)
+    entity_refs.extend([resource_type, *pool_ids])
     validation.append(
         ValidationMessage(
             level="error",
-            code="RESOURCE_SCOPE_NO_LEGAL_CANDIDATE",
+            code="RESOURCE_ALLOCATION_NO_LEGAL_CANDIDATE",
             subject_id=task.id,
-            entity_refs=[task.id, *pool_ids],
+            entity_refs=entity_refs,
+            details={
+                "task_id": task.id,
+                "workpoint_id": task.bridge_id,
+                "resource_type": resource_type,
+                "relevant_pool_ids": pool_ids,
+                "reason": reason_codes[0],
+                "reasons": reason_codes,
+            },
             message=(
-                f"工作项“{task.name}”需要受限资源类型 {resource_type}，但{reason}，"
-                "无法生成合法工点资源候选。"
+                f"工作项“{task.name}”在工点 {task.bridge_id or 'unknown'} 需要资源类型"
+                f" {resource_type}，但没有合法当前实例；原因：{', '.join(reason_codes)}。"
             ),
         )
     )
+
+
+def _resource_gap_reason_codes(
+    task: Task,
+    pools: list[EffectiveResourcePool],
+    *,
+    use_max_quantity: bool,
+) -> list[str]:
+    if not task.bridge_id:
+        return ["WORKPOINT_ID_INVALID"]
+    if not pools:
+        return ["RESOURCE_TYPE_UNCONFIGURED"]
+
+    reasons: set[str] = set()
+    for pool in pools:
+        matches_workpoint = task.bridge_id in pool.eligible_workpoint_ids
+        if not matches_workpoint:
+            reasons.add(
+                "SHARED_SCOPE_MISMATCH"
+                if pool.scope_mode == "PROJECT_SHARED"
+                else "WORKPOINT_ID_INVALID"
+            )
+            continue
+        if not pool.enabled:
+            reasons.add(
+                "LOCAL_DISABLED"
+                if pool.scope_mode == "WORKPOINT_EXCLUSIVE"
+                else "SHARED_DISABLED"
+            )
+            continue
+        if pool.resource_mode != "LIMITED":
+            continue
+        quantity = pool.max_quantity if use_max_quantity else pool.quantity
+        if quantity <= 0:
+            reasons.add(
+                "LOCAL_QUANTITY_ZERO"
+                if pool.scope_mode == "WORKPOINT_EXCLUSIVE"
+                else "SHARED_DISABLED"
+            )
+    return sorted(reasons or {"RESOURCE_TYPE_UNCONFIGURED"})
 
 
 def _append_unbounded_resource_warning(
@@ -2240,17 +2323,16 @@ def expand_effective_resource_pools(
             continue
         quantity = pool.max_quantity if use_max_quantity else pool.quantity
         for index in range(1, quantity + 1):
-            instance_scope = "project" if pool.scope_mode == "PROJECT_SHARED" else f"workpoint::{pool.workpoint_id}"
             resources.append(
                 Resource(
-                    id=f"{pool.source_pool_id}::{instance_scope}::{index}",
+                    id=f"{pool.effective_pool_id}::instance::{index}",
                     name=(
                         f"{pool.label}{index}"
                         if pool.workpoint_id is None
                         else f"{pool.label}（{pool.workpoint_id}）{index}"
                     ),
                     type=pool.resource_type,
-                    pool_id=pool.source_pool_id,
+                    pool_id=pool.effective_pool_id,
                     pool_label=pool.label,
                     enabled=True,
                     calendar_id=pool.calendar_id,

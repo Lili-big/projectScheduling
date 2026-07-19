@@ -6,11 +6,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 STAGES = [
     "00-governance",
-    "01-discovery",
+    "01-customer-validation",
     "02-solution-analysis",
     "03-requirements",
     "04-demo",
-    "05-validation",
     "06-delivery",
 ]
 REQUIRED_HEADINGS = ["目的", "进入条件", "退出条件", "权威资产", "工作包索引", "相邻阶段", "禁止内容", "维护触发条件"]

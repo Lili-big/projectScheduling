@@ -69,3 +69,74 @@ def test_project_shared_fixed_resource_adds_no_transfer_duration_or_precedence()
     assert result.status in {"OPTIMAL", "FEASIBLE"}
     assert result.objective_days == 10
     assert generated.source_summary["project_shared_transfer_time_days"] == 0
+
+
+def test_current_generation_uses_quantity_and_shared_pool_can_fill_zero_local_pool() -> None:
+    scenario = two_workpoint_scenario(
+        ResourcePool(
+            id="local-a",
+            type="cap_team",
+            label="A 本地班组",
+            scope_mode="WORKPOINT_EXCLUSIVE",
+            workpoint_id=WORKPOINT_A,
+            quantity=0,
+            max_quantity=3,
+        )
+    )
+    scenario.resource_pools.append(
+        ResourcePool(
+            id="shared-ab",
+            type="cap_team",
+            label="AB 共享班组",
+            quantity=1,
+            max_quantity=2,
+            authorized_workpoint_ids=[WORKPOINT_A, WORKPOINT_B],
+        )
+    )
+
+    generated = legacy.generate_schedule_input_from_scenario(scenario)
+
+    assert {resource.pool_id for resource in generated.schedule_input.resources} == {"shared-ab"}
+    assert all(task.compatible_resource_types == ["cap_team"] for task in generated.schedule_input.tasks)
+    assert not any(
+        message.code == "RESOURCE_ALLOCATION_NO_LEGAL_CANDIDATE"
+        for message in generated.validation
+    )
+
+
+def test_zero_local_without_legal_shared_pool_blocks_with_task_workpoint_type_and_pool_refs() -> None:
+    scenario = two_workpoint_scenario(
+        ResourcePool(
+            id="local-a",
+            type="cap_team",
+            label="A 本地班组",
+            scope_mode="WORKPOINT_EXCLUSIVE",
+            workpoint_id=WORKPOINT_A,
+            quantity=0,
+            max_quantity=3,
+        )
+    )
+    scenario.resource_pools.append(
+        ResourcePool(
+            id="shared-b",
+            type="cap_team",
+            label="B 共享班组",
+            quantity=1,
+            max_quantity=2,
+            authorized_workpoint_ids=[WORKPOINT_B],
+        )
+    )
+
+    generated = legacy.generate_schedule_input_from_scenario(scenario)
+    task_a = next(task for task in generated.schedule_input.tasks if task.bridge_id == WORKPOINT_A)
+    diagnostic = next(
+        message
+        for message in generated.validation
+        if message.code == "RESOURCE_ALLOCATION_NO_LEGAL_CANDIDATE"
+        and message.subject_id == task_a.id
+    )
+
+    assert diagnostic.level == "error"
+    assert diagnostic.entity_refs == [task_a.id, WORKPOINT_A, "cap_team", "local-a", "shared-b"]
+    assert "LOCAL_QUANTITY_ZERO" in diagnostic.message
+    assert "SHARED_SCOPE_MISMATCH" in diagnostic.message

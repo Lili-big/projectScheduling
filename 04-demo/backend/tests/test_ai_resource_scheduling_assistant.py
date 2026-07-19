@@ -311,13 +311,13 @@ def test_deterministic_baseline_uses_project_workload_and_specialized_rules() ->
 
     states = assistant_module._resource_workload_states(scenario, profile)
     baseline = assistant_module._deterministic_resource_baseline(scenario, profile)
-
-    assert states["rotary_drill"]["status"] == "ACTIVE"
-    assert states["manual_pile_team"]["status"] == "ACTIVE"
-    assert states["impact_drill"]["status"] == "UNUSED_OR_UNMAPPED"
-    assert states["circulation_drill"]["status"] == "UNUSED_OR_UNMAPPED"
-    assert states["cast_in_place_continuous_beam_team"]["status"] == "UNUSED_OR_UNMAPPED"
     pool_by_type = {pool.type: pool for pool in scenario.resource_pools}
+
+    assert states[pool_by_type["rotary_drill"].id]["status"] == "ACTIVE"
+    assert states[pool_by_type["manual_pile_team"].id]["status"] == "ACTIVE"
+    assert states[pool_by_type["impact_drill"].id]["status"] == "UNUSED_OR_UNMAPPED"
+    assert states[pool_by_type["circulation_drill"].id]["status"] == "UNUSED_OR_UNMAPPED"
+    assert states[pool_by_type["cast_in_place_continuous_beam_team"].id]["status"] == "UNUSED_OR_UNMAPPED"
     rotary = pool_by_type["rotary_drill"]
     rotary_current = int(rotary.quantity or 0)
     rotary_max = int(rotary.max_quantity or rotary_current)
@@ -527,6 +527,146 @@ def test_update_resource_plan_applies_structured_quantity_to_one_exclusive_workp
     assert "推荐解释" in (response.resource_plan.stale_reason or "")
 
 
+def test_update_resource_plan_applies_structured_quantity_to_explicit_workpoint_pool_only() -> None:
+    plan = _plan_with_resource_pools(
+        ResourcePool.model_validate(
+            {
+                "id": "pool-local-a",
+                "type": "shared_team",
+                "label": "A 工点班组",
+                "scope_mode": "WORKPOINT_EXCLUSIVE",
+                "workpoint_id": "WP-A",
+                "quantity": 1,
+                "max_quantity": 3,
+                "authorized_workpoint_ids": None,
+                "workpoint_overrides": [],
+            }
+        ),
+        ResourcePool(
+            id="pool-shared",
+            type="shared_team",
+            label="范围共享班组",
+            scope_mode="PROJECT_SHARED",
+            quantity=2,
+            max_quantity=4,
+            authorized_workpoint_ids=["WP-A", "WP-B"],
+        ),
+    )
+
+    response = update_resource_plan(
+        ResourceAssistantUpdatePlanRequest(
+            plan_id=plan.scenario_id,
+            resource_plan=plan,
+            scoped_resource_updates=[
+                {"resource_pool_id": "pool-local-a", "workpoint_id": "WP-A", "quantity": 3}
+            ],
+        )
+    )
+
+    pools = {pool.id: pool for pool in response.resource_plan.resource_pools}
+    assert pools["pool-local-a"].quantity == 3
+    assert pools["pool-local-a"].workpoint_id == "WP-A"
+    assert pools["pool-local-a"].workpoint_overrides == []
+    assert pools["pool-shared"].quantity == 2
+
+
+def test_update_resource_plan_rejects_legacy_type_map_for_multiple_shared_pools() -> None:
+    plan = _plan_with_resource_pools(
+        ResourcePool(id="pool-shared-a", type="shared_team", label="共享 A", quantity=1, max_quantity=3),
+        ResourcePool(id="pool-shared-b", type="shared_team", label="共享 B", quantity=2, max_quantity=4),
+    )
+
+    with pytest.raises(ValueError, match="多个资源池"):
+        update_resource_plan(
+            ResourceAssistantUpdatePlanRequest(
+                plan_id=plan.scenario_id,
+                resource_plan=plan,
+                resource_updates={"shared_team": 3},
+            )
+        )
+
+
+def test_structured_baseline_and_updates_keep_same_type_shared_pools_independent() -> None:
+    pools = [
+        ResourcePool(id="pool-shared-a", type="shared_team", label="共享 A", quantity=1, max_quantity=3),
+        ResourcePool(id="pool-shared-b", type="shared_team", label="共享 B", quantity=2, max_quantity=5),
+    ]
+    profile = ResourceAssistantProjectProfile(
+        project_name="多池项目",
+        start_date=date(2026, 7, 18),
+        resource_types=[
+            {"resource_pool_id": "pool-shared-a", "scope_mode": "PROJECT_SHARED", "task_count": 2},
+            {"resource_pool_id": "pool-shared-b", "scope_mode": "PROJECT_SHARED", "task_count": 2},
+        ],
+    )
+
+    baseline = assistant_module._deterministic_scoped_resource_baseline(
+        type("Scenario", (), {"resource_pools": pools})(),
+        profile,
+    )
+    balanced = {item["resource_pool_id"]: item["quantity"] for item in baseline["balanced"]}
+    assert balanced == {"pool-shared-a": 1, "pool-shared-b": 2}
+    legacy_baseline = assistant_module._deterministic_resource_baseline(
+        type("Scenario", (), {"resource_pools": pools})(),
+        profile,
+    )
+    assert all("shared_team" not in quantities for quantities in legacy_baseline.values())
+
+    updated = assistant_module._resource_pools_with_quantities(
+        pools,
+        {"shared_team": 3},
+        [
+            {"resource_pool_id": "pool-shared-a", "workpoint_id": None, "quantity": 2},
+            {"resource_pool_id": "pool-shared-b", "workpoint_id": None, "quantity": 4},
+        ],
+    )
+    assert {pool.id: pool.quantity for pool in updated} == {
+        "pool-shared-a": 2,
+        "pool-shared-b": 4,
+    }
+
+
+def test_plan_result_quantities_are_keyed_by_pool_and_legacy_map_stays_unambiguous() -> None:
+    scenario = default_scenario_with_process_library()
+    workpoint_id = next(bridge.id for bridge in scenario.project.bridges if bridge.workpoint_type == "bridge")
+    scenario.resource_pools = [
+        ResourcePool(id="pool-shared-a", type="shared_team", label="共享 A", quantity=1, max_quantity=3),
+        ResourcePool(id="pool-shared-b", type="shared_team", label="共享 B", quantity=2, max_quantity=5),
+        ResourcePool.model_validate(
+            {
+                "id": "pool-local",
+                "type": "local_team",
+                "label": "本地班组",
+                "scope_mode": "WORKPOINT_EXCLUSIVE",
+                "workpoint_id": workpoint_id,
+                "quantity": 0,
+                "max_quantity": 2,
+            }
+        ),
+    ]
+    pools = assistant_module._resource_pools_with_quantities(
+        scenario.resource_pools,
+        {},
+        [
+            {"resource_pool_id": "pool-shared-a", "workpoint_id": None, "quantity": 2},
+            {"resource_pool_id": "pool-shared-b", "workpoint_id": None, "quantity": 4},
+            {"resource_pool_id": "pool-local", "workpoint_id": workpoint_id, "quantity": 1},
+        ],
+    )
+
+    results = assistant_module._resource_pool_quantity_results(pools, scenario)
+
+    assert [
+        (item.resource_pool_id, item.workpoint_id, item.current_quantity, item.recommended_quantity)
+        for item in results
+    ] == [
+        ("pool-local", workpoint_id, 0, 1),
+        ("pool-shared-a", None, 1, 2),
+        ("pool-shared-b", None, 2, 4),
+    ]
+    assert assistant_module._legacy_input_resource_quantities(pools) == {}
+
+
 @pytest.mark.parametrize(
     ("plan", "request_updates", "expected_message"),
     [
@@ -694,6 +834,7 @@ def test_summarize_core_metrics_covers_duration_control_wait_utilization_and_cos
     assert metrics.average_wait_days == 4.5
     assert metrics.max_wait_days == 5
     assert metrics.transfer_penalty.penalty_score > 0
+    assert metrics.demo_cost.transfer_cost == 0
     assert metrics.demo_cost.total_cost > 0
     assert metrics.demo_cost.price_source == "demo_default_price"
 

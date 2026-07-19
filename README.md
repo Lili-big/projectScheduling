@@ -9,11 +9,10 @@
 | 阶段 | 回答的问题 | 主要入口 |
 | --- | --- | --- |
 | [`00-governance`](./00-governance/README.md) | 仓库如何治理、归类、校验和回退？ | 架构、资产策略、治理工具、迁移历史 |
-| [`01-discovery`](./01-discovery/README.md) | 客户和来源材料说明了什么？ | 访谈、调研、来源数据分析 |
+| [`01-customer-validation`](./01-customer-validation/README.md) | 客户资料说明什么，产品判断是否成立？ | 客户资料、验证计划、验证结果 |
 | [`02-solution-analysis`](./02-solution-analysis/README.md) | 有哪些方案，为什么选择当前路径？ | 产品方向、融合方案、MVP、决策 |
 | [`03-requirements`](./03-requirements/README.md) | 已确认口径如何变成可验收需求？ | PRD、算法规则、Spec Kit 规格 |
 | [`04-demo`](./04-demo/README.md) | 如何实现并运行 Demo？ | 后端、前端、样例、独立展示工具 |
-| [`05-validation`](./05-validation/README.md) | 方案和结果如何用客户数据验证？ | 验证计划、脚本、结果、报告 |
 | [`06-delivery`](./06-delivery/README.md) | 哪些成果可正式交付和传播？ | 交付物、案例总结、演示材料 |
 
 最短查找路径：先选阶段，再打开阶段 README；独立专项继续进入其 `workpackage.json` 和 README。全仓工作包索引见 [`workpackages.json`](./00-governance/asset-policy/workpackages.json)。
@@ -80,11 +79,10 @@ FastAPI 当前公开 57 个 `/api` 操作；其中 042 冻结的原有 45 个兼
 
 ```text
 00-governance/          架构、资产规则、治理工具和迁移历史
-01-discovery/           前期调研、访谈、来源数据和分析工作包
+01-customer-validation/ 客户资料、验证计划和验证结果工作包
 02-solution-analysis/   产品方向、方案比较、技术可行性与决策
 03-requirements/        PRD、算法规则和 specs/<编号>-<功能名>
 04-demo/                主 Demo 后端/前端、样例、运行工具与独立展示
-05-validation/          客户验证计划、输入、脚本、结果和报告
 06-delivery/            正式交付物、案例总结与演示材料
 .local-data/            状态、日志、缓存、临时和可再生成归档；默认忽略
 ```
@@ -93,11 +91,7 @@ FastAPI 当前公开 57 个 `/api` 操作；其中 042 冻结的原有 45 个兼
 
 ## 新任务放到哪里
 
-1. 先声明业务阶段：调研、方案、需求、Demo、验证、交付或治理。
-2. 再判断是否属于现有工作包；属于则在其 `inputs/`、`scripts/`、`results/` 中归位。
-3. 不属于现有工作包且需要独立运行/理解时，使用 `00-governance/asset-policy/templates/workpackage/` 创建工作包。
-4. 日志、缓存、临时文件、本地状态和未批准客户输入进入 `.local-data/`，不在根目录新增 `*.log` 或孤立输出。
-5. 提交前运行生命周期治理校验；未知资产应失败并要求分类，而不是就地堆放。
+资产位置由 [`placement-rules.json`](./00-governance/asset-policy/placement-rules.json) 和治理验证器决定；人类导航见 [仓库与资产治理](./00-governance/architecture/repository-governance.md)。未知资产先完成分类，不创建通用兜底目录。
 
 ## 配置与本地数据
 
@@ -126,17 +120,7 @@ Copy-Item .local.env.example .local.env
 
 `.local.env` 和 `.local-data/` 已忽略，不要提交密钥或个人运行数据。
 
-本地后台运行日志统一写入 `.local-data/logs/<启动时间>/`，不要再把 `*.out.log`、`*.err.log` 输出到仓库根目录。可使用统一启动辅助脚本：
-
-```powershell
-# 后端后台启动；命令会返回 PID 和 stdout/stderr 的实际路径
-.\04-demo\runtime\start_logged_process.ps1 `
-  -Name backend `
-  -FilePath .\.venv\Scripts\python.exe `
-  -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000', '--app-dir', '04-demo/backend')
-```
-
-散落历史日志已按批准清单移动到 `.local-data/logs/legacy-unclassified/`，未删除且不提交 Git。详细规则见 [本地产物分区](./.local-data/README.md)。
+后台进程、PID、stdout/stderr 和历史日志处理只按 [`04-demo/runtime/README.md`](./04-demo/runtime/README.md) 操作。
 
 ## 验证
 

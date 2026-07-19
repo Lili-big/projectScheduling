@@ -15,8 +15,9 @@ logs/
 local-json-task-review/
 /04-demo/standalone/json-task-viewer/input/
 /04-demo/standalone/json-task-viewer/output/
-/05-validation/workpackages/json-schedule-review/input/
-/05-validation/workpackages/json-schedule-review/output/
+/01-customer-validation/json-schedule-review/customer-materials/*.json
+/01-customer-validation/json-schedule-review/validation-results/*.html
+/01-customer-validation/json-schedule-review/validation-results/*.report.json
 /outputs/
 .local-data/*
 !.local-data/README.md

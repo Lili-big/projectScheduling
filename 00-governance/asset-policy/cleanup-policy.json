@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "default_mode": "dry-run",
   "classification_priority": [
     "persistent-state",
@@ -18,7 +18,7 @@
       "resolved_class": "persistent-state"
     },
     {
-      "path": "05-validation/workpackages/example/input/cache.json",
+      "path": "01-customer-validation/example/customer-materials/cache.json",
       "matches": ["user-input", "cache"],
       "resolved_class": "user-input"
     }
@@ -31,16 +31,16 @@
       "reason": "数据库、配置和运行状态不可自动删除"
     },
     {
-      "pattern": "01-discovery/**/input*/**;04-demo/**/input*/**;05-validation/**/input*/**;06-delivery/**/input*/**",
+      "pattern": "01-customer-validation/**/customer-materials/**;04-demo/**/input*/**;06-delivery/**/input*/**",
       "retention_class": "user-input",
       "protected": true,
       "reason": "客户或维护者提供的输入必须单独确认"
     },
     {
-      "pattern": "00-governance/**;01-discovery/**/results/**;02-solution-analysis/**;03-requirements/**;04-demo/**;05-validation/**/results/**;05-validation/reports/**;06-delivery/**",
+      "pattern": "00-governance/**;01-customer-validation/**/validation-plans/**;01-customer-validation/**/validation-results/**;02-solution-analysis/**;03-requirements/**;04-demo/**;06-delivery/**",
       "retention_class": "formal-output",
       "protected": true,
-      "reason": "正式交付物和批准成果只允许版本化替换"
+      "reason": "正式计划、验证结果和批准成果只允许版本化替换"
     },
     {
       "pattern": ".local-data/logs/**",

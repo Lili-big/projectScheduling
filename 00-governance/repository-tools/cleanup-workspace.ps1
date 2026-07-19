@@ -80,7 +80,7 @@ if ($Apply) {
         $AbsolutePath = [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot $Candidate.path))
         $ProtectedRoots = @(
             [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot '.local-data/state')),
-            [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot '01-discovery')),
+            [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot '01-customer-validation')),
             [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot '03-requirements')),
             [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot '06-delivery'))
         )

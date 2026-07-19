@@ -25,6 +25,7 @@ from .sample_data import default_bridge
 
 SCHEDULE_LOGIC_ONTOLOGY_PATH = Path(__file__).resolve().parent / "ontology" / "bridge_schedule_logic_ontology.v1.json"
 CONTINUOUS_BEAM_STRUCTURE_CODE = "castInPlaceContinuousBoxGirder"
+CAST_IN_PLACE_BOX_BEAM_STRUCTURE_CODE = "castInPlaceBoxGirder"
 CONTINUOUS_BEAM_DEFAULT_STANDARD_SEGMENT_CYCLES = 18
 DEFAULT_RESOURCE_MAX_QUANTITIES: dict[str, int] = {
     "rotary_drill": 10,
@@ -34,6 +35,7 @@ DEFAULT_RESOURCE_MAX_QUANTITIES: dict[str, int] = {
     "cap_team": 10,
     "pier_body_team": 10,
     "cap_beam_team": 10,
+    "abutment_team": 10,
 }
 PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION = "机械桩基资源：按同桥同幅同墩同工艺形成墩组，组内由同一台设备负责；不再配置并行上限。"
 MANUAL_PILE_PARALLEL_RULE_DESCRIPTION = "人工挖孔班组：不进入机械钻机墩组规则，按班组数量和资源互斥排程。"
@@ -335,6 +337,104 @@ def default_process_library() -> list[ProcessTemplate]:
     return historical_default_process_library()
 
 
+def derive_resource_catalog(scenario: ScenarioInput) -> list[dict[str, object]]:
+    """Build the read-only resource catalog projection from existing authorities."""
+
+    default_by_type = {pool.type: pool for pool in default_resource_pools()}
+    configured_by_type: dict[str, ResourcePool] = {}
+    for pool in sorted(scenario.resource_pools, key=lambda item: item.id):
+        configured_by_type.setdefault(pool.type, pool)
+    process_ids_by_type: dict[str, set[str]] = {}
+    for process in scenario.process_library:
+        if process.resource_type:
+            process_ids_by_type.setdefault(process.resource_type, set()).add(process.id)
+
+    resource_types = sorted(
+        set(default_by_type) | set(configured_by_type) | set(process_ids_by_type)
+    )
+    catalog: list[dict[str, object]] = []
+    for resource_type in resource_types:
+        default_pool = default_by_type.get(resource_type)
+        configured_pool = configured_by_type.get(resource_type)
+        if default_pool is not None:
+            source = "default_pool_metadata"
+        elif resource_type in process_ids_by_type:
+            source = "process_requirement"
+        else:
+            source = "configured_pool"
+        metadata_pool = default_pool or configured_pool
+        catalog.append(
+            {
+                "resource_type": resource_type,
+                "label": metadata_pool.label if metadata_pool is not None else resource_type,
+                "source": source,
+                "default_calendar_id": (
+                    metadata_pool.calendar_id if metadata_pool is not None else "continuous"
+                ),
+                "default_max_quantity": int(
+                    (metadata_pool.max_quantity or 0) if metadata_pool is not None else 0
+                ),
+                "applicable_process_ids": sorted(process_ids_by_type.get(resource_type, set())),
+            }
+        )
+    return catalog
+
+
+def derive_workpoint_possible_resource_types(
+    scenario: ScenarioInput, workpoint_id: str
+) -> list[str]:
+    """Return task/process-derived resource types for one authoritative workpoint."""
+
+    bridge = next((item for item in scenario.project.bridges if item.id == workpoint_id), None)
+    if bridge is None:
+        return []
+
+    resource_types: set[str] = set()
+    for section in bridge.work_sections:
+        for structure in section.structures:
+            for component in structure.components:
+                if not component.enabled:
+                    continue
+                process = _default_process_for_component(component, scenario.process_library)
+                if process is not None and process.resource_type:
+                    resource_types.add(process.resource_type)
+        for upper in section.upper_structures:
+            if not bool(getattr(upper, "enabled", True)):
+                continue
+            resource_type = str(
+                getattr(upper, "resource_type", "")
+                or upper.properties.get("resource_type")
+                or ""
+            ).strip()
+            if not resource_type:
+                component_type = _upper_resource_component_type(upper)
+                if component_type:
+                    candidates = [
+                        process
+                        for process in scenario.process_library
+                        if process.component_type == component_type
+                    ]
+                    process = next(
+                        (candidate for candidate in candidates if candidate.is_default),
+                        candidates[0] if candidates else None,
+                    )
+                    resource_type = process.resource_type if process is not None else ""
+            if resource_type:
+                resource_types.add(resource_type)
+    return sorted(resource_types)
+
+
+def _upper_resource_component_type(upper: UpperStructureComponent) -> str | None:
+    if _is_continuous_beam_upper(upper):
+        return "cast_in_place_continuous_beam"
+    structure_code = upper.properties.get("structure_code")
+    if structure_code == CAST_IN_PLACE_BOX_BEAM_STRUCTURE_CODE or (
+        "现浇" in upper.structure_type and "箱梁" in upper.structure_type
+    ):
+        return "cast_in_place_box_beam"
+    return None
+
+
 def default_scenario_logic_rules() -> list[LogicRule]:
     data = json.loads(SCHEDULE_LOGIC_ONTOLOGY_PATH.read_text(encoding="utf-8"))
     if data.get("schema_version") != "bridge-schedule-logic-ontology/v1":
@@ -452,6 +552,13 @@ def default_resource_pools() -> list[ResourcePool]:
             incremental_unit_cost=80000,
         ),
         ResourcePool(id="pool-cast-in-place-continuous-beam", type="cast_in_place_continuous_beam_team", label="连续梁班组", quantity=1, max_quantity=10),
+        ResourcePool(
+            id="pool-abutment",
+            type="abutment_team",
+            label="桥台班组",
+            quantity=1,
+            max_quantity=10,
+        ),
     ]
 
 

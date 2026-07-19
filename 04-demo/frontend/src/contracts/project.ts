@@ -10,6 +10,7 @@ export type {
   Resource,
   ResourceCalendar,
   ResourcePool,
+  ResourcePoolQuantityResult,
   ResourceScopeMode,
   ScenarioInput,
   StructureModel,

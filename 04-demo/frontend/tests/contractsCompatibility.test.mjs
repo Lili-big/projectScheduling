@@ -8,7 +8,7 @@ const fixture = JSON.parse(readFileSync(resolve(root, "tests/fixtures/architectu
 const schedulerContract = readFileSync(resolve(root, "src/contracts/scheduler.ts"), "utf8");
 const displayState = readFileSync(resolve(root, "src/features/taskView/projectMasterDisplayState.ts"), "utf8");
 const resourceScopeOpenApi = readFileSync(
-  resolve(root, "..", "..", "03-requirements/specs/047-workpoint-resource-configuration/contracts/resource-scope.openapi.yaml"),
+  resolve(root, "..", "..", "03-requirements/specs/048-workpoint-first-resource-allocation/contracts/workpoint-resource-allocation.openapi.yaml"),
   "utf8",
 );
 
@@ -27,10 +27,10 @@ function names(path, seen = new Set()) {
 }
 
 test("legacy scheduler types re-export all frozen contract names", () => {
-  const resourceScopeAdditions = ["ResourceScopeMode", "ScopedResourceQuantityUpdate", "WorkpointResourceOverride"];
+  const resourceScopeAdditions = ["ResourcePoolQuantityResult", "ResourceScopeMode", "ScopedResourceQuantityUpdate", "WorkpointResourceOverride"];
   assert.deepEqual(
     names(resolve(root, "src/types/scheduler.ts")),
-    [...fixture.public_contracts.scheduler_type_exports, ...resourceScopeAdditions].sort(),
+    [...new Set([...fixture.public_contracts.scheduler_type_exports, ...resourceScopeAdditions])].sort(),
   );
 });
 
@@ -56,11 +56,16 @@ test("resource-scope types align with the incremental contract and keep legacy i
   assert.match(schedulerContract, /export type ResourceScopeMode = "PROJECT_SHARED" \| "WORKPOINT_EXCLUSIVE"/);
   assert.match(schedulerContract, /export type WorkpointResourceOverride = \{/);
   assert.match(schedulerContract, /scope_mode\?: ResourceScopeMode/);
+  assert.match(schedulerContract, /workpoint_id\?: string \| null/);
   assert.match(schedulerContract, /authorized_workpoint_ids\?: string\[\] \| null/);
   assert.match(schedulerContract, /workpoint_overrides\?: WorkpointResourceOverride\[\]/);
   assert.match(schedulerContract, /eligible_workpoint_ids:\s*string\[\]/);
   assert.match(schedulerContract, /exclusive_workpoint_id\?:\s*string \| null/);
   assert.match(schedulerContract, /export type ScopedResourceQuantityUpdate = \{/);
+  assert.match(schedulerContract, /export type ResourcePoolQuantityResult = \{/);
+  assert.match(schedulerContract, /resource_pool_id:\s*string/);
+  assert.match(schedulerContract, /current_quantity:\s*number/);
+  assert.match(schedulerContract, /recommended_quantity:\s*number/);
   assert.match(schedulerContract, /resource_updates:\s*Record<string, number>/);
   assert.match(schedulerContract, /scoped_resource_updates\?:\s*ScopedResourceQuantityUpdate\[\]/);
   assert.doesNotMatch(schedulerContract, /\bmin_quantity\b/);

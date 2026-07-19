@@ -446,6 +446,12 @@ def _apply_process_method_assignment_suggestion(scenario: ScenarioInput, suggest
 
 
 def _apply_resource_suggestion(scenario: ScenarioInput, suggestion: AiParameterSuggestion, summary: AiParameterApplicationSummary) -> None:
+    pool_id = str(suggestion.target_ref.get("resource_pool_id") or "").strip()
+    resource_type = str(suggestion.target_ref.get("resource_type") or "").strip()
+    if not pool_id and resource_type:
+        matches = [item for item in scenario.resource_pools if item.type == resource_type]
+        if len(matches) > 1:
+            raise ValueError(f"资源类型 {resource_type} 对应多个资源池，必须使用 resource_pool_id 精确定位。")
     pool = _find_resource_pool(scenario, suggestion.target_ref)
     if pool is None:
         raise ValueError("未找到目标资源。")
@@ -579,7 +585,10 @@ def _find_components_by_ids(scenario: ScenarioInput, component_ids: list[Any]) -
 def _find_resource_pool(scenario: ScenarioInput, target_ref: dict[str, Any]) -> ResourcePool | None:
     pool_id = target_ref.get("resource_pool_id")
     resource_type = target_ref.get("resource_type")
-    return next((item for item in scenario.resource_pools if item.id == pool_id or item.type == resource_type), None)
+    if pool_id:
+        return next((item for item in scenario.resource_pools if item.id == pool_id), None)
+    matches = [item for item in scenario.resource_pools if item.type == resource_type]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _find_milestone(scenario: ScenarioInput, target_ref: dict[str, Any]) -> MilestoneConstraint | None:

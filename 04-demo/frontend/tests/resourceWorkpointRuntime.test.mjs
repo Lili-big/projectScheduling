@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, resolve } from "node:path";
@@ -12,7 +12,7 @@ const demoRoot = resolve(frontendRoot, "..");
 const repoRoot = resolve(demoRoot, "..");
 const backendRoot = resolve(demoRoot, "backend");
 const runId = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
-const evidenceRoot = resolve(repoRoot, ".local-data", "logs", "047-workpoint-resource-configuration", "d05-workspace");
+const evidenceRoot = resolve(repoRoot, ".local-data", "logs", "048-workpoint-first-resource-allocation", "d05-workspace");
 const logDir = resolve(evidenceRoot, `${runId}-resource-workpoint-runtime`);
 const tempDir = resolve(repoRoot, ".local-data", "tmp", "resource-workpoint-runtime", runId);
 const frontendUrl = "http://127.0.0.1:5173";
@@ -155,9 +155,9 @@ async function freeTcpPort() {
 function findBrowserExecutable() {
   const candidates = [
     "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    resolve(process.env.LOCALAPPDATA ?? "", "Google", "Chrome", "Application", "chrome.exe"),
     "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
     "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-    resolve(process.env.LOCALAPPDATA ?? "", "Google", "Chrome", "Application", "chrome.exe"),
     resolve(process.env.LOCALAPPDATA ?? "", "Microsoft", "Edge", "Application", "msedge.exe"),
   ];
   const executable = candidates.find((candidate) => candidate && existsSync(candidate));
@@ -172,11 +172,18 @@ class CdpConnection {
     this.pending = new Map();
     this.listeners = new Map();
     this.eventErrors = [];
+    this.closed = false;
     this.ready = new Promise((resolvePromise, rejectPromise) => {
       this.webSocket.addEventListener("open", resolvePromise, { once: true });
       this.webSocket.addEventListener("error", rejectPromise, { once: true });
+      this.webSocket.addEventListener("close", () => rejectPromise(new Error("CDP WebSocket closed before opening.")), { once: true });
     });
     this.webSocket.addEventListener("message", (event) => this.handleMessage(event.data));
+    this.webSocket.addEventListener("close", () => {
+      this.closed = true;
+      for (const pending of this.pending.values()) pending.reject(new Error(`${pending.method}: CDP WebSocket closed.`));
+      this.pending.clear();
+    });
   }
 
   handleMessage(data) {
@@ -199,14 +206,21 @@ class CdpConnection {
 
   async send(method, params = {}, sessionId = undefined) {
     await this.ready;
+    if (this.closed) throw new Error(`${method}: CDP WebSocket is closed.`);
     const id = this.nextId++;
     const message = { id, method, params };
     if (sessionId) message.sessionId = sessionId;
-    const response = new Promise((resolvePromise, rejectPromise) => this.pending.set(id, {
-      resolve: resolvePromise,
-      reject: rejectPromise,
-      method,
-    }));
+    const response = new Promise((resolvePromise, rejectPromise) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        rejectPromise(new Error(`${method}: CDP response timed out after 60000ms.`));
+      }, 60_000);
+      this.pending.set(id, {
+        resolve: (value) => { clearTimeout(timer); resolvePromise(value); },
+        reject: (error) => { clearTimeout(timer); rejectPromise(error); },
+        method,
+      });
+    });
     this.webSocket.send(JSON.stringify(message));
     return response;
   }
@@ -223,18 +237,7 @@ async function launchBrowser() {
   const executable = findBrowserExecutable();
   const port = await freeTcpPort();
   const physicalProfileDir = resolve(tempDir, "browser-profile");
-  let profileDir = physicalProfileDir;
-  let mappedDrive = null;
-  if (process.platform === "win32") {
-    const drive = ["Z:", "Y:", "X:", "W:", "V:"].find((candidate) => !existsSync(`${candidate}\\`));
-    if (drive) {
-      const mapped = spawnSync("subst.exe", [drive, tempDir], { encoding: "utf8" });
-      if (mapped.status === 0) {
-        mappedDrive = drive;
-        profileDir = `${drive}\\browser-profile`;
-      }
-    }
-  }
+  const profileDir = physicalProfileDir;
   mkdirSync(profileDir, { recursive: true });
   const stdoutPath = resolve(logDir, "browser.stdout.log");
   const stderrPath = resolve(logDir, "browser.stderr.log");
@@ -243,6 +246,9 @@ async function launchBrowser() {
   const child = spawn(executable, [
     "--headless=new",
     "--disable-gpu",
+    "--disable-gpu-sandbox",
+    "--disable-gpu-shader-disk-cache",
+    "--disable-features=SkiaGraphite,DawnGraphite",
     "--disable-extensions",
     "--disable-background-networking",
     "--no-first-run",
@@ -262,7 +268,7 @@ async function launchBrowser() {
       return null;
     }
   }, "browser DevTools endpoint", 30_000);
-  return { child, stdout, stderr, executable, product: version.Browser, webSocketUrl: version.webSocketDebuggerUrl, mappedDrive };
+  return { child, stdout, stderr, executable, product: version.Browser, webSocketUrl: version.webSocketDebuggerUrl };
 }
 
 async function closeBrowser() {
@@ -272,7 +278,6 @@ async function closeBrowser() {
   if (browser.child.exitCode === null) browser.child.kill();
   browser.stdout.end();
   browser.stderr.end();
-  if (browser.mappedDrive) spawnSync("subst.exe", [browser.mappedDrive, "/D"]);
 }
 
 async function createPage() {
@@ -289,7 +294,7 @@ async function createPage() {
           at: Date.now(), reason,
           version: panel?.getAttribute('data-resource-version') ?? null,
           status: panel?.querySelector('[role="alert"]') ? 'error' : panel?.querySelector('[role="status"]') ? 'loading' : panel ? 'ready' : 'absent',
-          workpoints: [...document.querySelectorAll('.resource-workpoint-table tbody tr strong')].map((node) => node.textContent.trim()),
+          workpoints: [...document.querySelectorAll('.resource-workpoint-nav button')].map((node) => node.textContent.trim()),
           text: panel?.innerText ?? '',
         });
       };
@@ -524,7 +529,7 @@ after(async () => {
   await stopOwnedProcesses();
 });
 
-test("T031 production workspace keeps resource scope authoritative across retry, empty and version races", { timeout: timeoutMs }, async () => {
+test("T016 production workspace keeps workpoint-first resources authoritative across retry, empty and version races", { timeout: timeoutMs }, async () => {
   await navigate(`${frontendUrl}/?resource-workpoint-runtime=${runId}`);
   await waitForExpression("[...document.querySelectorAll('button')].some((item) => item.textContent.trim() === '资源配置')", "workspace navigation");
   await openResourcesAfterTaskReady();
@@ -537,44 +542,61 @@ test("T031 production workspace keeps resource scope authoritative across retry,
   }))()`);
   assert.equal(firstResourceState.panel, true, JSON.stringify(firstResourceState));
   assert.ok(firstResourceState.cards > 0, JSON.stringify(firstResourceState));
-  assert.equal(await evaluate("document.querySelector('.resource-shared-notice')?.textContent.includes('转场时间按 0 天')"), true);
+  assert.equal(await evaluate("document.querySelector('.resource-shared-notice')?.textContent.includes('转场时间 0 天')"), true);
+  assert.equal(await evaluate("document.querySelectorAll('.resource-workpoint-section input[aria-label*=" + JSON.stringify("获准") + "]').length"), 0);
+  assert.equal(await evaluate("Boolean(document.querySelector('.resource-catalog-add'))"), true);
 
   await evaluate(`(() => {
-    const card = document.querySelector('.resource-scope-card');
-    const scope = card.querySelector('select');
-    scope.value = 'WORKPOINT_EXCLUSIVE';
-    scope.dispatchEvent(new Event('change', { bubbles: true }));
+    const addSelect = document.querySelector('.resource-shared-add select');
+    const firstPoolType = document.querySelector('.resource-scope-card .resource-scope-defaults select')?.value;
+    addSelect.value = firstPoolType || addSelect.options[1]?.value || '';
+    addSelect.dispatchEvent(new Event('change', { bubbles: true }));
   })()`);
-  await waitForExpression("document.querySelector('.resource-scope-card select')?.value === 'WORKPOINT_EXCLUSIVE'", "exclusive scope selection");
+  assert.equal(await clickText("新增共享池"), true);
+  await waitForExpression(`document.querySelectorAll('.resource-scope-card').length === ${firstResourceState.cards + 1}`, "same-type shared pool added");
+  await evaluate(`(() => {
+    const cards = [...document.querySelectorAll('.resource-scope-card')];
+    cards.at(-1).querySelector('.resource-all-workpoints input').click();
+  })()`);
+  await waitForExpression("Boolean([...document.querySelectorAll('.resource-scope-card')].at(-1).querySelector('.resource-inline-error'))", "explicit empty shared range blocked");
+  await evaluate(`(() => {
+    const card = [...document.querySelectorAll('.resource-scope-card')].at(-1);
+    card.querySelector('.resource-workpoint-options input').click();
+  })()`);
+  await waitForExpression("![...document.querySelectorAll('.resource-scope-card')].at(-1).querySelector('.resource-inline-error')", "shared range selected");
+  assert.equal(await evaluate(`(() => {
+    const types = [...document.querySelectorAll('.resource-scope-card .resource-scope-defaults select')].map((item) => item.value);
+    return new Set(types).size < types.length;
+  })()`), true);
   const editedValue = 3;
   await evaluate(`(() => {
-    const input = document.querySelector('.resource-workpoint-table input[aria-label$="有效投入"]');
+    const input = document.querySelector('.resource-workpoint-table input[aria-label$="当前投入"]');
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
     setValue.call(input, String(${editedValue}));
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
   })()`);
-  await waitForExpression("document.querySelector('.resource-workpoint-table tbody tr td:nth-child(3)')?.textContent.includes('工点覆盖')", "workpoint override");
+  await waitForExpression(`document.querySelector('.resource-workpoint-table input[aria-label$="当前投入"]')?.value === '${editedValue}'`, "workpoint-local quantity");
 
   networkMode.saveFailureRemaining = 1;
   assert.equal(await clickText("保存"), true);
   await waitForExpression("[...document.querySelectorAll('button')].some((item) => item.textContent.trim() === '重试保存')", "save failure retry");
-  assert.equal(await evaluate(`document.querySelector('.resource-workpoint-table input[aria-label$="有效投入"]')?.value === '${editedValue}'`), true);
+  assert.equal(await evaluate(`document.querySelector('.resource-workpoint-table input[aria-label$="当前投入"]')?.value === '${editedValue}'`), true);
   assert.equal(await clickText("重试保存"), true);
   await waitForExpression(`document.querySelector('button[aria-label="保存"]')?.disabled === true`, "successful save");
 
   assert.equal(evidence.requests.saves.length, 2);
-  const savedPool = evidence.requests.saves[1].body.resource_pools[0];
+  const savedPool = evidence.requests.saves[1].body.resource_pools.find((pool) => pool.scope_mode === "WORKPOINT_EXCLUSIVE" && pool.workpoint_id);
   assert.equal(savedPool.scope_mode, "WORKPOINT_EXCLUSIVE");
-  assert.equal(savedPool.workpoint_overrides.length, 1);
-  assert.ok(oracle.currentWorkpoints.some((item) => item.workpoint_id === savedPool.workpoint_overrides[0].workpoint_id));
+  assert.equal(savedPool.workpoint_overrides.length, 0);
+  assert.ok(oracle.currentWorkpoints.some((item) => item.workpoint_id === savedPool.workpoint_id));
 
   networkMode.workpointMode = "fail";
   await navigate(`${frontendUrl}/?resource-workpoint-runtime=${runId}-retry`);
   await openResourcesAfterTaskReady();
   await waitForExpression("Boolean(document.querySelector('.resource-scope-state.error button'))", "workpoint load error");
   await evaluate("document.querySelector('.resource-scope-state.error button').click()");
-  await waitForExpression("document.querySelectorAll('.resource-scope-card').length > 0", "workpoint retry ready");
+  await waitForExpression("document.querySelectorAll('.resource-workpoint-nav button').length > 0", "workpoint retry ready");
 
   networkMode.workpointMode = "empty";
   await navigate(`${frontendUrl}/?resource-workpoint-runtime=${runId}-empty`);
@@ -603,14 +625,14 @@ test("T031 production workspace keeps resource scope authoritative across retry,
   await waitForExpression("[...document.querySelectorAll('button')].some((item) => item.textContent.trim() === '确认并设为当前版本' && !item.disabled)", "confirm imported version");
   assert.equal(await clickText("确认并设为当前版本"), true);
   assert.equal(await clickText("资源配置"), true);
-  await waitForExpression(`document.querySelector('.resource-scope-panel')?.getAttribute('data-resource-version') === ${JSON.stringify(oracle.v2Version.version_id)} && document.querySelector('.resource-scope-card')?.querySelectorAll('.resource-workpoint-table tbody tr').length === ${oracle.v2Workpoints.length}`, "current version resource rows");
+  await waitForExpression(`document.querySelector('.resource-scope-panel')?.getAttribute('data-resource-version') === ${JSON.stringify(oracle.v2Version.version_id)} && document.querySelectorAll('.resource-workpoint-nav button').length === ${oracle.v2Workpoints.length}`, "current version resource rows");
   await fulfillJson(pausedV1.requestId, pageOf(oracle.currentWorkpoints));
   pausedV1 = null;
   await sleep(500);
 
   const finalState = await evaluate(`(() => ({
     version: document.querySelector('.resource-scope-panel')?.getAttribute('data-resource-version'),
-    names: [...new Set([...document.querySelectorAll('.resource-workpoint-table tbody tr strong')].map((node) => node.textContent.trim()))],
+    names: [...new Set([...document.querySelectorAll('.resource-workpoint-nav button')].map((node) => node.textContent.trim()))],
     text: document.querySelector('.resource-scope-panel')?.innerText ?? '',
     records: window.__resourceRuntime.records,
   }))()`);
@@ -624,12 +646,15 @@ test("T031 production workspace keeps resource scope authoritative across retry,
 
   evidence.assertions = {
     sharedAndExclusiveVisible: true,
-    inheritanceAndOverrideVisible: true,
+    sameTypeSharedPoolsVisible: true,
+    explicitEmptySharedRangeBlocked: true,
+    workpointLocalRecordVisible: true,
     saveFailureRetriedWithoutInputLoss: true,
     authoritativeEmptyRows: 0,
     oldVersionDomCommitsAfterCurrentReady: 0,
     defaultSufficientFalsePositives: 0,
     nameOrIdSpecialFillBranches: 0,
     projectSharedTransferDays: 0,
+    projectSharedTransferCost: 0,
   };
 });

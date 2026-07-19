@@ -1,27 +1,41 @@
 {
-  "version": 1,
-  "ownership_model": "lifecycle-stage -> workpackage -> asset",
+  "version": 2,
+  "ownership_model": "lifecycle-stage -> customer-or-project-workpackage -> asset-category -> asset",
   "packages": [
     {
-      "id": "lugu-customer-research",
-      "stage": "01-discovery",
-      "path": "01-discovery/workpackages/lugu-customer-research",
+      "id": "lugu",
+      "stage": "01-customer-validation",
+      "path": "01-customer-validation/lugu",
       "status": "active",
-      "purpose": "客户访谈、规划逻辑分析与调研报告"
+      "purpose": "泸古客户资料、验证计划和验证结果"
     },
     {
-      "id": "lugu-source-data-analysis",
-      "stage": "01-discovery",
-      "path": "01-discovery/workpackages/lugu-source-data-analysis",
-      "status": "active",
-      "purpose": "来源工作簿结构和桥梁进度数据画像"
-    },
-    {
-      "id": "infrastructure-version-research-2026q2",
-      "stage": "01-discovery",
-      "path": "01-discovery/workpackages/infrastructure-version-research-2026q2",
+      "id": "infrastructure-version-2026q2",
+      "stage": "01-customer-validation",
+      "path": "01-customer-validation/infrastructure-version-2026q2",
       "status": "orphaned",
-      "purpose": "基建版本 2026 Q2 历史客户调研整理稿和脱敏迁移索引"
+      "purpose": "基建版本 2026 Q2 历史客户材料和脱敏索引"
+    },
+    {
+      "id": "dianfengwu-tj03",
+      "stage": "01-customer-validation",
+      "path": "01-customer-validation/dianfengwu-tj03",
+      "status": "orphaned",
+      "purpose": "垫丰武 TJ03 历史客户资料和验证记录"
+    },
+    {
+      "id": "json-schedule-review",
+      "stage": "01-customer-validation",
+      "path": "01-customer-validation/json-schedule-review",
+      "status": "active",
+      "purpose": "真实工程 JSON 排程结果评审"
+    },
+    {
+      "id": "ai-assistants",
+      "stage": "01-customer-validation",
+      "path": "01-customer-validation/ai-assistants",
+      "status": "active",
+      "purpose": "AI 参数和资源助手验证说明"
     },
     {
       "id": "json-task-viewer",
@@ -36,34 +50,6 @@
       "path": "04-demo/standalone/schedule-result-viewer",
       "status": "active",
       "purpose": "批准排程结果样例的零构建离线查看"
-    },
-    {
-      "id": "json-schedule-review",
-      "stage": "05-validation",
-      "path": "05-validation/workpackages/json-schedule-review",
-      "status": "active",
-      "purpose": "真实工程 JSON 排程结果评审"
-    },
-    {
-      "id": "lugu-validation-material",
-      "stage": "05-validation",
-      "path": "05-validation/workpackages/lugu-validation-material",
-      "status": "active",
-      "purpose": "客户验证工作簿和统一工点主数据验证"
-    },
-    {
-      "id": "lugu-plan-granularity",
-      "stage": "05-validation",
-      "path": "05-validation/workpackages/lugu-plan-granularity",
-      "status": "active",
-      "purpose": "计划版本、粒度和管理方式变化验证"
-    },
-    {
-      "id": "dianfengwu-tj03-product-validation-2026q2",
-      "stage": "05-validation",
-      "path": "05-validation/workpackages/dianfengwu-tj03-product-validation-2026q2",
-      "status": "orphaned",
-      "purpose": "垫丰武 TJ03 2026 Q2 历史客户验证记录和脱敏迁移索引"
     },
     {
       "id": "ai-case-summary",

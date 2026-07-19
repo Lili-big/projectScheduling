@@ -27,8 +27,8 @@
 
 ## 相邻阶段
 
-- 上一阶段：[05-validation](../05-validation/README.md)。
-- 下一轮输入可回到 [01-discovery](../01-discovery/README.md)；方案复盘进入 `02-solution-analysis`。
+- 上游实现来自 [04-demo](../04-demo/README.md)，正式交付前由 [01-customer-validation](../01-customer-validation/README.md) 提供验证证据。
+- 下一轮输入可回到 [01-customer-validation](../01-customer-validation/README.md)；方案复盘进入 `02-solution-analysis`。
 
 ## 禁止内容
 

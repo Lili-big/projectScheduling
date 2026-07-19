@@ -7,19 +7,19 @@
 后端：
 
 ```powershell
-.\tools\local-runtime\start_logged_process.ps1 `
+.\04-demo\runtime\start_logged_process.ps1 `
   -Name backend `
   -FilePath .\.venv\Scripts\python.exe `
-  -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000', '--app-dir', 'backend')
+  -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000', '--app-dir', '04-demo/backend')
 ```
 
 前端：
 
 ```powershell
-.\tools\local-runtime\start_logged_process.ps1 `
+.\04-demo\runtime\start_logged_process.ps1 `
   -Name frontend `
   -FilePath npm.cmd `
-  -ArgumentList @('--workspace', 'frontend', 'run', 'dev')
+  -ArgumentList @('--workspace', '04-demo/frontend', 'run', 'dev')
 ```
 
 脚本返回进程 PID、stdout 和 stderr 路径。停止服务时只处理返回的 PID；不要按进程名批量终止无关服务。

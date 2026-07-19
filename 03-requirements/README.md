@@ -29,7 +29,7 @@
 ## 相邻阶段
 
 - 上一阶段：[02-solution-analysis](../02-solution-analysis/README.md)。
-- 下一阶段：[04-demo](../04-demo/README.md)；验收设计也可直接进入 `05-validation`。
+- 下一阶段：[04-demo](../04-demo/README.md)；验收设计也可直接进入 [01-customer-validation](../01-customer-validation/README.md)。
 
 ## 禁止内容
 

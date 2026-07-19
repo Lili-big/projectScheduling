@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 StructureType = Literal["pier", "abutment", "upper_structure", "continuous_beam"]
@@ -408,10 +408,19 @@ def _normalized_workpoint_ids(values: list[str]) -> list[str]:
 
 
 class WorkpointResourceOverride(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     workpoint_id: str = Field(min_length=1)
     enabled: bool | None = None
     quantity: int | None = Field(default=None, ge=0)
     max_quantity: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_min_quantity(cls, data: Any) -> Any:
+        if isinstance(data, Mapping) and "min_quantity" in data:
+            raise ValueError("min_quantity is not part of the resource contract")
+        return data
 
     @model_validator(mode="after")
     def normalize_override(self) -> "WorkpointResourceOverride":
@@ -496,6 +505,7 @@ class ValidationMessage(BaseModel):
     code: str | None = None
     entity_refs: list[str] = Field(default_factory=list)
     suggestion: str | None = None
+    details: dict[str, Any] | None = None
 
 
 class ComponentModel(BaseModel):
@@ -641,11 +651,14 @@ class ResourceCalendar(BaseModel):
 
 
 class ResourcePool(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     id: str
     type: str
     label: str
     resource_mode: ResourceMode = "LIMITED"
     scope_mode: ResourceScopeMode = "PROJECT_SHARED"
+    workpoint_id: str | None = None
     quantity: int | None = Field(default=0, ge=0)
     max_quantity: int | None = Field(default=None, ge=0)
     authorized_workpoint_ids: list[str] | None = None
@@ -659,8 +672,19 @@ class ResourcePool(BaseModel):
     same_structure_resource_binding: bool = False
     parallel_rule_description: str = ""
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_removed_min_quantity(cls, data: Any) -> Any:
+        if isinstance(data, Mapping) and "min_quantity" in data:
+            raise ValueError("min_quantity is not part of the resource contract")
+        return data
+
     @model_validator(mode="after")
     def ensure_max_quantity(self) -> "ResourcePool":
+        if self.workpoint_id is not None:
+            self.workpoint_id = self.workpoint_id.strip()
+            if not self.workpoint_id:
+                raise ValueError("workpoint_id must not be blank")
         if self.authorized_workpoint_ids is not None:
             self.authorized_workpoint_ids = _normalized_workpoint_ids(self.authorized_workpoint_ids)
         workpoint_ids = [item.workpoint_id for item in self.workpoint_overrides]
@@ -672,6 +696,17 @@ class ResourcePool(BaseModel):
             quantity = self.quantity or 0
             if self.max_quantity is None or self.max_quantity < quantity:
                 self.max_quantity = quantity
+        if self.scope_mode == "PROJECT_SHARED" and self.workpoint_id is not None:
+            raise ValueError("PROJECT_SHARED resource pool must not set workpoint_id")
+        if self.scope_mode == "WORKPOINT_EXCLUSIVE" and self.workpoint_id is not None:
+            if self.authorized_workpoint_ids is not None:
+                raise ValueError(
+                    "WORKPOINT_EXCLUSIVE resource pool with workpoint_id must set authorized_workpoint_ids to null"
+                )
+            if self.workpoint_overrides:
+                raise ValueError(
+                    "WORKPOINT_EXCLUSIVE resource pool with workpoint_id must not set workpoint_overrides"
+                )
         return self
 
 
@@ -724,6 +759,24 @@ class ScenarioInput(BaseModel):
     schedule_strategy: ScheduleStrategyConfig = Field(default_factory=ScheduleStrategyConfig)
     time_limit_seconds: float = Field(default=15.0, gt=0)
     girder_planning: GirderPlanningConfig | None = None
+
+    @model_validator(mode="after")
+    def validate_resource_pool_identities(self) -> "ScenarioInput":
+        pool_ids = [pool.id for pool in self.resource_pools]
+        duplicate_pool_ids = sorted({pool_id for pool_id in pool_ids if pool_ids.count(pool_id) > 1})
+        if duplicate_pool_ids:
+            raise ValueError(f"duplicate resource pool ids: {', '.join(duplicate_pool_ids)}")
+
+        local_keys = [
+            (pool.workpoint_id, pool.type)
+            for pool in self.resource_pools
+            if pool.scope_mode == "WORKPOINT_EXCLUSIVE" and pool.workpoint_id is not None
+        ]
+        duplicate_local_keys = sorted({key for key in local_keys if local_keys.count(key) > 1})
+        if duplicate_local_keys:
+            labels = [f"{workpoint_id}/{resource_type}" for workpoint_id, resource_type in duplicate_local_keys]
+            raise ValueError(f"duplicate workpoint resource keys: {', '.join(labels)}")
+        return self
 
 
 class AiParameterUploadedMaterialSummary(BaseModel):
@@ -1229,6 +1282,41 @@ class ResourceAssistantOptimizationStages(BaseModel):
     total_elapsed_seconds: float = Field(default=0.0, ge=0)
 
 
+class ResourcePoolQuantityResult(BaseModel):
+    resource_pool_id: str = Field(min_length=1)
+    resource_type: str = Field(min_length=1)
+    workpoint_id: str | None = None
+    scope_mode: ResourceScopeMode
+    current_quantity: int = Field(ge=0)
+    recommended_quantity: int = Field(ge=0)
+    max_quantity: int = Field(ge=0)
+    eligible_workpoint_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_pool_identity_and_quantities(self) -> "ResourcePoolQuantityResult":
+        self.resource_pool_id = self.resource_pool_id.strip()
+        self.resource_type = self.resource_type.strip()
+        if not self.resource_pool_id or not self.resource_type:
+            raise ValueError("resource pool quantity result identity must not be blank")
+        self.eligible_workpoint_ids = _normalized_workpoint_ids(self.eligible_workpoint_ids)
+        if self.workpoint_id is not None:
+            self.workpoint_id = self.workpoint_id.strip()
+            if not self.workpoint_id:
+                raise ValueError("workpoint_id must not be blank")
+        if self.scope_mode == "PROJECT_SHARED" and self.workpoint_id is not None:
+            raise ValueError("PROJECT_SHARED quantity result must not set workpoint_id")
+        if self.scope_mode == "WORKPOINT_EXCLUSIVE":
+            if self.workpoint_id is None:
+                raise ValueError("WORKPOINT_EXCLUSIVE quantity result requires workpoint_id")
+            if self.eligible_workpoint_ids != [self.workpoint_id]:
+                raise ValueError(
+                    "WORKPOINT_EXCLUSIVE quantity result eligible_workpoint_ids must contain only workpoint_id"
+                )
+        if self.max_quantity < max(self.current_quantity, self.recommended_quantity):
+            raise ValueError("max_quantity must cover current_quantity and recommended_quantity")
+        return self
+
+
 class ResourceAssistantPlanResult(BaseModel):
     scenario_id: str
     plan_status: ResourceAssistantPlanOutcomeStatus | None = None
@@ -1236,6 +1324,7 @@ class ResourceAssistantPlanResult(BaseModel):
     schedule_outcome_reason: ResourceAssistantScheduleOutcomeReason | None = None
     solver_status: str | None = None
     input_resource_quantities: dict[str, int] = Field(default_factory=dict)
+    resource_pool_quantities: list[ResourcePoolQuantityResult] = Field(default_factory=list)
     resource_expansion_attempted: bool = False
     optimization_stages: ResourceAssistantOptimizationStages | None = None
     generated: GeneratedScheduleInput | None = None
@@ -1291,6 +1380,8 @@ class ResourceAssistantInitialResponse(BaseModel):
 
 
 class ScopedResourceQuantityUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     resource_pool_id: str = Field(min_length=1)
     workpoint_id: str | None = None
     quantity: int = Field(ge=0)

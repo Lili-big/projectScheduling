@@ -795,7 +795,7 @@ async function collectT036Failure(page, tracker, phase, error) {
 function findWorkbookFixture() {
   const root = resolve(
     repoRoot,
-    "05-validation",
+    "01-customer-validation",
     "workpackages",
     "lugu-validation-material",
     "project-master",

@@ -9,7 +9,7 @@ import {
   resourceAssistantScheduleOutcomeLabels,
   resourceAssistantScheduleOutcomeReason,
   resourceAssistantScheduleOutcomeStatus,
-  resourceAssistantResourceLabel,
+  resourceAssistantPoolLabel,
   resourceAssistantProfileLabels,
   resourceAssistantStatusLabels,
   resourceAssistantStatusTone,
@@ -42,7 +42,7 @@ export function ResourcePlanCard({
   confirmingBaseline?: boolean;
   baselineVersionNo?: number | null;
   workpointLabels?: Record<string, string>;
-  onQuantityChange: (resourcePoolId: string, resourceType: string, workpointId: string | null, quantity: number) => void;
+  onQuantityChange: (resourcePoolId: string, workpointId: string | null, quantity: number) => void;
 }) {
   const statusTone = resourceAssistantStatusTone(plan.solve_status);
   const outcomeStatus = resourceAssistantScheduleOutcomeStatus(result);
@@ -89,7 +89,7 @@ export function ResourcePlanCard({
               max={row.maxQuantity ?? undefined}
               value={row.quantity}
               disabled={disabled}
-              onChange={(event) => onQuantityChange(row.pool.id, row.pool.type, row.workpointId, Number(event.target.value))}
+              onChange={(event) => onQuantityChange(row.pool.id, row.workpointId, Number(event.target.value))}
             />
           </label>
         ))}
@@ -154,23 +154,23 @@ function editableResourceRows(
         key: `${pool.id}:project`,
         pool,
         workpointId: null,
-        label: resourceAssistantResourceLabel(pool.type, plan.resource_pools),
+        label: resourceAssistantPoolLabel(pool, plan.resource_pools),
         quantity: pool.quantity ?? 0,
         maxQuantity: pool.max_quantity ?? null,
       });
       continue;
     }
     const overrides = Object.fromEntries((pool.workpoint_overrides ?? []).map((item) => [item.workpoint_id, item]));
-    const workpointIds = pool.authorized_workpoint_ids ?? Object.keys(overrides).sort();
+    const workpointIds = pool.workpoint_id ? [pool.workpoint_id] : pool.authorized_workpoint_ids ?? Object.keys(overrides).sort();
     for (const workpointId of workpointIds) {
       const override = overrides[workpointId];
       rows.push({
         key: `${pool.id}:${workpointId}`,
         pool,
         workpointId,
-        label: `${resourceAssistantResourceLabel(pool.type, plan.resource_pools)} · ${workpointLabels[workpointId] ?? workpointId}`,
-        quantity: override?.quantity ?? pool.quantity ?? 0,
-        maxQuantity: override?.max_quantity ?? pool.max_quantity ?? null,
+        label: `${resourceAssistantPoolLabel(pool, plan.resource_pools)} · ${workpointLabels[workpointId] ?? workpointId}`,
+        quantity: pool.workpoint_id ? pool.quantity ?? 0 : override?.quantity ?? pool.quantity ?? 0,
+        maxQuantity: pool.workpoint_id ? pool.max_quantity ?? null : override?.max_quantity ?? pool.max_quantity ?? null,
       });
     }
   }

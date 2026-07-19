@@ -115,8 +115,17 @@ type ResourcePool = {
   type: string;
   label: string;
   resource_mode?: "LIMITED" | "UNLIMITED";
+  scope_mode?: "PROJECT_SHARED" | "WORKPOINT_EXCLUSIVE";
+  workpoint_id?: string | null;
   quantity: number | null;
   max_quantity?: number | null;
+  authorized_workpoint_ids?: string[] | null;
+  workpoint_overrides?: Array<{
+    workpoint_id: string;
+    enabled?: boolean | null;
+    quantity?: number | null;
+    max_quantity?: number | null;
+  }>;
   calendar_id: string;
   enabled: boolean;
   compatible_process_ids: string[];
@@ -263,6 +272,9 @@ type Resource = {
   type: string;
   pool_id: string;
   pool_label: string;
+  scope_mode?: "PROJECT_SHARED" | "WORKPOINT_EXCLUSIVE";
+  eligible_workpoint_ids?: string[];
+  exclusive_workpoint_id?: string | null;
   enabled: boolean;
   calendar_id: string;
 };
@@ -1268,25 +1280,30 @@ function applyRequiredResourceTypes(
   tasks: Task[],
   resourcePools: ResourcePool[],
   validation: GeneratedScheduleInput["validation"],
+  useMaxResources = false,
 ): Task[] {
-  const poolsByType = new Map(resourcePools.map((poolModel) => [poolModel.type, poolModel]));
+  const poolsByType = groupBy(resourcePools, (poolModel) => poolModel.type);
   const warningKeys = new Set<string>();
   return tasks.map((task) => ({
     ...task,
-    compatible_resource_types: requiredResourceTypesForTask(task, poolsByType, validation, warningKeys),
+    compatible_resource_types: requiredResourceTypesForTask(task, poolsByType, validation, warningKeys, useMaxResources),
   }));
 }
 
 function requiredResourceTypesForTask(
   task: Task,
-  poolsByType: Map<string, ResourcePool>,
+  poolsByType: Map<string, ResourcePool[]>,
   validation: GeneratedScheduleInput["validation"],
   warningKeys: Set<string>,
+  useMaxResources: boolean,
 ): string[] {
   const resourceType = defaultResourceTypeForTask(task);
   if (!resourceType) return [];
-  const poolModel = poolsByType.get(resourceType);
-  if (isLimitedPoolAvailable(poolModel)) return [resourceType];
+  const poolModels = poolsByType.get(resourceType) ?? [];
+  const poolModel = poolModels.find((item) => resourcePoolMatchesTask(item, task));
+  if (poolModels.some((item) => resourcePoolMatchesTask(item, task) && isLimitedPoolAvailable(item, useMaxResources))) {
+    return [resourceType];
+  }
   if (KEY_RESOURCE_COMPONENT_TYPES.has(task.component_type)) {
     appendUnboundedResourceWarning(resourceType, poolModel, validation, warningKeys);
     return [];
@@ -1311,17 +1328,25 @@ function methodIdFromProcessId(processId: string): string | null {
   return Object.keys(PILE_RESOURCE_TYPE_BY_METHOD).find((methodId) => processId.includes(methodId)) ?? null;
 }
 
-function isLimitedPoolAvailable(poolModel: ResourcePool | undefined): boolean {
+function isLimitedPoolAvailable(poolModel: ResourcePool | undefined, useMaxResources = false): boolean {
   return Boolean(
     poolModel
       && poolModel.enabled
       && (poolModel.resource_mode ?? "LIMITED") === "LIMITED"
-      && resourcePoolUsableLimit(poolModel) > 0,
+      && resourcePoolUsableLimit(poolModel, useMaxResources) > 0,
   );
 }
 
-function resourcePoolUsableLimit(poolModel: ResourcePool): number {
-  return poolModel.max_quantity ?? poolModel.quantity ?? 0;
+function resourcePoolUsableLimit(poolModel: ResourcePool, useMaxResources = false): number {
+  return useMaxResources ? (poolModel.max_quantity ?? poolModel.quantity ?? 0) : (poolModel.quantity ?? 0);
+}
+
+function resourcePoolMatchesTask(poolModel: ResourcePool, task: Task): boolean {
+  if ((poolModel.scope_mode ?? "PROJECT_SHARED") === "PROJECT_SHARED") {
+    return poolModel.authorized_workpoint_ids == null || poolModel.authorized_workpoint_ids.includes(task.bridge_id);
+  }
+  if (poolModel.workpoint_id) return poolModel.workpoint_id === task.bridge_id;
+  return (poolModel.authorized_workpoint_ids ?? []).includes(task.bridge_id);
 }
 
 function appendUnboundedResourceWarning(
@@ -1345,14 +1370,14 @@ function resourceUnboundedReason(poolModel: ResourcePool | undefined): string {
   if (!poolModel) return "未配置";
   if (!poolModel.enabled) return "未启用";
   if ((poolModel.resource_mode ?? "LIMITED") === "UNLIMITED") return "设置为默认充足";
-  if (resourcePoolUsableLimit(poolModel) <= 0) return "资源上限为 0";
+  if (resourcePoolUsableLimit(poolModel) <= 0) return "当前投入为 0";
   return "不可用";
 }
 
 function generateScheduleInput(scenario: ScenarioInput, useMaxResources = false): GeneratedScheduleInput {
   const built = buildTasks(scenario);
   const resourceWarnings: GeneratedScheduleInput["validation"] = [];
-  const tasks = applyRequiredResourceTypes(built.tasks, scenario.resource_pools, resourceWarnings);
+  const tasks = applyRequiredResourceTypes(built.tasks, scenario.resource_pools, resourceWarnings, useMaxResources);
   const precedenceLinks = [
     ...buildPrecedenceLinks(tasks, scenario.logic_rules),
     ...built.generatedLinks,
@@ -2500,11 +2525,16 @@ function expandResources(pools: ResourcePool[], useMaxResources: boolean): Resou
     if (!poolModel.enabled || (poolModel.resource_mode ?? "LIMITED") === "UNLIMITED") return [];
     const count = useMaxResources ? (poolModel.max_quantity ?? poolModel.quantity ?? 0) : (poolModel.quantity ?? 0);
     return Array.from({ length: count }, (_, index) => ({
-      id: `${poolModel.type}_${index + 1}`,
+      id: `${poolModel.id}_${index + 1}`,
       name: `${poolModel.label}${index + 1}`,
       type: poolModel.type,
       pool_id: poolModel.id,
       pool_label: poolModel.label,
+      scope_mode: poolModel.scope_mode ?? "PROJECT_SHARED",
+      eligible_workpoint_ids: poolModel.workpoint_id
+        ? [poolModel.workpoint_id]
+        : (poolModel.authorized_workpoint_ids ?? []),
+      exclusive_workpoint_id: poolModel.workpoint_id ?? null,
       enabled: true,
       calendar_id: poolModel.calendar_id,
     }));
@@ -2631,6 +2661,10 @@ function schedule(generated: GeneratedScheduleInput, evaluatedAtSource = "curren
     }));
     const candidates = task.compatible_resource_types
       .flatMap((type) => resourcesByType.get(type) ?? [])
+      .filter((resource) => {
+        if (resource.exclusive_workpoint_id) return resource.exclusive_workpoint_id === task.bridge_id;
+        return !resource.eligible_workpoint_ids?.length || resource.eligible_workpoint_ids.includes(task.bridge_id);
+      })
       .filter((resource) => !(isContinuousBeamTask(task) && resource.type === CONTINUOUS_BEAM_RESOURCE_TYPE));
     const assigned = candidates.reduce<Resource | null>((best, current) => {
       if (!best) return current;

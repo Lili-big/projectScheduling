@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "decision_order": [
     "stage",
     "workpackage",
@@ -18,11 +18,10 @@
   ],
   "allowed_stage_roots": [
     "00-governance",
-    "01-discovery",
+    "01-customer-validation",
     "02-solution-analysis",
     "03-requirements",
     "04-demo",
-    "05-validation",
     "06-delivery"
   ],
   "forbidden_business_roots": [
@@ -57,12 +56,21 @@
     },
     {
       "id": "customer-research",
-      "stage": "01-discovery",
-      "workpackage": "existing-or-new-research-workpackage",
-      "asset_type": "research-source-or-summary",
+      "stage": "01-customer-validation",
+      "workpackage": "existing-or-new-customer-project",
+      "asset_type": "customer-material-or-research-record",
       "tracking_policy": "tracked",
       "retention_class": "formal-output",
-      "primary_owner": "01-discovery/workpackages/<id>"
+      "primary_owner": "01-customer-validation/<project>/customer-materials"
+    },
+    {
+      "id": "customer-validation",
+      "stage": "01-customer-validation",
+      "workpackage": "required",
+      "asset_type": "validation-plan-script-result-or-report",
+      "tracking_policy": "tracked",
+      "retention_class": "formal-output",
+      "primary_owner": "01-customer-validation/<project>"
     },
     {
       "id": "solution-proposal",
@@ -92,15 +100,6 @@
       "primary_owner": "04-demo/<component-or-workpackage>"
     },
     {
-      "id": "customer-validation",
-      "stage": "05-validation",
-      "workpackage": "required",
-      "asset_type": "validation-input-script-result-or-report",
-      "tracking_policy": "local-only",
-      "retention_class": "user-input",
-      "primary_owner": "05-validation/workpackages/<id>"
-    },
-    {
       "id": "formal-delivery",
       "stage": "06-delivery",
       "workpackage": "existing-or-new-delivery-workpackage",
@@ -112,7 +111,7 @@
   ],
   "local_asset_routes": {
     "persistent-state": ".local-data/state",
-    "user-input": "workpackage input with local-only tracking",
+    "user-input": "customer-materials with local-only tracking",
     "diagnostic-log": ".local-data/logs",
     "rebuildable": ".local-data/archive/rebuildable",
     "cache": ".local-data/cache",

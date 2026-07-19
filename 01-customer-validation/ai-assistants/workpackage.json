@@ -1,0 +1,15 @@
+{
+  "id": "ai-assistants",
+  "stage": "01-customer-validation",
+  "purpose": "维护 AI 参数和资源助手的验证说明。",
+  "status": "active",
+  "inputs": [],
+  "entrypoints": [],
+  "results": [
+    "validation-results/AI参数输入助手验证说明.md",
+    "validation-results/AI资源配置与排程优化助手验证说明.md"
+  ],
+  "owner": "L01｜需求发现与验证闭环（AI 助手验证）",
+  "tracking_policy": "tracked",
+  "retention_policy": "验证说明作为正式结果跟踪；临时检查和预览进入本地数据区。"
+}

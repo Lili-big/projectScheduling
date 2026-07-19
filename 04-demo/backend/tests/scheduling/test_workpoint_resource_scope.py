@@ -6,10 +6,13 @@ from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(BACKEND_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from app.contracts import ProjectBridge, ResourcePool, WorkpointResourceOverride  # noqa: E402
+from app.scenario_data import derive_resource_catalog, derive_workpoint_possible_resource_types  # noqa: E402
 from app.scheduling.application._scenario import expand_effective_resource_pools  # noqa: E402
 from app.scheduling.domain.resource_scope import resolve_effective_resource_pools  # noqa: E402
+from workpoint_scope_test_support import WORKPOINT_A, WORKPOINT_B, two_workpoint_scenario  # noqa: E402
 
 
 def _bridges() -> list[ProjectBridge]:
@@ -165,3 +168,132 @@ def test_named_resources_expand_once_for_shared_and_per_workpoint_for_exclusive(
         for item in maximum
         if item.type == "exclusive-team"
     )
+
+
+def test_direct_workpoint_pool_and_multiple_same_type_shared_pools_keep_pool_identity() -> None:
+    pools = [
+        ResourcePool(
+            id="local-a",
+            type="cap_team",
+            label="A 本地班组",
+            scope_mode="WORKPOINT_EXCLUSIVE",
+            workpoint_id="WP-A",
+            quantity=2,
+            max_quantity=4,
+        ),
+        ResourcePool(
+            id="shared-ab",
+            type="cap_team",
+            label="AB 共享班组",
+            quantity=1,
+            max_quantity=2,
+            authorized_workpoint_ids=["WP-A", "WP-B"],
+        ),
+        ResourcePool(
+            id="shared-b",
+            type="cap_team",
+            label="B 共享班组",
+            quantity=1,
+            max_quantity=3,
+            authorized_workpoint_ids=["WP-B"],
+        ),
+    ]
+
+    resolution = resolve_effective_resource_pools(
+        project_data_version_id="project-data-v1",
+        bridges=_bridges(),
+        resource_pools=list(reversed(pools)),
+    )
+
+    assert resolution.diagnostics == ()
+    assert [pool.effective_pool_id for pool in resolution.pools] == [
+        "local-a",
+        "shared-ab",
+        "shared-b",
+    ]
+    by_id = {pool.effective_pool_id: pool for pool in resolution.pools}
+    assert by_id["local-a"].workpoint_id == "WP-A"
+    assert by_id["local-a"].eligible_workpoint_ids == ("WP-A",)
+    assert by_id["local-a"].inheritance_source == "global"
+    assert by_id["shared-ab"].eligible_workpoint_ids == ("WP-A", "WP-B")
+    assert by_id["shared-b"].eligible_workpoint_ids == ("WP-B",)
+
+    resources, messages = expand_effective_resource_pools(resolution.pools)
+    assert messages == []
+    assert {resource.pool_id for resource in resources} == {"local-a", "shared-ab", "shared-b"}
+    assert len([resource for resource in resources if resource.pool_id == "local-a"]) == 2
+
+
+def test_effective_pools_reject_duplicate_pool_ids_duplicate_local_keys_and_unknown_local_workpoint() -> None:
+    resolution = resolve_effective_resource_pools(
+        project_data_version_id="project-data-v1",
+        bridges=_bridges(),
+        resource_pools=[
+            ResourcePool(id="duplicate", type="cap_team", label="共享一", quantity=1),
+            ResourcePool(id="duplicate", type="pier_body_team", label="共享二", quantity=1),
+            ResourcePool(
+                id="local-a-1",
+                type="cap_team",
+                label="A 本地一",
+                scope_mode="WORKPOINT_EXCLUSIVE",
+                workpoint_id="WP-A",
+                quantity=1,
+            ),
+            ResourcePool(
+                id="local-a-2",
+                type="cap_team",
+                label="A 本地二",
+                scope_mode="WORKPOINT_EXCLUSIVE",
+                workpoint_id="WP-A",
+                quantity=1,
+            ),
+            ResourcePool(
+                id="local-old",
+                type="cap_beam_team",
+                label="旧工点本地",
+                scope_mode="WORKPOINT_EXCLUSIVE",
+                workpoint_id="OLD-WP",
+                quantity=1,
+            ),
+        ],
+    )
+
+    assert resolution.pools == ()
+    assert {message.code for message in resolution.diagnostics} == {
+        "RESOURCE_SCOPE_DUPLICATE_POOL_ID",
+        "RESOURCE_SCOPE_DUPLICATE_LOCAL_KEY",
+        "RESOURCE_SCOPE_UNKNOWN_WORKPOINT",
+    }
+
+
+def test_resource_catalog_and_workpoint_possible_types_are_deterministic_projections() -> None:
+    scenario = two_workpoint_scenario(
+        ResourcePool(
+            id="shared-cap",
+            type="cap_team",
+            label="项目承台班组",
+            quantity=1,
+            max_quantity=3,
+        )
+    )
+    scenario.resource_pools.append(
+        ResourcePool(
+            id="configured-generator",
+            type="generator",
+            label="发电机",
+            quantity=0,
+            max_quantity=2,
+        )
+    )
+
+    catalog = derive_resource_catalog(scenario)
+
+    assert [item["resource_type"] for item in catalog] == sorted(
+        item["resource_type"] for item in catalog
+    )
+    assert next(item for item in catalog if item["resource_type"] == "cap_team")[
+        "applicable_process_ids"
+    ] == ["cap-scope-test"]
+    assert next(item for item in catalog if item["resource_type"] == "generator")["label"] == "发电机"
+    assert derive_workpoint_possible_resource_types(scenario, WORKPOINT_A) == ["cap_team"]
+    assert derive_workpoint_possible_resource_types(scenario, WORKPOINT_B) == ["cap_team"]

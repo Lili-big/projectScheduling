@@ -2,6 +2,116 @@
   overflow: hidden;
 }
 
+.resource-workpoint-section,
+.resource-shared-section {
+  margin: 0 14px 16px;
+  border: 1px solid #dbe5ef;
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.resource-section-heading {
+  padding: 14px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  background: #f8fafc;
+}
+
+.resource-section-heading h3,
+.resource-section-heading p {
+  margin: 0;
+}
+
+.resource-section-heading p {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.resource-workpoint-nav {
+  padding: 10px 14px;
+  display: flex;
+  gap: 8px;
+  overflow: auto;
+  border-top: 1px solid #e5edf5;
+  border-bottom: 1px solid #e5edf5;
+}
+
+.resource-workpoint-nav button {
+  white-space: nowrap;
+}
+
+.resource-workpoint-nav button.active {
+  color: #fff;
+  border-color: #0369a1;
+  background: #0369a1;
+}
+
+.resource-catalog-add,
+.resource-shared-add {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.resource-catalog-add {
+  padding: 12px 14px;
+}
+
+.resource-catalog-add label,
+.resource-scope-card-header label {
+  display: grid;
+  gap: 5px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.resource-workpoint-table td:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.resource-workpoint-table code,
+.resource-workpoint-table small {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.resource-shared-range {
+  padding: 12px;
+  border-top: 1px solid #e5edf5;
+}
+
+.resource-all-workpoints {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.resource-workpoint-options {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.resource-workpoint-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.resource-inline-error {
+  margin-top: 10px;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .resource-scope-state {
   margin: 0 14px 14px;
   min-height: 46px;
@@ -49,6 +159,10 @@
 .resource-scope-card-header {
   justify-content: space-between;
   background: #f8fafc;
+}
+
+.resource-scope-card-header input {
+  min-width: 220px;
 }
 
 .resource-scope-defaults {
@@ -117,8 +231,10 @@
 }
 
 @media (max-width: 900px) {
+  .resource-section-heading,
   .resource-scope-card-header {
     align-items: flex-start;
+    flex-direction: column;
   }
 
   .resource-scope-defaults label,

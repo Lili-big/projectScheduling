@@ -91,6 +91,6 @@ def test_041_partial_status_is_not_presented_as_complete() -> None:
     completed = len(re.findall(r"^\s*- \[(?:x|X)\]\s+T\d+", tasks, flags=re.MULTILINE))
     total = len(re.findall(r"^\s*- \[(?: |x|X)\]\s+T\d+", tasks, flags=re.MULTILINE))
     assert (completed, total) == (74, 95)
-    assert "74/95" in README and "74/95" in AGENT
+    assert "74/95" in README
     assert re.search(r"21\s*项.*未完成", README)
-    assert re.search(r"21\s*项.*未完成", AGENT)
+    assert "74/95" not in AGENT

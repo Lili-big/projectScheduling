@@ -1,0 +1,272 @@
+openapi: 3.1.0
+info:
+  title: 工点主导资源配置与范围共享流转契约增量
+  version: 1.0.0
+  description: >-
+    复用现有场景保存、任务生成、三类求解和 AI 资源助手端点；
+    本契约只冻结 048 的池身份、工点本地记录、多共享池、兼容和诊断增量。
+paths:
+  /api/local-scenario-config:
+    put:
+      summary: 保存工点本地资源和范围共享池
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [process_library, logic_rules, resource_pools]
+              properties:
+                resource_pools:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/ResourcePool'
+      responses:
+        '200':
+          description: 返回按池 ID 标准化后的配置
+        '422':
+          description: 池 ID、工点身份、数量、共享范围或历史迁移校验失败
+  /api/generate-schedule-input:
+    post:
+      summary: 生成工点本地与多共享池候选
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScenarioInputResourceFragment'
+      responses:
+        '200':
+          description: 返回命名资源、合法候选和资源池诊断
+        '422':
+          description: 当前资源下受限任务没有合法候选或资源迁移被阻断
+  /api/solve-scenario:
+    post:
+      summary: 使用每池当前 quantity 求最短工期
+      responses:
+        '200':
+          description: 返回按池和实例追溯的固定资源结果
+  /api/solve-min-resources:
+    post:
+      summary: 以每池 max_quantity 为上界求最少资源
+      responses:
+        '200':
+          description: 返回逐池推荐数量，不按资源类型合并
+  /api/solve-resource-cost:
+    post:
+      summary: 在每个独立池的数量与上限范围内优化资源成本
+      responses:
+        '200':
+          description: 返回逐池资源数量与成本结果
+  /api/ai-resource-assistant/update-plan:
+    post:
+      summary: 按资源池 ID 更新共享池或工点本地资源建议
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResourceAssistantUpdatePlanRequest'
+      responses:
+        '200':
+          description: 只更新目标池并使旧求解、比较和解释失效
+        '422':
+          description: 池 ID、工点身份、上限或旧类型键存在歧义
+components:
+  schemas:
+    ResourceScopeMode:
+      type: string
+      enum: [PROJECT_SHARED, WORKPOINT_EXCLUSIVE]
+      default: PROJECT_SHARED
+    WorkpointResourceOverride:
+      type: object
+      description: 仅用于 047 历史输入兼容；048 新写入必须为空数组
+      required: [workpoint_id]
+      properties:
+        workpoint_id:
+          type: string
+          minLength: 1
+        enabled:
+          type: [boolean, 'null']
+        quantity:
+          type: [integer, 'null']
+          minimum: 0
+        max_quantity:
+          type: [integer, 'null']
+          minimum: 0
+    ResourcePool:
+      type: object
+      required: [id, type, label, quantity, enabled]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          description: 全场景稳定唯一；同类型多池以此区分
+        type:
+          type: string
+          minLength: 1
+        label:
+          type: string
+          minLength: 1
+        resource_mode:
+          type: string
+          enum: [LIMITED, UNLIMITED]
+          default: LIMITED
+        scope_mode:
+          $ref: '#/components/schemas/ResourceScopeMode'
+        workpoint_id:
+          type: [string, 'null']
+          description: 048 工点本地记录必填；共享池必须为 null
+        quantity:
+          type: [integer, 'null']
+          minimum: 0
+          description: 当前投入；0 表示当前没有实例
+        max_quantity:
+          type: [integer, 'null']
+          minimum: 0
+        enabled:
+          type: boolean
+        authorized_workpoint_ids:
+          type: [array, 'null']
+          items:
+            type: string
+          description: 共享池专用；null 表示当前项目全部桥梁工点，显式数组必须非空
+        workpoint_overrides:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkpointResourceOverride'
+          description: 047 legacy 专用；048 新记录必须为空
+        calendar_id:
+          type: string
+        cost_type:
+          type: string
+          enum: [none, monthly_rental, one_time_purchase]
+        incremental_unit_cost:
+          type: integer
+          minimum: 0
+        billing_period_days:
+          type: integer
+          minimum: 1
+        same_structure_resource_binding:
+          type: boolean
+    NamedResourceScope:
+      type: object
+      required: [pool_id, scope_mode, eligible_workpoint_ids]
+      properties:
+        pool_id:
+          type: string
+        scope_mode:
+          $ref: '#/components/schemas/ResourceScopeMode'
+        eligible_workpoint_ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        exclusive_workpoint_id:
+          type: [string, 'null']
+    ScenarioInputResourceFragment:
+      type: object
+      required: [project_data_version_id, resource_pools]
+      properties:
+        project_data_version_id:
+          type: string
+        resource_pools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourcePool'
+    ScopedResourceQuantityUpdate:
+      type: object
+      required: [resource_pool_id, quantity]
+      properties:
+        resource_pool_id:
+          type: string
+          minLength: 1
+        workpoint_id:
+          type: [string, 'null']
+          description: 共享池为 null；工点本地池必须与池的 workpoint_id 一致
+        quantity:
+          type: integer
+          minimum: 0
+    ResourceAssistantUpdatePlanRequest:
+      type: object
+      required: [plan_id]
+      properties:
+        plan_id:
+          type: string
+        resource_updates:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+          description: 旧类型键格式；只兼容唯一匹配的旧共享池
+        scoped_resource_updates:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScopedResourceQuantityUpdate'
+    ResourceGapDiagnostic:
+      type: object
+      required: [code, task_id, resource_type, reason]
+      properties:
+        code:
+          type: string
+          enum: [RESOURCE_ALLOCATION_NO_LEGAL_CANDIDATE]
+        task_id:
+          type: string
+        workpoint_id:
+          type: [string, 'null']
+        resource_type:
+          type: string
+        relevant_pool_ids:
+          type: array
+          items:
+            type: string
+        reason:
+          type: string
+          enum:
+            - LOCAL_QUANTITY_ZERO
+            - LOCAL_DISABLED
+            - SHARED_DISABLED
+            - SHARED_SCOPE_MISMATCH
+            - WORKPOINT_ID_INVALID
+            - RESOURCE_TYPE_UNCONFIGURED
+    ResourcePoolQuantityResult:
+      type: object
+      required:
+        - resource_pool_id
+        - resource_type
+        - scope_mode
+        - current_quantity
+        - recommended_quantity
+        - max_quantity
+      properties:
+        resource_pool_id:
+          type: string
+        resource_type:
+          type: string
+        workpoint_id:
+          type: [string, 'null']
+        scope_mode:
+          $ref: '#/components/schemas/ResourceScopeMode'
+        current_quantity:
+          type: integer
+          minimum: 0
+        recommended_quantity:
+          type: integer
+          minimum: 0
+        max_quantity:
+          type: integer
+          minimum: 0
+        eligible_workpoint_ids:
+          type: array
+          items:
+            type: string
+x-invariants:
+  - ResourcePool.id 在同一 ScenarioInput 中唯一，ResourcePool.type 可以重复
+  - WORKPOINT_EXCLUSIVE 新记录必须有 workpoint_id，且同一 workpoint_id 与 type 组合唯一
+  - PROJECT_SHARED 记录的 workpoint_id 必须为 null，同类型可以有多个独立池
+  - PROJECT_SHARED 的 authorized_workpoint_ids 为 null 时表示动态全部工点，显式空数组非法
+  - 048 新记录的 workpoint_overrides 必须为空；非空值只进入 legacy 迁移
+  - 固定资源只展开 quantity，quantity 为 0 且无合法共享实例时必须阻断
+  - 最少资源和成本结果按 resource_pool_id 返回，不得按 type 合并
+  - 同一共享实例互斥，跨工点转场时间和成本均为 0
+  - 旧 PROJECT_SHARED 池保持一条记录及原数量和范围，不拆分到工点

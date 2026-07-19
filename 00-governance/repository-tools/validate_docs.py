@@ -13,8 +13,8 @@ ENTRY_DOCS = [
     ROOT / "README.md",
     ROOT / "agent.md",
     *(ROOT / stage / "README.md" for stage in [
-        "00-governance", "01-discovery", "02-solution-analysis", "03-requirements",
-        "04-demo", "05-validation", "06-delivery",
+        "00-governance", "01-customer-validation", "02-solution-analysis", "03-requirements",
+        "04-demo", "06-delivery",
     ]),
 ]
 LINK = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")

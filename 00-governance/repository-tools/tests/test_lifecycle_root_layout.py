@@ -7,11 +7,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 STAGES = [
     "00-governance",
-    "01-discovery",
+    "01-customer-validation",
     "02-solution-analysis",
     "03-requirements",
     "04-demo",
-    "05-validation",
     "06-delivery",
 ]
 LEGACY_BUSINESS_ROOTS = {"backend", "deliverables", "docs", "examples", "frontend", "output", "outputs", "specs", "tools"}

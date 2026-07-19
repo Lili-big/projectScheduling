@@ -540,12 +540,12 @@ export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null 
     setError(null);
     setMessage(null);
     try {
-      const resourceTypes = summary?.active_plan?.resource_plan_snapshot.resource_pools
+      const resourcePools = summary?.active_plan?.resource_plan_snapshot.resource_pools
         .filter((pool) => pool.enabled && (pool.quantity ?? 0) > 0)
-        .map((pool) => pool.type) ?? [];
+        ?? [];
       setAdjustments(await generateAdjustmentProposals(
         forecast.forecast_id,
-        Object.fromEntries(resourceTypes.map((resourceType) => [resourceType, resourceIncrementLimit])),
+        Object.fromEntries(resourcePools.map((pool) => [pool.id, resourceIncrementLimit])),
       ));
     } catch (exc) {
       setError(planControlErrorMessage(exc, "adjustments"));
@@ -808,6 +808,7 @@ export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null 
               <article className={`adjustment-card ${proposal.recommended ? "recommended" : ""}`} key={proposal.proposal_id}>
                 <header><strong>{strategyLabels[proposal.strategy]}</strong><span>{proposal.status}</span></header>
                 <p>{proposal.explanation}</p>
+                <p><strong>调整资源池：</strong>{adjustmentResourcePoolLabels(proposal.strategy_parameters, summary?.active_plan?.resource_plan_snapshot.resource_pools ?? [])}</p>
                 <dl><div><dt>预计完成</dt><dd>{String(proposal.metrics.predicted_finish_date ?? "不可用")}</dd></div><div><dt>工期偏差</dt><dd>{String(proposal.metrics.finish_variance_days ?? "-")} 天</dd></div><div><dt>迟延里程碑</dt><dd>{String(proposal.metrics.late_milestone_count ?? 0)}</dd></div><div><dt>新增资源</dt><dd>{String(proposal.metrics.added_resource_count ?? 0)}</dd></div><div><dt>演示成本变化</dt><dd>{String(proposal.metrics.demo_cost_change ?? 0)}</dd></div><div><dt>完工改善</dt><dd>{String(proposal.metrics.finish_improvement_days ?? 0)} 天</dd></div></dl>
                 {diagnosticText(proposal.diagnostics, "error") && <div className="notice danger">{diagnosticText(proposal.diagnostics, "error")}</div>}
                 {diagnosticText(proposal.diagnostics, "warning") && <div className="notice warning">{diagnosticText(proposal.diagnostics, "warning")}</div>}
@@ -828,4 +829,22 @@ export function PlanControlPanel({ scenario }: { scenario: ScenarioInput | null 
       )}
     </div>
   );
+}
+
+function adjustmentResourcePoolLabels(
+  strategyParameters: Record<string, unknown>,
+  pools: Array<{ id: string; label: string; type: string }>,
+): string {
+  const raw = strategyParameters.resource_increments ?? strategyParameters.max_resource_increments ?? strategyParameters.resource_pool_ids;
+  const ids = Array.isArray(raw)
+    ? raw.map(String)
+    : raw && typeof raw === "object"
+      ? Object.keys(raw as Record<string, unknown>)
+      : [];
+  if (!ids.length) return "未调整资源数量";
+  const byId = new Map(pools.map((pool) => [pool.id, pool]));
+  return ids.map((id) => {
+    const pool = byId.get(id);
+    return pool ? `${pool.label}（${pool.id}）` : id;
+  }).join("、");
 }

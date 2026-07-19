@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT))
 from app import process_nl  # noqa: E402
 from app.bridge_import import BridgeImportConfigError, default_local_bridge_workbook, get_bridge_import_adapter, import_bridge_parameters  # noqa: E402
 from app.main import apply_process_natural_language_endpoint, import_bridge_params_endpoint, import_local_bridge_params_endpoint  # noqa: E402
-from app.models import ProcessNlRequest, ProductivityOption  # noqa: E402
+from app.models import ProcessNlRequest, ProductivityOption, ResourcePool  # noqa: E402
 from app.project_structure_params import (  # noqa: E402
     apply_project_structure_params,
     load_project_structure_params,
@@ -75,6 +75,24 @@ def test_bridge_excel_import_understands_sample_workbook() -> None:
 def test_bridge_excel_import_maps_to_schedulable_scenario() -> None:
     path = sample_workbook_path()
     scenario = default_scenario()
+    scenario.resource_pools.extend(
+        [
+            ResourcePool(
+                id="pool-spread-foundation-team",
+                type="spread_foundation_team",
+                label="扩大基础班组",
+                quantity=1,
+                max_quantity=2,
+            ),
+            ResourcePool(
+                id="pool-tie-beam-team",
+                type="tie_beam_team",
+                label="系梁班组",
+                quantity=1,
+                max_quantity=2,
+            ),
+        ]
+    )
     response = import_bridge_parameters(file_name=path.name, content=path.read_bytes(), scenario=scenario, target_bridge=None)
 
     imported = response.scenario

@@ -8,170 +8,120 @@ ROOT = Path(__file__).resolve().parents[3]
 ROLE_ROOT = ROOT / "00-governance/asset-policy/thread-roles"
 REGISTRY = ROLE_ROOT / "registry.yaml"
 RESIDENT_IDS = {"G00", "L01"}
-CAPABILITY_IDS = {
-    "L02",
-    "L03",
-    "L06",
-    "D01",
-    "D02",
-    "D03",
-    "D04",
-    "D05",
-    "D06",
-    "D07",
-}
-ALL_CONTRACT_IDS = RESIDENT_IDS | CAPABILITY_IDS
+REMOVED_CAPABILITIES = {"L02", "L03", "L06", "D01", "D02", "D03", "D04", "D05", "D06", "D07"}
 
 
 def registry_text() -> str:
     return REGISTRY.read_text(encoding="utf-8")
 
 
-def registry_section(start: str, end: str | None = None) -> str:
-    text = registry_text().split(f"{start}:\n", 1)[1]
-    return text.split(f"\n{end}:\n", 1)[0] if end else text
+def resident_records() -> dict[str, str]:
+    section = registry_text().split("resident_threads:\n", 1)[1]
+    matches = list(re.finditer(r"^  - id: ([GLD]\d{2})$", section, re.MULTILINE))
+    return {
+        match.group(1): section[match.start() : matches[index + 1].start() if index + 1 < len(matches) else len(section)]
+        for index, match in enumerate(matches)
+    }
 
 
-def test_registry_has_only_two_unique_resident_thread_bindings() -> None:
-    residents = registry_section("resident_threads", "capabilities")
-    resident_ids = re.findall(r"^  - id: ([GLD]\d{2})$", residents, re.MULTILINE)
-    thread_ids = re.findall(
-        r'^    thread_id: "([0-9a-f-]{36})"$', residents, re.MULTILINE
-    )
+def field(block: str, name: str) -> str:
+    match = re.search(rf'^    {re.escape(name)}: "?([^"\n]+)"?$', block, re.MULTILINE)
+    assert match, f"missing {name}: {block}"
+    return match.group(1)
 
-    assert set(resident_ids) == RESIDENT_IDS
-    assert len(resident_ids) == len(set(resident_ids)) == 2
+
+def test_registry_contains_only_live_resident_threads() -> None:
+    text = registry_text()
+    assert set(re.findall(r"^([a-z_]+):", text, re.MULTILINE)) == {"version", "updated_at", "resident_threads"}
+    assert "version: 10" in text
+    assert "capabilities:" not in text
+    assert "requirement_template:" not in text
+
+    records = resident_records()
+    assert set(records) == RESIDENT_IDS
+    thread_ids = [field(block, "thread_id") for block in records.values()]
     assert len(thread_ids) == len(set(thread_ids)) == 2
-    assert "thread_id:" not in registry_section("capabilities")
+    assert all(re.fullmatch(r"[0-9a-f-]{36}", value) for value in thread_ids)
+    for role_id, block in records.items():
+        assert field(block, "contract") == f"{role_id}.md"
+        contract = ROLE_ROOT / f"{role_id}.md"
+        assert contract.is_file()
+        assert contract.read_text(encoding="utf-8").startswith(f"# {role_id}｜")
 
 
-def test_former_l_and_d_roles_are_capabilities_with_contracts() -> None:
-    capabilities = registry_section("capabilities")
-    capability_ids = re.findall(
-        r"^  - id: ([LD]\d{2})$", capabilities, re.MULTILINE
-    )
-    assert set(capability_ids) == CAPABILITY_IDS
-
-    for capability_id in CAPABILITY_IDS:
-        contract = ROLE_ROOT / f"{capability_id}.md"
-        assert contract.is_file(), f"missing capability contract: {contract}"
-        text = contract.read_text(encoding="utf-8")
-        assert text.startswith(f"# {capability_id}｜")
-        assert "这是能力契约，不绑定常驻 Thread" in text
-        assert "registry.yaml" in text
-        assert "本契约优先于旧对话" in text
-
-
-def test_resident_contracts_and_l01_closed_loop() -> None:
-    residents = registry_section("resident_threads", "capabilities")
-    assert 'title: "G00｜项目治理与工作项协调"' in residents
-    assert 'title: "L01｜需求发现与验证闭环"' in residents
-    assert 'covered_stages: ["01-discovery", "05-validation"]' in residents
-    assert '"01-discovery/workpackages/"' in residents
-    assert '"05-validation/workpackages/"' in residents
-
-    for resident_id in RESIDENT_IDS:
-        text = (ROLE_ROOT / f"{resident_id}.md").read_text(encoding="utf-8")
-        assert text.startswith(f"# {resident_id}｜")
-        assert "这是常驻 Thread 契约" in text
-
-    assert "\n  - id: L05\n" not in registry_text()
-    assert not (ROLE_ROOT / "L05.md").exists()
-
-
-def test_registry_defines_one_requirement_one_thread() -> None:
-    text = registry_text()
-    template = (ROLE_ROOT / "REQUIREMENT_THREAD_TEMPLATE.md").read_text(
-        encoding="utf-8"
-    )
-
-    assert "version: 7" in text
-    assert 'execution_model: "one_requirement_one_thread"' in text
-    assert "work_id_required: true" in text
-    assert 'template: "REQUIREMENT_THREAD_TEMPLATE.md"' in text
-    assert 'user_facing_owner: "work_item_thread"' in text
-    assert 'lifecycle_coverage: "discovery_through_closeout"' in text
-    assert 'capability_loading: "load_required_capabilities_in_same_thread"' in text
-    assert 'final_accountability: "work_item_thread"' in text
-
-    for required_field in (
-        'work_id: "<唯一需求或规格编号>"',
-        "objective:",
-        "source_paths:",
-        "acceptance:",
-        "risk_level:",
-        "required_capabilities:",
-        "close_conditions:",
+def test_default_execution_path_is_single_and_concise() -> None:
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    assert len(agents) <= 1500
+    for step in (
+        "读取目标文件、邻近测试",
+        "完成最小修改",
+        "运行一次与风险匹配的最小验证",
+        "然后停止",
     ):
-        assert required_field in template
+        assert step in agents
+    assert "默认不创建工作项、不路由角色、不加载 Thread 注册表、不写计划" in agents
+    assert "同一状态不重复读取，同一测试不重复运行" in agents
+    assert "可逆、权限范围内且验收明确的操作直接执行" in agents
 
-    retired_template = "HANDOFF_" + "TEMPLATE.md"
-    assert not (ROLE_ROOT / retired_template).exists()
 
-
-def test_subagents_are_explicitly_allowed_without_role_or_count_bans() -> None:
-    registry = registry_text()
+def test_formal_workflow_has_four_skills_and_one_confirmation() -> None:
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    contracts = "\n".join(
-        (ROLE_ROOT / f"{contract_id}.md").read_text(encoding="utf-8")
-        for contract_id in ALL_CONTRACT_IDS
-    )
-    all_governance_text = "\n".join((registry, agents, contracts))
-
-    assert "subagent_policy:" in registry
-    assert "  enabled: true" in registry
-    assert 'authorization: "project_contract"' in registry
-    assert 'orchestrator: "work_item_thread"' in registry
-    assert 'capability_named_agents: "allowed"' in registry
-    assert 'concurrency: "platform_limit"' in registry
-    assert "minimum_useful_fanout: true" in registry
-    assert 'write_policy: "disjoint_paths_or_isolated_worktree"' in registry
-    assert 'result_flow: "summarize_to_parent"' in registry
-    assert 'durable_authority: "parent_work_item_thread"' in registry
-
-    assert "项目契约明确允许工作项 Thread 自行创建、管理和结束 Subagent" in agents
-    assert "能力型临时名称" in agents
-    assert "数量不设固定项目上限" in agents
-    assert "互不重叠的 `allowed_paths`" in agents
-    assert "隔离 Worktree" in agents
-
-    retired_rules = (
-        "forbid_role_named_" + "subagents",
-        "role_internal_" + "subagents",
-        "子智能体只允许由实际承接任务的" + "常驻 thread",
-        "禁止 `G00` " + "创建或使用",
-        "只能一个 " + "Subagent",
-        "Subagent " + "只能只读",
-    )
-    for retired_rule in retired_rules:
-        assert retired_rule not in all_governance_text
+    expected = "$speckit-specify → $speckit-plan → $speckit-tasks → 用户确认 → $speckit-implement"
+    assert expected in agents
+    for removed in ("$speckit-clarify", "$speckit-analyze", "$speckit-converge"):
+        assert removed not in agents
+    assert not (ROOT / ".specify/workflows/speckit/workflow.yml").exists()
+    assert not (ROOT / ".specify/workflows/workflow-registry.json").exists()
 
 
-def test_review_policy_keeps_r0_to_r3_without_a_resident_reviewer() -> None:
-    text = registry_text()
-    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    d06 = (ROLE_ROOT / "D06.md").read_text(encoding="utf-8")
-
-    assert "default_full_suite_runs: 1" in text
-    assert 'reviewer_execution: "parent_or_temporary_subagents_based_on_risk"' in text
-    assert "dedicated_resident_reviewer_required: false" in text
-    assert '"R0-self-check"' in text
-    assert '"R3-full-independent-release-gate"' in text
-    assert "R2/R3 可由一个或多个临时审查 Subagent 执行" in agents
-    assert "可以由主 Thread 或一个或多个临时审查 Subagent 承担" in d06
+def test_removed_roles_and_work_item_layer_stay_absent() -> None:
+    for role_id in REMOVED_CAPABILITIES:
+        assert not (ROLE_ROOT / f"{role_id}.md").exists()
+    for removed in ("README.md", "REQUIREMENT_THREAD_TEMPLATE.md", "L05.md", "HANDOFF_TEMPLATE.md"):
+        assert not (ROLE_ROOT / removed).exists()
 
 
-def test_policy_layers_and_repository_navigation_are_current() -> None:
-    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    governance = (ROOT / "00-governance/README.md").read_text(encoding="utf-8")
-    directory_readme = (ROLE_ROOT / "README.md").read_text(encoding="utf-8")
-    registry = registry_text()
+def test_project_skill_set_has_no_redundant_stages_or_compatibility_entry() -> None:
+    skill_files = sorted((ROOT / ".agents/skills").glob("*/SKILL.md"))
+    assert {path.parent.name for path in skill_files} == {
+        "demo-algorithm-explainer",
+        "speckit-checklist",
+        "speckit-constitution",
+        "speckit-implement",
+        "speckit-plan",
+        "speckit-specify",
+        "speckit-tasks",
+    }
+    for skill in skill_files:
+        match = re.search(r'^name:\s*["\']?([^"\'\n]+)', skill.read_text(encoding="utf-8"), re.MULTILINE)
+        assert match and match.group(1) == skill.parent.name
+    assert not (ROOT / ".agents/skills/README.md").exists()
+    assert not (ROOT / "04-demo/skills/demo-algorithm-explainer/SKILL.md").exists()
+    assert not (ROOT / ".specify/integrations/codex.manifest.json").exists()
 
-    assert "00-governance/asset-policy/thread-roles/" in agents
-    assert "公共流程的唯一权威源" in agents
-    assert 'common_execution_rules: "AGENTS.md"' in registry
-    assert 'capability_contract_scope: "reusable_domain_responsibilities_paths_and_boundaries_only"' in registry
-    assert "forbid_common_rule_duplication_in_contracts: true" in registry
-    assert "单需求工作项、能力契约与 Subagent 策略" in governance
-    assert "当前常驻 Thread" in directory_readme
-    assert "当前能力" in directory_readme
+
+def test_merged_speckit_stages_own_one_check_each() -> None:
+    skill_root = ROOT / ".agents/skills"
+    specify = (skill_root / "speckit-specify/SKILL.md").read_text(encoding="utf-8")
+    tasks = (skill_root / "speckit-tasks/SKILL.md").read_text(encoding="utf-8")
+    implement = (skill_root / "speckit-implement/SKILL.md").read_text(encoding="utf-8")
+
+    assert "create-new-feature.ps1 -Json" in specify
+    assert "ask one concise question at a time, at most three" in specify
+    assert "Do not create a separate clarification artifact or stage" in specify
+    assert "Perform one consistency check" in tasks
+    assert "Ask the user to confirm `tasks.md` and this result" in tasks
+    assert "run the validation commands defined by the tasks once" in implement
+    assert "Do not mechanically reload every design file" in implement
+    assert "$speckit-clarify" not in specify
+    assert "$speckit-analyze" not in tasks
+    assert "$speckit-converge" not in implement
+
+
+def test_spec_kit_constitution_points_to_merged_gates() -> None:
+    constitution = (ROOT / ".specify/memory/constitution.md").read_text(encoding="utf-8")
+    assert "Version**: 1.2.2" in constitution
+    assert "$speckit-tasks` 的一致性检查" in constitution
+    assert "$speckit-implement` 的验证" in constitution
+    for removed in ("$speckit-clarify", "$speckit-analyze", "$speckit-converge"):
+        assert removed not in constitution

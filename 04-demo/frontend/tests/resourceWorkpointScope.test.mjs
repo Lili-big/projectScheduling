@@ -123,3 +123,89 @@ test("scenario normalization preserves explicit unlimited mode and standardizes 
   assert.equal(normalized.resource_pools[0].scope_mode, "PROJECT_SHARED");
   assert.equal(normalized.resource_pools[0].authorized_workpoint_ids, null);
 });
+
+test("workpoint-local pools upsert by workpoint and type while preserving zero quantity", async () => {
+  const {
+    localResourcePoolsForWorkpoint,
+    upsertWorkpointLocalResource,
+  } = await loadResources();
+  const initial = [pool({ id: "shared-x", type: "team-x", scope_mode: "PROJECT_SHARED" })];
+  const added = upsertWorkpointLocalResource(initial, "WP-A", {
+    id: "local-a-x",
+    type: "team-x",
+    label: "A 点班组",
+    quantity: 0,
+    max_quantity: 3,
+    enabled: true,
+  });
+  const updated = upsertWorkpointLocalResource(added, "WP-A", {
+    id: "ignored-new-id",
+    type: "team-x",
+    label: "A 点班组",
+    quantity: 2,
+    max_quantity: 4,
+    enabled: false,
+  });
+
+  assert.equal(updated.length, 2);
+  assert.deepEqual(localResourcePoolsForWorkpoint(updated, "WP-A").map((item) => ({
+    id: item.id,
+    workpoint_id: item.workpoint_id,
+    quantity: item.quantity,
+    max_quantity: item.max_quantity,
+    enabled: item.enabled,
+    authorized_workpoint_ids: item.authorized_workpoint_ids,
+    workpoint_overrides: item.workpoint_overrides,
+  })), [{
+    id: "local-a-x",
+    workpoint_id: "WP-A",
+    quantity: 2,
+    max_quantity: 4,
+    enabled: false,
+    authorized_workpoint_ids: null,
+    workpoint_overrides: [],
+  }]);
+});
+
+test("catalog projection is deterministic and same-type shared pools remain independent", async () => {
+  const {
+    resourceCatalogProjection,
+    sharedResourcePools,
+  } = await loadResources();
+  const shared = [
+    pool({ id: "pool-b", type: "team-x", label: "二区班组", scope_mode: "PROJECT_SHARED", authorized_workpoint_ids: ["WP-B"] }),
+    pool({ id: "pool-a", type: "team-x", label: "一区班组", scope_mode: "PROJECT_SHARED", authorized_workpoint_ids: ["WP-A"] }),
+  ];
+  const processes = [
+    { id: "process-b", name: "工艺乙", component_type: "pier_body", resource_type: "team-y" },
+    { id: "process-a", name: "工艺甲", component_type: "cap", resource_type: "team-x" },
+  ];
+
+  assert.deepEqual(sharedResourcePools(shared).map((item) => item.id), ["pool-a", "pool-b"]);
+  assert.deepEqual(resourceCatalogProjection(processes, shared).map((item) => item.type), ["cap_team", "pier_body_team", "team-x"]);
+});
+
+test("fingerprint distinguishes workpoint identity but ignores pool ordering", async () => {
+  const { resourcePoolsSemanticFingerprint } = await loadResources();
+  const localA = pool({ id: "local-a", scope_mode: "WORKPOINT_EXCLUSIVE", workpoint_id: "WP-A" });
+  const localB = pool({ id: "local-b", scope_mode: "WORKPOINT_EXCLUSIVE", workpoint_id: "WP-B" });
+  assert.equal(
+    resourcePoolsSemanticFingerprint([localA, localB]),
+    resourcePoolsSemanticFingerprint([localB, localA]),
+  );
+  assert.notEqual(
+    resourcePoolsSemanticFingerprint([localA]),
+    resourcePoolsSemanticFingerprint([{ ...localA, workpoint_id: "WP-C" }]),
+  );
+});
+
+test("resource page separates workpoint-local rows from the shared-pool range editor", () => {
+  const source = readFileSync(resolve(root, "src/features/resources/ResourcesTab.tsx"), "utf8");
+  assert.match(source, /工点资源与共享池/);
+  assert.match(source, /scope_mode:\s*"WORKPOINT_EXCLUSIVE"/);
+  assert.match(source, /workpoint_id:\s*selectedWorkpoint\.workpoint_id/);
+  assert.match(source, /task\.bridge_id === selectedWorkpoint\?\.workpoint_id/);
+  assert.match(source, /范围共享资源池/);
+  assert.match(source, /同类型可建立多个独立池/);
+  assert.doesNotMatch(source, /该资源适用于哪些工点|获准工点/);
+});

@@ -40,6 +40,7 @@ from ._models import (
     ResourceAssistantPlanResult,
     ResourceAssistantPrimaryStageSummary,
     ResourceAssistantProjectProfile,
+    ResourcePoolQuantityResult,
     ResourceAssistantRecommendation,
     ResourceAssistantRecommendationResponse,
     ResourceAssistantReferenceExample,

@@ -1,185 +1,49 @@
-<!--
-Sync Impact Report
-Version change: 1.1.1 -> 1.2.0
-Modified principles:
-- IV. Reuse Existing Docs and Code -> IV. Reuse Existing Assets and Preserve Behavior
-Added principles:
-- VIII. Lifecycle Ownership and Work Packages
-Added sections:
-- None
-Removed sections:
-- None
-Templates requiring updates:
-- ✅ .specify/templates/spec-template.md updated for lifecycle source references
-- ✅ .specify/templates/plan-template.md updated for lifecycle ownership checks
-- ✅ .specify/templates/tasks-template.md updated for lifecycle/work-package tasks
-- ✅ .specify/templates/checklist-template.md remains compatible
-- ⚠ .specify/templates/constitution-template.md pending 045 implementation sync
-- ⚠ .agents/skills/speckit-* path defaults pending 045 implementation sync
-- ⚠ AGENTS.md, agent.md, README.md and current repository docs pending 045 implementation sync
-Follow-up TODOs:
-- Complete physical migration and path-tooling switch only after 045 tasks and analysis are approved.
--->
-
 # Bridge Scheduling Spec Kit Constitution
 
-## Core Principles
+本宪章只定义 Spec Kit 产物和实现必须满足的内容不变量。任务分流、执行顺序、用户确认和审查级别以根目录 `AGENTS.md` 为唯一权威；`agent.md` 只提供项目事实。
 
-### I. Requirements First
+## I. 可验收需求
 
-Agents MUST NOT write implementation code when the requirement is unclear. Every feature
-or change MUST first identify the business goal, target user, scope boundary, source
-documents, affected modules, assumptions, and acceptance criteria.
+- 规格必须说明业务目标、目标用户、范围、来源、假设和可观察验收标准。
+- 会改变关键业务语义的缺口必须在生成实施任务前澄清；需求评审、PRD 和实现不得相互替代。
 
-Requirement review MUST remain separate from PRD writing and implementation. When the
-user asks for review, use `$requirement-review` to decide whether to proceed, adjust,
-validate first, defer, or reject before creating engineering artifacts.
+## II. 显式算法规则
 
-### II. Explicit Algorithm Specifications
+算法、排程、资源和工期变更必须定义输入、输出、单位、默认值、硬约束、软约束、目标优先级、冲突处理及可复现验收样例。诊断指标不得写成求解目标，Demo 默认值不得写成正式产品规则。
 
-Algorithm-related requirements MUST define inputs, outputs, hard constraints, soft
-constraints, objective function, prioritization rules, and acceptance examples before
-planning implementation.
+## III. 显式共享契约
 
-This applies to task duration, resource configuration, fixed-resource constraints,
-minimum-resource recommendations, resource-cost optimization, milestones, continuity
-metrics, CP-SAT objectives, and schedule-result interpretation.
+前后端或持久化联动必须定义字段、状态码、加载/空态/失败态、兼容策略和下游失效行为。共享数据结构必须在后端模型、前端类型、API/演示镜像和契约测试间保持一致。
 
-### III. Explicit Frontend-Backend Contracts
+## IV. 保留行为与最小设计
 
-Frontend-backend changes MUST define interface fields, page entry points, state display,
-loading and empty states, error handling, compatibility expectations, and downstream
-invalidation behavior.
+- 先依据相关文档、代码、测试和工作包证据，再改变需求或实现。
+- 优先复用现有模型、服务、组件、接口和测试；没有当前需求证据时不新增抽象、依赖、目录或兼容分支。
+- 路径迁移不得丢失受跟踪内容、批准的二进制哈希或用户未提交工作；公开行为变化必须在规格中明确。
 
-Shared data shapes such as `ScenarioInput`, `ScheduleInput`, `ScheduleResult`, resource
-pools, process templates, logic rules, milestones, and diagnostics MUST be kept aligned
-across backend models, frontend types, API clients, Netlify demo code when applicable,
-and tests.
+## V. 分阶段可验证价值
 
-### IV. Reuse Existing Assets and Preserve Behavior
+复杂需求按可独立验证的用户价值分阶段；首个实施阶段必须形成可测试的最小闭环。基础工作、用户故事和收敛任务应保持依赖顺序，不为假设性未来需求预建任务。
 
-All work MUST start from existing project documents, code, scripts, inputs, outputs,
-tests, and work-package evidence. Agents MUST read the relevant lifecycle assets before
-changing requirements, algorithms, scheduling behavior, resource configuration,
-frontend interaction, backend contracts, or generated deliverables.
+## VI. 验证与完成证据
 
-Implementation MUST reuse existing modules, domain helpers, services, components, API
-patterns, tests, and documentation conventions before introducing new abstractions,
-dependencies, or directory structures. Directory migration MUST preserve public behavior,
-tracked content, approved binary hashes, and uncommitted user work unless a change is
-explicitly included in an approved migration entry.
+- 实施任务必须包含与风险匹配的测试或可运行场景；算法变更必须有输入样例和预期输出/不变量。
+- 完成声明必须有实际 diff、命令与退出结果支撑，并说明剩余风险。`$speckit-tasks` 的一致性检查和 `$speckit-implement` 的验证将违反本宪章的 MUST 规则视为阻塞问题。
 
-### V. Phased Delivery
+## VII. 资产与数据安全
 
-Complex requirements MUST be split into phases. The first implementation phase MUST
-deliver a testable MVP that proves the primary user value independently. Enhancements,
-secondary stories, polish, and broader optimization MUST follow after the MVP is
-validated.
+- 每项资产只有一个生命周期主归属；跨阶段复用只建立引用。路径分类、跟踪和保留依据 `00-governance/asset-policy/` 的机器策略。
+- 本地状态、用户输入、正式成果、日志、可再生成物、缓存和临时文件必须按策略分区；持久状态、用户输入和正式成果不得自动删除。
+- 密钥和真实凭据不得进入文档、规格、代码、样例或 Git。
 
-Spec Kit tasks MUST preserve this sequencing by grouping work into setup, foundational
-work, prioritized user stories, and polish or convergence phases.
+## Repository Overrides
 
-### VI. Spec Kit Gate Before Implementation
-
-Before implementation of complex or scheduling-related work, agents MUST complete:
-
-```text
-$speckit-specify -> $speckit-clarify -> $speckit-plan
-  -> $speckit-tasks -> $speckit-analyze
-```
-
-Implementation MUST NOT begin until the user confirms the analyzed spec, plan, and tasks.
-After implementation, `$speckit-converge` MUST assess whether code, spec, plan, and
-tasks have converged.
-
-Small documentation edits and narrow bug fixes may skip the full Spec Kit flow only when
-they do not change business rules, algorithm behavior, shared contracts, or user-facing
-workflow.
-
-### VII. Completion Report and Verification
-
-After every implementation, agents MUST report changed files, core logic, test method,
-validation result, and remaining risk.
-
-Algorithm changes MUST include a reproducible input sample, expected output or invariant,
-and validation command or scenario. Frontend-backend changes MUST report affected fields,
-status and error behavior, and any compatibility gaps.
-
-### VIII. Lifecycle Ownership and Work Packages
-
-Every business asset MUST have one primary lifecycle stage and, when it belongs to an
-independent workflow, one primary work package. A work package MUST connect its purpose,
-inputs, scripts or entry commands, generated results, tracking policy, retention class,
-and owner. Cross-stage reuse MUST use references rather than duplicated source files.
-
-Before creating or moving assets, agents MUST classify the task by lifecycle stage,
-work package, asset type, retention class, and primary owner. Generic root-level
-collections such as undifferentiated `docs/`, `tools/`, `outputs/`, or `logs/` MUST NOT
-become new long-term ownership boundaries. Framework discovery entry points and required
-platform configuration MAY remain at the root only when their compatibility reason is
-documented and their business content has a lifecycle owner.
-
-Local assets MUST distinguish persistent state, user input, formal output, diagnostic
-logs, rebuildable output, caches, and temporary files. Cleanup MUST default to dry-run;
-persistent state, user input, and formal output MUST NOT be automatic deletion candidates.
-
-## Project Constraints
-
-- The detailed project handbook is `agent.md`; `AGENTS.md` governs runtime workflow
-  routing; this constitution governs Spec Kit and implementation gates.
-- Requirement review uses `$requirement-review`; formal PRD output uses
-  `skills/write-dev-prd/SKILL.md`; spec ambiguity reduction uses `$speckit-clarify`.
-- During the 045 transition, existing features continue under
-  `specs/<number>-<feature-name>/`. After the approved migration activates the lifecycle
-  layout, new features live under
-  `03-requirements/specs/<number>-<feature-name>/`; historical feature content and numbering
-  MUST remain unchanged.
-- Product, algorithm, research, validation, Demo, and delivery assets live under their
-  primary lifecycle stage and work package. Temporary analysis MUST NOT be scattered in
-  the repository root or promoted to a formal output without an explicit retention class.
-- `.agents/` and `.specify/` MAY remain root discovery entry points. Their project-specific
-  content and generated feature assets MUST still declare a lifecycle owner.
-- All Spec Kit process artifacts and user-facing stage reports MUST be written in
-  Simplified Chinese. This includes `spec.md`, `plan.md`, `research.md`,
-  `data-model.md`, `quickstart.md`, `tasks.md`, checklist files, analyze reports,
-  converge reports, and clarification questions. Code identifiers, file paths, API
-  names, field names, commands, branch names, task IDs, requirement IDs, and necessary
-  English acronyms MAY remain unchanged for traceability and tooling compatibility.
-- Chinese business documents MUST remain UTF-8.
-- Secret-bearing files such as `.local.env` MUST NOT be copied into docs, specs, code,
-  or examples with real values.
-
-## Development Workflow
-
-1. Classify the request as requirement review, Demo implementation, PRD/document output,
-   or Spec Kit development.
-2. Declare the lifecycle stage, work package, asset type, retention class, and primary
-   owner before creating or moving project assets.
-3. Read relevant project documents before implementation planning; for algorithm work,
-   read both docs and code paths.
-4. Resolve high-impact ambiguity before generating implementation tasks.
-5. For complex features, run the full Spec Kit gate sequence and treat this constitution
-   as non-negotiable during analyze and converge.
-6. Implement only after user confirmation, then verify with the narrowest reliable tests
-   or runnable scenario.
-7. Do not modify `README.md`, commit, push, or deploy unless the user explicitly asks.
+- 规格唯一根路径为 `03-requirements/specs/<number>-<feature>`；历史编号和已有规格路径不得重编号。
+- Spec Kit 产物和用户可见阶段报告使用简体中文、UTF-8；代码标识符、路径、命令、任务/需求编号和必要缩写可保留原文。
+- `.agents/` 与 `.specify/` 仅作为平台发现和 Spec Kit 执行入口，不承载第二套业务规则。
 
 ## Governance
 
-This constitution supersedes ad-hoc workflow habits when using Spec Kit in this
-repository. `AGENTS.md` provides runtime routing rules; `agent.md` provides detailed
-project knowledge. If the three conflict, this constitution controls Spec Kit governance,
-`AGENTS.md` controls routing, and `agent.md` supplies factual context.
+修改本宪章时按语义化版本递增，并核对 `AGENTS.md`、Spec Kit 模板和治理测试。规则冲突时：`AGENTS.md` 控制执行，本文控制规格内容不变量，`agent.md` 提供事实。
 
-Amendments require an explicit user request or an approved workflow-design task. Changes
-MUST update the version using semantic versioning:
-
-- MAJOR for removing or redefining a core principle.
-- MINOR for adding or materially expanding workflow principles.
-- PATCH for clarifications that do not change required behavior.
-
-Any change to this constitution MUST re-check `AGENTS.md` and the Spec Kit templates for
-alignment. `$speckit-analyze` and `$speckit-converge` MUST treat violations of MUST-level
-principles as blocking issues.
-
-**Version**: 1.2.0 | **Ratified**: 2026-07-01 | **Last Amended**: 2026-07-16
+**Version**: 1.2.2 | **Ratified**: 2026-07-01 | **Last Amended**: 2026-07-18

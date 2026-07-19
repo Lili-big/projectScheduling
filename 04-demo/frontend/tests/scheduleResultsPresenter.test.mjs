@@ -214,3 +214,33 @@ test("missing scope or authority stays generically unavailable and never parses 
   assert.equal(presentation.rows[0].workpointLabel, "工点信息不可用");
   assert.doesNotMatch(presentation.rows[0].workpointLabel, /WP-A|shared-pool/);
 });
+
+test("same-type shared pools stay as separate result rows with zero transfer time and cost", async () => {
+  const { buildResourceScopeResult, projectSharedTransferNotice } = await loadPresenter();
+  const payload = generated();
+  payload.schedule_input.resources.push({
+    id: "resource-beta",
+    name: "共享二",
+    type: "shared-type",
+    pool_id: "shared-pool-2",
+    pool_label: "共享资源二区",
+    enabled: true,
+    calendar_id: "continuous",
+    scope_mode: "PROJECT_SHARED",
+    eligible_workpoint_ids: ["WP-B"],
+    exclusive_workpoint_id: null,
+  });
+  const presentation = buildResourceScopeResult({
+    generated: payload,
+    result: { ...result(), resource_allocations: [] },
+    resourcePools: [...pools, { ...pools[0], id: "shared-pool-2", label: "共享资源二区", authorized_workpoint_ids: ["WP-B"] }],
+    workpoints: [
+      { workpoint_id: "WP-A", workpoint_name: "一号工点" },
+      { workpoint_id: "WP-B", workpoint_name: "二号工点" },
+    ],
+  });
+
+  assert.equal(presentation.rows.filter((row) => row.resourceLabel.startsWith("共享资源")).length, 2);
+  assert.match(projectSharedTransferNotice, /转场时间 0 天/);
+  assert.match(projectSharedTransferNotice, /转场成本 0/);
+});

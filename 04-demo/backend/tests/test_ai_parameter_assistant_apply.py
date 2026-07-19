@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from app.models import AiParameterApplyRequest  # noqa: E402
+from app.models import AiParameterApplyRequest, ResourcePool  # noqa: E402
 from app.scenario_data import default_scenario  # noqa: E402
 from app.services.ai_parameter_ai_client import AiParameterAiClient, AiParameterAiPayload  # noqa: E402
 from app.services.ai_parameter_assistant import apply_ai_parameter_suggestions, parse_ai_parameter_assistant  # noqa: E402
@@ -67,6 +67,57 @@ def test_apply_selected_process_resource_and_milestone_suggestions_only() -> Non
     assert result.scenario.resource_pools[0].quantity == 2
     assert result.scenario.milestones[0].target_date == scenario.milestones[0].target_date
     assert result.application_summary.applied_count == 2
+
+
+def test_apply_resource_suggestion_rejects_ambiguous_resource_type_without_pool_id() -> None:
+    scenario = default_scenario()
+    source = scenario.resource_pools[0]
+    scenario.resource_pools.append(
+        ResourcePool(
+            id=f"{source.id}-second",
+            type=source.type,
+            label=f"{source.label}二号池",
+            quantity=3,
+            max_quantity=5,
+        )
+    )
+    store = AiParameterStore()
+    response = parse_ai_parameter_assistant(
+        {"scenario": scenario.model_dump_json(), "text_inputs[]": "建议"},
+        {},
+        client=FakeAiClient(
+            [
+                {
+                    "category": "resource_pool",
+                    "target_ref": {"resource_type": source.type},
+                    "parameter_key": "resource.quantity",
+                    "proposed_value": 2,
+                    "unit": "台",
+                    "confidence_score": 88,
+                    "source_refs": [{"material_id": "mat_text_001", "excerpt": "建议 2 台"}],
+                }
+            ]
+        ),
+        store=store,
+    )
+
+    result = apply_ai_parameter_suggestions(
+        AiParameterApplyRequest(
+            scenario=scenario,
+            run_id=response.run_id,
+            selected_suggestion_ids=[response.suggestions[0].suggestion_id],
+        ),
+        store=store,
+    )
+
+    assert result.stale_results is False
+    assert result.application_summary.applied_count == 0
+    assert result.application_summary.failed_count == 1
+    assert "多个资源池" in result.application_summary.failed_items[0].message
+    assert [pool.quantity for pool in result.scenario.resource_pools if pool.type == source.type] == [
+        source.quantity,
+        3,
+    ]
 
 
 class FakeAiClient(AiParameterAiClient):

@@ -18,6 +18,7 @@ from app.contracts import (  # noqa: E402
     WorkpointResourceOverride,
 )
 from app.contracts import common, project, scheduling  # noqa: E402
+from app.scenario_data import default_scenario  # noqa: E402
 
 
 def test_scheduling_contracts_are_the_legacy_objects_not_copies() -> None:
@@ -31,6 +32,7 @@ def test_scenario_defaults_and_schedule_json_stay_snake_case() -> None:
     schema = project.ScenarioInput.model_json_schema()
     assert "scenario_id" in schema["properties"]
     assert scheduling.ScheduleResult.model_json_schema()["properties"]["tasks"]
+    assert "details" in common.ValidationMessage.model_json_schema()["properties"]
 
 
 def test_unlimited_resource_pool_and_projection_metadata_are_open_contracts() -> None:
@@ -108,6 +110,142 @@ def test_resource_scope_contract_rejects_duplicate_overrides_and_negative_quanti
 
     with pytest.raises(ValueError):
         ResourcePool(id="pool-negative", type="negative-team", label="负数", quantity=-1)
+
+    with pytest.raises(ValueError, match="min_quantity is not part"):
+        ResourcePool.model_validate(
+            {
+                "id": "pool-removed-min",
+                "type": "negative-team",
+                "label": "已移除下限",
+                "min_quantity": 1,
+            }
+        )
+
+
+def test_workpoint_first_resource_pool_contract_enforces_identity_and_allows_same_type_pools() -> None:
+    local_pool = ResourcePool(
+        id="pool-local-a",
+        type="rotary_drill",
+        label="A 工点旋挖钻",
+        scope_mode="WORKPOINT_EXCLUSIVE",
+        workpoint_id=" WP-A ",
+        quantity=0,
+        max_quantity=3,
+    )
+    shared_one = ResourcePool(
+        id="pool-shared-one",
+        type="rotary_drill",
+        label="共享池一",
+        authorized_workpoint_ids=["WP-B", "WP-A"],
+        quantity=2,
+        max_quantity=4,
+    )
+    shared_two = ResourcePool(
+        id="pool-shared-two",
+        type="rotary_drill",
+        label="共享池二",
+        authorized_workpoint_ids=["WP-C", "WP-B"],
+        quantity=1,
+        max_quantity=2,
+    )
+
+    scenario_payload = default_scenario().model_dump(mode="python")
+    scenario_payload["resource_pools"] = [local_pool, shared_one, shared_two]
+    scenario = project.ScenarioInput.model_validate(scenario_payload)
+
+    assert local_pool.workpoint_id == "WP-A"
+    assert local_pool.authorized_workpoint_ids is None
+    assert local_pool.workpoint_overrides == []
+    assert [pool.id for pool in scenario.resource_pools] == [
+        "pool-local-a",
+        "pool-shared-one",
+        "pool-shared-two",
+    ]
+    assert [pool.type for pool in scenario.resource_pools] == ["rotary_drill"] * 3
+
+
+def test_workpoint_first_resource_pool_contract_rejects_invalid_combinations_and_duplicate_keys() -> None:
+    with pytest.raises(ValueError, match="PROJECT_SHARED.*workpoint_id"):
+        ResourcePool(
+            id="pool-invalid-shared",
+            type="rotary_drill",
+            label="非法共享池",
+            workpoint_id="WP-A",
+        )
+
+    with pytest.raises(ValueError, match="authorized_workpoint_ids"):
+        ResourcePool(
+            id="pool-invalid-local",
+            type="rotary_drill",
+            label="非法本地池",
+            scope_mode="WORKPOINT_EXCLUSIVE",
+            workpoint_id="WP-A",
+            authorized_workpoint_ids=["WP-A"],
+        )
+
+    base = default_scenario().model_dump(mode="python")
+    duplicate_id = ResourcePool(id="pool-duplicate", type="type-a", label="一")
+    base["resource_pools"] = [
+        duplicate_id,
+        ResourcePool(id="pool-duplicate", type="type-b", label="二"),
+    ]
+    with pytest.raises(ValueError, match="duplicate resource pool ids"):
+        project.ScenarioInput.model_validate(base)
+
+    base["resource_pools"] = [
+        ResourcePool(
+            id="pool-local-a-1",
+            type="type-a",
+            label="A-1",
+            scope_mode="WORKPOINT_EXCLUSIVE",
+            workpoint_id="WP-A",
+        ),
+        ResourcePool(
+            id="pool-local-a-2",
+            type="type-a",
+            label="A-2",
+            scope_mode="WORKPOINT_EXCLUSIVE",
+            workpoint_id="WP-A",
+        ),
+    ]
+    with pytest.raises(ValueError, match="duplicate workpoint resource keys"):
+        project.ScenarioInput.model_validate(base)
+
+
+def test_resource_pool_preserves_unknown_legacy_fields_instead_of_silently_dropping_them() -> None:
+    pool = ResourcePool.model_validate(
+        {
+            "id": "pool-legacy-extra",
+            "type": "rotary_drill",
+            "label": "旧共享池",
+            "quantity": 2,
+            "legacy_extension": {"keep": True},
+        }
+    )
+
+    assert pool.model_dump(mode="json")["legacy_extension"] == {"keep": True}
+    assert pool.scope_mode == "PROJECT_SHARED"
+    assert pool.workpoint_id is None
+
+
+def test_resource_gap_validation_contract_carries_machine_readable_details_additively() -> None:
+    diagnostic = common.ValidationMessage(
+        level="error",
+        code="RESOURCE_ALLOCATION_NO_LEGAL_CANDIDATE",
+        subject_id="task-a",
+        entity_refs=["task-a", "WP-A", "rotary_drill", "pool-a"],
+        message="当前资源计划没有合法候选。",
+        details={
+            "task_id": "task-a",
+            "workpoint_id": "WP-A",
+            "resource_type": "rotary_drill",
+            "relevant_pool_ids": ["pool-a"],
+            "reasons": ["LOCAL_QUANTITY_ZERO"],
+        },
+    )
+
+    assert diagnostic.details is not None
+    assert diagnostic.details["reasons"] == ["LOCAL_QUANTITY_ZERO"]
 
 
 def test_named_resource_carries_explicit_scope_without_min_quantity() -> None:

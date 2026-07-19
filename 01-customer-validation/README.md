@@ -1,0 +1,57 @@
+# 01 · 客户验证与验证记录
+
+## 目的
+
+统一保存客户资料、验证计划和验证结果，形成从客户事实、产品假设到验证判断的单一证据链。原 `01-discovery/` 与 `05-validation/` 已合并到本阶段。
+
+每个客户或项目只保留三个用户可见业务目录：
+
+- `customer-materials/`：客户提供的原始资料，以及由客户事实形成的调研记录和结构分析。
+- `validation-plans/`：验证目标、问题、提纲、步骤、记录表和判定标准。
+- `validation-results/`：数据对比、系统处理结果、客户反馈和“通过／不通过／材料不足”结论。
+
+可复现脚本放在对应类别的 `_scripts/` 中，不增加第四个业务类别。预览、检查数据库和可再生成中间文件进入 `.local-data/archive/rebuildable/customer-validation/`。
+
+## 进入条件
+
+- 需要用客户材料还原业务事实、提出验证问题或复核产品判断。
+- 需要用客户数据、方案比较或客户反馈形成验证结果。
+
+## 退出条件
+
+- 客户资料、验证计划和验证结果可以在同一项目目录内追溯。
+- 结论明确标记为通过、不通过或材料不足，并给出后续回流方向。
+
+## 权威资产
+
+- 客户原始资料、调研事实和来源数据分析。
+- 验证计划、可复现脚本、验证结果和正式验证记录。
+
+## 角色与闭环
+
+- 主责角色：`L01｜需求发现与验证闭环`。
+- 属于具体 `WORK_ID` 的需求由工作项 Thread 端到端负责；L01 维护跨需求证据索引和验证闭环。
+- 产品介绍、销售表述和产品假设不得写成已验证事实。
+
+## 工作包索引
+
+- [`lugu`](lugu/)：泸古客户资料、验证计划和验证结果。
+- [`infrastructure-version-2026q2`](infrastructure-version-2026q2/)：基建版本 2026 Q2 历史客户材料及脱敏索引。
+- [`dianfengwu-tj03`](dianfengwu-tj03/)：垫丰武 TJ03 历史客户验证记录。
+- [`json-schedule-review`](json-schedule-review/)：真实 JSON 工程排程结果评审。
+- [`ai-assistants`](ai-assistants/)：AI 参数与资源助手验证说明。
+
+## 相邻阶段
+
+- 上一阶段：[00-governance](../00-governance/README.md)。
+- 后续方案进入 [02-solution-analysis](../02-solution-analysis/README.md)，已确认口径进入 [03-requirements](../03-requirements/README.md)，Demo 验证引用 [04-demo](../04-demo/README.md)，正式成果进入 [06-delivery](../06-delivery/README.md)。
+
+## 禁止内容
+
+- 未登记来源的客户材料、无法复现的验证结果和未经证据支持的产品结论。
+- 把客户原始材料、验证计划和验证结果复制为多个权威版本。
+- 把临时预览、检查缓存或本地数据库混入三个业务目录。
+
+## 维护触发条件
+
+新增客户材料、验证计划、验证脚本、验证结果或结论时，更新对应项目的 `README.md`、`workpackage.json` 和全仓工作包索引。

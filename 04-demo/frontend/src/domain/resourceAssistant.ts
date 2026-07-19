@@ -245,7 +245,7 @@ export function metricsSummary(metrics?: ResourceAssistantCoreMetrics | null): s
   return `${metrics.total_days} 天 / 等待 ${metrics.average_wait_days ?? 0} 天 / ${currencyDisplay(metrics.demo_cost.total_cost)}`;
 }
 
-export function normalizePlanResourceQuantity(plan: ResourceAssistantPlan, resourceType: string, quantity: number): ResourceAssistantPlan {
+export function normalizePlanResourcePoolQuantity(plan: ResourceAssistantPlan, resourcePoolId: string, quantity: number): ResourceAssistantPlan {
   const nextQuantity = Math.max(0, Math.floor(Number.isFinite(quantity) ? quantity : 0));
   return {
     ...plan,
@@ -254,7 +254,7 @@ export function normalizePlanResourceQuantity(plan: ResourceAssistantPlan, resou
     solve_status: "stale",
     stale_reason: "资源数量已调整，原求解结果和推荐解释需要重新计算。",
     resource_pools: plan.resource_pools.map((pool) =>
-      pool.type === resourceType
+      pool.id === resourcePoolId
         ? {
             ...pool,
             quantity: nextQuantity,
@@ -263,6 +263,11 @@ export function normalizePlanResourceQuantity(plan: ResourceAssistantPlan, resou
         : pool,
     ),
   };
+}
+
+/** @deprecated Use normalizePlanResourcePoolQuantity so same-type pools are never updated together. */
+export function normalizePlanResourceQuantity(plan: ResourceAssistantPlan, resourcePoolId: string, quantity: number): ResourceAssistantPlan {
+  return normalizePlanResourcePoolQuantity(plan, resourcePoolId, quantity);
 }
 
 export function invalidatedAfterPlanChange(results: ResourceAssistantPlanResult[], planId: string): ResourceAssistantPlanResult[] {
@@ -275,6 +280,12 @@ export function editableResourcePools(plan: ResourceAssistantPlan): ResourcePool
 
 export function resourceAssistantResourceLabel(resourceType: string, pools: ResourcePool[] = []): string {
   return pools.find((pool) => pool.type === resourceType)?.label ?? defaultResourceTypeLabels[resourceType] ?? resourceType;
+}
+
+export function resourceAssistantPoolLabel(pool: ResourcePool, pools: ResourcePool[] = []): string {
+  const sameTypeCount = pools.filter((candidate) => candidate.type === pool.type).length;
+  const base = pool.label || resourceAssistantResourceLabel(pool.type, pools);
+  return sameTypeCount > 1 ? `${base} · ${pool.id}` : base;
 }
 
 export function recommendationTitle(recommendation?: ResourceAssistantRecommendation | null): string {

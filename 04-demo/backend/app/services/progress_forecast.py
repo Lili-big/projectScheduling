@@ -796,9 +796,9 @@ def _execution_summary(tasks, entries: dict[str, ProgressEntry], strategy: Forec
 def _expanded_resources(resources: list[Resource], tasks, parameters: dict[str, Any]) -> list[Resource]:
     increments = {key: max(0, int(value)) for key, value in (parameters.get("max_resource_increments") or {}).items()}
     result = list(resources)
-    template_by_type = {resource.type: resource for resource in resources if resource.enabled}
-    for resource_type, count in increments.items():
-        template = template_by_type.get(resource_type)
+    template_by_pool = {resource.pool_id: resource for resource in resources if resource.enabled and resource.pool_id}
+    for pool_id, count in increments.items():
+        template = template_by_pool.get(pool_id)
         if template is None:
             continue
         for index in range(min(count, 20)):
@@ -1087,11 +1087,23 @@ def create_adjustment_proposals(
     plan = repository.get_plan_version(base.plan_version_id)
     snapshot = repository.get_progress_snapshot(base.progress_snapshot_id)
     bottleneck_types = _bottleneck_resource_types(plan, snapshot)
-    effective_increments = {
-        resource_type: min(20, max(0, int(count)))
-        for resource_type, count in max_resource_increments.items()
-        if resource_type in bottleneck_types and int(count) > 0
-    }
+    pools_by_id = {pool.id: pool for pool in plan.resource_plan_snapshot.resource_pools}
+    pools_by_type: dict[str, list[Any]] = defaultdict(list)
+    for pool in plan.resource_plan_snapshot.resource_pools:
+        pools_by_type[pool.type].append(pool)
+    effective_increments: dict[str, int] = {}
+    for raw_key, raw_count in max_resource_increments.items():
+        count = min(20, max(0, int(raw_count)))
+        if count <= 0:
+            continue
+        pool = pools_by_id.get(raw_key)
+        if pool is None:
+            legacy_matches = pools_by_type.get(raw_key, [])
+            if len(legacy_matches) > 1:
+                raise PlanControlValidationError(f"资源类型 {raw_key} 对应多个资源池，必须使用 resource_pool_id。")
+            pool = legacy_matches[0] if legacy_matches else None
+        if pool is not None and pool.type in bottleneck_types:
+            effective_increments[pool.id] = count
     strategies: tuple[ForecastStrategy, ...] = ("as_is", "add_bottleneck_resources", "prioritize_critical_tasks")
     proposals: list[AdjustmentProposal] = []
     for strategy in strategies:
@@ -1110,7 +1122,7 @@ def create_adjustment_proposals(
             else 0
         )
         demo_cost_change = sum(
-            pool.incremental_unit_cost * effective_increments.get(pool.type, 0)
+            pool.incremental_unit_cost * effective_increments.get(pool.id, 0)
             for pool in plan.resource_plan_snapshot.resource_pools
         ) if strategy == "add_bottleneck_resources" else 0
         metrics.update(
@@ -1272,10 +1284,10 @@ def adopt_adjustment(
         resource_plan_snapshot.resource_pools = [
             pool.model_copy(
                 update={
-                    "quantity": (pool.quantity or 0) + int(increments.get(pool.type, 0)),
+                    "quantity": (pool.quantity or 0) + int(increments.get(pool.id, 0)),
                     "max_quantity": max(
                         pool.max_quantity or pool.quantity or 0,
-                        (pool.quantity or 0) + int(increments.get(pool.type, 0)),
+                        (pool.quantity or 0) + int(increments.get(pool.id, 0)),
                     ),
                 }
             )

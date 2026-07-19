@@ -104,7 +104,7 @@ def test_plan_input_fingerprint_normalizes_resource_collection_order() -> None:
 
 @pytest.mark.parametrize(
     "semantic_change",
-    ["scope_mode", "authorized_workpoint_ids", "workpoint_overrides", "quantity", "max_quantity", "enabled", "calendar_id"],
+    ["scope_mode", "workpoint_id", "authorized_workpoint_ids", "workpoint_overrides", "quantity", "max_quantity", "enabled", "calendar_id"],
 )
 def test_plan_input_fingerprint_changes_for_every_resource_semantic_field(semantic_change: str) -> None:
     base = solved_baseline_request()
@@ -115,6 +115,7 @@ def test_plan_input_fingerprint_changes_for_every_resource_semantic_field(semant
     base_max_quantity = max(base_pool.max_quantity or 0, base_quantity + 2)
     common = {
         "scope_mode": "WORKPOINT_EXCLUSIVE",
+        "workpoint_id": "workpoint-a",
         "authorized_workpoint_ids": ["workpoint-a", "workpoint-b"],
         "workpoint_overrides": [
             WorkpointResourceOverride(
@@ -132,6 +133,7 @@ def test_plan_input_fingerprint_changes_for_every_resource_semantic_field(semant
     _replace_resource_pool(changed, pool_id, common)
     updates = {
         "scope_mode": "PROJECT_SHARED",
+        "workpoint_id": "workpoint-b",
         "authorized_workpoint_ids": ["workpoint-a"],
         "workpoint_overrides": [
             WorkpointResourceOverride(

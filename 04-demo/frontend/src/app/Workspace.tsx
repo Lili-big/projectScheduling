@@ -162,8 +162,10 @@ import {
   resourcePoolCostType,
   resourcePoolMode,
   resourcePoolQuantity,
-  resourcePoolScopeIssues,
+  resourcePoolsScopeIssues,
+  removeResourcePoolById,
   resourcePoolsSemanticFingerprint,
+  upsertResourcePoolById,
   resourcePoolUnitCost,
   resourcePoolUsableLimit,
   resourceTypeLabel,
@@ -785,7 +787,7 @@ export default function App() {
       return "当前项目主数据版本的权威桥梁工点尚未就绪";
     }
     const authoritativeIds = resourceWorkpointState.workpoints.map((workpoint) => workpoint.workpoint_id);
-    const issues = requestScenario.resource_pools.flatMap((pool) => resourcePoolScopeIssues(pool, authoritativeIds));
+    const issues = resourcePoolsScopeIssues(requestScenario.resource_pools, authoritativeIds);
     return issues[0] ?? null;
   }
 
@@ -827,21 +829,35 @@ export default function App() {
     );
   }
 
-  function updateResourcePool(index: number, patch: Partial<ResourcePool>) {
+  function upsertResourcePool(poolId: string, patch: Partial<ResourcePool>) {
     setResourcesDirty(true);
     setResourceSaveError(null);
     setScenario((current) =>
       current
         ? {
             ...current,
-            resource_pools: current.resource_pools.map((pool, poolIndex) =>
-              poolIndex === index
-                ? normalizeResourcePoolForWorkspace({ ...pool, ...patch })
-                : normalizeResourcePoolForWorkspace(pool),
-            ),
+            resource_pools: upsertResourcePoolById(current.resource_pools, poolId, patch),
           }
         : current,
     );
+  }
+
+  function addResourcePool(pool: ResourcePool) {
+    setResourcesDirty(true);
+    setResourceSaveError(null);
+    setScenario((current) => current ? {
+      ...current,
+      resource_pools: [...current.resource_pools, normalizeResourcePoolForWorkspace(pool)],
+    } : current);
+  }
+
+  function removeResourcePool(poolId: string) {
+    setResourcesDirty(true);
+    setResourceSaveError(null);
+    setScenario((current) => current ? {
+      ...current,
+      resource_pools: removeResourcePoolById(current.resource_pools, poolId),
+    } : current);
   }
 
   function updateMilestone(index: number, patch: Partial<MilestoneConstraint>) {
@@ -957,9 +973,12 @@ export default function App() {
         {scenario && activeTab === "resources" && (
           <ResourcesTab
             scenario={scenario}
+            generated={currentGenerated}
             workpointState={resourceWorkpointState}
             onRetryWorkpoints={() => setResourceWorkpointReloadToken((current) => current + 1)}
-            onUpdateResourcePool={updateResourcePool}
+            onUpsertResourcePool={upsertResourcePool}
+            onAddResourcePool={addResourcePool}
+            onRemoveResourcePool={removeResourcePool}
             onSaveLocalConfig={saveCurrentResourceConfig}
             savingLocalConfig={busy === "savingResources"}
             localConfigDirty={resourcesDirty}

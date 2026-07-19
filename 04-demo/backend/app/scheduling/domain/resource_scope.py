@@ -69,25 +69,83 @@ def resolve_effective_resource_pools(
     effective_pools: list[EffectiveResourcePool] = []
     inherited_workpoint_count = 0
 
-    pools_by_type: dict[str, list[ResourcePool]] = {}
+    pools_by_id: dict[str, list[ResourcePool]] = {}
     for pool in resource_pools:
-        pools_by_type.setdefault(pool.type, []).append(pool)
-    duplicate_types = sorted(resource_type for resource_type, pools in pools_by_type.items() if len(pools) > 1)
-    for resource_type in duplicate_types:
-        duplicates = sorted(pool.id for pool in pools_by_type[resource_type])
+        pools_by_id.setdefault(pool.id, []).append(pool)
+    duplicate_pool_ids = {pool_id for pool_id, pools in pools_by_id.items() if len(pools) > 1}
+    for pool_id in sorted(duplicate_pool_ids):
         diagnostics.append(
             ValidationMessage(
                 level="error",
-                code="RESOURCE_SCOPE_DUPLICATE_TYPE",
-                subject_id=resource_type,
-                entity_refs=duplicates,
-                message=f"资源类型 {resource_type} 存在多个权威资源池：{', '.join(duplicates)}。",
+                code="RESOURCE_SCOPE_DUPLICATE_POOL_ID",
+                subject_id=pool_id,
+                entity_refs=[pool_id],
+                message=f"资源池 ID {pool_id} 重复，无法确定资源池身份。",
             )
         )
 
-    for pool in sorted(resource_pools, key=lambda item: (item.type, item.id)):
-        if pool.type in duplicate_types:
+    direct_local_by_key: dict[tuple[str, str], list[ResourcePool]] = {}
+    for pool in resource_pools:
+        if pool.scope_mode == "WORKPOINT_EXCLUSIVE" and pool.workpoint_id is not None:
+            direct_local_by_key.setdefault((pool.workpoint_id, pool.type), []).append(pool)
+    duplicate_local_keys = {
+        key: pools for key, pools in direct_local_by_key.items() if len(pools) > 1
+    }
+    duplicate_local_pool_ids: set[str] = set()
+    for (workpoint_id, resource_type), pools in sorted(duplicate_local_keys.items()):
+        pool_ids = sorted(pool.id for pool in pools)
+        duplicate_local_pool_ids.update(pool_ids)
+        diagnostics.append(
+            ValidationMessage(
+                level="error",
+                code="RESOURCE_SCOPE_DUPLICATE_LOCAL_KEY",
+                subject_id=f"{workpoint_id}:{resource_type}",
+                entity_refs=[workpoint_id, resource_type, *pool_ids],
+                message=(
+                    f"工点 {workpoint_id} 的资源类型 {resource_type} 存在多条本地记录："
+                    f"{', '.join(pool_ids)}。"
+                ),
+            )
+        )
+
+    for pool in sorted(resource_pools, key=lambda item: item.id):
+        if pool.id in duplicate_pool_ids or pool.id in duplicate_local_pool_ids:
             continue
+
+        if pool.scope_mode == "WORKPOINT_EXCLUSIVE" and pool.workpoint_id is not None:
+            if pool.workpoint_id not in valid_workpoint_ids:
+                diagnostics.append(
+                    ValidationMessage(
+                        level="error",
+                        code="RESOURCE_SCOPE_UNKNOWN_WORKPOINT",
+                        subject_id=pool.id,
+                        entity_refs=[pool.id, pool.workpoint_id],
+                        message=(
+                            f"本地资源池“{pool.label}”引用了不属于当前项目主数据版本"
+                            f" {project_data_version_id or 'unknown'} 的桥梁工点：{pool.workpoint_id}。"
+                        ),
+                    )
+                )
+                continue
+            quantity = int(pool.quantity or 0)
+            max_quantity = max(
+                quantity,
+                int(pool.max_quantity if pool.max_quantity is not None else quantity),
+            )
+            effective_pools.append(
+                _effective_pool(
+                    pool,
+                    effective_pool_id=pool.id,
+                    workpoint_id=pool.workpoint_id,
+                    eligible_workpoint_ids=(pool.workpoint_id,),
+                    enabled=pool.enabled,
+                    quantity=quantity,
+                    max_quantity=max_quantity,
+                    inheritance_source="global",
+                )
+            )
+            continue
+
         authorized = (
             bridge_workpoint_ids
             if pool.authorized_workpoint_ids is None
@@ -222,12 +280,7 @@ def resolve_effective_resource_pools(
         pools=tuple(
             sorted(
                 effective_pools,
-                key=lambda item: (
-                    item.resource_type,
-                    item.source_pool_id,
-                    item.workpoint_id or "",
-                    item.effective_pool_id,
-                ),
+                key=lambda item: item.effective_pool_id,
             )
         ),
         diagnostics=tuple(diagnostics),

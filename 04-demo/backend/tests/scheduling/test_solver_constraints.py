@@ -23,7 +23,7 @@ def test_constraint_modules_reference_the_single_engine_implementation() -> None
     assert workfaces._add_normal_workface_constraints is legacy._add_normal_workface_constraints
 
 
-def test_missing_abutment_pool_does_not_serialize_independent_tasks() -> None:
+def test_missing_required_abutment_pool_blocks_instead_of_defaulting_to_sufficient() -> None:
     pytest.importorskip("ortools")
     scenario = default_scenario()
     section = scenario.project.bridges[0].work_sections[0]
@@ -33,22 +33,28 @@ def test_missing_abutment_pool_does_not_serialize_independent_tasks() -> None:
     scenario.upper_structure_logic_rules = []
     scenario.milestones = []
     scenario.time_limit_seconds = 5
+    scenario.resource_pools = [
+        pool for pool in scenario.resource_pools if pool.type != "abutment_team"
+    ]
     assert all(pool.type != "abutment_team" for pool in scenario.resource_pools)
 
     generated = generate_schedule_input_from_scenario(scenario)
     result = legacy.solve_schedule(generated.schedule_input)
     abutment_tasks = [task for task in generated.schedule_input.tasks if task.component_type == "abutment_body"]
-    scheduled_abutments = [task for task in result.tasks if task.component_type == "abutment_body"]
 
     assert len(abutment_tasks) == 2
-    assert all(task.compatible_resource_types == [] for task in abutment_tasks)
+    assert all(task.compatible_resource_types == ["abutment_team"] for task in abutment_tasks)
     assert all(resource.type != "abutment_team" for resource in generated.schedule_input.resources)
-    assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert result.objective_days == 15
+    assert result.status in {"MODEL_INVALID", "INFEASIBLE"}
     assert all(allocation.resource_type != "abutment_team" for allocation in result.resource_allocations)
-    assert len(scheduled_abutments) == 2
-    assert {task.start_offset for task in scheduled_abutments} == {0}
-    assert all(task.assigned_resource_id is None for task in scheduled_abutments)
+    assert len(
+        [
+            message
+            for message in generated.validation
+            if message.code == "RESOURCE_ALLOCATION_NO_LEGAL_CANDIDATE"
+            and message.subject_id in {task.id for task in abutment_tasks}
+        ]
+    ) == 2
 
 
 def test_candidates_use_explicit_scope_fields_without_parsing_resource_id() -> None:
@@ -99,20 +105,18 @@ def test_scoped_limited_resource_blocks_missing_or_unauthorized_task_workpoint()
     assert candidates == {missing.id: [], unauthorized.id: []}
     assert len(validation) == 2
     assert all(message.level == "error" for message in validation)
-    assert all(message.code == "RESOURCE_SCOPE_NO_LEGAL_CANDIDATE" for message in validation)
+    assert all(message.code == "RESOURCE_ALLOCATION_NO_LEGAL_CANDIDATE" for message in validation)
 
 
 @pytest.mark.parametrize(
     ("pool_changes", "expected_reason"),
     [
-        pytest.param({"enabled": False}, "未启用", id="disabled"),
-        pytest.param({"resource_mode": "UNLIMITED"}, "设置为默认充足", id="unlimited"),
-        pytest.param({"quantity": 0, "max_quantity": 0}, "资源上限为 0", id="max-quantity-zero"),
+        pytest.param({"enabled": False}, "SHARED_DISABLED", id="disabled"),
+        pytest.param({"quantity": 0, "max_quantity": 3}, "SHARED_DISABLED", id="quantity-zero"),
     ],
 )
-def test_explicit_unavailable_resource_states_keep_default_sufficient_warning(
-    pool_changes: dict[str, object],
-    expected_reason: str,
+def test_explicit_unavailable_limited_resource_blocks_required_tasks(
+    pool_changes: dict[str, object], expected_reason: str
 ) -> None:
     scenario = default_scenario()
     pool = next(pool for pool in scenario.resource_pools if pool.type == "cap_team")
@@ -121,18 +125,87 @@ def test_explicit_unavailable_resource_states_keep_default_sufficient_warning(
 
     generated = generate_schedule_input_from_scenario(scenario)
     cap_tasks = [task for task in generated.schedule_input.tasks if task.component_type == "cap"]
-    expected_warning = (
-        f'资源“{pool.label}”{expected_reason}，相关工作项按资源默认充足处理，不产生资源等待。'
+    assert cap_tasks
+    assert all(task.compatible_resource_types == ["cap_team"] for task in cap_tasks)
+    assert all(resource.pool_id != pool.id for resource in generated.schedule_input.resources)
+    diagnostic = next(
+        message
+        for message in generated.validation
+        if message.level == "error"
+        and message.code == "RESOURCE_ALLOCATION_NO_LEGAL_CANDIDATE"
+        and message.subject_id == cap_tasks[0].id
     )
+    assert expected_reason in diagnostic.message
+    assert diagnostic.details == {
+        "task_id": cap_tasks[0].id,
+        "workpoint_id": cap_tasks[0].bridge_id,
+        "resource_type": "cap_team",
+        "relevant_pool_ids": [pool.id],
+        "reason": expected_reason,
+        "reasons": [expected_reason],
+    }
+    assert any(
+        message.level == "error"
+        and message.code == "RESOURCE_ALLOCATION_NO_LEGAL_CANDIDATE"
+        and message.subject_id == cap_tasks[0].id
+        and message.details is not None
+        for message in generated.validation
+    )
+
+
+def test_explicit_unlimited_resource_keeps_legacy_default_sufficient_warning() -> None:
+    scenario = default_scenario()
+    pool = next(pool for pool in scenario.resource_pools if pool.type == "cap_team")
+    pool.resource_mode = "UNLIMITED"
+
+    generated = generate_schedule_input_from_scenario(scenario)
+    cap_tasks = [task for task in generated.schedule_input.tasks if task.component_type == "cap"]
 
     assert cap_tasks
     assert all(task.compatible_resource_types == [] for task in cap_tasks)
-    assert all(resource.pool_id != pool.id for resource in generated.schedule_input.resources)
-    assert all(message.level != "error" for message in generated.validation)
     assert any(
-        message.level == "warning" and message.subject_id == pool.id and message.message == expected_warning
+        message.level == "warning"
+        and message.subject_id == pool.id
+        and "设置为默认充足" in message.message
         for message in generated.validation
     )
+
+
+def test_candidate_union_contains_local_and_every_eligible_shared_pool() -> None:
+    task_a = _scoped_task("TASK-A", "WP-A")
+    task_b = _scoped_task("TASK-B", "WP-B")
+    resources = [
+        Resource(
+            id="local-a-1",
+            name="A 本地",
+            type="cap_team",
+            pool_id="local-a",
+            scope_mode="WORKPOINT_EXCLUSIVE",
+            eligible_workpoint_ids=["WP-A"],
+            exclusive_workpoint_id="WP-A",
+        ),
+        Resource(
+            id="shared-ab-1",
+            name="AB 共享",
+            type="cap_team",
+            pool_id="shared-ab",
+            scope_mode="PROJECT_SHARED",
+            eligible_workpoint_ids=["WP-A", "WP-B"],
+        ),
+        Resource(
+            id="shared-b-1",
+            name="B 共享",
+            type="cap_team",
+            pool_id="shared-b",
+            scope_mode="PROJECT_SHARED",
+            eligible_workpoint_ids=["WP-B"],
+        ),
+    ]
+
+    candidates = _resource_candidates_by_task([task_a, task_b], resources)
+
+    assert {resource.pool_id for resource in candidates[task_a.id]} == {"local-a", "shared-ab"}
+    assert {resource.pool_id for resource in candidates[task_b.id]} == {"shared-ab", "shared-b"}
 
 
 def test_shared_resource_is_serial_across_authorized_workpoints_with_zero_transfer() -> None:

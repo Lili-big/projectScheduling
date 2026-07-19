@@ -48,5 +48,6 @@
 | `045-lifecycle-workspace-governance` | completed | 77/77 |
 | `046-unified-abutment-task-rules` | completed | 40/40 |
 | `047-workpoint-resource-configuration` | completed | 40/40 |
+| `048-workpoint-first-resource-allocation` | active_partial | 57/59 |
 
 使用规则：先读目标目录的 `spec.md`、`plan.md` 和 `tasks.md`。`completed` 只表示该规格任务清单已勾选，不替代当前代码验证；`active_partial` 中未完成项不得在 README/agent 中写成已实现。

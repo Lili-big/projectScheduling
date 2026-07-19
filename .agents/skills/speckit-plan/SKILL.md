@@ -8,13 +8,7 @@ metadata:
 ---
 
 
-## Language Policy
-
-All user-facing Spec Kit outputs and generated Markdown artifacts in this repository MUST use Simplified Chinese. Keep code identifiers, file paths, API names, branch names, task IDs (`T001`, `US1`), requirement IDs (`FR-001`), status markers (`[P]`, `[x]`), and CLI commands in their original form when clearer or required by tooling. If an upstream template or example is in English, translate headings, explanatory text, checklist items, scenarios, and summaries into Simplified Chinese before writing files or replying.
-
-## Lifecycle Spec Path Policy
-
-Feature assets use the canonical `03-requirements/specs/<number>-<feature>` path. Do not create or resolve new features under a root `specs/` directory.
+> 仓库覆盖规则只从 `.specify/memory/constitution.md` 加载；当前上下文已有且文件未变化时不重读。
 
 ## User Input
 
@@ -24,41 +18,6 @@ $ARGUMENTS
 
 You **MUST** consider the user input before proceeding (if not empty).
 
-## Pre-Execution Checks
-
-**Check for extension hooks (before planning)**:
-- Check if `.specify/extensions.yml` exists in the project root.
-- If it exists, read it and look for entries under the `hooks.before_plan` key
-- If the YAML cannot be parsed or is invalid, skip hook checking silently and continue normally
-- Filter out hooks where `enabled` is explicitly `false`. Treat hooks without an `enabled` field as enabled by default.
-- For each remaining hook, do **not** attempt to interpret or evaluate hook `condition` expressions:
-  - If the hook has no `condition` field, or it is null/empty, treat the hook as executable
-  - If the hook defines a non-empty `condition`, skip the hook and leave condition evaluation to the HookExecutor implementation
-- When constructing slash commands from hook command names, replace dots (`.`) with hyphens (`-`). For example, `speckit.git.commit` → `/speckit-git-commit`.
-- For each executable hook, output the following based on its `optional` flag:
-  - **Optional hook** (`optional: true`):
-    ```
-    ## Extension Hooks
-
-    **Optional Pre-Hook**: {extension}
-    Command: `/{command}`
-    Description: {description}
-
-    Prompt: {prompt}
-    To execute: `/{command}`
-    ```
-  - **Mandatory hook** (`optional: false`):
-    ```
-    ## Extension Hooks
-
-    **Automatic Pre-Hook**: {extension}
-    Executing: `/{command}`
-    EXECUTE_COMMAND: {command}
-
-    Wait for the result of the hook command before proceeding to the Outline.
-    ```
-    After emitting the block above you MUST actually invoke the hook and wait for it to finish before continuing. Run it the same way you would run the command yourself in this agent/session (the invocation may differ from the literal `{command}` id shown above, e.g. a skills-mode agent runs it as `/skill:speckit-...` or `$speckit-...`). Emitting the block alone does not run the hook.
-- If no hooks are registered or `.specify/extensions.yml` does not exist, skip silently
 
 ## Outline
 
@@ -75,40 +34,6 @@ You **MUST** consider the user input before proceeding (if not empty).
    - Phase 1: Update agent context by running the agent script
    - Re-evaluate Constitution Check post-design
 
-## Mandatory Post-Execution Hooks
-
-**You MUST complete this section before reporting completion to the user.**
-
-Check if `.specify/extensions.yml` exists in the project root.
-- If it does not exist, or no hooks are registered under `hooks.after_plan`, skip to the Completion Report.
-- If it exists, read it and look for entries under the `hooks.after_plan` key.
-- If the YAML cannot be parsed or is invalid, skip hook checking silently and continue to the Completion Report.
-- Filter out hooks where `enabled` is explicitly `false`. Treat hooks without an `enabled` field as enabled by default.
-- For each remaining hook, do **not** attempt to interpret or evaluate hook `condition` expressions:
-  - If the hook has no `condition` field, or it is null/empty, treat the hook as executable
-  - If the hook defines a non-empty `condition`, skip the hook and leave condition evaluation to the HookExecutor implementation
-- When constructing slash commands from hook command names, replace dots (`.`) with hyphens (`-`). For example, `speckit.git.commit` → `/speckit-git-commit`.
-- For each executable hook, output the following based on its `optional` flag:
-  - **Mandatory hook** (`optional: false`) — **You MUST emit `EXECUTE_COMMAND:` for each mandatory hook**:
-    ```
-    ## Extension Hooks
-
-    **Automatic Hook**: {extension}
-    Executing: `/{command}`
-    EXECUTE_COMMAND: {command}
-    ```
-    After emitting the block above you MUST actually invoke the hook and wait for it to finish before continuing. Run it the same way you would run the command yourself in this agent/session (the invocation may differ from the literal `{command}` id shown above, e.g. a skills-mode agent runs it as `/skill:speckit-...` or `$speckit-...`). Emitting the block alone does not run the hook.
-  - **Optional hook** (`optional: true`):
-    ```
-    ## Extension Hooks
-
-    **Optional Hook**: {extension}
-    Command: `/{command}`
-    Description: {description}
-
-    Prompt: {prompt}
-    To execute: `/{command}`
-    ```
 
 ## Completion Report
 
@@ -118,32 +43,19 @@ Command ends after Phase 2 planning. Report branch, IMPL_PLAN path, and generate
 
 ### Phase 0: Outline & Research
 
-1. **Extract unknowns from Technical Context** above:
-   - For each NEEDS CLARIFICATION → research task
-   - For each dependency → best practices task
-   - For each integration → patterns task
+1. **Extract only blocking unknowns** from Technical Context. Do not create research work for settled dependencies, familiar project patterns, or hypothetical future choices.
 
-2. **Generate and dispatch research agents**:
+2. **Research the minimum evidence needed** to resolve those unknowns. Use a research Subagent only when the question is independently investigable and parallel work has clear value; otherwise research in the main Thread.
 
-   ```text
-   For each unknown in Technical Context:
-     Task: "Research {unknown} for {feature context}"
-   For each technology choice:
-     Task: "Find best practices for {tech} in {domain}"
-   ```
+3. **汇总实际研究结论** 到 `research.md`，使用中文简体，并记录决策、理由和已评估替代方案。没有真实未知项时，简要记录“无新增研究决策”，不要制造研究任务。
 
-3. **汇总研究结论** 到 `research.md`，使用中文简体，并采用以下格式：
-   - 决策：[选择了什么]
-   - 理由：[为什么这样选择]
-   - 已评估的替代方案：[还评估了什么]
-
-**Output**: research.md with all NEEDS CLARIFICATION resolved
+**Output**: research.md with blocking unknowns resolved
 
 ### Phase 1: Design & Contracts
 
 **Prerequisites:** `research.md` complete
 
-1. **Extract entities from feature spec** → `data-model.md`:
+1. **When the feature introduces or changes entities**, extract them from the feature spec → `data-model.md`:
    - Entity name, fields, relationships
    - Validation rules from requirements
    - State transitions if applicable
@@ -161,7 +73,7 @@ Command ends after Phase 2 planning. Report branch, IMPL_PLAN path, and generate
    - Do not include full implementation code, model/service/controller bodies, migrations, or complete test suites
    - Keep this artifact as a validation/run guide; implementation details belong in `tasks.md` and the implementation phase
 
-**Output**: data-model.md, /contracts/*, quickstart.md
+**Output**: only the applicable data model/contracts plus `quickstart.md`.
 
 ## Key rules
 
@@ -170,6 +82,5 @@ Command ends after Phase 2 planning. Report branch, IMPL_PLAN path, and generate
 
 ## Done When
 
-- [ ] Plan workflow executed and design artifacts generated
-- [ ] Extension hooks dispatched or skipped according to the rules in Mandatory Post-Execution Hooks above
+- [ ] Plan workflow executed and only applicable design artifacts generated
 - [ ] Completion reported to user with branch, plan path, and generated artifacts

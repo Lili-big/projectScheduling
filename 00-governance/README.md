@@ -18,7 +18,7 @@
 
 - `architecture/`：架构说明与当前结构事实。
 - `asset-policy/`：阶段、工作包、放置和清理策略。
-- `asset-policy/thread-roles/`：Codex 常驻 Thread、单需求工作项、能力契约与 Subagent 策略。
+- `asset-policy/thread-roles/`：仅保存 G00、L01 常驻 Thread 的注册信息和专属边界。
 - `repository-tools/`：仓库校验、迁移和安全清理工具。
 - `history/`：旧路径映射与历史治理记录。
 
@@ -28,15 +28,14 @@
 - [全仓工作包注册表](asset-policy/workpackages.json)：列出 9 个独立工作包的阶段、路径、状态和用途。
 
 ```text
-01-discovery -> lugu-customer-research / lugu-source-data-analysis
+01-customer-validation -> lugu / infrastructure-version-2026q2 / dianfengwu-tj03 / json-schedule-review / ai-assistants
 04-demo      -> json-task-viewer / schedule-result-viewer
-05-validation-> json-schedule-review / lugu-validation-material / lugu-plan-granularity
 06-delivery  -> ai-case-summary / ai-ppt-system
 ```
 
 ## 相邻阶段
 
-- 下一阶段：[01-discovery](../01-discovery/README.md)。治理规则也可以直接约束 `02-solution-analysis` 至 `06-delivery`。
+- 下一阶段：[01-customer-validation](../01-customer-validation/README.md)。治理规则也可以直接约束 `02-solution-analysis` 至 `06-delivery`。
 
 ## 禁止内容
 
@@ -45,4 +44,4 @@
 
 ## 维护触发条件
 
-新增根目录、阶段、工作包、资产类别、常驻 Thread、工作项/能力契约、兼容入口或清理类别时必须更新本 README、`asset-policy/` 和对应测试。
+新增根目录、阶段、工作包、资产类别、常驻 Thread、兼容入口或清理类别时必须更新本 README、`asset-policy/` 和对应测试。

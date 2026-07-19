@@ -9,7 +9,7 @@ import type {
 import { effectiveWorkpointResource, resourcePoolQuantity, resourceScopeLabels } from "../../domain/resources";
 import { scheduleStatusLabels } from "../../domain/labels";
 
-export const projectSharedTransferNotice = "项目共享资源跨工点串行使用，转场时间按 0 天。";
+export const projectSharedTransferNotice = "项目共享资源在允许工点间互斥流转，转场时间 0 天、转场成本 0。使用先后由求解器确定。";
 
 export type ResourceScopeResultRow = {
   key: string;
@@ -98,9 +98,7 @@ export function buildResourceScopeResult({
 
   return {
     rows,
-    showProjectSharedNotice: resources.some((resource) => (
-      resource.scope_mode === "PROJECT_SHARED" && new Set(resource.eligible_workpoint_ids).size > 1
-    )),
+    showProjectSharedNotice: resources.some((resource) => resource.scope_mode === "PROJECT_SHARED"),
     notice: projectSharedTransferNotice,
   };
 }

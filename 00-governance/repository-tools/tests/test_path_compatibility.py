@@ -25,9 +25,10 @@ def test_spec_kit_uses_only_the_canonical_lifecycle_spec_root() -> None:
     assert pointer["feature_directory"].startswith("03-requirements/specs/")
 
 
-def test_speckit_skills_document_the_canonical_path_policy() -> None:
+def test_speckit_skills_reference_the_single_repository_policy() -> None:
     skills = sorted((ROOT / ".agents/skills").glob("speckit-*/SKILL.md"))
     assert skills
     for skill in skills:
         content = skill.read_text(encoding="utf-8").replace("\\", "/")
-        assert "03-requirements/specs" in content, f"missing transition path policy: {skill}"
+        assert ".specify/memory/constitution.md" in content, skill
+        assert "## Lifecycle Spec Path Policy" not in content, skill

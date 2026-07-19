@@ -475,7 +475,7 @@ def test_pile_method_selects_impact_drill_rule() -> None:
     assert {task.compatible_resource_types[0] for task in p01_piles} == {"impact_drill"}
 
 
-def test_missing_resource_is_treated_as_unlimited_with_warning() -> None:
+def test_missing_required_resource_blocks_with_structured_diagnostic() -> None:
     pytest.importorskip("ortools")
     bridge = default_bridge()
     wbs = generate_wbs(bridge, default_productivity_rules(), default_logic_rules())
@@ -489,8 +489,15 @@ def test_missing_resource_is_treated_as_unlimited_with_warning() -> None:
             resources=resources,
         )
     )
-    assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert any(message.level == "warning" and "默认充足" in message.message for message in result.validation)
+    assert result.status in {"INFEASIBLE", "MODEL_INVALID"}
+    assert result.stats["reason"] == "missing_compatible_resource"
+    assert any(
+        message.level == "error"
+        and message.code == "RESOURCE_ALLOCATION_NO_LEGAL_CANDIDATE"
+        and message.details is not None
+        and message.details["resource_type"] == "cap_team"
+        for message in result.validation
+    )
 
 
 def test_default_solver_satisfies_logic_and_resource_constraints() -> None:
@@ -1172,6 +1179,7 @@ def test_default_scenario_sets_resource_max_quantity_from_business_defaults() ->
         "pier_body_team",
         "cap_beam_team",
         "cast_in_place_continuous_beam_team",
+        "abutment_team",
     }
     assert all(quantity == 1 for quantity in quantity_by_type.values())
     assert all(max_quantity == 10 for max_quantity in max_by_type.values())
@@ -1220,7 +1228,7 @@ def test_scenario_pile_method_selects_process_template() -> None:
     assert task.compatible_resource_types == ["impact_drill"]
 
 
-def test_abutment_body_uses_standard_process_and_missing_pool_default_sufficient_semantics() -> None:
+def test_abutment_body_uses_standard_process_and_explicit_default_pool() -> None:
     scenario = default_scenario()
     section = scenario.project.bridges[0].work_sections[0]
     section.structures = [_abutment_structure(0), _abutment_structure(1)]
@@ -1228,7 +1236,7 @@ def test_abutment_body_uses_standard_process_and_missing_pool_default_sufficient
     scenario.logic_rules = []
     scenario.upper_structure_logic_rules = []
     scenario.milestones = []
-    assert all(pool.type != "abutment_team" for pool in scenario.resource_pools)
+    assert any(pool.type == "abutment_team" for pool in scenario.resource_pools)
 
     generated = generate_schedule_input_from_scenario(scenario)
     abutment_tasks = [task for task in generated.schedule_input.tasks if task.component_type == "abutment_body"]
@@ -1241,8 +1249,8 @@ def test_abutment_body_uses_standard_process_and_missing_pool_default_sufficient
     assert {task.quantity for task in abutment_tasks} == {1}
     assert {task.quantity_label for task in abutment_tasks} == {"1个"}
     assert {task.duration_days for task in abutment_tasks} == {15}
-    assert all(task.compatible_resource_types == [] for task in abutment_tasks)
-    assert all(resource.type != "abutment_team" for resource in generated.schedule_input.resources)
+    assert all(task.compatible_resource_types == ["abutment_team"] for task in abutment_tasks)
+    assert len([resource for resource in generated.schedule_input.resources if resource.type == "abutment_team"]) == 1
 
 
 def test_missing_abutment_process_reports_generic_error_without_cap_beam_fallback() -> None:
@@ -1364,7 +1372,7 @@ def test_switching_resource_to_unlimited_releases_constraint() -> None:
     assert all(task.assigned_resource_id is None for task in unlimited_cap_tasks)
 
 
-def test_missing_key_resource_pool_warns_and_uses_unlimited_strategy() -> None:
+def test_missing_key_resource_pool_blocks_current_resource_scenario() -> None:
     pytest.importorskip("ortools")
     scenario = _small_resource_scenario()
     scenario.resource_pools = [pool for pool in scenario.resource_pools if pool.type != "cap_team"]
@@ -1372,10 +1380,16 @@ def test_missing_key_resource_pool_warns_and_uses_unlimited_strategy() -> None:
     solved = solve_scenario(scenario)
     cap_tasks = [task for task in solved.generated.schedule_input.tasks if task.component_type == "cap"]
 
-    assert solved.result.status in {"OPTIMAL", "FEASIBLE"}
+    assert solved.result.status in {"INFEASIBLE", "MODEL_INVALID"}
     assert cap_tasks
-    assert all(task.compatible_resource_types == [] for task in cap_tasks)
-    assert any(message.level == "warning" and "未配置" in message.message for message in solved.diagnostics)
+    assert all(task.compatible_resource_types == ["cap_team"] for task in cap_tasks)
+    assert any(
+        message.level == "error"
+        and message.code == "RESOURCE_ALLOCATION_NO_LEGAL_CANDIDATE"
+        and message.details is not None
+        and message.details["resource_type"] == "cap_team"
+        for message in solved.diagnostics
+    )
 
 
 def test_noncritical_component_can_opt_into_limited_resource_pool() -> None:
@@ -1723,8 +1737,8 @@ def test_fixed_resource_shortest_returns_resource_increment_recommendation_when_
     assert alternative.result.stats["recommended_resource_counts"][0]["added_quantity"] == 1
     assert len(alternative.generated.schedule_input.resources) == 2
     assert {allocation.resource_id for allocation in alternative.result.resource_allocations} <= {
-        "pool-cap::project::1",
-        "pool-cap::project::2",
+        "pool-cap::instance::1",
+        "pool-cap::instance::2",
     }
     _assert_alternative_output(
         solved.result,
@@ -4315,7 +4329,7 @@ def test_configured_resource_normal_work_skips_unconfigured_balance_without_path
     assert "normal_balance_penalty" not in result.objective_breakdown
 
 
-def test_unconfigured_resource_normal_work_reports_weekly_diagnostics_without_objective() -> None:
+def test_unconfigured_resource_normal_work_blocks_before_balance_objective() -> None:
     pytest.importorskip("ortools")
 
     control = _solver_task("Z-control", "控制墩盖梁", 30, "critical_team").model_copy(
@@ -4355,23 +4369,17 @@ def test_unconfigured_resource_normal_work_reports_weekly_diagnostics_without_ob
         )
     )
 
-    metrics = result.stats["normal_balance_metrics"]
-    bucket_workloads = [bucket["duration_days"] for bucket in metrics["bucket_loads"]]
-
-    assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert result.objective_days == 30
-    assert metrics["normal_task_count"] == 6
-    assert metrics["configured_resource_normal_task_count"] == 0
-    assert metrics["unconfigured_resource_normal_task_count"] == 6
-    assert sum(bucket_workloads) == 12
-    assert metrics["balance_weight"] == 0
-    assert metrics["balance_penalty"] == sum(bucket["deviation_days"] for bucket in metrics["bucket_loads"])
-    assert "unconfigured_normal_balance" not in result.objective_breakdown["objective_weights"]
-    assert "unconfigured_normal_balance_penalty" not in result.objective_breakdown
-    assert "unconfigured_normal_balance_weight" not in result.objective_breakdown
+    assert result.status in {"INFEASIBLE", "MODEL_INVALID"}
+    assert "normal_balance_metrics" not in result.stats
+    missing_ids = {
+        message.subject_id
+        for message in result.validation
+        if message.code == "RESOURCE_ALLOCATION_NO_LEGAL_CANDIDATE"
+    }
+    assert missing_ids == {task.id for task in normal_tasks}
 
 
-def test_control_chain_normal_predecessor_is_excluded_from_unconfigured_balance() -> None:
+def test_control_chain_normal_predecessor_with_unconfigured_resource_blocks() -> None:
     pytest.importorskip("ortools")
 
     predecessor = _solver_task("N-control-predecessor", "控制链普通前置", 5, "unconfigured_team").model_copy(
@@ -4429,20 +4437,14 @@ def test_control_chain_normal_predecessor_is_excluded_from_unconfigured_balance(
         )
     )
 
-    tasks_by_id = {task.id: task for task in result.tasks}
-    metrics = result.stats["normal_balance_metrics"]
-    bucket_task_ids = {
-        task_id
-        for bucket in metrics["bucket_loads"]
-        for task_id in bucket["task_ids"]
+    assert result.status in {"INFEASIBLE", "MODEL_INVALID"}
+    assert "normal_balance_metrics" not in result.stats
+    missing_ids = {
+        message.subject_id
+        for message in result.validation
+        if message.code == "RESOURCE_ALLOCATION_NO_LEGAL_CANDIDATE"
     }
-
-    assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert tasks_by_id[predecessor.id].start_offset == 0
-    assert tasks_by_id[control.id].start_offset == predecessor.duration_days
-    assert metrics["normal_task_count"] == 2
-    assert metrics["unconfigured_resource_normal_task_count"] == 2
-    assert predecessor.id not in bucket_task_ids
+    assert missing_ids == {predecessor.id, *(task.id for task in ordinary)}
 
 
 def test_control_priority_reports_configured_objective_terms_used() -> None:

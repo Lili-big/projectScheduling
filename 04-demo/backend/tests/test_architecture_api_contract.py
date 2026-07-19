@@ -53,6 +53,10 @@ def test_resource_scope_reuses_the_five_existing_api_contracts() -> None:
             "#/components/schemas/MinResourcesSolveRequest",
             "#/components/schemas/ScenarioSolveResult-Output",
         ),
+        ("POST", "/api/solve-resource-cost"): (
+            "#/components/schemas/ResourceCostSolveRequest",
+            "#/components/schemas/ScenarioSolveResult-Output",
+        ),
         ("POST", "/api/ai-resource-assistant/update-plan"): (
             "#/components/schemas/ResourceAssistantUpdatePlanRequest",
             "#/components/schemas/ResourceAssistantUpdatePlanResponse",
@@ -68,3 +72,15 @@ def test_resource_scope_reuses_the_five_existing_api_contracts() -> None:
             "$ref": "#/components/schemas/HTTPValidationError"
         }
         assert sum(1 for item in routes if (item["method"], item["path"]) == operation) == 1
+
+
+def test_workpoint_first_resource_fields_are_additive_on_existing_api_schemas() -> None:
+    schemas = app.openapi()["components"]["schemas"]
+    resource_pool_properties = schemas["ResourcePool"]["properties"]
+    assistant_result_properties = schemas["ResourceAssistantPlanResult-Output"]["properties"]
+    validation_properties = schemas["ValidationMessage"]["properties"]
+
+    assert "workpoint_id" in resource_pool_properties
+    assert {"input_resource_quantities", "resource_pool_quantities"} <= assistant_result_properties.keys()
+    assert "ResourcePoolQuantityResult" in schemas
+    assert "details" in validation_properties

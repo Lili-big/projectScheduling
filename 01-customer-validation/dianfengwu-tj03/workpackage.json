@@ -1,0 +1,13 @@
+{
+  "id": "dianfengwu-tj03",
+  "stage": "01-customer-validation",
+  "purpose": "保存垫丰武 TJ03 历史客户资料、验证记录及脱敏迁移索引。",
+  "status": "orphaned",
+  "inputs": ["customer-materials/"],
+  "entrypoints": [],
+  "results": ["validation-results/asset-index.md"],
+  "owner": "L01｜需求发现与验证闭环（历史客户验证）",
+  "tracking_policy": "tracked",
+  "retention_policy": "工作包契约和脱敏索引跟踪；含客户信息的 PDF 与来源映射保持 local-only，迁移或替换前核对 SHA-256。",
+  "related_workpackages": ["infrastructure-version-2026q2"]
+}

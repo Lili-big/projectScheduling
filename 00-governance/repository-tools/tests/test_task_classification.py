@@ -8,11 +8,11 @@ ROOT = Path(__file__).resolve().parents[3]
 POLICY = ROOT / "00-governance/asset-policy/placement-rules.json"
 CASES = {
     "agent-thread-governance": "00-governance",
-    "customer-research": "01-discovery",
+    "customer-research": "01-customer-validation",
     "solution-proposal": "02-solution-analysis",
     "product-requirement": "03-requirements",
     "demo-implementation": "04-demo",
-    "customer-validation": "05-validation",
+    "customer-validation": "01-customer-validation",
     "formal-delivery": "06-delivery",
 }
 

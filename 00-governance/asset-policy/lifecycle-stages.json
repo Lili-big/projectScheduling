@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "ownership_model": "lifecycle-stage -> workpackage -> asset",
+  "version": 2,
+  "ownership_model": "lifecycle-stage -> customer-or-project-workpackage -> asset-category -> asset",
   "stages": [
     {
       "id": "00-governance",
@@ -9,16 +9,16 @@
       "exit_criteria": ["治理契约可验证，迁移和回退边界可审计"],
       "authoritative_asset_types": ["architecture", "governance-policy", "repository-tool", "migration-history"],
       "workpackages": ["lifecycle-workspace-governance"],
-      "next_stages": ["01-discovery", "02-solution-analysis", "03-requirements", "04-demo", "05-validation", "06-delivery"]
+      "next_stages": ["01-customer-validation", "02-solution-analysis", "03-requirements", "04-demo", "06-delivery"]
     },
     {
-      "id": "01-discovery",
-      "purpose": "保存需求调研、客户访谈、来源数据和业务现状证据",
-      "entry_criteria": ["问题仍需用客户或来源材料确认"],
-      "exit_criteria": ["事实、推断、待确认问题和机会判断已分离"],
-      "authoritative_asset_types": ["research-source", "interview", "source-data-analysis", "research-summary"],
-      "workpackages": ["lugu-customer-research", "lugu-source-data-analysis", "infrastructure-version-research-2026q2"],
-      "next_stages": ["02-solution-analysis", "03-requirements"]
+      "id": "01-customer-validation",
+      "purpose": "统一维护客户资料、验证计划、验证结果和客户价值反馈",
+      "entry_criteria": ["需要用客户材料还原事实、提出验证问题或复核产品判断"],
+      "exit_criteria": ["客户资料、验证计划、结果、结论和限制可追溯"],
+      "authoritative_asset_types": ["customer-material", "research-record", "validation-plan", "validation-script", "validation-result", "validation-report"],
+      "workpackages": ["lugu", "infrastructure-version-2026q2", "dianfengwu-tj03", "json-schedule-review", "ai-assistants"],
+      "next_stages": ["02-solution-analysis", "03-requirements", "04-demo", "06-delivery"]
     },
     {
       "id": "02-solution-analysis",
@@ -36,7 +36,7 @@
       "exit_criteria": ["需求可验收，规格、计划和任务通过门禁"],
       "authoritative_asset_types": ["product-requirement", "algorithm-rule", "requirement-template", "feature-specification"],
       "workpackages": [],
-      "next_stages": ["04-demo", "05-validation"]
+      "next_stages": ["04-demo", "01-customer-validation"]
     },
     {
       "id": "04-demo",
@@ -45,16 +45,7 @@
       "exit_criteria": ["实现可运行、可测试且保持共享契约一致"],
       "authoritative_asset_types": ["backend", "frontend", "demo-tool", "deployment", "reproducible-example"],
       "workpackages": ["json-task-viewer", "schedule-result-viewer"],
-      "next_stages": ["05-validation", "06-delivery"]
-    },
-    {
-      "id": "05-validation",
-      "purpose": "聚合客户验证计划、输入、分析脚本、结果和验证报告",
-      "entry_criteria": ["方案或 Demo 需要用客户数据和验收场景验证"],
-      "exit_criteria": ["验证输入、步骤、结果、结论和限制可追溯"],
-      "authoritative_asset_types": ["validation-plan", "validation-input", "validation-script", "validation-result", "validation-report"],
-      "workpackages": ["json-schedule-review", "lugu-validation-material", "lugu-plan-granularity", "dianfengwu-tj03-product-validation-2026q2"],
-      "next_stages": ["02-solution-analysis", "03-requirements", "04-demo", "06-delivery"]
+      "next_stages": ["01-customer-validation", "06-delivery"]
     },
     {
       "id": "06-delivery",
@@ -63,7 +54,7 @@
       "exit_criteria": ["来源、版本、哈希、生成关系和维护状态已登记"],
       "authoritative_asset_types": ["formal-deliverable", "case-study", "presentation", "release-material"],
       "workpackages": ["ai-case-summary", "ai-ppt-system"],
-      "next_stages": ["01-discovery", "02-solution-analysis"]
+      "next_stages": ["01-customer-validation", "02-solution-analysis"]
     }
   ]
 }

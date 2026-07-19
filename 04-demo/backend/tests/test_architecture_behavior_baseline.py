@@ -16,6 +16,7 @@ from capture_architecture_baseline import _scenario_manifest  # noqa: E402
 
 
 FIXTURE = BACKEND_ROOT / "tests" / "fixtures" / "architecture" / "backend-baseline.json"
+API_MIRROR = BACKEND_ROOT.parent / "tools" / "demo-api-mirror" / "api.mts"
 
 
 def test_default_scenario_and_task_generation_are_behaviorally_stable() -> None:
@@ -38,3 +39,15 @@ def test_generated_schedule_keeps_task_identity_and_resource_candidates_stable()
 def test_stable_fingerprint_ignores_mapping_order_but_not_business_values() -> None:
     assert stable_fingerprint({"a": 1, "b": [2, 3]}) == stable_fingerprint({"b": [2, 3], "a": 1})
     assert stable_fingerprint({"a": 1}) != stable_fingerprint({"a": 2})
+
+
+def test_demo_api_mirror_preserves_pool_identity_and_explicit_workpoint_scope() -> None:
+    source = API_MIRROR.read_text(encoding="utf-8")
+
+    assert 'workpoint_id?: string | null' in source
+    assert 'scope_mode?: "PROJECT_SHARED" | "WORKPOINT_EXCLUSIVE"' in source
+    assert 'id: `${poolModel.id}_${index + 1}`' in source
+    assert 'resource.exclusive_workpoint_id === task.bridge_id' in source
+    assert 'resource.eligible_workpoint_ids.includes(task.bridge_id)' in source
+    assert "manual_transfer_order" not in source
+    assert "transfer_time_days" not in source

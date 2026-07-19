@@ -804,9 +804,17 @@ def _add_capacity_continuous_beam_team_span_constraints(
             validation.append(
                 ValidationMessage(
                     level="error",
-                    code="RESOURCE_SCOPE_NO_LEGAL_CANDIDATE",
+                    code="RESOURCE_ALLOCATION_NO_LEGAL_CANDIDATE",
                     subject_id=span.span_group_id,
                     entity_refs=[span.span_group_id, span.bridge_id],
+                    details={
+                        "task_id": span.span_group_id,
+                        "workpoint_id": span.bridge_id,
+                        "resource_type": CONTINUOUS_BEAM_RESOURCE_TYPE,
+                        "relevant_pool_ids": sorted(groups_by_key),
+                        "reason": "SHARED_SCOPE_MISMATCH",
+                        "reasons": ["SHARED_SCOPE_MISMATCH"],
+                    },
                     message=f"连续梁联 {span.display_name} 没有当前工点可用的受限班组资源。",
                 )
             )
@@ -7814,10 +7822,11 @@ def _resource_sort_key(resource: Resource) -> tuple[Any, ...]:
 
 
 def _resource_group_key(resource: Resource) -> str:
-    base_key = resource.pool_id or resource.type
+    if resource.pool_id:
+        return resource.pool_id
     if resource.scope_mode == "WORKPOINT_EXCLUSIVE" and resource.exclusive_workpoint_id is not None:
-        return f"{base_key}::workpoint::{resource.exclusive_workpoint_id}"
-    return base_key
+        return f"{resource.type}::workpoint::{resource.exclusive_workpoint_id}"
+    return resource.type
 
 
 def _resource_matches_task(task: Task, resource: Resource) -> bool:
@@ -8005,6 +8014,10 @@ def _resource_capacity_lower_bound_diagnostics(
         return []
 
     scoped_task_ids = _capacity_window_scope_task_ids(schedule_input)
+    candidate_group_keys = {
+        task.id: _candidate_resource_group_keys_for_task(task, groups)
+        for task in schedule_input.tasks
+    }
     diagnostics: list[dict[str, Any]] = []
     for group in groups:
         resource_type = group["resource_type"]
@@ -8013,7 +8026,7 @@ def _resource_capacity_lower_bound_diagnostics(
             for task in schedule_input.tasks
             if task.id in scoped_task_ids
             and resource_type in task.compatible_resource_types
-            and _task_matches_resource_group(task, group)
+            and candidate_group_keys[task.id] == {group["key"]}
         ]
         total_duration = sum(task.duration_days for task in scoped_tasks)
         if total_duration <= 0:
@@ -8045,6 +8058,10 @@ def _resource_capacity_exclusive_lower_bound_diagnostics(
         return []
 
     scoped_task_ids = _capacity_window_scope_task_ids(schedule_input)
+    candidate_group_keys = {
+        task.id: _candidate_resource_group_keys_for_task(task, groups)
+        for task in schedule_input.tasks
+    }
     diagnostics: list[dict[str, Any]] = []
     for group in groups:
         resource_type = group["resource_type"]
@@ -8053,7 +8070,7 @@ def _resource_capacity_exclusive_lower_bound_diagnostics(
             for task in schedule_input.tasks
             if task.id in scoped_task_ids
             and set(task.compatible_resource_types) == {resource_type}
-            and _task_matches_resource_group(task, group)
+            and candidate_group_keys[task.id] == {group["key"]}
         ]
         total_duration = sum(task.duration_days for task in scoped_tasks)
         if total_duration <= 0:
@@ -8095,6 +8112,17 @@ def _resource_capacity_lower_bound_messages(
             )
         )
     return messages
+
+
+def _candidate_resource_group_keys_for_task(
+    task: Task, groups: list[dict[str, Any]]
+) -> set[str]:
+    return {
+        str(group["key"])
+        for group in groups
+        if group["resource_type"] in task.compatible_resource_types
+        and _task_matches_resource_group(task, group)
+    }
 
 
 def _workface_parallelism_diagnostics(schedule_input: ScheduleInput) -> list[dict[str, Any]]:
@@ -8277,23 +8305,52 @@ def _validate_resource_coverage(
         constrained_task_count += 1
         if not candidates.get(task.id):
             missing_candidate_count += 1
-            has_explicit_scoped_type = any(
-                resource.eligible_workpoint_ids
-                and resource.type in task.compatible_resource_types
-                for resource in (resources or [])
+            relevant_pool_ids = sorted(
+                {
+                    resource.pool_id or resource.type
+                    for resource in (resources or [])
+                    if resource.type in task.compatible_resource_types
+                }
             )
+            entity_refs = [task.id]
+            if task.bridge_id:
+                entity_refs.append(task.bridge_id)
+            entity_refs.extend([*task.compatible_resource_types, *relevant_pool_ids])
             messages.append(
                 ValidationMessage(
-                    level="error" if has_explicit_scoped_type else "warning",
-                    code="RESOURCE_SCOPE_NO_LEGAL_CANDIDATE" if has_explicit_scoped_type else None,
+                    level="error",
+                    code="RESOURCE_ALLOCATION_NO_LEGAL_CANDIDATE",
                     subject_id=task.id,
+                    entity_refs=entity_refs,
+                    details={
+                        "task_id": task.id,
+                        "workpoint_id": task.bridge_id,
+                        "resource_type": task.compatible_resource_types[0],
+                        "relevant_pool_ids": relevant_pool_ids,
+                        "reason": (
+                            "WORKPOINT_ID_INVALID"
+                            if task.bridge_id is None
+                            else (
+                                "SHARED_SCOPE_MISMATCH"
+                                if relevant_pool_ids
+                                else "RESOURCE_TYPE_UNCONFIGURED"
+                            )
+                        ),
+                        "reasons": [
+                            (
+                                "WORKPOINT_ID_INVALID"
+                                if task.bridge_id is None
+                                else (
+                                    "SHARED_SCOPE_MISMATCH"
+                                    if relevant_pool_ids
+                                    else "RESOURCE_TYPE_UNCONFIGURED"
+                                )
+                            )
+                        ],
+                    },
                     message=(
                         f"“{task.name}”需要以下资源类型之一：{', '.join(task.compatible_resource_types)}，"
-                        + (
-                            "但任务缺少合法工点候选，受限资源作用域校验已阻断求解。"
-                            if has_explicit_scoped_type
-                            else "但当前没有启用的受限兼容资源，已按资源默认充足处理。"
-                        )
+                        "但任务缺少合法工点候选，受限资源作用域校验已阻断求解。"
                     ),
                 )
             )

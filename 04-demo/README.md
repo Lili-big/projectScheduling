@@ -12,7 +12,7 @@
 ## 退出条件
 
 - 代码、接口、测试和运行说明一致。
-- 输入、输出、异常和兼容场景可复现，结果可交给 `05-validation` 验证。
+- 输入、输出、异常和兼容场景可复现，结果可交给 `01-customer-validation` 验证。
 
 ## 权威资产
 
@@ -30,7 +30,7 @@
 ## 相邻阶段
 
 - 上一阶段：[03-requirements](../03-requirements/README.md)。
-- 下一阶段：[05-validation](../05-validation/README.md)；经验证的正式成果进入 `06-delivery`。
+- 下一阶段：[01-customer-validation](../01-customer-validation/README.md)；经验证的正式成果进入 `06-delivery`。
 
 ## 禁止内容
 

@@ -880,7 +880,7 @@ def test_adjustment_strategies_isolate_failure_and_only_expand_bottleneck(
         return original(plan, progress, strategy, parameters)
 
     monkeypatch.setattr(forecast_module, "_solve_forecast", fail_one_strategy)
-    requested = {pool.type: 2 for pool in baseline.resource_plan_snapshot.resource_pools}
+    requested = {pool.id: 2 for pool in baseline.resource_plan_snapshot.resource_pools}
     comparison = create_adjustment_proposals(forecast.forecast_id, requested, repository)
 
     by_strategy = {item.strategy: item for item in comparison.proposals}

@@ -4,7 +4,11 @@
 执行日期：2026-07-16 至 2026-07-17  
 批准依据：042 的 140 项清单确认，以及 045 的 1,127 项清单确认。045 确认明确包含 9 条 043 规格及日志、用户输入、持久状态、缓存和临时入口，并明确“不授权删除”。
 
-完整逐文件源路径、目标路径、跟踪策略、迁移前哈希和回滚方式见 [042 清单](../../03-requirements/specs/042-repo-architecture-modernization/asset-migration-manifest.json) 和 [045 清单](../../03-requirements/specs/045-lifecycle-workspace-governance/asset-migration-manifest.json)。本页记录最终维护路径；历史规格、清单、离线结果元数据和迁移前基线中的旧路径作为当时证据保留，不批量改写。
+完整逐文件源路径、目标路径、跟踪策略、迁移前哈希和回滚方式见 [042 清单](../../03-requirements/specs/042-repo-architecture-modernization/asset-migration-manifest.json)、[045 清单](../../03-requirements/specs/045-lifecycle-workspace-governance/asset-migration-manifest.json) 和 [2026-07-18 客户验证目录合并记录](customer-validation-merge-20260718.md)。本页记录最终维护路径；历史规格、清单、离线结果元数据和迁移前基线中的旧路径作为当时证据保留，不批量改写。
+
+## 2026-07-18 客户调研与验证目录合并
+
+`01-discovery/` 与 `05-validation/` 已合并为 `01-customer-validation/`。每个客户或项目仅保留 `customer-materials/`、`validation-plans/`、`validation-results/` 三个业务类别。下方 045 表格继续保留更早一轮迁移的历史路径，不代表当前写入位置。
 
 ## 045 最终生命周期映射
 

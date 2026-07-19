@@ -4,7 +4,7 @@
 
 **输入**：来自当前 `SPECIFY_FEATURE_DIRECTORY/spec.md` 的功能规格
 
-**说明**：本模板由 `/speckit-plan` 填写。执行流程以 `.specify/templates/plan-template.md` 和 `.agents/skills/speckit-plan/SKILL.md` 为准。
+**说明**：本模板定义计划结构；执行步骤由 `.agents/skills/speckit-plan/SKILL.md` 定义，内容不变量由 Constitution 定义。
 
 ## 概要
 
@@ -36,13 +36,8 @@
 
 ## 生命周期归属
 
-- **主要阶段**：[00-governance ～ 06-delivery]
-- **工作包**：[已登记 ID、none 或“需创建契约”]
-- **资产类型**：[输入/脚本/代码/规则/正式成果等]
-- **跟踪策略**：[tracked / ignored / local-only]
-- **保留类别**：[persistent-state / user-input / formal-output / diagnostic-log / rebuildable / cache / temporary]
-- **主归属**：[唯一权威目录]
-- **跨阶段引用**：[只列引用，不创建第二份权威原文]
+- **规格归属引用**：[`spec.md#生命周期归属`](./spec.md#生命周期归属)
+- **实施路径**：[本计划实际修改的源码、测试或部署路径]
 
 ## Constitution 检查
 
@@ -53,8 +48,7 @@
 - 排程、资源、工期、CP-SAT、前后端契约影响已明确。
 - 输入、输出、约束、边界场景和验收标准可测试。
 - 未经明确批准，不把 Demo 临时限制提升为正式产品目标。
-- Spec Kit 过程文档和阶段报告使用中文简体；代码标识符、文件路径、接口名、任务编号和必要英文缩写可保持原文。
-- 已声明主要生命周期阶段、工作包、资产类型、跟踪策略、保留类别和唯一主归属。
+- `spec.md` 已声明唯一生命周期归属，本计划不复制第二份分类。
 - 资产迁移具有逐项清单、清单外保护、引用更新和回退边界。
 - 本地状态、用户输入和正式成果不会被当作缓存或临时文件清理。
 
@@ -80,11 +74,10 @@
 
 ```text
 00-governance/
-01-discovery/
+01-customer-validation/
 02-solution-analysis/
 03-requirements/
 04-demo/
-05-validation/
 06-delivery/
 
 .agents/       # 必需的 Agent/Skill 发现入口

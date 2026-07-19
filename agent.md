@@ -1,10 +1,10 @@
 # 项目 Agent 工作手册
 
-`AGENTS.md` 决定需求评审、文档、实现和 Spec Kit 的工作流；本文件只维护项目事实、模块所有权、调用链、兼容边界和修改/验证矩阵。开始任务时先读 `AGENTS.md`，再读本文件和目标领域文档。
+`AGENTS.md` 是执行规则；本文件只维护项目事实、模块所有权、调用链、兼容边界和修改矩阵，缺少这些事实时按需读取。
 
 ## 1. 项目事实
 
-本项目是桥梁施工排程产品全生命周期工作区：`01-discovery` 调研、`02-solution-analysis` 方案、`03-requirements` 需求、`04-demo` 实现、`05-validation` 验证、`06-delivery` 交付，仓库规则由 `00-governance` 维护。主 Demo 是 `FastAPI + React + OR-Tools CP-SAT` 模块化单体；前端维护 `ScenarioInput`，后端生成任务图和 `ScheduleInput`，求解器返回 `ScheduleResult`/`ScenarioSolveResult`。
+本项目是桥梁施工排程产品全生命周期工作区：`01-customer-validation` 统一客户调研与验证、`02-solution-analysis` 方案、`03-requirements` 需求、`04-demo` 实现、`06-delivery` 交付，仓库规则由 `00-governance` 维护。主 Demo 是 `FastAPI + React + OR-Tools CP-SAT` 模块化单体；前端维护 `ScenarioInput`，后端生成任务图和 `ScheduleInput`，求解器返回 `ScheduleResult`/`ScenarioSolveResult`。
 
 ```text
 ScenarioInput
@@ -21,17 +21,11 @@ ScenarioInput
 - 架梁项目/方案版本、专项导入、校验、预览和综合排程。
 - 计划基线、进度快照、预测、调整和采纳。
 
-边界：`041-girder-scheduling-integration` 仍为 74/95，统一发布、完整实绩滚动和影子验证等 21 项未完成；不得写成现状。生产权限、审计、租户/项目隔离、正式数据接入也未形成产品级实现。
+边界：规格完成状态以 [`03-requirements/specs/README.md`](./03-requirements/specs/README.md) 和对应 `tasks.md` 为准，不在本手册复制计数；未完成规格不得写成现状。生产权限、审计、租户/项目隔离、正式数据接入也未形成产品级实现。
 
-## 2. 取证顺序
+## 2. 定位入口
 
-1. 用户当前要求和明确约束。
-2. `AGENTS.md` 工作流门禁。
-3. `README.md`、本文件和目标生命周期阶段 README。
-4. [模块地图](./00-governance/architecture/module-map.md)、目标工作包、源码、测试、配置和运行结果。
-5. [规格索引](./03-requirements/specs/README.md) 与目标 `spec.md`/`plan.md`/`tasks.md`。
-
-解释当前实现时，代码和测试优先；评审/PRD 同时列出文档口径、代码事实和用户新要求。无法判断目标口径时，列出冲突并请求决策，不自行编造业务规则。
+模块入口不清时读取 [模块地图](./00-governance/architecture/module-map.md) 和下文修改矩阵；规格状态读取 [规格索引](./03-requirements/specs/README.md)。当前实现以代码、测试和运行结果为准，产品口径以已确认需求/规则为准。
 
 ## 3. 当前模块所有权
 
@@ -69,11 +63,10 @@ ScenarioInput
 
 | 资产 | 当前所有权 | 验证 |
 | --- | --- | --- |
-| 调研与来源证据 | `01-discovery/` 及其工作包 | 来源、输入/结论分离、工作包契约 |
-| 方案与决策 | `02-solution-analysis/proposals/`、`decisions/` | 方案边界与引用检查 |
+| 客户调研与验证 | `01-customer-validation/<项目>/` | 客户资料、验证计划和验证结果可追溯 |
+| 方案与决策 | `02-solution-analysis/proposals/` | 方案边界与引用检查 |
 | PRD、算法和规格 | `03-requirements/product/`、`rules/`、`specs/` | 文档、Spec Kit 门禁 |
 | Demo 代码与样例 | `04-demo/backend/`、`frontend/`、`examples/`、`standalone/` | 后端/前端/部署与工作包测试 |
-| 客户验证 | `05-validation/reports/`、`workpackages/` | 输入、脚本、结果和结论可追溯 |
 | 正式交付与演示 | `06-delivery/deliverables/`、`workpackages/`、`presentations/` | 版本、哈希和生成关系 |
 | 本地状态与生成物 | `.local-data/state|logs|cache|tmp|locks|archive` | 保护优先、默认 dry-run |
 
@@ -167,55 +160,22 @@ npm.cmd run verify:architecture
 | 样式 | feature CSS / 聚合入口 | 导入顺序、弹层、响应式 | 构建 + 同视口视觉对比 |
 | 部署 | 根 Dockerfile/netlify.toml 与 `04-demo/runtime/` | 样例数据、环境变量、健康/SPA | Docker/Netlify/单服务冒烟 |
 
-## 7. 算法解释规则
+## 7. 算法解释
 
-回答算法问题时至少区分：
-
-- 输入对象、字段、单位、默认值和来源。
-- 任务生成规则。
-- 硬约束：不可违反，违反通常导致 infeasible/blocked。
-- 软目标：可权衡，进入 CP-SAT objective。
-- 诊断：解释/评价结果，不一定参与求解。
-- 展示转换：前端标签或聚合，不是业务规则。
-
-优先读取目标模块、`04-demo/backend/tests/test_scheduler.py`、相关专项测试和 [算法当前实现文档](./03-requirements/rules/排程算法当前实现交底文档_v1.2.md)。不要把诊断指标写成目标项，也不要把 Demo 默认值写成正式产品规则。
+算法解释按需使用 [`demo-algorithm-explainer`](./.agents/skills/demo-algorithm-explainer/SKILL.md)；本手册不复制其分类、回答结构和取证流程。
 
 ## 8. 运行与验证
 
-```powershell
-# 后端全量
-.\.venv\Scripts\python.exe -m pytest 04-demo\backend\tests -q
-
-# 前端测试和构建
-npm.cmd --workspace 04-demo/frontend test
-npm.cmd run build
-
-# 架构/仓库/文档
-npm.cmd run verify:architecture
-
-# 类型、全量测试、构建、包体和架构统一门禁
-npm.cmd run verify
-```
-
-单服务：
-
-```powershell
-npm.cmd run build
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir 04-demo/backend
-```
-
-详细环境和部署边界见 [运行部署文档](./00-governance/architecture/runtime-and-deployment.md)，资产放置见 [仓库与资产治理](./00-governance/architecture/repository-governance.md)。
-
-后台启动需要落盘日志时，统一使用 `04-demo/runtime/start_logged_process.ps1`，输出到 `.local-data/logs/<启动时间>/`。禁止在仓库根目录创建 `*.log`；历史日志只按批准清单移动到 `.local-data/logs/legacy-unclassified/`，不得未经确认删除。
+可执行命令以根目录 `package.json` 的 `scripts` 为唯一清单；按修改矩阵选择最小门禁，发布级验证使用 `npm.cmd run verify`。部署边界见 [运行部署文档](./00-governance/architecture/runtime-and-deployment.md)，后台进程与日志只按 [`04-demo/runtime/README.md`](./04-demo/runtime/README.md) 操作。
 
 ## 9. 文档维护规则
 
 - `README.md`：项目定位、当前能力、快速启动、验证和最短地图。
 - `AGENTS.md`：工作分流与治理门禁，不写代码百科。
 - `agent.md`：当前事实、所有权、调用链和修改矩阵。
-- 七阶段 README：阶段目的、进入/退出条件、权威资产和工作包索引。
+- 六阶段 README：阶段目的、进入/退出条件、权威资产和工作包索引。
 - `00-governance/architecture/`：系统、模块、依赖、运行与 ADR。
 - `03-requirements/specs/README.md`：规格状态；规格编号和历史内容保持。
 - 工作包 README / `workpackage.json`：输入、入口、成果、跟踪和保留策略。
 
-修改模块、API、命令、环境变量、部署或规格状态时，同批更新对应入口并运行文档门禁。资产移动、取消跟踪或交付件重分区必须先提供逐文件清单并取得用户二次确认。
+修改模块、API、命令、环境变量、部署或规格状态时，只更新受影响的权威入口并运行文档门禁；资产归属与高风险确认遵循 `AGENTS.md` 和确定性治理策略。

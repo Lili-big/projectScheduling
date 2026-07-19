@@ -1170,7 +1170,7 @@
     ]
   },
   "models": {
-    "count": 155,
+    "count": 156,
     "schemas": {
       "AbutmentConfig": {
         "properties": {
@@ -2512,6 +2512,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -3744,6 +3757,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -6065,6 +6091,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -6095,6 +6122,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -7435,6 +7474,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -7494,6 +7546,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -7727,6 +7780,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -9035,6 +9101,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -9065,6 +9132,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -9692,6 +9771,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -10973,6 +11053,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -11003,6 +11084,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -11637,6 +11730,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -11696,6 +11802,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -12075,6 +12182,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -12616,6 +12736,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -12889,6 +13022,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -13425,6 +13571,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -16186,6 +16345,13 @@
                 "title": "Input Resource Quantities",
                 "type": "object"
               },
+              "resource_pool_quantities": {
+                "items": {
+                  "$ref": "#/$defs/ResourcePoolQuantityResult"
+                },
+                "title": "Resource Pool Quantities",
+                "type": "array"
+              },
               "resource_expansion_attempted": {
                 "default": false,
                 "title": "Resource Expansion Attempted",
@@ -16510,6 +16676,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -16540,6 +16707,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -16646,6 +16825,72 @@
               "label"
             ],
             "title": "ResourcePool",
+            "type": "object"
+          },
+          "ResourcePoolQuantityResult": {
+            "properties": {
+              "resource_pool_id": {
+                "minLength": 1,
+                "title": "Resource Pool Id",
+                "type": "string"
+              },
+              "resource_type": {
+                "minLength": 1,
+                "title": "Resource Type",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "scope_mode": {
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "current_quantity": {
+                "minimum": 0,
+                "title": "Current Quantity",
+                "type": "integer"
+              },
+              "recommended_quantity": {
+                "minimum": 0,
+                "title": "Recommended Quantity",
+                "type": "integer"
+              },
+              "max_quantity": {
+                "minimum": 0,
+                "title": "Max Quantity",
+                "type": "integer"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              }
+            },
+            "required": [
+              "resource_pool_id",
+              "resource_type",
+              "scope_mode",
+              "current_quantity",
+              "recommended_quantity",
+              "max_quantity"
+            ],
+            "title": "ResourcePoolQuantityResult",
             "type": "object"
           },
           "ScenarioInput": {
@@ -17832,6 +18077,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -17891,6 +18149,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -19138,6 +19397,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -19168,6 +19428,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -19795,6 +20067,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -20883,6 +21156,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -22762,6 +23048,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -24243,6 +24542,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -25295,6 +25607,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -25775,6 +26100,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -26534,6 +26872,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -27048,6 +27399,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -27440,6 +27804,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -29083,6 +29460,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -29113,6 +29491,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -29740,6 +30130,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -31650,6 +32041,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -32326,6 +32730,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -32356,6 +32761,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -32522,6 +32939,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -33001,6 +33419,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -33031,6 +33450,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -33197,6 +33628,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -34734,6 +35166,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -34764,6 +35197,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -35391,6 +35836,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -39000,6 +39446,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -39030,6 +39477,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -40370,6 +40829,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -40429,6 +40901,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -44661,6 +45134,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -44691,6 +45165,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -46113,6 +46599,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -46172,6 +46671,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -48410,6 +48910,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -48440,6 +48941,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -49780,6 +50293,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -49839,6 +50365,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -51208,6 +51735,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -51238,6 +51766,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -51865,6 +52405,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -53420,6 +53961,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -53450,6 +53992,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -54077,6 +54631,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -55301,6 +55856,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -55331,6 +55887,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -55958,6 +56526,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -56974,6 +57543,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -59873,6 +60455,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -59903,6 +60486,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -60530,6 +61125,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -61698,6 +62294,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -61728,6 +62325,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -62355,6 +62964,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -64671,6 +65281,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -64701,6 +65312,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -65335,6 +65958,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -65394,6 +66030,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -66634,6 +67271,13 @@
                 "title": "Input Resource Quantities",
                 "type": "object"
               },
+              "resource_pool_quantities": {
+                "items": {
+                  "$ref": "#/$defs/ResourcePoolQuantityResult"
+                },
+                "title": "Resource Pool Quantities",
+                "type": "array"
+              },
               "resource_expansion_attempted": {
                 "default": false,
                 "title": "Resource Expansion Attempted",
@@ -67113,6 +67757,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -67143,6 +67788,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -67249,6 +67906,72 @@
               "label"
             ],
             "title": "ResourcePool",
+            "type": "object"
+          },
+          "ResourcePoolQuantityResult": {
+            "properties": {
+              "resource_pool_id": {
+                "minLength": 1,
+                "title": "Resource Pool Id",
+                "type": "string"
+              },
+              "resource_type": {
+                "minLength": 1,
+                "title": "Resource Type",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "scope_mode": {
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "current_quantity": {
+                "minimum": 0,
+                "title": "Current Quantity",
+                "type": "integer"
+              },
+              "recommended_quantity": {
+                "minimum": 0,
+                "title": "Recommended Quantity",
+                "type": "integer"
+              },
+              "max_quantity": {
+                "minimum": 0,
+                "title": "Max Quantity",
+                "type": "integer"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              }
+            },
+            "required": [
+              "resource_pool_id",
+              "resource_type",
+              "scope_mode",
+              "current_quantity",
+              "recommended_quantity",
+              "max_quantity"
+            ],
+            "title": "ResourcePoolQuantityResult",
             "type": "object"
           },
           "ScheduleInput": {
@@ -68054,6 +68777,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -68064,6 +68800,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -69850,6 +70587,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -69880,6 +70618,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -70507,6 +71257,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -71076,6 +71827,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -71106,6 +71858,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -71271,6 +72035,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -71281,6 +72058,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -71713,6 +72491,7 @@
       "ResourceAssistantPlan": {
         "$defs": {
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -71743,6 +72522,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -71908,6 +72699,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -71918,6 +72722,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -73019,6 +73824,72 @@
             "title": "ResourceAssistantTransferPenalty",
             "type": "object"
           },
+          "ResourcePoolQuantityResult": {
+            "properties": {
+              "resource_pool_id": {
+                "minLength": 1,
+                "title": "Resource Pool Id",
+                "type": "string"
+              },
+              "resource_type": {
+                "minLength": 1,
+                "title": "Resource Type",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "scope_mode": {
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "current_quantity": {
+                "minimum": 0,
+                "title": "Current Quantity",
+                "type": "integer"
+              },
+              "recommended_quantity": {
+                "minimum": 0,
+                "title": "Recommended Quantity",
+                "type": "integer"
+              },
+              "max_quantity": {
+                "minimum": 0,
+                "title": "Max Quantity",
+                "type": "integer"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              }
+            },
+            "required": [
+              "resource_pool_id",
+              "resource_type",
+              "scope_mode",
+              "current_quantity",
+              "recommended_quantity",
+              "max_quantity"
+            ],
+            "title": "ResourcePoolQuantityResult",
+            "type": "object"
+          },
           "ScheduleInput": {
             "properties": {
               "project_name": {
@@ -73822,6 +74693,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -73911,6 +74795,13 @@
             },
             "title": "Input Resource Quantities",
             "type": "object"
+          },
+          "resource_pool_quantities": {
+            "items": {
+              "$ref": "#/$defs/ResourcePoolQuantityResult"
+            },
+            "title": "Resource Pool Quantities",
+            "type": "array"
           },
           "resource_expansion_attempted": {
             "default": false,
@@ -74241,6 +75132,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -74749,6 +75653,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -75734,6 +76651,13 @@
                 "title": "Input Resource Quantities",
                 "type": "object"
               },
+              "resource_pool_quantities": {
+                "items": {
+                  "$ref": "#/$defs/ResourcePoolQuantityResult"
+                },
+                "title": "Resource Pool Quantities",
+                "type": "array"
+              },
               "resource_expansion_attempted": {
                 "default": false,
                 "title": "Resource Expansion Attempted",
@@ -76015,6 +76939,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -76045,6 +76970,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -76151,6 +77088,72 @@
               "label"
             ],
             "title": "ResourcePool",
+            "type": "object"
+          },
+          "ResourcePoolQuantityResult": {
+            "properties": {
+              "resource_pool_id": {
+                "minLength": 1,
+                "title": "Resource Pool Id",
+                "type": "string"
+              },
+              "resource_type": {
+                "minLength": 1,
+                "title": "Resource Type",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "scope_mode": {
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "current_quantity": {
+                "minimum": 0,
+                "title": "Current Quantity",
+                "type": "integer"
+              },
+              "recommended_quantity": {
+                "minimum": 0,
+                "title": "Recommended Quantity",
+                "type": "integer"
+              },
+              "max_quantity": {
+                "minimum": 0,
+                "title": "Max Quantity",
+                "type": "integer"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              }
+            },
+            "required": [
+              "resource_pool_id",
+              "resource_type",
+              "scope_mode",
+              "current_quantity",
+              "recommended_quantity",
+              "max_quantity"
+            ],
+            "title": "ResourcePoolQuantityResult",
             "type": "object"
           },
           "ScheduleInput": {
@@ -76956,6 +77959,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -76966,6 +77982,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -78370,6 +79387,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -78400,6 +79418,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -79034,6 +80064,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -79093,6 +80136,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -80077,6 +81121,13 @@
                 "title": "Input Resource Quantities",
                 "type": "object"
               },
+              "resource_pool_quantities": {
+                "items": {
+                  "$ref": "#/$defs/ResourcePoolQuantityResult"
+                },
+                "title": "Resource Pool Quantities",
+                "type": "array"
+              },
               "resource_expansion_attempted": {
                 "default": false,
                 "title": "Resource Expansion Attempted",
@@ -80358,6 +81409,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -80388,6 +81440,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -80494,6 +81558,72 @@
               "label"
             ],
             "title": "ResourcePool",
+            "type": "object"
+          },
+          "ResourcePoolQuantityResult": {
+            "properties": {
+              "resource_pool_id": {
+                "minLength": 1,
+                "title": "Resource Pool Id",
+                "type": "string"
+              },
+              "resource_type": {
+                "minLength": 1,
+                "title": "Resource Type",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "scope_mode": {
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "current_quantity": {
+                "minimum": 0,
+                "title": "Current Quantity",
+                "type": "integer"
+              },
+              "recommended_quantity": {
+                "minimum": 0,
+                "title": "Recommended Quantity",
+                "type": "integer"
+              },
+              "max_quantity": {
+                "minimum": 0,
+                "title": "Max Quantity",
+                "type": "integer"
+              },
+              "eligible_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Eligible Workpoint Ids",
+                "type": "array"
+              }
+            },
+            "required": [
+              "resource_pool_id",
+              "resource_type",
+              "scope_mode",
+              "current_quantity",
+              "recommended_quantity",
+              "max_quantity"
+            ],
+            "title": "ResourcePoolQuantityResult",
             "type": "object"
           },
           "ScheduleInput": {
@@ -81299,6 +82429,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -81309,6 +82452,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -81554,6 +82698,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -81584,6 +82729,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -81693,6 +82850,7 @@
             "type": "object"
           },
           "ScopedResourceQuantityUpdate": {
+            "additionalProperties": false,
             "properties": {
               "resource_pool_id": {
                 "minLength": 1,
@@ -81781,6 +82939,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -81791,6 +82962,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -82007,6 +83179,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -82037,6 +83210,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -82202,6 +83387,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -82212,6 +83410,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -83443,6 +84642,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -83473,6 +84673,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -84100,6 +85312,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -84179,6 +85392,7 @@
       "ResourcePool": {
         "$defs": {
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -84231,6 +85445,7 @@
             "type": "object"
           }
         },
+        "additionalProperties": true,
         "properties": {
           "id": {
             "title": "Id",
@@ -84261,6 +85476,18 @@
             ],
             "title": "Scope Mode",
             "type": "string"
+          },
+          "workpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workpoint Id"
           },
           "quantity": {
             "anyOf": [
@@ -84367,6 +85594,72 @@
           "label"
         ],
         "title": "ResourcePool",
+        "type": "object"
+      },
+      "ResourcePoolQuantityResult": {
+        "properties": {
+          "resource_pool_id": {
+            "minLength": 1,
+            "title": "Resource Pool Id",
+            "type": "string"
+          },
+          "resource_type": {
+            "minLength": 1,
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "workpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workpoint Id"
+          },
+          "scope_mode": {
+            "enum": [
+              "PROJECT_SHARED",
+              "WORKPOINT_EXCLUSIVE"
+            ],
+            "title": "Scope Mode",
+            "type": "string"
+          },
+          "current_quantity": {
+            "minimum": 0,
+            "title": "Current Quantity",
+            "type": "integer"
+          },
+          "recommended_quantity": {
+            "minimum": 0,
+            "title": "Recommended Quantity",
+            "type": "integer"
+          },
+          "max_quantity": {
+            "minimum": 0,
+            "title": "Max Quantity",
+            "type": "integer"
+          },
+          "eligible_workpoint_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Eligible Workpoint Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "resource_pool_id",
+          "resource_type",
+          "scope_mode",
+          "current_quantity",
+          "recommended_quantity",
+          "max_quantity"
+        ],
+        "title": "ResourcePoolQuantityResult",
         "type": "object"
       },
       "RouteRun": {
@@ -85695,6 +86988,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -87144,6 +88450,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -88307,6 +89626,7 @@
             "type": "object"
           },
           "ResourcePool": {
+            "additionalProperties": true,
             "properties": {
               "id": {
                 "title": "Id",
@@ -88337,6 +89657,18 @@
                 ],
                 "title": "Scope Mode",
                 "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
               },
               "quantity": {
                 "anyOf": [
@@ -88855,6 +90187,7 @@
             "type": "object"
           },
           "WorkpointResourceOverride": {
+            "additionalProperties": true,
             "properties": {
               "workpoint_id": {
                 "minLength": 1,
@@ -90346,6 +91679,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -91588,6 +92934,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -92080,6 +93439,7 @@
         "type": "object"
       },
       "ScopedResourceQuantityUpdate": {
+        "additionalProperties": false,
         "properties": {
           "resource_pool_id": {
             "minLength": 1,
@@ -92840,6 +94200,19 @@
             ],
             "default": null,
             "title": "Suggestion"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Details"
           }
         },
         "required": [
@@ -93552,6 +94925,19 @@
                 ],
                 "default": null,
                 "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
               }
             },
             "required": [
@@ -93927,6 +95313,7 @@
         "type": "object"
       },
       "WorkpointResourceOverride": {
+        "additionalProperties": true,
         "properties": {
           "workpoint_id": {
             "minLength": 1,
@@ -94193,6 +95580,10 @@
       },
       {
         "name": "ComponentModel",
+        "kind": "class"
+      },
+      {
+        "name": "ConfigDict",
         "kind": "class"
       },
       {
@@ -94657,6 +96048,10 @@
       },
       {
         "name": "ResourcePool",
+        "kind": "class"
+      },
+      {
+        "name": "ResourcePoolQuantityResult",
         "kind": "class"
       },
       {
@@ -95301,10 +96696,10 @@
     ]
   },
   "fixed_scenario": {
-    "scenario_sha256": "1fb0a2f27228d447ed47c9268e4f8d67d0696c5993ef13eedd407782b7ffb485",
-    "generated_sha256": "2105d28d32ee9919bf0e8058e436bf6ef1ea89411ae373a60ce7033cd5a57b6f",
+    "scenario_sha256": "0c1ed6ee38ca82fd8ec62879a8e95bc431e19ea29643c26c63c8ffa20b5d71f0",
+    "generated_sha256": "7bd3e8c2c5e7e4bdf6863a2fca719a84263d9b791f061de1b649fd386dc03d93",
     "task_count": 68,
-    "resource_pool_count": 8,
+    "resource_pool_count": 9,
     "milestone_count": 1
   }
 }

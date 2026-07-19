@@ -333,6 +333,7 @@ export type ResourcePool = {
   label: string;
   resource_mode?: ResourceMode;
   scope_mode?: ResourceScopeMode;
+  workpoint_id?: string | null;
   quantity: number | null;
   max_quantity?: number | null;
   authorized_workpoint_ids?: string[] | null;
@@ -345,6 +346,17 @@ export type ResourcePool = {
   billing_period_days?: number;
   same_structure_resource_binding?: boolean;
   parallel_rule_description?: string;
+};
+
+export type ResourcePoolQuantityResult = {
+  resource_pool_id: string;
+  resource_type: string;
+  workpoint_id?: string | null;
+  scope_mode: ResourceScopeMode;
+  current_quantity: number;
+  recommended_quantity: number;
+  max_quantity: number;
+  eligible_workpoint_ids: string[];
 };
 
 export type MilestoneConstraint = {
@@ -906,6 +918,7 @@ export type ResourceAssistantPlanResult = {
   schedule_outcome_reason?: ResourceAssistantScheduleOutcomeReason | null;
   solver_status?: string | null;
   input_resource_quantities: Record<string, number>;
+  resource_pool_quantities?: ResourcePoolQuantityResult[];
   resource_expansion_attempted: boolean;
   optimization_stages?: ResourceAssistantOptimizationStages | null;
   generated?: GeneratedScheduleInput | null;
@@ -962,7 +975,7 @@ export type ResourceAssistantInitialResponse = {
 
 export type ScopedResourceQuantityUpdate = {
   resource_pool_id: string;
-  workpoint_id?: string | null;
+  workpoint_id: string | null;
   quantity: number;
 };
 

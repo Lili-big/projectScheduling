@@ -1,0 +1,19 @@
+{
+  "id": "json-schedule-review",
+  "stage": "01-customer-validation",
+  "purpose": "对真实工程排程 JSON 生成检查报告和固定快照。",
+  "status": "active",
+  "inputs": ["customer-materials/固定资源最小工期结果.v1.json"],
+  "entrypoints": [
+    "validation-results/_scripts/build-engineering-result-snapshot.mjs",
+    "validation-results/_scripts/生成研发结果快照.cmd"
+  ],
+  "results": [
+    "validation-results/固定资源最小工期结果.v1.report.json",
+    "validation-results/固定资源最小工期结果.v1.html"
+  ],
+  "owner": "L01｜需求发现与验证闭环（排程结果验证）",
+  "tracking_policy": "tracked",
+  "retention_policy": "README 和脚本跟踪；真实输入 local-only；报告和 HTML 可再生成并忽略。",
+  "related_workpackages": ["json-task-viewer"]
+}
