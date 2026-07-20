@@ -12,7 +12,7 @@ const demoRoot = resolve(frontendRoot, "..");
 const repoRoot = resolve(demoRoot, "..");
 const backendRoot = resolve(demoRoot, "backend");
 const runId = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
-const evidenceRoot = resolve(repoRoot, ".local-data", "logs", "048-workpoint-first-resource-allocation", "d05-workspace");
+const evidenceRoot = resolve(repoRoot, ".local-data", "logs", "050-structure-matched-resource-catalog", "runtime");
 const logDir = resolve(evidenceRoot, `${runId}-resource-workpoint-runtime`);
 const tempDir = resolve(repoRoot, ".local-data", "tmp", "resource-workpoint-runtime", runId);
 const frontendUrl = "http://127.0.0.1:5173";
@@ -32,7 +32,7 @@ const evidence = {
   browser: null,
   oracle: null,
   transitions: [],
-  requests: { saves: [], workpointLists: [] },
+  requests: { saves: [], generations: [], workpointLists: [], workpointDetails: [] },
   assertions: {},
 };
 let browser = null;
@@ -43,10 +43,13 @@ let networkMode = {
   saveFailureRemaining: 0,
   workpointMode: "pass",
   pauseNextV1: false,
+  pauseNextDetail: false,
+  firstDetailWithoutStructures: false,
   projectMasterMock: false,
   v2Confirmed: false,
 };
 let pausedV1 = null;
+let pausedDetail = null;
 
 const sleep = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 const now = () => new Date().toISOString();
@@ -381,6 +384,9 @@ async function handleRequestPaused(params) {
     }
     return;
   }
+  if (method === "POST" && url.includes("/api/generate-schedule-input")) {
+    evidence.requests.generations.push({ at: now(), body: JSON.parse(params.request.postData ?? "{}") });
+  }
   const workpointMatch = url.match(/\/api\/project-master\/versions\/([^/]+)\/workpoints\?/);
   if (method === "GET" && workpointMatch) {
     const versionId = decodeURIComponent(workpointMatch[1]);
@@ -401,6 +407,27 @@ async function handleRequestPaused(params) {
     if (versionId === oracle.currentVersion.version_id && networkMode.workpointMode === "fail") {
       networkMode.workpointMode = "pass";
       await fulfillJson(params.requestId, { detail: "受控工点加载失败" }, 503);
+      return;
+    }
+  }
+  const workpointDetailMatch = url.match(/\/api\/project-master\/versions\/([^/]+)\/workpoints\/([^/?]+)(?:\?|$)/);
+  if (method === "GET" && workpointDetailMatch) {
+    const versionId = decodeURIComponent(workpointDetailMatch[1]);
+    const workpointId = decodeURIComponent(workpointDetailMatch[2]);
+    evidence.requests.workpointDetails.push({ at: now(), versionId, workpointId });
+    const details = versionId === oracle.v2Version.version_id ? oracle.v2Details : oracle.currentDetails;
+    const detail = details[workpointId];
+    if (detail) {
+      if (networkMode.pauseNextDetail) {
+        networkMode.pauseNextDetail = false;
+        pausedDetail = { requestId: params.requestId, detail };
+        return;
+      }
+      if (networkMode.firstDetailWithoutStructures && workpointId === oracle.currentWorkpoints[0].workpoint_id) {
+        await fulfillJson(params.requestId, { ...detail, structures: [] });
+        return;
+      }
+      await fulfillJson(params.requestId, detail);
       return;
     }
   }
@@ -449,11 +476,75 @@ function workpoint(id, name, sortOrder) {
   };
 }
 
+function resourceComponent(id, type, { methodId = null, enabled = true } = {}) {
+  return {
+    component_id: id,
+    structure_id: "runtime-lower",
+    component_name: id,
+    component_type: type,
+    quantity: 1,
+    unit: "个",
+    enabled,
+    sort_order: 1,
+    remark: null,
+    parameters: methodId
+      ? [{ parameter_code: "method_id", value_type: "text", value: methodId, unit: null, sort_order: 1, source: null }]
+      : [],
+    source: null,
+  };
+}
+
+function resourceDetail(item, { empty = false } = {}) {
+  if (empty) return { ...item, structures: [] };
+  return {
+    ...item,
+    structures: [
+      {
+        structure_id: "runtime-lower",
+        workpoint_id: item.workpoint_id,
+        structure_name: "受控下部结构",
+        structure_category: "substructure",
+        structure_type: "bridge_pier",
+        side: "left",
+        section_code: "runtime-section",
+        section_name: "受控工区",
+        control_level: "normal",
+        sort_order: 1,
+        remark: null,
+        parameters: [],
+        components: [
+          resourceComponent("runtime-pile", "pile", { methodId: "rotary_drill" }),
+          resourceComponent("runtime-cap", "cap"),
+          resourceComponent("runtime-pier", "pier_body"),
+          resourceComponent("runtime-cap-beam", "cap_beam"),
+        ],
+        source: null,
+      },
+      {
+        structure_id: "runtime-continuous",
+        workpoint_id: item.workpoint_id,
+        structure_name: "受控连续梁",
+        structure_category: "superstructure",
+        structure_type: "continuous_unit",
+        side: "left",
+        section_code: "runtime-section",
+        section_name: "受控工区",
+        control_level: "control",
+        sort_order: 2,
+        remark: null,
+        parameters: [],
+        components: [],
+        source: null,
+      },
+    ],
+  };
+}
+
 async function loadOracle() {
   const scenario = await (await fetch(`${apiUrl}/api/demo-scenario`)).json();
   const currentVersion = await (await fetch(`${apiUrl}/api/projects/${encodeURIComponent(scenario.project.project_id)}/project-master/versions/current`)).json();
   const page = await (await fetch(`${apiUrl}/api/project-master/versions/${encodeURIComponent(currentVersion.version_id)}/workpoints?page=1&page_size=200&workpoint_type=bridge`)).json();
-  assert.ok(page.items.length > 0, "runtime fixture requires at least one authoritative bridge workpoint");
+  assert.ok(page.items.length > 1, "runtime fixture requires at least two authoritative bridge workpoints");
   const counts = { workpoints: 2, structures: 0, components: 0, errors: 0, warnings: 0 };
   const v2VersionId = `${currentVersion.version_id}-runtime-next`;
   const v2Workpoints = [workpoint("runtime-current-a", "当前版本工点甲", 1), workpoint("runtime-current-b", "当前版本工点乙", 2)];
@@ -478,8 +569,10 @@ async function loadOracle() {
     projectId: scenario.project.project_id,
     currentVersion,
     currentWorkpoints: page.items,
+    currentDetails: Object.fromEntries(page.items.map((item, index) => [item.workpoint_id, resourceDetail(item, { empty: index > 0 })])),
     v2Version,
     v2Workpoints,
+    v2Details: Object.fromEntries(v2Workpoints.map((item, index) => [item.workpoint_id, resourceDetail(item, { empty: index > 0 })])),
     importBatch: {
       batch_id: "runtime-batch",
       project_id: scenario.project.project_id,
@@ -529,45 +622,41 @@ after(async () => {
   await stopOwnedProcesses();
 });
 
-test("T016 production workspace keeps workpoint-first resources authoritative across retry, empty and version races", { timeout: timeoutMs }, async () => {
+test("T015 production workspace matches Chinese resources from structures across save, empty and version races", { timeout: timeoutMs }, async () => {
   await navigate(`${frontendUrl}/?resource-workpoint-runtime=${runId}`);
   await waitForExpression("[...document.querySelectorAll('button')].some((item) => item.textContent.trim() === '资源配置')", "workspace navigation");
   await openResourcesAfterTaskReady();
-  await sleep(1_000);
+  await waitForExpression("document.querySelector('.resource-scope-panel')?.innerText.includes('旋挖钻机') && document.querySelector('.resource-scope-panel')?.innerText.includes('连续梁班组')", "structure-matched Chinese resources");
   const firstResourceState = await evaluate(`(() => ({
     url: location.href,
     body: document.body.innerText.slice(0, 3000),
     panel: Boolean(document.querySelector('.resource-scope-panel')),
-    cards: document.querySelectorAll('.resource-scope-card').length,
+    sharedEditor: Boolean(document.querySelector('.resource-shared-section')),
   }))()`);
   assert.equal(firstResourceState.panel, true, JSON.stringify(firstResourceState));
-  assert.ok(firstResourceState.cards > 0, JSON.stringify(firstResourceState));
-  assert.equal(await evaluate("document.querySelector('.resource-shared-notice')?.textContent.includes('转场时间 0 天')"), true);
+  assert.equal(firstResourceState.sharedEditor, false, JSON.stringify(firstResourceState));
   assert.equal(await evaluate("document.querySelectorAll('.resource-workpoint-section input[aria-label*=" + JSON.stringify("获准") + "]').length"), 0);
   assert.equal(await evaluate("Boolean(document.querySelector('.resource-catalog-add'))"), true);
+  assert.equal(await evaluate("document.querySelector('.resource-workpoint-table input[aria-label$='当前投入']')?.value"), "0");
+  assert.equal(await evaluate("document.querySelector('.resource-workpoint-table input[aria-label$='可增上限']')?.value"), "0");
+  assert.equal(evidence.requests.saves.length, 0);
+  assert.ok(evidence.requests.generations.length > 0);
+  assert.equal(evidence.requests.generations.some(({ body }) => body.resource_pools?.some((pool) => pool.scope_mode === "PROJECT_SHARED")), false);
 
-  await evaluate(`(() => {
-    const addSelect = document.querySelector('.resource-shared-add select');
-    const firstPoolType = document.querySelector('.resource-scope-card .resource-scope-defaults select')?.value;
-    addSelect.value = firstPoolType || addSelect.options[1]?.value || '';
-    addSelect.dispatchEvent(new Event('change', { bubbles: true }));
-  })()`);
-  assert.equal(await clickText("新增共享池"), true);
-  await waitForExpression(`document.querySelectorAll('.resource-scope-card').length === ${firstResourceState.cards + 1}`, "same-type shared pool added");
-  await evaluate(`(() => {
-    const cards = [...document.querySelectorAll('.resource-scope-card')];
-    cards.at(-1).querySelector('.resource-all-workpoints input').click();
-  })()`);
-  await waitForExpression("Boolean([...document.querySelectorAll('.resource-scope-card')].at(-1).querySelector('.resource-inline-error'))", "explicit empty shared range blocked");
-  await evaluate(`(() => {
-    const card = [...document.querySelectorAll('.resource-scope-card')].at(-1);
-    card.querySelector('.resource-workpoint-options input').click();
-  })()`);
-  await waitForExpression("![...document.querySelectorAll('.resource-scope-card')].at(-1).querySelector('.resource-inline-error')", "shared range selected");
-  assert.equal(await evaluate(`(() => {
-    const types = [...document.querySelectorAll('.resource-scope-card .resource-scope-defaults select')].map((item) => item.value);
-    return new Set(types).size < types.length;
-  })()`), true);
+  await evaluate("document.querySelectorAll('.resource-workpoint-nav button')[1].click()");
+  await waitForExpression("Boolean(document.querySelector('[data-resource-suggestion-empty=true]'))", "initial empty second workpoint suggestions");
+  networkMode.pauseNextDetail = true;
+  await evaluate("document.querySelectorAll('.resource-workpoint-nav button')[0].click()");
+  await waitUntil(() => pausedDetail, "paused old workpoint detail", 30_000);
+  await evaluate("document.querySelectorAll('.resource-workpoint-nav button')[1].click()");
+  await waitForExpression("Boolean(document.querySelector('[data-resource-suggestion-empty=true]'))", "empty second workpoint suggestions");
+  await fulfillJson(pausedDetail.requestId, pausedDetail.detail);
+  pausedDetail = null;
+  await sleep(300);
+  assert.equal(await evaluate("document.querySelectorAll('.resource-workpoint-nav button')[1].classList.contains('active')"), true);
+  assert.equal(await evaluate("Boolean(document.querySelector('[data-resource-suggestion-empty=true]'))"), true);
+  await evaluate("document.querySelectorAll('.resource-workpoint-nav button')[0].click()");
+  await waitForExpression("document.querySelector('.resource-scope-panel')?.innerText.includes('旋挖钻机')", "return to matched workpoint");
   const editedValue = 3;
   await evaluate(`(() => {
     const input = document.querySelector('.resource-workpoint-table input[aria-label$="当前投入"]');
@@ -590,6 +679,14 @@ test("T016 production workspace keeps workpoint-first resources authoritative ac
   assert.equal(savedPool.scope_mode, "WORKPOINT_EXCLUSIVE");
   assert.equal(savedPool.workpoint_overrides.length, 0);
   assert.ok(oracle.currentWorkpoints.some((item) => item.workpoint_id === savedPool.workpoint_id));
+  assert.equal(evidence.requests.saves[1].body.resource_pools.some((pool) => pool.scope_mode === "PROJECT_SHARED"), false);
+
+  networkMode.firstDetailWithoutStructures = true;
+  await evaluate("document.querySelectorAll('.resource-workpoint-nav button')[1].click()");
+  await waitForExpression("Boolean(document.querySelector('[data-resource-suggestion-empty=true]'))", "empty second workpoint before retained pool check");
+  await evaluate("document.querySelectorAll('.resource-workpoint-nav button')[0].click()");
+  await waitForExpression(`document.querySelector('.resource-workpoint-table input[aria-label$="当前投入"]')?.value === '${editedValue}'`, "configured pool retained after structure mismatch");
+  networkMode.firstDetailWithoutStructures = false;
 
   networkMode.workpointMode = "fail";
   await navigate(`${frontendUrl}/?resource-workpoint-runtime=${runId}-retry`);
@@ -645,10 +742,15 @@ test("T016 production workspace keeps workpoint-first resources authoritative ac
   assert.equal(cdp.eventErrors.length, 0);
 
   evidence.assertions = {
-    sharedAndExclusiveVisible: true,
-    sameTypeSharedPoolsVisible: true,
-    explicitEmptySharedRangeBlocked: true,
+    sharedEditorVisible: false,
+    generationRequestsWithSharedPools: 0,
+    saveRequestsWithSharedPools: 0,
     workpointLocalRecordVisible: true,
+    ChineseNamesVisible: true,
+    structureMatchedTypesVisible: true,
+    suggestionsStartAtZero: true,
+    staleDetailCommits: 0,
+    configuredPoolRetainedAfterMismatch: true,
     saveFailureRetriedWithoutInputLoss: true,
     authoritativeEmptyRows: 0,
     oldVersionDomCommitsAfterCurrentReady: 0,

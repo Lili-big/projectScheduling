@@ -10,6 +10,8 @@ sys.path.insert(0, str(BACKEND_ROOT))
 sys.path.insert(0, str(BACKEND_ROOT / "scripts"))
 
 from app.main import app  # noqa: E402
+from app.contracts import LocalScenarioConfigResponse, LocalScenarioConfigSaveRequest  # noqa: E402
+from app.scenario_data import default_scenario  # noqa: E402
 from capture_architecture_baseline import _route_manifest  # noqa: E402
 
 
@@ -84,3 +86,24 @@ def test_workpoint_first_resource_fields_are_additive_on_existing_api_schemas() 
     assert {"input_resource_quantities", "resource_pool_quantities"} <= assistant_result_properties.keys()
     assert "ResourcePoolQuantityResult" in schemas
     assert "details" in validation_properties
+
+
+def test_local_scenario_config_contract_accepts_and_returns_empty_resource_pools() -> None:
+    scenario = default_scenario()
+    request = LocalScenarioConfigSaveRequest(
+        process_library=scenario.process_library,
+        logic_rules=scenario.logic_rules,
+        upper_structure_logic_rules=scenario.upper_structure_logic_rules,
+        resource_pools=[],
+        milestones=scenario.milestones,
+    )
+    response = LocalScenarioConfigResponse(
+        process_library=request.process_library,
+        logic_rules=request.logic_rules,
+        upper_structure_logic_rules=request.upper_structure_logic_rules,
+        resource_pools=[],
+        milestones=request.milestones,
+    )
+
+    assert request.resource_pools == []
+    assert response.resource_pools == []

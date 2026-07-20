@@ -58,10 +58,11 @@
       "id": "customer-research",
       "stage": "01-customer-validation",
       "workpackage": "existing-or-new-customer-project",
-      "asset_type": "customer-material-or-research-record",
+      "asset_type": "raw-customer-material-or-analyzed-research-summary",
       "tracking_policy": "tracked",
       "retention_class": "formal-output",
-      "primary_owner": "01-customer-validation/<project>/customer-materials"
+      "primary_owner": "01-customer-validation/<project>",
+      "asset_subdirectory_rule": "未经分析加工的原始材料进入 customer-materials；已分析的调研总结进入 validation-results"
     },
     {
       "id": "customer-validation",
@@ -70,7 +71,7 @@
       "asset_type": "validation-plan-script-result-or-report",
       "tracking_policy": "tracked",
       "retention_class": "formal-output",
-      "primary_owner": "01-customer-validation/<project>"
+      "primary_owner": "01-customer-validation/<project>/validation-plans-or-validation-results"
     },
     {
       "id": "solution-proposal",
@@ -111,7 +112,7 @@
   ],
   "local_asset_routes": {
     "persistent-state": ".local-data/state",
-    "user-input": "customer-materials with local-only tracking",
+    "user-input": "formal customer-materials tracked in Git; temporary copies use .local-data/tmp",
     "diagnostic-log": ".local-data/logs",
     "rebuildable": ".local-data/archive/rebuildable",
     "cache": ".local-data/cache",

@@ -1,0 +1,13 @@
+{
+  "fixture_id": "performance-500-10-300-v1",
+  "generator": {
+    "workpoint_count": 500,
+    "beam_yard_count": 10,
+    "bridge_side_target_count": 300,
+    "beam_types": ["T32", "T40"],
+    "pieces_per_target": 4
+  },
+  "runs": 3,
+  "max_elapsed_seconds_per_run": 10,
+  "require_stable_result_fingerprint": true
+}

@@ -13,17 +13,7 @@ import type {
   ResourceAssistantLlmConfigStatus,
   ResourcePool,
 } from "../contracts";
-
-const defaultResourceTypeLabels: Record<string, string> = {
-  rotary_drill: "旋挖钻",
-  circulation_drill: "回旋钻",
-  impact_drill: "冲击钻",
-  manual_pile_team: "人工挖孔班组",
-  cap_team: "承台模板",
-  pier_body_team: "墩柱模板",
-  cap_beam_team: "盖梁模板",
-  cast_in_place_continuous_beam_team: "连续梁班组",
-};
+import { resourceTypeLabel } from "./resources";
 
 export const resourceAssistantProfileLabels: Record<ResourceAssistantPlanProfile, string> = {
   economy: "经济方案",
@@ -279,12 +269,12 @@ export function editableResourcePools(plan: ResourceAssistantPlan): ResourcePool
 }
 
 export function resourceAssistantResourceLabel(resourceType: string, pools: ResourcePool[] = []): string {
-  return pools.find((pool) => pool.type === resourceType)?.label ?? defaultResourceTypeLabels[resourceType] ?? resourceType;
+  return resourceTypeLabel(resourceType, pools);
 }
 
 export function resourceAssistantPoolLabel(pool: ResourcePool, pools: ResourcePool[] = []): string {
   const sameTypeCount = pools.filter((candidate) => candidate.type === pool.type).length;
-  const base = pool.label || resourceAssistantResourceLabel(pool.type, pools);
+  const base = resourceTypeLabel(pool.type, [pool]);
   return sameTypeCount > 1 ? `${base} · ${pool.id}` : base;
 }
 

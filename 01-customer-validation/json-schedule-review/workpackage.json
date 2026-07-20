@@ -14,6 +14,6 @@
   ],
   "owner": "L01｜需求发现与验证闭环（排程结果验证）",
   "tracking_policy": "tracked",
-  "retention_policy": "README 和脚本跟踪；真实输入 local-only；报告和 HTML 可再生成并忽略。",
+  "retention_policy": "正式 JSON 输入、报告、HTML 和脚本全部进入 Git；临时预览、缓存和运行日志进入 .local-data。",
   "related_workpackages": ["json-task-viewer"]
 }

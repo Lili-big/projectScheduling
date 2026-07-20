@@ -447,12 +447,19 @@ type WorkbookSheet = {
 
 // Netlify Functions do not provide durable local disk for this demo API; FastAPI stores the real local JSON file.
 let localScenarioConfigCache: Partial<LocalScenarioConfig> | null = null;
+// Ephemeral mirror state only; the authoritative FastAPI implementation uses
+// .local-data/state/girder-plan-simulation-store.json.
+const girderPlanScenarioCache = new Map<string, any>();
+const girderPlanRunCache = new Map<string, any>();
 
 export default async function handler(req: Request, context: Context) {
   try {
     const endpoint = apiEndpointFromRequest(req, context);
     if (endpoint === "health" && req.method === "GET") {
       return json({ status: "ok" });
+    }
+    if (endpoint.startsWith("girder-plan-simulation/")) {
+      return handleGirderPlanSimulation(endpoint, req);
     }
     if ((endpoint === "demo-scenario" || endpoint === "process-library") && req.method === "GET") {
       const scenario = createDefaultScenario();
@@ -476,7 +483,9 @@ export default async function handler(req: Request, context: Context) {
         upper_structure_logic_rules: Array.isArray(body.upper_structure_logic_rules)
           ? body.upper_structure_logic_rules
           : fallback.upper_structure_logic_rules,
-        resource_pools: Array.isArray(body.resource_pools) ? body.resource_pools : fallback.resource_pools,
+        resource_pools: currentProjectResourcePools(
+          Array.isArray(body.resource_pools) ? body.resource_pools : fallback.resource_pools,
+        ),
       };
       return json(localScenarioConfigCache);
     }
@@ -594,16 +603,7 @@ function createDefaultScenario(): ScenarioInput {
     ],
     upper_structure_logic_rules: defaultUpperStructureLogicRules(),
     resource_calendars: [{ id: "continuous", name: "连续自然日", working_weekdays: [0, 1, 2, 3, 4, 5, 6], blackout_dates: [] }],
-    resource_pools: [
-      pool("pool-rotary-drill", "rotary_drill", "旋挖钻", 3, 5, "monthly_rental", 180000, 30),
-      pool("pool-circulation-drill", "circulation_drill", "回旋钻", 0, 5),
-      pool("pool-impact-drill", "impact_drill", "冲击钻", 0, 5),
-      pool("pool-manual-pile", "manual_pile_team", "人工挖孔班组", 0, 10),
-      pool("pool-cap", "cap_team", "承台模板", 1, 5),
-      pool("pool-pier-body", "pier_body_team", "墩柱模板", 1, 5, "one_time_purchase", 90000),
-      pool("pool-cap-beam", "cap_beam_team", "盖梁模板", 1, 5, "one_time_purchase", 80000),
-      pool("pool-cast-in-place-continuous-beam", "cast_in_place_continuous_beam_team", "连续梁班组", 1, 1),
-    ],
+    resource_pools: [],
     milestones: [
       milestone("M-contract-finish", "合同下部结构及上部现浇梁完工", "contract", "hard", "bridge", "B1", "2028-12-31", 10),
       milestone("M-control-ws-lower", "下部结构及上部现浇梁强控节点", "control", "hard", "bridge", "B1", "2028-12-15", 10),
@@ -611,7 +611,6 @@ function createDefaultScenario(): ScenarioInput {
     ],
     time_limit_seconds: 15,
   };
-  applyDefaultResourcePoolQuantities(scenario);
   return applyCachedLocalScenarioConfig(scenario);
 }
 
@@ -754,30 +753,10 @@ function normalizeProcessTemplate(processTemplate: ProcessTemplate): ProcessTemp
   };
 }
 
-function applyDefaultResourcePoolQuantities(scenario: ScenarioInput) {
-  const defaults: Record<string, { quantity: number; maxQuantity: number }> = {
-    rotary_drill: { quantity: 1, maxQuantity: 10 },
-    circulation_drill: { quantity: 1, maxQuantity: 10 },
-    impact_drill: { quantity: 1, maxQuantity: 10 },
-    manual_pile_team: { quantity: 1, maxQuantity: 10 },
-    cap_team: { quantity: 1, maxQuantity: 10 },
-    pier_body_team: { quantity: 1, maxQuantity: 10 },
-    cap_beam_team: { quantity: 1, maxQuantity: 10 },
-    cast_in_place_continuous_beam_team: { quantity: 1, maxQuantity: 10 },
-  };
-  scenario.resource_pools = scenario.resource_pools.map((resourcePool) => {
-    const defaultValue = defaults[resourcePool.type];
-    if (!defaultValue) return resourcePool;
-    return {
-      ...resourcePool,
-      quantity: defaultValue.quantity,
-      max_quantity: defaultValue.maxQuantity,
-    };
-  });
-}
-
 function applyCachedLocalScenarioConfig(scenario: ScenarioInput): ScenarioInput {
-  if (!localScenarioConfigCache) return scenario;
+  if (!localScenarioConfigCache) {
+    return { ...scenario, resource_pools: currentProjectResourcePools(scenario.resource_pools) };
+  }
   return {
     ...scenario,
     process_library: mergeById(scenario.process_library, localScenarioConfigCache.process_library),
@@ -786,8 +765,214 @@ function applyCachedLocalScenarioConfig(scenario: ScenarioInput): ScenarioInput 
       scenario.upper_structure_logic_rules ?? [],
       localScenarioConfigCache.upper_structure_logic_rules,
     ),
-    resource_pools: mergeById(scenario.resource_pools, localScenarioConfigCache.resource_pools),
+    resource_pools: currentProjectResourcePools(
+      mergeById(scenario.resource_pools, localScenarioConfigCache.resource_pools),
+    ),
   };
+}
+
+async function handleGirderPlanSimulation(endpoint: string, req: Request): Promise<Response> {
+  const graphMatch = endpoint.match(/^girder-plan-simulation\/line-graphs\/([^/]+)$/);
+  if (graphMatch && req.method === "GET") return json(mirrorLineGraph(decodeURIComponent(graphMatch[1])));
+  if (endpoint === "girder-plan-simulation/scenarios" && req.method === "GET") {
+    const projectId = new URL(req.url).searchParams.get("project_id");
+    return json([...girderPlanScenarioCache.values()].filter((item) => !projectId || item.project_id === projectId));
+  }
+  if (endpoint === "girder-plan-simulation/scenarios" && req.method === "POST") {
+    const body = await req.json() as any;
+    const scenarioId = body.scenario_id || `gps-mirror-${stableMirrorHash(body.project_id || "project")}`;
+    const existing = [...girderPlanScenarioCache.values()].filter((item) => item.scenario_id === scenarioId);
+    const latestVersionNo = Math.max(0, ...existing.map((item) => Number(item.version_no || 0)));
+    if (body.expected_latest_version_no != null && body.expected_latest_version_no !== latestVersionNo) {
+      return mirrorError(409, "SCENARIO_VERSION_CHANGED", "方案版本已变化，请重新加载。" );
+    }
+    const inputFingerprint = `mirror:${stableMirrorHash(JSON.stringify({ ...body, created_by: undefined, expected_latest_version_no: undefined }))}`;
+    for (const previous of existing) {
+      if (previous.input_fingerprint !== inputFingerprint && !["stale", "blocked"].includes(previous.status)) {
+        girderPlanScenarioCache.set(previous.scenario_version_id, { ...previous, status: "stale", stale_reason: "方案输入已变化。" });
+      }
+    }
+    const scenario = {
+      ...body,
+      scenario_id: scenarioId,
+      scenario_version_id: `gpsv-mirror-${Date.now()}-${latestVersionNo + 1}`,
+      version_no: latestVersionNo + 1,
+      status: "draft",
+      input_fingerprint: inputFingerprint,
+      created_at: new Date().toISOString(),
+    };
+    girderPlanScenarioCache.set(scenario.scenario_version_id, scenario);
+    return json(scenario, 201);
+  }
+  const scenarioMatch = endpoint.match(/^girder-plan-simulation\/scenarios\/([^/]+)$/);
+  if (scenarioMatch && req.method === "GET") {
+    const scenario = girderPlanScenarioCache.get(decodeURIComponent(scenarioMatch[1]));
+    return scenario ? json(scenario) : mirrorError(404, "GIRDER_PLAN_SIMULATION_NOT_FOUND", "方案版本不存在。" );
+  }
+  const validateMatch = endpoint.match(/^girder-plan-simulation\/scenarios\/([^/]+)\/validate$/);
+  if (validateMatch && req.method === "POST") {
+    const scenario = girderPlanScenarioCache.get(decodeURIComponent(validateMatch[1]));
+    if (!scenario) return mirrorError(404, "GIRDER_PLAN_SIMULATION_NOT_FOUND", "方案版本不存在。" );
+    const body = await req.json() as any;
+    if (body.expected_input_fingerprint !== scenario.input_fingerprint) return mirrorError(409, "SCENARIO_INPUT_FINGERPRINT_STALE", "方案输入指纹已变化。" );
+    const readiness = mirrorGirderReadiness(scenario);
+    girderPlanScenarioCache.set(scenario.scenario_version_id, { ...scenario, status: readiness.status === "blocking" ? "blocked" : "ready" });
+    return json(readiness);
+  }
+  if (endpoint === "girder-plan-simulation/runs" && req.method === "POST") {
+    const body = await req.json() as any;
+    const scenario = girderPlanScenarioCache.get(body.scenario_version_id);
+    if (!scenario) return mirrorError(404, "GIRDER_PLAN_SIMULATION_NOT_FOUND", "方案版本不存在。" );
+    if (body.expected_input_fingerprint !== scenario.input_fingerprint) return mirrorError(409, "SCENARIO_INPUT_FINGERPRINT_STALE", "方案输入指纹已变化。" );
+    const reusable = [...girderPlanRunCache.values()].find((item) => !body.force_recompute && item.scenario_version_id === scenario.scenario_version_id && item.input_fingerprint === scenario.input_fingerprint && ["calculated", "confirmed"].includes(item.status));
+    if (reusable) return json({ ...reusable, reused_from_run_id: reusable.run_id }, 201);
+    const readiness = mirrorGirderReadiness(scenario);
+    const run = mirrorGirderRun(scenario, readiness);
+    girderPlanRunCache.set(run.run_id, run);
+    girderPlanScenarioCache.set(scenario.scenario_version_id, { ...scenario, status: run.status === "calculated" ? "calculated" : "blocked" });
+    return json(run, 201);
+  }
+  const runMatch = endpoint.match(/^girder-plan-simulation\/runs\/([^/]+)$/);
+  if (runMatch && req.method === "GET") {
+    const run = girderPlanRunCache.get(decodeURIComponent(runMatch[1]));
+    return run ? json(run) : mirrorError(404, "GIRDER_PLAN_SIMULATION_NOT_FOUND", "运行快照不存在。" );
+  }
+  const confirmMatch = endpoint.match(/^girder-plan-simulation\/runs\/([^/]+)\/confirm$/);
+  if (confirmMatch && req.method === "POST") {
+    const runId = decodeURIComponent(confirmMatch[1]);
+    const run = girderPlanRunCache.get(runId);
+    if (!run) return mirrorError(404, "GIRDER_PLAN_SIMULATION_NOT_FOUND", "运行快照不存在。" );
+    const body = await req.json() as any;
+    if (body.expected_input_fingerprint !== run.input_fingerprint) return mirrorError(409, "RUN_INPUT_FINGERPRINT_STALE", "运行输入指纹已变化。" );
+    if (!body.confirmed_by?.trim() || !body.confirmation_reason?.trim()) return mirrorError(422, "CONFIRMATION_REQUIRED", "确认人和确认原因不能为空。" );
+    const confirmed = { ...run, status: "confirmed", confirmed_by: body.confirmed_by.trim(), confirmed_at: new Date().toISOString(), confirmation_reason: body.confirmation_reason.trim() };
+    girderPlanRunCache.set(runId, confirmed);
+    const scenario = girderPlanScenarioCache.get(run.scenario_version_id);
+    if (scenario) girderPlanScenarioCache.set(run.scenario_version_id, { ...scenario, status: "confirmed", confirmed_by: confirmed.confirmed_by, confirmed_at: confirmed.confirmed_at, confirmation_reason: confirmed.confirmation_reason });
+    return json(confirmed);
+  }
+  return mirrorError(404, "GIRDER_PLAN_SIMULATION_ENDPOINT_UNKNOWN", `Unknown girder plan simulation endpoint: ${endpoint}`);
+}
+
+function mirrorLineGraph(projectMasterVersionId: string) {
+  const nodes = [
+    mirrorNode("R0:unknown", "起点路基", "roadbed", "unknown", 0, false, []),
+    mirrorNode("B1:left", "一号桥·左幅", "bridge", "left", 1000, true, [{ beam_type_id: "T32", beam_type_name: "T32", span_count: 1, beam_count: 8, span_refs: ["B1-left"] }]),
+    mirrorNode("B1:right", "一号桥·右幅", "bridge", "right", 1000, true, [{ beam_type_id: "T32", beam_type_name: "T32", span_count: 1, beam_count: 8, span_refs: ["B1-right"] }]),
+    mirrorNode("T1:unknown", "共用隧道", "tunnel", "unknown", 2000, false, []),
+    mirrorNode("B2:left", "二号桥·左幅", "bridge", "left", 3000, true, [{ beam_type_id: "T40", beam_type_name: "T40", span_count: 1, beam_count: 8, span_refs: ["B2-left"] }]),
+    mirrorNode("B2:right", "二号桥·右幅", "bridge", "right", 3000, true, [{ beam_type_id: "T40", beam_type_name: "T40", span_count: 1, beam_count: 8, span_refs: ["B2-right"] }]),
+  ];
+  const edgePairs = [
+    ["R0:unknown", "B1:left"], ["R0:unknown", "B1:right"], ["B1:left", "T1:unknown"], ["B1:right", "T1:unknown"], ["T1:unknown", "B2:left"], ["T1:unknown", "B2:right"],
+  ];
+  const edges = edgePairs.map(([from, to], index) => ({ edge_id: `mirror-edge-${index + 1}`, from_node_id: from, to_node_id: to, direction: "bidirectional", source: "alignment_adjacency", transfer_days: 0, confirmation: null }));
+  return { line_graph_id: `lgs-mirror-${stableMirrorHash(projectMasterVersionId)}`, project_id: "demo-project", project_master_version_id: projectMasterVersionId, input_fingerprint: `mirror:${stableMirrorHash(JSON.stringify(nodes))}`, projection_version: "girder-plan-line-graph/v1", status: "ready", nodes, edges, diagnostics: [] };
+}
+
+function mirrorNode(node_id: string, name: string, node_type: string, side: string, mileage: number, requires_erection: boolean, beam_demands: any[]) {
+  return { node_id, project_master_workpoint_id: node_id.split(":")[0], name, node_type, side, alignment_code: "A", start_mileage_m: mileage, end_mileage_m: mileage + 100, sort_order: mileage / 100, requires_erection, beam_demands, source_refs: [node_id.split(":")[0]], current_plan_finish_date: null };
+}
+
+function mirrorYardNodeId(yard: any, graph: any): string | undefined {
+  const candidates = graph.nodes.filter((node: any) => node.alignment_code === yard.alignment_code
+    && Number(node.start_mileage_m) <= Number(yard.mileage_m)
+    && Number(yard.mileage_m) <= Number(node.end_mileage_m));
+  const exactStart = candidates.filter((node: any) => Number(node.start_mileage_m) === Number(yard.mileage_m));
+  const exactStartPreferred = exactStart.filter((node: any) => node.side === "unknown" && !node.requires_erection);
+  if (exactStartPreferred.length === 1) return exactStartPreferred[0].node_id;
+  if (exactStart.length === 1) return exactStart[0].node_id;
+  const preferred = candidates.filter((node: any) => node.side === "unknown" && !node.requires_erection);
+  return (preferred.length === 1 ? preferred[0] : candidates.length === 1 ? candidates[0] : undefined)?.node_id;
+}
+
+function mirrorGirderReadiness(scenario: any) {
+  const diagnostics: any[] = [];
+  const graph = mirrorLineGraph(scenario.project_master_version_id);
+  const required = graph.nodes.filter((item) => item.requires_erection).map((item) => item.node_id);
+  const assignments = new Map<string, number>();
+  for (const route of scenario.route_plans || []) {
+    if (!route.confirmed) diagnostics.push(mirrorDiagnostic("ROUTE_ORDER_NOT_CONFIRMED", "route", route.route_plan_id, "人工顺序尚未确认。"));
+    for (const target of route.target_node_ids || []) assignments.set(target, (assignments.get(target) || 0) + 1);
+  }
+  for (const target of required) {
+    const count = assignments.get(target) || 0;
+    if (count === 0) diagnostics.push(mirrorDiagnostic("TARGET_UNASSIGNED", "bridge_side", target, "待架目标尚未分配。"));
+    if (count > 1) diagnostics.push(mirrorDiagnostic("TARGET_DUPLICATE_ASSIGNMENT", "bridge_side", target, "待架目标被重复分配。"));
+  }
+  for (const line of scenario.erection_lines || []) if (Number(line.daily_erection_capacity_pieces) <= 0) diagnostics.push(mirrorDiagnostic("ERECTION_CAPACITY_NON_POSITIVE", "erection_line", line.erection_line_id, "架梁能力必须大于 0。"));
+  const status = diagnostics.length ? "blocking" : "ready";
+  return {
+    status,
+    checks: [{ code: "MIRROR_READINESS", status: status === "ready" ? "passed" : "blocking", message: "镜像校验人工顺序、唯一分配和片日能力。", entity_refs: required }],
+    diagnostics,
+    expanded_routes: Object.fromEntries((scenario.route_plans || []).map((route) => {
+      const yard = scenario.beam_yards?.find((item) => item.beam_yard_id === route.beam_yard_id);
+      return [route.route_plan_id, [yard ? mirrorYardNodeId(yard, graph) : undefined, ...(route.target_node_ids || [])].filter(Boolean)];
+    })),
+  };
+}
+
+function mirrorGirderRun(scenario: any, readiness: any) {
+  const now = new Date().toISOString();
+  const runId = `gpsr-mirror-${Date.now()}`;
+  if (readiness.status === "blocking") return { run_id: runId, scenario_version_id: scenario.scenario_version_id, project_master_version_id: scenario.project_master_version_id, status: "blocked", started_at: now, finished_at: now, input_fingerprint: scenario.input_fingerprint, result_fingerprint: `mirror:${stableMirrorHash(JSON.stringify(readiness))}`, reused_from_run_id: null, bridge_schedules: [], inventory_ledger: [], route_runs: [], workpoint_controls: [], diagnostics: readiness.diagnostics, confirmed_by: null, confirmed_at: null, confirmation_reason: null };
+  const graph = mirrorLineGraph(scenario.project_master_version_id);
+  const nodeById = new Map(graph.nodes.map((item) => [item.node_id, item]));
+  const schedules: any[] = [];
+  const ledger: any[] = [];
+  const routeRuns: any[] = [];
+  const controls: any[] = [];
+  for (const route of scenario.route_plans || []) {
+    const yard = scenario.beam_yards.find((item) => item.beam_yard_id === route.beam_yard_id);
+    const line = scenario.erection_lines.find((item) => item.erection_line_id === route.erection_line_id);
+    let cursor = line.available_date;
+    const inventory = Object.fromEntries((yard.capacities || []).map((item) => [item.beam_type_id, Number(item.initial_inventory_pieces || 0)]));
+    const capacity = Object.fromEntries((yard.capacities || []).map((item) => [item.beam_type_id, item]));
+    for (let sequence = 0; sequence < route.target_node_ids.length; sequence += 1) {
+      const targetId = route.target_node_ids[sequence];
+      const target: any = nodeById.get(targetId);
+      const remaining = Object.fromEntries((target.beam_demands || []).map((item) => [item.beam_type_id, item.beam_count]));
+      const start = cursor;
+      const daily: any[] = [];
+      while (Object.values(remaining).some((value: any) => value > 0)) {
+        let dailyCapacity = Number(line.daily_erection_capacity_pieces);
+        for (const beamType of Object.keys(remaining).sort()) {
+          const opening = Number(inventory[beamType] || 0);
+          const erected = Math.min(Number(remaining[beamType]), dailyCapacity, opening);
+          const produced = cursor >= yard.production_start_date ? Number(capacity[beamType]?.daily_capacity_pieces || 0) : 0;
+          inventory[beamType] = opening + produced - erected;
+          remaining[beamType] -= erected;
+          dailyCapacity -= erected;
+          ledger.push({ date: cursor, beam_yard_id: yard.beam_yard_id, beam_type_id: beamType, opening_inventory_pieces: opening, produced_pieces: produced, erected_pieces: erected, closing_inventory_pieces: inventory[beamType] });
+          if (erected > 0) daily.push({ date: cursor, beam_type_id: beamType, erected_pieces: erected });
+        }
+        if (Object.values(remaining).some((value: any) => value > 0)) cursor = addDays(cursor, 1);
+      }
+      const finish = cursor;
+      schedules.push({ target_node_id: targetId, beam_yard_id: yard.beam_yard_id, route_plan_id: route.route_plan_id, sequence_index: sequence, start_date: start, finish_date: finish, total_beam_count: target.beam_demands.reduce((sum, item) => sum + item.beam_count, 0), beam_type_counts: Object.fromEntries(target.beam_demands.map((item) => [item.beam_type_id, item.beam_count])), daily_erection: daily, controlling_factors: ["line_available", "supply"] });
+      const latest = addDays(start, -Number(scenario.parameters.bridge_readiness_buffer_days || 0));
+      controls.push({ node_id: targetId, project_master_workpoint_id: target.project_master_workpoint_id, side: target.side, first_required_date: start, latest_delivery_date: latest, buffer_days: Number(scenario.parameters.bridge_readiness_buffer_days || 0), controlling_source: "erection_start", route_requirements: [{ route_plan_id: route.route_plan_id, required_date: start, buffer_days: Number(scenario.parameters.bridge_readiness_buffer_days || 0), source: "erection_start" }], current_plan_finish_date: null, late_days: null, risk_status: "unknown" });
+      cursor = addDays(finish, Math.max(1, Number(line.bridge_transfer_days || scenario.parameters.default_transfer_days || 1)));
+    }
+    if (route.target_node_ids.length) routeRuns.push({ route_plan_id: route.route_plan_id, beam_yard_id: yard.beam_yard_id, start_date: schedules.find((item) => item.route_plan_id === route.route_plan_id).start_date, finish_date: schedules.filter((item) => item.route_plan_id === route.route_plan_id).at(-1).finish_date, expanded_node_ids: readiness.expanded_routes[route.route_plan_id], waiting_days_by_reason: {} });
+  }
+  const resultPayload = { schedules, ledger, routeRuns, controls };
+  return { run_id: runId, scenario_version_id: scenario.scenario_version_id, project_master_version_id: scenario.project_master_version_id, status: "calculated", started_at: now, finished_at: new Date().toISOString(), input_fingerprint: scenario.input_fingerprint, result_fingerprint: `mirror:${stableMirrorHash(JSON.stringify(resultPayload))}`, reused_from_run_id: null, bridge_schedules: schedules, inventory_ledger: ledger, route_runs: routeRuns, workpoint_controls: controls, diagnostics: [], confirmed_by: null, confirmed_at: null, confirmation_reason: null };
+}
+
+function mirrorDiagnostic(code: string, subject_type: string, subject_id: string, message: string) {
+  return { level: "error", code, message, subject_type, subject_id, entity_refs: [subject_id], suggestion: "修正对象后重新校验。" };
+}
+
+function mirrorError(status: number, code: string, message: string) {
+  return json({ detail: { code, message } }, status);
+}
+
+function stableMirrorHash(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) hash = Math.imul(hash ^ value.charCodeAt(index), 16777619);
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
 function localConfigFromScenario(scenario: ScenarioInput): LocalScenarioConfig {
@@ -795,8 +980,14 @@ function localConfigFromScenario(scenario: ScenarioInput): LocalScenarioConfig {
     process_library: scenario.process_library,
     logic_rules: scenario.logic_rules,
     upper_structure_logic_rules: scenario.upper_structure_logic_rules ?? [],
-    resource_pools: scenario.resource_pools,
+    resource_pools: currentProjectResourcePools(scenario.resource_pools),
   };
+}
+
+function currentProjectResourcePools(resourcePools: ResourcePool[]): ResourcePool[] {
+  return resourcePools.filter(
+    (resourcePool) => resourcePool.scope_mode === "WORKPOINT_EXCLUSIVE" && Boolean(resourcePool.workpoint_id?.trim()),
+  );
 }
 
 function mergeById<T extends { id: string }>(defaults: T[], saved: T[] | undefined): T[] {

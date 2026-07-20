@@ -22,7 +22,7 @@ PROJECT_ROOT = REPOSITORY_ROOT
 LOCAL_DATA_DIR = LOCAL_DATA_ROOT
 LOCAL_SCENARIO_CONFIG_PATH = state_path("scheduler-config.json")
 BUNDLED_SCENARIO_CONFIG_PATH = Path(__file__).resolve().with_name("default_scenario_config.json")
-SCHEMA_VERSION = "local-scheduler-config/v3"
+SCHEMA_VERSION = "local-scheduler-config/v4"
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
@@ -36,7 +36,7 @@ def apply_local_scenario_config(
     *,
     path: Path = LOCAL_SCENARIO_CONFIG_PATH,
 ) -> ScenarioInput:
-    return apply_scenario_config(scenario, path=path)
+    return apply_scenario_config(scenario, path=path, persist_resource_cleanup=True)
 
 
 def apply_bundled_scenario_config(
@@ -51,12 +51,14 @@ def apply_scenario_config(
     scenario: ScenarioInput,
     *,
     path: Path,
+    persist_resource_cleanup: bool = False,
 ) -> ScenarioInput:
     config = _read_config(path)
     if not config:
         return scenario
 
     next_scenario = scenario.model_copy(deep=True)
+    resource_cleanup_payload: list[dict[str, Any]] | None = None
 
     if "process_library" in config:
         saved_processes = _validate_list(config["process_library"], ProcessTemplate, "process_library")
@@ -89,14 +91,22 @@ def apply_scenario_config(
         # whose id matches a bundled default would be materialized under new ids
         # and the stale bundled record would incorrectly survive beside it.
         merged_resource_pools = _merge_resource_pools(next_scenario.resource_pools, saved_resource_pools)
-        next_scenario.resource_pools = _normalize_resource_pools(
+        normalized_resource_pools = _normalize_resource_pools(
             merged_resource_pools,
             workpoint_ids=workpoint_ids,
         )
+        next_scenario.resource_pools = normalized_resource_pools
+        normalized_payload = _dump_models(normalized_resource_pools)
+        if persist_resource_cleanup and config["resource_pools"] != normalized_payload:
+            resource_cleanup_payload = normalized_payload
 
     if "milestones" in config:
         saved_milestones = _validate_list(config["milestones"], MilestoneConstraint, "milestones")
         next_scenario.milestones = _merge_by_id(next_scenario.milestones, saved_milestones)
+
+    if resource_cleanup_payload is not None:
+        config["resource_pools"] = resource_cleanup_payload
+        _write_config(config, path)
 
     return next_scenario
 
@@ -141,9 +151,6 @@ def save_local_scenario_config(
         raise LocalScenarioConfigError("工艺工效库保存内容不能为空。")
     if not logic_rules:
         raise LocalScenarioConfigError("工艺逻辑保存内容不能为空。")
-    if not resource_pools:
-        raise LocalScenarioConfigError("资源配置保存内容不能为空。")
-
     config = _read_config(path)
     upgraded_process_library = upgrade_process_library(process_library)
     normalized_resource_pools = _normalize_resource_pools(resource_pools, for_save=True)
@@ -182,11 +189,15 @@ def _write_config(config: dict[str, Any], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"schema_version": SCHEMA_VERSION, **config}
     temporary_path = path.with_suffix(f"{path.suffix}.tmp")
-    temporary_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    temporary_path.replace(path)
+    try:
+        temporary_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temporary_path.replace(path)
+    except OSError as exc:
+        temporary_path.unlink(missing_ok=True)
+        raise LocalScenarioConfigError(f"本地配置写入失败：{exc}") from exc
 
 
 def _validate_list(value: Any, model: type[ModelT], field_name: str) -> list[ModelT]:
@@ -266,18 +277,9 @@ def _normalize_resource_pools(
         else:
             normalized.append(pool)
 
+    normalized = [pool for pool in normalized if pool.scope_mode == "WORKPOINT_EXCLUSIVE"]
     _ensure_unique_pool_ids(normalized)
     _ensure_unique_local_resource_keys(normalized)
-    if for_save:
-        empty_shared_pool_ids = [
-            pool.id
-            for pool in normalized
-            if pool.scope_mode == "PROJECT_SHARED" and pool.authorized_workpoint_ids == []
-        ]
-        if empty_shared_pool_ids:
-            raise LocalScenarioConfigError(
-                f"共享资源池允许流转工点集合不能为空：{', '.join(empty_shared_pool_ids)}"
-            )
     return normalized
 
 

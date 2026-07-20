@@ -36,6 +36,71 @@ function pool(patch = {}) {
   };
 }
 
+function process(id, componentType, resourceType, { methodId = null, isDefault = true } = {}) {
+  return {
+    id,
+    process_name: id,
+    component_type: componentType,
+    method_id: methodId,
+    resource_type: resourceType,
+    is_default: isDefault,
+  };
+}
+
+function parameter(parameterCode, value) {
+  return { parameter_code: parameterCode, value_type: "text", value, sort_order: 1 };
+}
+
+function component(componentId, componentType, { enabled = true, methodId = null } = {}) {
+  return {
+    component_id: componentId,
+    structure_id: "structure-lower",
+    component_name: componentId,
+    component_type: componentType,
+    quantity: 1,
+    unit: "个",
+    enabled,
+    sort_order: 1,
+    parameters: methodId ? [parameter("method_id", methodId)] : [],
+  };
+}
+
+function structure(structureId, structureType, components = [], parameters = []) {
+  return {
+    structure_id: structureId,
+    workpoint_id: "WP-A",
+    structure_name: structureId,
+    structure_category: structureType.endsWith("unit") ? "superstructure" : "substructure",
+    structure_type: structureType,
+    side: "left",
+    sort_order: 1,
+    parameters,
+    components,
+  };
+}
+
+function workpoint(structures) {
+  return {
+    workpoint_id: "WP-A",
+    workpoint_name: "测试工点",
+    workpoint_type: "bridge",
+    sort_order: 1,
+    schedule_support: "bridge_supported",
+    structures,
+  };
+}
+
+const processLibrary = [
+  process("pile_rotary_regular", "pile", "rotary_drill", { methodId: "rotary_drill" }),
+  process("pile_circulation", "pile", "circulation_drill", { methodId: "circulation_drill", isDefault: false }),
+  process("pile_impact", "pile", "impact_drill", { methodId: "impact_drill", isDefault: false }),
+  process("pile_manual", "pile", "manual_pile_team", { methodId: "manual_pile", isDefault: false }),
+  process("cap_standard", "cap", "cap_team"),
+  process("pier_body_standard", "pier_body", "pier_body_team"),
+  process("cap_beam_standard", "cap_beam", "cap_beam_team"),
+  process("continuous_default", "cast_in_place_continuous_beam", "cast_in_place_continuous_beam_team"),
+];
+
 test("legacy pools migrate generically to project shared while null and empty authorization stay distinct", async () => {
   const { normalizeResourcePoolForWorkspace } = await loadResources();
 
@@ -111,17 +176,20 @@ test("scope normalization and fingerprint use stable sets without resource-name 
   assert.deepEqual(resourcePoolScopeIssues(right, ["a"]), ["配置包含当前项目主数据版本之外的工点"]);
 });
 
-test("scenario normalization preserves explicit unlimited mode and standardizes scoped pools", async () => {
+test("scenario normalization removes project shared pools without mutating the source", async () => {
   const { normalizeScenarioResourcePools } = await loadResources();
+  const shared = pool({ id: "shared", resource_mode: "UNLIMITED", quantity: null, max_quantity: null });
+  const local = pool({ id: "local", scope_mode: "WORKPOINT_EXCLUSIVE", workpoint_id: "WP-A" });
   const scenario = {
     marker: "scenario",
-    resource_pools: [pool({ resource_mode: "UNLIMITED", quantity: null, max_quantity: null })],
+    resource_pools: [shared, local],
   };
   const normalized = normalizeScenarioResourcePools(scenario);
 
-  assert.equal(normalized.resource_pools[0].resource_mode, "UNLIMITED");
-  assert.equal(normalized.resource_pools[0].scope_mode, "PROJECT_SHARED");
-  assert.equal(normalized.resource_pools[0].authorized_workpoint_ids, null);
+  assert.deepEqual(normalized.resource_pools.map((item) => item.id), ["local"]);
+  assert.equal(normalized.resource_pools[0].scope_mode, "WORKPOINT_EXCLUSIVE");
+  assert.equal(normalized.resource_pools[0].workpoint_id, "WP-A");
+  assert.deepEqual(scenario.resource_pools, [shared, local]);
 });
 
 test("workpoint-local pools upsert by workpoint and type while preserving zero quantity", async () => {
@@ -185,6 +253,91 @@ test("catalog projection is deterministic and same-type shared pools remain inde
   assert.deepEqual(resourceCatalogProjection(processes, shared).map((item) => item.type), ["cap_team", "pier_body_team", "team-x"]);
 });
 
+test("workpoint projection selects the actual pile method and defaults only when no method is explicit", async () => {
+  const { workpointResourceTypeProjection } = await loadResources();
+  const methods = [
+    ["rotary_drill", "rotary_drill"],
+    ["circulation_drill", "circulation_drill"],
+    ["impact_drill", "impact_drill"],
+    ["manual_pile", "manual_pile_team"],
+  ];
+
+  for (const [methodId, expectedType] of methods) {
+    const actual = workpointResourceTypeProjection(
+      workpoint([structure("structure-lower", "bridge_pier", [component(`pile-${methodId}`, "pile", { methodId })])]),
+      processLibrary,
+    );
+    assert.deepEqual(actual, [expectedType]);
+  }
+
+  assert.deepEqual(
+    workpointResourceTypeProjection(
+      workpoint([structure("structure-lower", "bridge_pier", [component("pile-default", "pile")])]),
+      processLibrary,
+    ),
+    ["rotary_drill"],
+  );
+  assert.deepEqual(
+    workpointResourceTypeProjection(
+      workpoint([structure("structure-lower", "bridge_pier", [component("pile-invalid", "pile", { methodId: "unknown" })])]),
+      processLibrary,
+    ),
+    [],
+  );
+});
+
+test("workpoint projection maps continuous and ordinary structures, filters disabled components and stays deterministic", async () => {
+  const { workpointResourceTypeProjection } = await loadResources();
+  const input = workpoint([
+    structure("continuous", "continuous_unit"),
+    structure("structure-lower", "bridge_pier", [
+      component("cap-a", "cap"),
+      component("cap-b", "cap"),
+      component("pier", "pier_body"),
+      component("cap-beam", "cap_beam"),
+      component("disabled-pile", "pile", { enabled: false, methodId: "impact_drill" }),
+      component("unknown", "unknown_component"),
+    ]),
+  ]);
+  const expected = ["cap_beam_team", "cap_team", "cast_in_place_continuous_beam_team", "pier_body_team"];
+
+  assert.deepEqual(workpointResourceTypeProjection(input, processLibrary), expected);
+  assert.deepEqual(workpointResourceTypeProjection({ ...input, structures: [...input.structures].reverse() }, [...processLibrary].reverse()), expected);
+  assert.deepEqual(workpointResourceTypeProjection(workpoint([]), processLibrary), []);
+});
+
+test("resource names prefer configured Chinese labels, cover built-ins and keep unknown types diagnosable", async () => {
+  const { resourceTypeLabel } = await loadResources();
+  const builtIns = {
+    rotary_drill: "旋挖钻机",
+    circulation_drill: "回旋钻机",
+    impact_drill: "冲击钻机",
+    manual_pile_team: "人工挖孔班组",
+    cap_team: "承台模板",
+    spread_foundation_team: "扩大基础班组",
+    tie_beam_team: "系梁班组",
+    pier_body_team: "墩柱模板",
+    cap_beam_team: "盖梁模板",
+    abutment_team: "桥台班组",
+    precast_beam_team: "预制梁班组",
+    beam_erection_team: "架梁班组",
+    cast_in_place_continuous_beam_team: "连续梁班组",
+    cast_in_place_box_beam_team: "现浇箱梁班组",
+    steel_box_beam_team: "钢箱梁班组",
+    bridge_deck_system_team: "桥面系班组",
+  };
+  for (const [type, expected] of Object.entries(builtIns)) {
+    const label = resourceTypeLabel(type, []);
+    assert.equal(label, expected);
+    assert.match(label, /[\u3400-\u9fff]/u);
+  }
+
+  assert.equal(resourceTypeLabel("rotary_drill", [pool({ type: "rotary_drill", label: "一号桥旋挖设备" })]), "一号桥旋挖设备");
+  assert.equal(resourceTypeLabel("rotary_drill", [pool({ type: "rotary_drill", label: "rotary_drill" })]), "旋挖钻机");
+  assert.equal(resourceTypeLabel("custom-crane", [pool({ type: "custom-crane", label: "自定义吊车" })]), "自定义吊车");
+  assert.equal(resourceTypeLabel("custom-crane", [pool({ type: "custom-crane", label: "custom-crane" })]), "未命名资源");
+});
+
 test("fingerprint distinguishes workpoint identity but ignores pool ordering", async () => {
   const { resourcePoolsSemanticFingerprint } = await loadResources();
   const localA = pool({ id: "local-a", scope_mode: "WORKPOINT_EXCLUSIVE", workpoint_id: "WP-A" });
@@ -199,13 +352,20 @@ test("fingerprint distinguishes workpoint identity but ignores pool ordering", a
   );
 });
 
-test("resource page separates workpoint-local rows from the shared-pool range editor", () => {
+test("resource page keeps the workpoint-local editor and omits shared-pool configuration", () => {
   const source = readFileSync(resolve(root, "src/features/resources/ResourcesTab.tsx"), "utf8");
-  assert.match(source, /工点资源与共享池/);
+  assert.match(source, /工点资源配置/);
   assert.match(source, /scope_mode:\s*"WORKPOINT_EXCLUSIVE"/);
   assert.match(source, /workpoint_id:\s*selectedWorkpoint\.workpoint_id/);
-  assert.match(source, /task\.bridge_id === selectedWorkpoint\?\.workpoint_id/);
-  assert.match(source, /范围共享资源池/);
-  assert.match(source, /同类型可建立多个独立池/);
+  assert.match(source, /getProjectMasterWorkpoint/);
+  assert.match(source, /detailRequestId/);
+  assert.match(source, /正在加载当前工点结构/);
+  assert.match(source, /当前工点结构加载失败/);
+  assert.match(source, /当前工点没有匹配到待配置资源/);
+  assert.match(source, /<code>\{item\.type\}<\/code>/);
+  assert.match(source, /const maxQuantity = pool \? resourcePoolUsableLimit\(pool\) : 0/);
+  assert.match(source, /结构可能使用，尚未配置/);
+  assert.doesNotMatch(source, /generated\?\.schedule_input\.tasks|taskLikelyTypes|applicableProcessIds\.length > 0/);
+  assert.doesNotMatch(source, /范围共享资源池|新增共享池|删除共享池|全部工点（动态）/);
   assert.doesNotMatch(source, /该资源适用于哪些工点|获准工点/);
 });

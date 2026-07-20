@@ -28,4 +28,4 @@ node .\01-customer-validation\json-schedule-review\validation-results\_scripts\b
 
 ## 跟踪与保留
 
-README、工作包契约和脚本跟踪；真实输入 local-only；报告和 HTML 为 ignored/rebuildable，但保留在 `validation-results/` 便于查找。
+正式 JSON 输入、报告、HTML 和脚本全部进入 Git；仅临时预览、缓存和运行日志进入 `.local-data`。

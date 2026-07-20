@@ -47,6 +47,6 @@
     {"path": "node_modules", "status": "local-cache", "reason": "根 npm 依赖", "owner": "04-demo", "target_owner": "根 npm workspace 兼容缓存", "removal_condition": "由 npm 重建", "tracking_policy": "ignored"},
     {"path": "local-json-task-review", "status": "migrated-history", "reason": "独立 JSON 展示与结果评审混合工作区已拆分并归档空壳", "owner": "04-demo", "target_owner": "04-demo/standalone 与 01-customer-validation/json-schedule-review", "removal_condition": "已完成；新增资产按目标工作包分类", "tracking_policy": "ignored"},
     {"path": "ai-ppt-system", "status": "migrated-history", "reason": "遗留 AI PPT 本地缓存已按批准清单迁移", "owner": "06-delivery", "target_owner": ".local-data/cache", "removal_condition": "已完成；权威工具位于 06-delivery/presentations/ai-ppt-system", "tracking_policy": "ignored"},
-    {"path": "泸古1标架梁工点导入模板.xlsx", "status": "migrated-history", "reason": "根目录客户来源模板已按哈希迁移", "owner": "01-customer-validation", "target_owner": "01-customer-validation/lugu/customer-materials", "removal_condition": "已完成；根目录不得恢复副本", "tracking_policy": "tracked"}
+    {"path": "泸古1标架梁工点导入模板.xlsx", "status": "migrated-history", "reason": "根目录客户来源模板已按哈希迁移", "owner": "01-customer-validation", "target_owner": "01-customer-validation/泸古1标/customer-materials", "removal_condition": "已完成；根目录不得恢复副本", "tracking_policy": "tracked"}
   ]
 }

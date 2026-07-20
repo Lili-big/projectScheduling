@@ -1,5 +1,8 @@
 import type {
+  ComponentType,
   ProcessTemplate,
+  ProjectMasterParameter,
+  ProjectMasterWorkpoint,
   ResourceCostType,
   ResourceMode,
   ResourcePool,
@@ -10,9 +13,13 @@ import type {
 } from "../contracts";
 import {
   defaultResourceTypeByComponent,
+  excludedResourceCatalogTypes,
   keyResourceComponentTypes,
   pileResourceTypeByMethod,
   pileResourceTypeByProcess,
+  projectMasterComponentTypeProjection,
+  projectMasterUpperStructureResourceComponent,
+  standardResourceTypeLabels,
 } from "./constants";
 import { resourceCostTypeLabels } from "./constants";
 
@@ -239,12 +246,12 @@ export function resourceCatalogProjection(processes: ProcessTemplate[], pools: R
       applicableProcessIds: Array.from(new Set([...(existing?.applicableProcessIds ?? []), process.id])).sort(),
     });
   }
-  for (const pool of pools.map(normalizeResourcePoolForWorkspace)) {
+  for (const pool of pools.map(normalizeResourcePoolForWorkspace).sort((left, right) => left.id.localeCompare(right.id))) {
     if (excludedResourceCatalogTypes.has(pool.type)) continue;
     const existing = catalog.get(pool.type);
     catalog.set(pool.type, {
       type: pool.type,
-      label: pool.label || existing?.label || pool.type,
+      label: resourceTypeLabel(pool.type, pools),
       defaultCalendarId: pool.calendar_id || existing?.defaultCalendarId || "continuous",
       defaultMaxQuantity: Math.max(existing?.defaultMaxQuantity ?? 0, resourcePoolUsableLimit(pool)),
       applicableProcessIds: Array.from(new Set([...(existing?.applicableProcessIds ?? []), ...pool.compatible_process_ids])).sort(),
@@ -253,7 +260,76 @@ export function resourceCatalogProjection(processes: ProcessTemplate[], pools: R
   return [...catalog.values()].sort((left, right) => left.type.localeCompare(right.type));
 }
 
-const excludedResourceCatalogTypes = new Set(["girder_erector", "beam_yard", "beam_yard_production_line"]);
+const processMethodParameterCodes = new Set([
+  "method_id",
+  "process_method_id",
+  "pile_method",
+  "construction_method",
+]);
+
+function methodIdsFromParameters(parameters: ProjectMasterParameter[]): string[] {
+  const methodIds: string[] = [];
+  for (const parameter of parameters) {
+    if (!processMethodParameterCodes.has(parameter.parameter_code)) continue;
+    const values = Array.isArray(parameter.value) ? parameter.value : [parameter.value];
+    for (const value of values) {
+      const methodId = String(value ?? "").trim();
+      if (methodId) methodIds.push(methodId);
+    }
+  }
+  return Array.from(new Set(methodIds));
+}
+
+function projectedProjectMasterComponentType(structureType: string, componentType: string): ComponentType | null {
+  if (structureType === "bridge_abutment") {
+    return componentType === "pile" ? "pile" : "abutment_body";
+  }
+  return projectMasterComponentTypeProjection[componentType] ?? null;
+}
+
+function processesForProjectedComponent(
+  componentType: ComponentType,
+  explicitMethodIds: string[],
+  processes: ProcessTemplate[],
+): ProcessTemplate[] {
+  const candidates = processes.filter((process) => process.component_type === componentType);
+  if (explicitMethodIds.length > 0) {
+    return explicitMethodIds
+      .map((methodId) => candidates.find((process) => process.id === methodId || process.method_id === methodId) ?? null)
+      .filter((process): process is ProcessTemplate => process !== null);
+  }
+  const defaults = candidates.filter((process) => process.is_default);
+  return defaults.length === 1 ? defaults : [];
+}
+
+export function workpointResourceTypeProjection(
+  workpoint: ProjectMasterWorkpoint,
+  processes: ProcessTemplate[],
+): string[] {
+  const resourceTypes = new Set<string>();
+  const addComponentResources = (componentType: ComponentType, explicitMethodIds: string[]) => {
+    for (const process of processesForProjectedComponent(componentType, explicitMethodIds, processes)) {
+      const resourceType = defaultResourceTypeForProcess(process);
+      if (resourceType && !excludedResourceCatalogTypes.has(resourceType)) resourceTypes.add(resourceType);
+    }
+  };
+
+  for (const structure of workpoint.structures) {
+    const structureMethodIds = methodIdsFromParameters(structure.parameters);
+    const upperComponentType = projectMasterUpperStructureResourceComponent[structure.structure_type];
+    if (upperComponentType) addComponentResources(upperComponentType, structureMethodIds);
+
+    for (const component of structure.components) {
+      if (!component.enabled) continue;
+      const componentType = projectedProjectMasterComponentType(structure.structure_type, component.component_type);
+      if (!componentType) continue;
+      const componentMethodIds = methodIdsFromParameters(component.parameters);
+      addComponentResources(componentType, componentMethodIds.length > 0 ? componentMethodIds : structureMethodIds);
+    }
+  }
+
+  return [...resourceTypes].sort((left, right) => left.localeCompare(right));
+}
 
 export function effectiveWorkpointResource(pool: ResourcePool, workpointId: string): EffectiveWorkpointResource {
   const normalized = normalizeResourcePoolForWorkspace(pool);
@@ -356,7 +432,9 @@ export function normalizeLimitedResourcePool(pool: ResourcePool): ResourcePool {
 export function normalizeScenarioResourcePools(scenario: ScenarioInput): ScenarioInput {
   return {
     ...scenario,
-    resource_pools: scenario.resource_pools.map(normalizeResourcePoolForWorkspace),
+    resource_pools: scenario.resource_pools
+      .map(normalizeResourcePoolForWorkspace)
+      .filter(isWorkpointLocalPool),
   };
 }
 
@@ -372,7 +450,12 @@ export function processResourceLabel(process: ProcessTemplate, resourcePools: Re
 }
 
 export function resourceTypeLabel(resourceType: string, resourcePools: ResourcePool[]): string {
-  return resourcePools.find((pool) => pool.type === resourceType)?.label ?? resourceType;
+  const configuredChineseLabel = resourcePools
+    .filter((pool) => pool.type === resourceType)
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((pool) => pool.label.trim())
+    .find((label) => /[\u3400-\u9fff]/u.test(label));
+  return configuredChineseLabel ?? standardResourceTypeLabels[resourceType] ?? "未命名资源";
 }
 
 export function resourceTypesLabel(resourceTypes: string[], resourcePools: ResourcePool[], separator = "、"): string {
@@ -389,5 +472,5 @@ export function defaultResourceTypeForProcess(process: ProcessTemplate): string 
       ?? null
     );
   }
-  return defaultResourceTypeByComponent[process.component_type] ?? null;
+  return defaultResourceTypeByComponent[process.component_type] ?? process.resource_type ?? null;
 }

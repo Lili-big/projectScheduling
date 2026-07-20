@@ -1,0 +1,16 @@
+{
+  "id": "jiangluyi-tj01",
+  "stage": "01-customer-validation",
+  "purpose": "保存江泸宜 01 标五月集中调研分析总结。",
+  "status": "historical",
+  "inputs": [],
+  "entrypoints": [],
+  "results": [
+    "validation-results/2026Q2-5月集中调研-江泸宜01标-项目工程部-分析总结.pdf",
+    "validation-results/来源与完整性索引.md"
+  ],
+  "owner": "L01｜需求发现与验证闭环（江泸宜 01 标调研）",
+  "tracking_policy": "tracked",
+  "retention_policy": "正式分析总结和完整性索引进入 Git；迁移来源名称映射保持 local-only；替换前核对 SHA-256。",
+  "related_workpackages": []
+}

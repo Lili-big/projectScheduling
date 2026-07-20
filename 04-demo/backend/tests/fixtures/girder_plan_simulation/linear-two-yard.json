@@ -1,0 +1,19 @@
+{
+  "fixture_id": "linear-two-yard-v1",
+  "calendar": "continuous-natural-day",
+  "units": { "quantity": "piece", "capacity": "piece/day" },
+  "same_day_production_available": false,
+  "project_start_date": "2026-08-01",
+  "alignments": ["A", "B"],
+  "beam_types": ["T32", "T40"],
+  "beam_yards": 2,
+  "routes": 2,
+  "shared_passage_nodes": ["TUNNEL-SHARED"],
+  "expected_invariants": [
+    "manual target order is unchanged",
+    "one route never erects two targets on the same day",
+    "different yards may erect in parallel",
+    "closing inventory equals opening plus produced minus erected",
+    "production completed on day D is first available on day D+1"
+  ]
+}

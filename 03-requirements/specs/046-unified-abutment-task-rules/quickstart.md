@@ -61,7 +61,7 @@
 按工作包 README 运行项目主数据生成脚本，并检查输出工作簿：
 
 ```powershell
-node 01-customer-validation\lugu\validation-results\_scripts\build_lugu_project_master.mjs
+node 01-customer-validation\泸古1标\validation-results\_scripts\build_lugu_project_master.mjs
 ```
 
 预期：

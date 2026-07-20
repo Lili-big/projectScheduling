@@ -30,7 +30,7 @@
 - **来源文档**：`AGENTS.md`、`agent.md`、`README.md`、`03-requirements/README.md`、`03-requirements/product/施工工艺及工效库需求文档_v1.1.md`、`03-requirements/product/资源配置页面需求文档_v1.2.md`、`03-requirements/product/任务视图页面需求文档_v1.0.md`、`03-requirements/rules/工艺逻辑约束需求文档_v1.1.md`，以及本次用户已确认口径。
 - **评审结论**：产品口径已经确认，直接进入完整 Spec Kit 规格化流程；2026-07-17 实施中用户进一步明确“不需要增加桥台资源池”，因此桥台默认充足改为复用资源池缺失的通用语义。
 - **使用的 Demo/代码事实**：当前 `04-demo/backend/app/project_master/scheduling_adapter.py` 会把项目主数据中的 `cap_beam` 原样投影为排程构件；`04-demo/backend/app/process_library_defaults.py` 与 `default_scenario_config.json` 已同时存在 `cap_beam_standard`（盖梁施工、10 天/个）和 `abutment_body_standard`（桥台施工、15 天/个）；`04-demo/backend/app/scheduling/application/_scenario.py` 与求解器已具备资源池缺失时清空 `compatible_resource_types`、不展开具名资源和不产生资源等待的通用默认充足语义；当前前端共享类型同时支持 `cap_beam` 与 `abutment_body`，未发现桥台 10/15 天专属显示兜底。D05 进一步复核确认：`TaskViewTab` 在规范任务到达后立即构建 rows，而项目主数据工点映射由后续 `useEffect` 异步加载；映射未就绪时 `buildTaskViewRows` 会把 `task.bridge_id`、`task.work_section_id` 或 `"-"` 作为可见名称，加载完成后才切换为 `workpoint_name`、`section_name` 和幅别标签。当前请求逐项吞错并可能提交部分映射，现有 `taskView.test.mjs` 只做源码静态断言，未覆盖首屏、失败和版本竞态行为。
-- **当前数据事实**：`01-customer-validation/lugu/validation-results/_scripts/build_lugu_project_master.mjs` 曾把 `bridge_abutment` 的“台帽”写成 `component_type=cap_beam`，使已确认主数据经当前适配链生成“盖梁施工”、10 天并匹配 `cap_beam_team`。
+- **当前数据事实**：`01-customer-validation/泸古1标/validation-results/_scripts/build_lugu_project_master.mjs` 曾把 `bridge_abutment` 的“台帽”写成 `component_type=cap_beam`，使已确认主数据经当前适配链生成“盖梁施工”、10 天并匹配 `cap_beam_team`。
 - **不在范围内**：不改变桥台桩基的构件、工艺、工期、资源和前置规则；不修改其他桥墩盖梁的 `cap_beam` 规则；不调整求解目标函数、里程碑或连续性指标；不新增桥台专属资源模型、接口或前端兜底；不把异步显示竞态描述为桥台规则或缓存故障；本规格阶段不实施代码、不迁移用户数据库、不发布或部署。
 
 ## 生命周期归属（必填）

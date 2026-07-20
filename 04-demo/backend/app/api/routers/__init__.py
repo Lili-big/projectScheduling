@@ -1,6 +1,7 @@
 """HTTP router packages grouped by product capability."""
 
 from .assistants import router as assistants_router
+from .girder_plan_simulation import router as girder_plan_simulation_router
 from .plan_control import router as plan_control_router
 from .project_girder import router as project_girder_router
 from .project_master import router as project_master_router
@@ -9,6 +10,7 @@ from .system import router as system_router
 
 __all__ = [
     "assistants_router",
+    "girder_plan_simulation_router",
     "plan_control_router",
     "project_girder_router",
     "project_master_router",

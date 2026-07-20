@@ -50,7 +50,7 @@ bridge_abutment 下非桩构件
 - **跟踪策略**：`tracked`
 - **保留类别**：`formal-output`
 - **主归属**：`03-requirements/specs/046-unified-abutment-task-rules/`
-- **跨阶段引用**：引用 `04-demo/` 源码与测试、`01-customer-validation/lugu/validation-results/_scripts/` 的输入生成脚本；实现和验证资产仍留在各自主阶段，不复制权威原文
+- **跨阶段引用**：引用 `04-demo/` 源码与测试、`01-customer-validation/泸古1标/validation-results/_scripts/` 的输入生成脚本；实现和验证资产仍留在各自主阶段，不复制权威原文
 
 ## Constitution 检查
 
@@ -171,7 +171,7 @@ bridge_abutment 下非桩构件
 ├── taskViewPresenter.test.mjs
 └── taskViewProjectMasterDisplay.test.mjs
 
-01-customer-validation/lugu/validation-results/_scripts/
+01-customer-validation/泸古1标/validation-results/_scripts/
 └── build_lugu_project_master.mjs
 ```
 

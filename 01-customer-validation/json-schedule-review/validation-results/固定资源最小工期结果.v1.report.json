@@ -1,0 +1,624 @@
+{
+  "sourceFile": "D:\\codex_workspace\\排程算法\\01-customer-validation\\json-schedule-review\\customer-materials\\固定资源最小工期结果.v1.json",
+  "code": 0,
+  "message": "success",
+  "rawDataKeys": [
+    "solveStatus",
+    "objectiveDays",
+    "planFinishDate",
+    "tasks",
+    "resourceAllocations",
+    "milestones",
+    "diagnostics",
+    "resourceRecommendations"
+  ],
+  "solveStatus": "OPTIMAL",
+  "objectiveDays": 175,
+  "planFinishDate": "2026-08-23",
+  "taskCount": 57,
+  "resourceAllocationCount": 56,
+  "milestoneCount": 1,
+  "diagnosticCount": 3,
+  "resourceRecommendationCount": 0,
+  "unmatchedAllocationCount": 0,
+  "noResourceTaskCount": 1,
+  "invalidTaskTimeCount": 0,
+  "missingTaskTimeCount": 0,
+  "diagnostics": [
+    "工艺逻辑约束已应用",
+    "命名资源 NoOverlap 已应用",
+    "存在 1 个无受限资源任务，仅受前后置约束"
+  ],
+  "milestones": [
+    {
+      "milestoneId": "ms-bridge-829766029737881600",
+      "name": "下部及现浇结构施工完成",
+      "targetDate": "2026-10-31",
+      "actualFinishDate": "2026-08-23",
+      "delayDays": 0,
+      "status": "satisfied"
+    }
+  ],
+  "resourcePaths": [
+    {
+      "resourceId": "pool-cap#1",
+      "resourceLabel": "承台模板#1",
+      "taskCount": 5,
+      "tasks": [
+        {
+          "taskId": "857993176579919872",
+          "taskName": "1号墩承台-1#承台",
+          "startOffsetDays": 18,
+          "endOffsetDays": 48
+        },
+        {
+          "taskId": "857993195064217600",
+          "taskName": "3号墩承台-3#承台",
+          "startOffsetDays": 53,
+          "endOffsetDays": 83
+        },
+        {
+          "taskId": "857993186235207680",
+          "taskName": "2号墩承台-2#承台",
+          "startOffsetDays": 83,
+          "endOffsetDays": 113
+        },
+        {
+          "taskId": "857993169327968256",
+          "taskName": "0号台承台-0#承台",
+          "startOffsetDays": 113,
+          "endOffsetDays": 143
+        },
+        {
+          "taskId": "857993203696095232",
+          "taskName": "4号台承台-4#承台",
+          "startOffsetDays": 143,
+          "endOffsetDays": 173
+        }
+      ]
+    },
+    {
+      "resourceId": "pool-pier-body#1",
+      "resourceLabel": "墩柱模板#1",
+      "taskCount": 4,
+      "tasks": [
+        {
+          "taskId": "857993177796268032",
+          "taskName": "1号墩墩身-1号墩-1",
+          "startOffsetDays": 53,
+          "endOffsetDays": 102
+        },
+        {
+          "taskId": "857993178530271232",
+          "taskName": "1号墩墩身-1号墩-2",
+          "startOffsetDays": 102,
+          "endOffsetDays": 122
+        },
+        {
+          "taskId": "857993195789832192",
+          "taskName": "3号墩墩身-3号墩",
+          "startOffsetDays": 122,
+          "endOffsetDays": 142
+        },
+        {
+          "taskId": "857993186990182400",
+          "taskName": "2号墩墩身-2号墩",
+          "startOffsetDays": 142,
+          "endOffsetDays": 162
+        }
+      ]
+    },
+    {
+      "resourceId": "pool-cap-beam#1",
+      "resourceLabel": "盖梁模板#1",
+      "taskCount": 3,
+      "tasks": [
+        {
+          "taskId": "857993179243302912",
+          "taskName": "1号墩盖梁-1#盖梁",
+          "startOffsetDays": 125,
+          "endOffsetDays": 135
+        },
+        {
+          "taskId": "857993196519641088",
+          "taskName": "3号墩盖梁-3#盖梁",
+          "startOffsetDays": 145,
+          "endOffsetDays": 155
+        },
+        {
+          "taskId": "857993187778711552",
+          "taskName": "2号墩盖梁-2#盖梁",
+          "startOffsetDays": 165,
+          "endOffsetDays": 175
+        }
+      ]
+    },
+    {
+      "resourceId": "pool-rotary-drill#1",
+      "resourceLabel": "旋挖钻#1",
+      "taskCount": 19,
+      "tasks": [
+        {
+          "taskId": "857993175141273600",
+          "taskName": "1号墩桩基-1-8桩基",
+          "startOffsetDays": 0,
+          "endOffsetDays": 5
+        },
+        {
+          "taskId": "857993170749837312",
+          "taskName": "1号墩桩基-1-2桩基",
+          "startOffsetDays": 5,
+          "endOffsetDays": 10
+        },
+        {
+          "taskId": "857993171458674688",
+          "taskName": "1号墩桩基-1-3桩基",
+          "startOffsetDays": 10,
+          "endOffsetDays": 15
+        },
+        {
+          "taskId": "857993190727307264",
+          "taskName": "3号墩桩基-3-4桩基",
+          "startOffsetDays": 15,
+          "endOffsetDays": 20
+        },
+        {
+          "taskId": "857993182594551808",
+          "taskName": "2号墩桩基-2-5桩基",
+          "startOffsetDays": 20,
+          "endOffsetDays": 25
+        },
+        {
+          "taskId": "857993188512714752",
+          "taskName": "3号墩桩基-3-1桩基",
+          "startOffsetDays": 25,
+          "endOffsetDays": 30
+        },
+        {
+          "taskId": "857993179532709888",
+          "taskName": "2号墩桩基-2-1桩基",
+          "startOffsetDays": 30,
+          "endOffsetDays": 35
+        },
+        {
+          "taskId": "857993194330214400",
+          "taskName": "3号墩桩基-3-9桩基",
+          "startOffsetDays": 35,
+          "endOffsetDays": 40
+        },
+        {
+          "taskId": "857993181860548608",
+          "taskName": "2号墩桩基-2-4桩基",
+          "startOffsetDays": 40,
+          "endOffsetDays": 45
+        },
+        {
+          "taskId": "857993193592016896",
+          "taskName": "3号墩桩基-3-8桩基",
+          "startOffsetDays": 45,
+          "endOffsetDays": 50
+        },
+        {
+          "taskId": "857993202177757184",
+          "taskName": "4号台桩基-4-8桩基",
+          "startOffsetDays": 50,
+          "endOffsetDays": 55
+        },
+        {
+          "taskId": "857993167859961856",
+          "taskName": "0号台桩基-0-8桩基",
+          "startOffsetDays": 55,
+          "endOffsetDays": 60
+        },
+        {
+          "taskId": "857993185526370304",
+          "taskName": "2号墩桩基-2-9桩基",
+          "startOffsetDays": 60,
+          "endOffsetDays": 65
+        },
+        {
+          "taskId": "857993163967647744",
+          "taskName": "0号台桩基-0-3桩基",
+          "startOffsetDays": 65,
+          "endOffsetDays": 70
+        },
+        {
+          "taskId": "857993164840062976",
+          "taskName": "0号台桩基-0-4桩基",
+          "startOffsetDays": 70,
+          "endOffsetDays": 75
+        },
+        {
+          "taskId": "857993197954093056",
+          "taskName": "4号台桩基-4-2桩基",
+          "startOffsetDays": 75,
+          "endOffsetDays": 80
+        },
+        {
+          "taskId": "857993201481502720",
+          "taskName": "4号台桩基-4-7桩基",
+          "startOffsetDays": 80,
+          "endOffsetDays": 85
+        },
+        {
+          "taskId": "857993198654541824",
+          "taskName": "4号台桩基-4-3桩基",
+          "startOffsetDays": 85,
+          "endOffsetDays": 90
+        },
+        {
+          "taskId": "857993165649563648",
+          "taskName": "0号台桩基-0-5桩基",
+          "startOffsetDays": 90,
+          "endOffsetDays": 95
+        }
+      ]
+    },
+    {
+      "resourceId": "pool-rotary-drill#2",
+      "resourceLabel": "旋挖钻#2",
+      "taskCount": 11,
+      "tasks": [
+        {
+          "taskId": "857993172180094976",
+          "taskName": "1号墩桩基-1-4桩基",
+          "startOffsetDays": 0,
+          "endOffsetDays": 5
+        },
+        {
+          "taskId": "857993174390493184",
+          "taskName": "1号墩桩基-1-7桩基",
+          "startOffsetDays": 5,
+          "endOffsetDays": 10
+        },
+        {
+          "taskId": "857993170015834112",
+          "taskName": "1号墩桩基-1-1桩基",
+          "startOffsetDays": 10,
+          "endOffsetDays": 15
+        },
+        {
+          "taskId": "857993183341137920",
+          "taskName": "2号墩桩基-2-6桩基",
+          "startOffsetDays": 15,
+          "endOffsetDays": 20
+        },
+        {
+          "taskId": "857993180266713088",
+          "taskName": "2号墩桩基-2-2桩基",
+          "startOffsetDays": 20,
+          "endOffsetDays": 25
+        },
+        {
+          "taskId": "857993202882400256",
+          "taskName": "4号台桩基-4-9桩基",
+          "startOffsetDays": 25,
+          "endOffsetDays": 30
+        },
+        {
+          "taskId": "857993163116204032",
+          "taskName": "0号台桩基-0-2桩基",
+          "startOffsetDays": 30,
+          "endOffsetDays": 35
+        },
+        {
+          "taskId": "857993192883179520",
+          "taskName": "3号墩桩基-3-7桩基",
+          "startOffsetDays": 35,
+          "endOffsetDays": 40
+        },
+        {
+          "taskId": "857993189989109760",
+          "taskName": "3号墩桩基-3-3桩基",
+          "startOffsetDays": 40,
+          "endOffsetDays": 45
+        },
+        {
+          "taskId": "857993192174342144",
+          "taskName": "3号墩桩基-3-6桩基",
+          "startOffsetDays": 45,
+          "endOffsetDays": 50
+        },
+        {
+          "taskId": "857993166354206720",
+          "taskName": "0号台桩基-0-6桩基",
+          "startOffsetDays": 95,
+          "endOffsetDays": 100
+        }
+      ]
+    },
+    {
+      "resourceId": "pool-rotary-drill#3",
+      "resourceLabel": "旋挖钻#3",
+      "taskCount": 14,
+      "tasks": [
+        {
+          "taskId": "857993172918292480",
+          "taskName": "1号墩桩基-1-5桩基",
+          "startOffsetDays": 0,
+          "endOffsetDays": 5
+        },
+        {
+          "taskId": "857993175887859712",
+          "taskName": "1号墩桩基-1-9桩基",
+          "startOffsetDays": 5,
+          "endOffsetDays": 10
+        },
+        {
+          "taskId": "857993173669072896",
+          "taskName": "1号墩桩基-1-6桩基",
+          "startOffsetDays": 10,
+          "endOffsetDays": 15
+        },
+        {
+          "taskId": "857993180983939072",
+          "taskName": "2号墩桩基-2-3桩基",
+          "startOffsetDays": 15,
+          "endOffsetDays": 20
+        },
+        {
+          "taskId": "857993189271883776",
+          "taskName": "3号墩桩基-3-2桩基",
+          "startOffsetDays": 20,
+          "endOffsetDays": 25
+        },
+        {
+          "taskId": "857993184058363904",
+          "taskName": "2号墩桩基-2-7桩基",
+          "startOffsetDays": 25,
+          "endOffsetDays": 30
+        },
+        {
+          "taskId": "857993184804950016",
+          "taskName": "2号墩桩基-2-8桩基",
+          "startOffsetDays": 30,
+          "endOffsetDays": 35
+        },
+        {
+          "taskId": "857993199371767808",
+          "taskName": "4号台桩基-4-4桩基",
+          "startOffsetDays": 35,
+          "endOffsetDays": 40
+        },
+        {
+          "taskId": "857993167092404224",
+          "taskName": "0号台桩基-0-7桩基",
+          "startOffsetDays": 40,
+          "endOffsetDays": 45
+        },
+        {
+          "taskId": "857993191448727552",
+          "taskName": "3号墩桩基-3-5桩基",
+          "startOffsetDays": 45,
+          "endOffsetDays": 50
+        },
+        {
+          "taskId": "857993200789442560",
+          "taskName": "4号台桩基-4-6桩基",
+          "startOffsetDays": 50,
+          "endOffsetDays": 55
+        },
+        {
+          "taskId": "857993168577187840",
+          "taskName": "0号台桩基-0-9桩基",
+          "startOffsetDays": 55,
+          "endOffsetDays": 60
+        },
+        {
+          "taskId": "857993197215895552",
+          "taskName": "4号台桩基-4-1桩基",
+          "startOffsetDays": 60,
+          "endOffsetDays": 65
+        },
+        {
+          "taskId": "857993200072216576",
+          "taskName": "4号台桩基-4-5桩基",
+          "startOffsetDays": 65,
+          "endOffsetDays": 70
+        }
+      ]
+    }
+  ],
+  "sampleTasks": [
+    {
+      "taskId": "857993162227011584",
+      "taskName": "0号台桩基-0-1桩基",
+      "startOffsetDays": 0,
+      "endOffsetDays": 10,
+      "startDate": "2026-03-01",
+      "endDate": "2026-03-11",
+      "assignedResourceLabel": "—",
+      "unconstrained": true
+    },
+    {
+      "taskId": "857993163116204032",
+      "taskName": "0号台桩基-0-2桩基",
+      "startOffsetDays": 30,
+      "endOffsetDays": 35,
+      "startDate": "2026-03-31",
+      "endDate": "2026-04-05",
+      "assignedResourceLabel": "旋挖钻#2",
+      "unconstrained": false
+    },
+    {
+      "taskId": "857993163967647744",
+      "taskName": "0号台桩基-0-3桩基",
+      "startOffsetDays": 65,
+      "endOffsetDays": 70,
+      "startDate": "2026-05-05",
+      "endDate": "2026-05-10",
+      "assignedResourceLabel": "旋挖钻#1",
+      "unconstrained": false
+    },
+    {
+      "taskId": "857993164840062976",
+      "taskName": "0号台桩基-0-4桩基",
+      "startOffsetDays": 70,
+      "endOffsetDays": 75,
+      "startDate": "2026-05-10",
+      "endDate": "2026-05-15",
+      "assignedResourceLabel": "旋挖钻#1",
+      "unconstrained": false
+    },
+    {
+      "taskId": "857993165649563648",
+      "taskName": "0号台桩基-0-5桩基",
+      "startOffsetDays": 90,
+      "endOffsetDays": 95,
+      "startDate": "2026-05-30",
+      "endDate": "2026-06-04",
+      "assignedResourceLabel": "旋挖钻#1",
+      "unconstrained": false
+    },
+    {
+      "taskId": "857993166354206720",
+      "taskName": "0号台桩基-0-6桩基",
+      "startOffsetDays": 95,
+      "endOffsetDays": 100,
+      "startDate": "2026-06-04",
+      "endDate": "2026-06-09",
+      "assignedResourceLabel": "旋挖钻#2",
+      "unconstrained": false
+    },
+    {
+      "taskId": "857993167092404224",
+      "taskName": "0号台桩基-0-7桩基",
+      "startOffsetDays": 40,
+      "endOffsetDays": 45,
+      "startDate": "2026-04-10",
+      "endDate": "2026-04-15",
+      "assignedResourceLabel": "旋挖钻#3",
+      "unconstrained": false
+    },
+    {
+      "taskId": "857993167859961856",
+      "taskName": "0号台桩基-0-8桩基",
+      "startOffsetDays": 55,
+      "endOffsetDays": 60,
+      "startDate": "2026-04-25",
+      "endDate": "2026-04-30",
+      "assignedResourceLabel": "旋挖钻#1",
+      "unconstrained": false
+    },
+    {
+      "taskId": "857993168577187840",
+      "taskName": "0号台桩基-0-9桩基",
+      "startOffsetDays": 55,
+      "endOffsetDays": 60,
+      "startDate": "2026-04-25",
+      "endDate": "2026-04-30",
+      "assignedResourceLabel": "旋挖钻#3",
+      "unconstrained": false
+    },
+    {
+      "taskId": "857993169327968256",
+      "taskName": "0号台承台-0#承台",
+      "startOffsetDays": 113,
+      "endOffsetDays": 143,
+      "startDate": "2026-06-22",
+      "endDate": "2026-07-22",
+      "assignedResourceLabel": "承台模板#1",
+      "unconstrained": false
+    },
+    {
+      "taskId": "857993170015834112",
+      "taskName": "1号墩桩基-1-1桩基",
+      "startOffsetDays": 10,
+      "endOffsetDays": 15,
+      "startDate": "2026-03-11",
+      "endDate": "2026-03-16",
+      "assignedResourceLabel": "旋挖钻#2",
+      "unconstrained": false
+    },
+    {
+      "taskId": "857993170749837312",
+      "taskName": "1号墩桩基-1-2桩基",
+      "startOffsetDays": 5,
+      "endOffsetDays": 10,
+      "startDate": "2026-03-06",
+      "endDate": "2026-03-11",
+      "assignedResourceLabel": "旋挖钻#1",
+      "unconstrained": false
+    },
+    {
+      "taskId": "857993171458674688",
+      "taskName": "1号墩桩基-1-3桩基",
+      "startOffsetDays": 10,
+      "endOffsetDays": 15,
+      "startDate": "2026-03-11",
+      "endDate": "2026-03-16",
+      "assignedResourceLabel": "旋挖钻#1",
+      "unconstrained": false
+    },
+    {
+      "taskId": "857993172180094976",
+      "taskName": "1号墩桩基-1-4桩基",
+      "startOffsetDays": 0,
+      "endOffsetDays": 5,
+      "startDate": "2026-03-01",
+      "endDate": "2026-03-06",
+      "assignedResourceLabel": "旋挖钻#2",
+      "unconstrained": false
+    },
+    {
+      "taskId": "857993172918292480",
+      "taskName": "1号墩桩基-1-5桩基",
+      "startOffsetDays": 0,
+      "endOffsetDays": 5,
+      "startDate": "2026-03-01",
+      "endDate": "2026-03-06",
+      "assignedResourceLabel": "旋挖钻#3",
+      "unconstrained": false
+    },
+    {
+      "taskId": "857993173669072896",
+      "taskName": "1号墩桩基-1-6桩基",
+      "startOffsetDays": 10,
+      "endOffsetDays": 15,
+      "startDate": "2026-03-11",
+      "endDate": "2026-03-16",
+      "assignedResourceLabel": "旋挖钻#3",
+      "unconstrained": false
+    },
+    {
+      "taskId": "857993174390493184",
+      "taskName": "1号墩桩基-1-7桩基",
+      "startOffsetDays": 5,
+      "endOffsetDays": 10,
+      "startDate": "2026-03-06",
+      "endDate": "2026-03-11",
+      "assignedResourceLabel": "旋挖钻#2",
+      "unconstrained": false
+    },
+    {
+      "taskId": "857993175141273600",
+      "taskName": "1号墩桩基-1-8桩基",
+      "startOffsetDays": 0,
+      "endOffsetDays": 5,
+      "startDate": "2026-03-01",
+      "endDate": "2026-03-06",
+      "assignedResourceLabel": "旋挖钻#1",
+      "unconstrained": false
+    },
+    {
+      "taskId": "857993175887859712",
+      "taskName": "1号墩桩基-1-9桩基",
+      "startOffsetDays": 5,
+      "endOffsetDays": 10,
+      "startDate": "2026-03-06",
+      "endDate": "2026-03-11",
+      "assignedResourceLabel": "旋挖钻#3",
+      "unconstrained": false
+    },
+    {
+      "taskId": "857993176579919872",
+      "taskName": "1号墩承台-1#承台",
+      "startOffsetDays": 18,
+      "endOffsetDays": 48,
+      "startDate": "2026-03-19",
+      "endDate": "2026-04-18",
+      "assignedResourceLabel": "承台模板#1",
+      "unconstrained": false
+    }
+  ]
+}

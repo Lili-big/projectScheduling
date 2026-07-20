@@ -6,3 +6,4 @@ surface; ``app.models`` remains a compatibility façade.
 """
 
 from ._models import *  # noqa: F401,F403
+from .girder_plan_simulation import *  # noqa: F401,F403

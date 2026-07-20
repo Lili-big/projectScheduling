@@ -37,8 +37,6 @@ DEFAULT_RESOURCE_MAX_QUANTITIES: dict[str, int] = {
     "cap_beam_team": 10,
     "abutment_team": 10,
 }
-PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION = "机械桩基资源：按同桥同幅同墩同工艺形成墩组，组内由同一台设备负责；不再配置并行上限。"
-MANUAL_PILE_PARALLEL_RULE_DESCRIPTION = "人工挖孔班组：不进入机械钻机墩组规则，按班组数量和资源互斥排程。"
 BRIDGE_COMPLETION_MILESTONE_NAME = "下部及现浇结构施工完成"
 
 
@@ -493,73 +491,7 @@ def default_resource_calendars() -> list[ResourceCalendar]:
 
 
 def default_resource_pools() -> list[ResourcePool]:
-    return [
-        ResourcePool(
-            id="pool-rotary-drill",
-            type="rotary_drill",
-            label="旋挖钻",
-            quantity=1,
-            max_quantity=10,
-            cost_type="monthly_rental",
-            incremental_unit_cost=180000,
-            billing_period_days=30,
-            same_structure_resource_binding=False,
-            parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
-        ),
-        ResourcePool(
-            id="pool-circulation-drill",
-            type="circulation_drill",
-            label="回旋钻",
-            quantity=1,
-            max_quantity=10,
-            same_structure_resource_binding=False,
-            parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
-        ),
-        ResourcePool(
-            id="pool-impact-drill",
-            type="impact_drill",
-            label="冲击钻",
-            quantity=1,
-            max_quantity=10,
-            same_structure_resource_binding=False,
-            parallel_rule_description=PILE_EQUIPMENT_PARALLEL_RULE_DESCRIPTION,
-        ),
-        ResourcePool(
-            id="pool-manual-pile",
-            type="manual_pile_team",
-            label="人工挖孔班组",
-            quantity=1,
-            max_quantity=10,
-            parallel_rule_description=MANUAL_PILE_PARALLEL_RULE_DESCRIPTION,
-        ),
-        ResourcePool(id="pool-cap", type="cap_team", label="承台模板", quantity=1, max_quantity=10),
-        ResourcePool(
-            id="pool-pier-body",
-            type="pier_body_team",
-            label="墩柱模板",
-            quantity=1,
-            max_quantity=10,
-            cost_type="one_time_purchase",
-            incremental_unit_cost=90000,
-        ),
-        ResourcePool(
-            id="pool-cap-beam",
-            type="cap_beam_team",
-            label="盖梁模板",
-            quantity=1,
-            max_quantity=10,
-            cost_type="one_time_purchase",
-            incremental_unit_cost=80000,
-        ),
-        ResourcePool(id="pool-cast-in-place-continuous-beam", type="cast_in_place_continuous_beam_team", label="连续梁班组", quantity=1, max_quantity=10),
-        ResourcePool(
-            id="pool-abutment",
-            type="abutment_team",
-            label="桥台班组",
-            quantity=1,
-            max_quantity=10,
-        ),
-    ]
+    return []
 
 
 def default_milestones() -> list[MilestoneConstraint]:

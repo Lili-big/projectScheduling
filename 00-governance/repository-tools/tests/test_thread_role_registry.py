@@ -111,7 +111,11 @@ def test_merged_speckit_stages_own_one_check_each() -> None:
     assert "Do not create a separate clarification artifact or stage" in specify
     assert "Perform one consistency check" in tasks
     assert "Ask the user to confirm `tasks.md` and this result" in tasks
-    assert "run the validation commands defined by the tasks once" in implement
+    assert "run each validation command defined by the tasks for an initial attempt" in implement
+    assert "Classify every failure against the confirmed core objective" in implement
+    assert "make the smallest in-scope correction and rerun only the affected validation" in implement
+    assert "record the evidence and why it is non-blocking, then continue" in implement
+    assert "Stop only when the core objective still cannot be proven" in implement
     assert "Do not mechanically reload every design file" in implement
     assert "$speckit-clarify" not in specify
     assert "$speckit-analyze" not in tasks

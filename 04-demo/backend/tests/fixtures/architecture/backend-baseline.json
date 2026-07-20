@@ -1,7 +1,7 @@
 {
   "format_version": 1,
   "api": {
-    "route_count": 57,
+    "route_count": 65,
     "routes": [
       {
         "method": "POST",
@@ -299,6 +299,178 @@
             "description": "Successful Response",
             "json_schema": {
               "$ref": "#/components/schemas/WbsResponse"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "json_schema": {
+              "$ref": "#/components/schemas/HTTPValidationError"
+            }
+          }
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/api/girder-plan-simulation/line-graphs/{project_master_version_id}",
+        "operation_id": "get_line_graph_endpoint_api_girder_plan_simulation_line_graphs__project_master_version_id__get",
+        "request_schema": null,
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "json_schema": {
+              "$ref": "#/components/schemas/LineGraphSnapshot"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "json_schema": {
+              "$ref": "#/components/schemas/HTTPValidationError"
+            }
+          }
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/girder-plan-simulation/runs",
+        "operation_id": "create_run_endpoint_api_girder_plan_simulation_runs_post",
+        "request_schema": {
+          "$ref": "#/components/schemas/CreateSimulationRunRequest"
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "json_schema": {
+              "$ref": "#/components/schemas/GirderPlanSimulationRun"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "json_schema": {
+              "$ref": "#/components/schemas/HTTPValidationError"
+            }
+          }
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/api/girder-plan-simulation/runs/{run_id}",
+        "operation_id": "get_run_endpoint_api_girder_plan_simulation_runs__run_id__get",
+        "request_schema": null,
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "json_schema": {
+              "$ref": "#/components/schemas/GirderPlanSimulationRun"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "json_schema": {
+              "$ref": "#/components/schemas/HTTPValidationError"
+            }
+          }
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/girder-plan-simulation/runs/{run_id}/confirm",
+        "operation_id": "confirm_run_endpoint_api_girder_plan_simulation_runs__run_id__confirm_post",
+        "request_schema": {
+          "$ref": "#/components/schemas/ConfirmSimulationRunRequest"
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "json_schema": {
+              "$ref": "#/components/schemas/GirderPlanSimulationRun"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "json_schema": {
+              "$ref": "#/components/schemas/HTTPValidationError"
+            }
+          }
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/api/girder-plan-simulation/scenarios",
+        "operation_id": "list_scenarios_endpoint_api_girder_plan_simulation_scenarios_get",
+        "request_schema": null,
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "json_schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/GirderPlanScenarioVersion"
+              },
+              "title": "Response List Scenarios Endpoint Api Girder Plan Simulation Scenarios Get"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "json_schema": {
+              "$ref": "#/components/schemas/HTTPValidationError"
+            }
+          }
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/girder-plan-simulation/scenarios",
+        "operation_id": "create_scenario_endpoint_api_girder_plan_simulation_scenarios_post",
+        "request_schema": {
+          "$ref": "#/components/schemas/CreateScenarioVersionRequest"
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "json_schema": {
+              "$ref": "#/components/schemas/GirderPlanScenarioVersion"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "json_schema": {
+              "$ref": "#/components/schemas/HTTPValidationError"
+            }
+          }
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/api/girder-plan-simulation/scenarios/{scenario_version_id}",
+        "operation_id": "get_scenario_endpoint_api_girder_plan_simulation_scenarios__scenario_version_id__get",
+        "request_schema": null,
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "json_schema": {
+              "$ref": "#/components/schemas/GirderPlanScenarioVersion"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "json_schema": {
+              "$ref": "#/components/schemas/HTTPValidationError"
+            }
+          }
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/girder-plan-simulation/scenarios/{scenario_version_id}/validate",
+        "operation_id": "validate_scenario_endpoint_api_girder_plan_simulation_scenarios__scenario_version_id__validate_post",
+        "request_schema": {
+          "$ref": "#/components/schemas/ExpectedFingerprintRequest"
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "json_schema": {
+              "$ref": "#/components/schemas/GirderPlanReadiness"
             }
           },
           "422": {

@@ -58,8 +58,8 @@
 ### 用户故事 1 的实现
 
 - [X] T010 [US1] (D01) 在 `04-demo/backend/app/project_master/scheduling_adapter.py` 的下部结构投影中以父级 `structure_type=bridge_abutment` 规范化构件：`pile` 沿用现有映射，其他有效非桩构件投影为 `abutment_body`；不得读取名称、ID、排序、参数文本或工期数值，不得凭父结构名称补造不存在的主体，并保留全部来源引用
-- [X] T011 [US1] (D01) 修改 `01-customer-validation/lugu/validation-results/_scripts/build_lugu_project_master.mjs`，基于父结构物规范类型输出桥台非桩 `component_type=abutment_body`，同步类型验证列表且保留桥墩 `cap_beam` 与桥台 `pile`；不得再用“台帽/盖梁”等名称决定规范类型
-- [X] T012 [US1] (D01) 按 `03-requirements/specs/046-unified-abutment-task-rules/quickstart.md` 场景 A、D 运行 `04-demo/backend/tests/test_project_master_adapter.py`、`04-demo/backend/tests/test_project_master_workbook.py` 和 `01-customer-validation/lugu/validation-results/_scripts/build_lugu_project_master.mjs`，核对桥台主体、仅桩基桥台和桥墩盖梁回归
+- [X] T011 [US1] (D01) 修改 `01-customer-validation/泸古1标/validation-results/_scripts/build_lugu_project_master.mjs`，基于父结构物规范类型输出桥台非桩 `component_type=abutment_body`，同步类型验证列表且保留桥墩 `cap_beam` 与桥台 `pile`；不得再用“台帽/盖梁”等名称决定规范类型
+- [X] T012 [US1] (D01) 按 `03-requirements/specs/046-unified-abutment-task-rules/quickstart.md` 场景 A、D 运行 `04-demo/backend/tests/test_project_master_adapter.py`、`04-demo/backend/tests/test_project_master_workbook.py` 和 `01-customer-validation/泸古1标/validation-results/_scripts/build_lugu_project_master.mjs`，核对桥台主体、仅桩基桥台和桥墩盖梁回归
 
 **检查点**：用户故事 1 可独立证明规范映射正确，且没有改写或补造桥台桩基、桥台主体和桥墩盖梁。
 

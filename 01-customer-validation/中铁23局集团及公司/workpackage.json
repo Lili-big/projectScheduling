@@ -1,0 +1,17 @@
+{
+  "id": "zhongtie23ju-organization",
+  "stage": "01-customer-validation",
+  "purpose": "保存中铁23局集团及公司级进度管理调研分析总结。",
+  "status": "historical",
+  "inputs": [],
+  "entrypoints": [],
+  "results": [
+    "validation-results/2026Q2-5月集中调研-中铁23局3公司工程部-进度管理分析总结.pdf",
+    "validation-results/2026Q2-5月集中调研-中铁23局集团工程部-科员访谈分析总结.pdf",
+    "validation-results/来源与完整性索引.md"
+  ],
+  "owner": "L01｜需求发现与验证闭环（中铁23局公司级调研）",
+  "tracking_policy": "tracked",
+  "retention_policy": "正式分析总结和完整性索引进入 Git；迁移来源名称映射保持 local-only；替换前核对 SHA-256。",
+  "related_workpackages": ["lugu"]
+}

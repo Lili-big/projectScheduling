@@ -1,0 +1,17 @@
+{
+  "id": "huyu-dianchangduan-3fenbu",
+  "stage": "01-customer-validation",
+  "purpose": "保存沪渝高速垫长段三分部五月集中调研分析总结。",
+  "status": "historical",
+  "inputs": [],
+  "entrypoints": [],
+  "results": [
+    "validation-results/2026Q2-5月集中调研-沪渝垫长段三分部-工程部长-分析总结-20260526.pdf",
+    "validation-results/2026Q2-5月集中调研-沪渝垫长段三分部-总工及总工办主任-分析总结-20260526.pdf",
+    "validation-results/来源与完整性索引.md"
+  ],
+  "owner": "L01｜需求发现与验证闭环（沪渝垫长段三分部调研）",
+  "tracking_policy": "tracked",
+  "retention_policy": "正式分析总结和完整性索引进入 Git；迁移来源名称映射保持 local-only；替换前核对 SHA-256。",
+  "related_workpackages": []
+}

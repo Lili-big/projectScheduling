@@ -1,0 +1,38 @@
+{
+  "id": "lugu",
+  "stage": "01-customer-validation",
+  "purpose": "统一维护泸古1标客户资料、验证计划、调研分析总结、验证结果和可复现脚本。",
+  "status": "active",
+  "inputs": [
+    "customer-materials/泸古1标架梁工点导入模板.xlsx",
+    "customer-materials/2026Q3-0718上午-泸古1标工程部长-调研录音文字记录.docx",
+    "validation-plans/泸古项目客户访谈提纲_20260715.md",
+    "validation-plans/泸古项目客户验证计划_20260715.md"
+  ],
+  "entrypoints": [
+    "validation-results/_scripts/build_report.py",
+    "validation-results/_scripts/analyze_bridge_schedule_workbook.py",
+    "validation-plans/_scripts/build_validation_workbook.mjs",
+    "validation-results/_scripts/compare_plan_versions.py",
+    "validation-results/_scripts/build_lugu_project_master.mjs"
+  ],
+  "results": [
+    "validation-results/2026Q3-0718上午-泸古1标工程部长-客户价值验证调研记录表.xlsx",
+    "validation-results/2026Q3-0718上午-泸古1标工程部长-调研分析报告.docx",
+    "validation-results/2026Q3-0718上午-泸古1标工程部长-产品价值验证领导汇报.md",
+    "validation-results/泸古项目7月15日上午调研验证记录_20260715.docx",
+    "validation-results/泸古项目7月16日前期工期策划思路分析_20260715.docx",
+    "validation-results/2026Q2-5月集中调研-泸古1标-项目总工-分析总结-20260527.pdf",
+    "validation-results/2026Q2-5月集中调研-泸古1标-工程部长-分析总结.pdf",
+    "validation-results/2026Q2-5月集中调研-泸古1标-项目经理-分析总结.pdf",
+    "validation-results/来源与完整性索引.md",
+    "validation-results/plan_version_comparison.json",
+    "validation-results/泸古项目计划管理方式变化验证记录_20260716_v3.docx",
+    "validation-results/泸古TJ-1标统一工点及桥梁结构物导入数据.xlsx",
+    "validation-results/泸古TJ-1标统一主数据_mapping-report.json"
+  ],
+  "owner": "L01｜需求发现与验证闭环（泸古客户验证）",
+  "tracking_policy": "tracked",
+  "retention_policy": "正式客户资料、验证计划、分析总结、脚本和验证结果进入 Git；迁移来源名称映射保留为 local-only；可再生成预览和检查数据进入本地归档。",
+  "related_workpackages": []
+}

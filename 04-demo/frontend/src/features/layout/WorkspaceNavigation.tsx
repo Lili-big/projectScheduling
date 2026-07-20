@@ -45,6 +45,7 @@ const navigationGroups: NavigationGroup[] = [
     label: "前期策划",
     items: [
       { key: "girderPlanning", label: "架梁专项策划", icon: <ClipboardList size={15} /> },
+      { key: "girderPlanSimulation", label: "架梁计划推演", icon: <ChartSpline size={15} /> },
       { key: "resourceAssistant", label: "AI多方案比选", icon: <Bot size={15} /> },
       { key: "results", label: "模拟求解", icon: <CheckCircle2 size={15} /> },
     ],

@@ -35,6 +35,7 @@ export type TabKey =
   | "tasks"
   | "results"
   | "girderPlanning"
+  | "girderPlanSimulation"
   | "resourceAssistant"
   | "planControl"
   | "progressVisualization";

@@ -50,7 +50,7 @@ def test_historical_physical_asset_manifest_remains_auditable() -> None:
 
 def test_business_assets_are_reachable_within_two_directory_hops() -> None:
     expected = {
-        "01-customer-validation": "lugu",
+        "01-customer-validation": "泸古1标",
         "02-solution-analysis": "proposals",
         "03-requirements": "specs",
         "04-demo": "backend",
@@ -59,7 +59,7 @@ def test_business_assets_are_reachable_within_two_directory_hops() -> None:
     for stage, child in expected.items():
         assert (ROOT / stage / child).exists(), f"missing {stage}/{child}"
 
-    lugu = ROOT / "01-customer-validation/lugu"
+    lugu = ROOT / "01-customer-validation/泸古1标"
     categories = {"customer-materials", "validation-plans", "validation-results"}
     assert categories <= {path.name for path in lugu.iterdir() if path.is_dir()}
     assert (lugu / "validation-results/泸古项目计划管理方式变化验证记录_20260716_v3.docx").is_file()

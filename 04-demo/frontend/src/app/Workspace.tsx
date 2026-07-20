@@ -183,6 +183,7 @@ import { ResourceAssistantPanel } from "../features/resourceAssistant/ResourceAs
 import { PlanControlPanel } from "../features/planControl";
 import { ProgressVisualizationPanel } from "../features/progressVisualization/ProgressVisualizationPanel";
 import { GirderPlanningPanel } from "../features/girderPlanning";
+import { GirderPlanSimulationPanel } from "../features/girderPlanSimulation";
 import { ProjectMasterDataWorkspace } from "../features/projectMasterData";
 import { Metric } from "../components/common/Metric";
 import { PanelTitle } from "../components/common/PanelTitle";
@@ -973,7 +974,6 @@ export default function App() {
         {scenario && activeTab === "resources" && (
           <ResourcesTab
             scenario={scenario}
-            generated={currentGenerated}
             workpointState={resourceWorkpointState}
             onRetryWorkpoints={() => setResourceWorkpointReloadToken((current) => current + 1)}
             onUpsertResourcePool={upsertResourcePool}
@@ -1015,6 +1015,9 @@ export default function App() {
         {scenario && activeTab === "planControl" && <PlanControlPanel scenario={scenario} />}
         {scenario && activeTab === "girderPlanning" && (
           <GirderPlanningPanel scenario={scenario} onScenarioChange={setScenario} onIntegratedSnapshot={setIntegratedSnapshot} />
+        )}
+        {scenario && activeTab === "girderPlanSimulation" && (
+          <GirderPlanSimulationPanel projectId={scenario.project.project_id} />
         )}
         {activeTab === "progressVisualization" && <ProgressVisualizationPanel />}
         {scenario && activeTab === "milestones" && (

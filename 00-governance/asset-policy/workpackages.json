@@ -5,23 +5,44 @@
     {
       "id": "lugu",
       "stage": "01-customer-validation",
-      "path": "01-customer-validation/lugu",
+      "path": "01-customer-validation/泸古1标",
       "status": "active",
       "purpose": "泸古客户资料、验证计划和验证结果"
     },
     {
-      "id": "infrastructure-version-2026q2",
+      "id": "zhongtie23ju-organization",
       "stage": "01-customer-validation",
-      "path": "01-customer-validation/infrastructure-version-2026q2",
-      "status": "orphaned",
-      "purpose": "基建版本 2026 Q2 历史客户材料和脱敏索引"
+      "path": "01-customer-validation/中铁23局集团及公司",
+      "status": "historical",
+      "purpose": "中铁23局集团及公司级调研分析总结"
     },
     {
       "id": "dianfengwu-tj03",
       "stage": "01-customer-validation",
-      "path": "01-customer-validation/dianfengwu-tj03",
-      "status": "orphaned",
-      "purpose": "垫丰武 TJ03 历史客户资料和验证记录"
+      "path": "01-customer-validation/垫丰武TJ03标",
+      "status": "historical",
+      "purpose": "垫丰武 TJ03 历史产品验证总结"
+    },
+    {
+      "id": "dianfengwu-tj08",
+      "stage": "01-customer-validation",
+      "path": "01-customer-validation/垫丰武TJ08标",
+      "status": "historical",
+      "purpose": "垫丰武 TJ08 标调研分析总结"
+    },
+    {
+      "id": "jiangluyi-tj01",
+      "stage": "01-customer-validation",
+      "path": "01-customer-validation/江泸宜01标",
+      "status": "historical",
+      "purpose": "江泸宜 01 标调研分析总结"
+    },
+    {
+      "id": "huyu-dianchangduan-3fenbu",
+      "stage": "01-customer-validation",
+      "path": "01-customer-validation/沪渝垫长段三分部",
+      "status": "historical",
+      "purpose": "沪渝垫长段三分部调研分析总结"
     },
     {
       "id": "json-schedule-review",

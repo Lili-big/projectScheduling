@@ -1,0 +1,557 @@
+openapi: 3.1.0
+info:
+  title: 架梁计划推演 API
+  version: 1.0.0
+  description: >-
+    独立于现有架梁专项与综合联算的计划推演契约。所有结果均为独立策划成果，
+    不写入 GirderPlanningConfig、联合计算快照或计划版本。
+paths:
+  /api/girder-plan-simulation/line-graphs/{project_master_version_id}:
+    get:
+      summary: 从已确认项目主数据版本派生线路图
+      parameters:
+        - $ref: '#/components/parameters/ProjectMasterVersionId'
+      responses:
+        '200':
+          description: 线路图及可定位诊断
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LineGraphSnapshot'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 项目主数据版本未确认
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /api/girder-plan-simulation/scenarios:
+    get:
+      summary: 查询项目的计划推演方案版本
+      parameters:
+        - in: query
+          name: project_id
+          required: false
+          schema: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: 按版本号倒序返回
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/GirderPlanScenarioVersion' }
+    post:
+      summary: 创建新的计划推演方案版本
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateScenarioVersionRequest'
+      responses:
+        '201':
+          description: 创建新的不可变方案版本
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GirderPlanScenarioVersion'
+        '409':
+          description: 最新版本号或项目版本已变化
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          $ref: '#/components/responses/ValidationError'
+  /api/girder-plan-simulation/scenarios/{scenario_version_id}:
+    get:
+      summary: 查询一个方案版本
+      parameters:
+        - $ref: '#/components/parameters/ScenarioVersionId'
+      responses:
+        '200':
+          description: 方案版本
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GirderPlanScenarioVersion' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/girder-plan-simulation/scenarios/{scenario_version_id}/validate:
+    post:
+      summary: 校验方案就绪度
+      parameters:
+        - $ref: '#/components/parameters/ScenarioVersionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExpectedFingerprintRequest' }
+      responses:
+        '200':
+          description: 就绪度与对象级诊断
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GirderPlanReadiness' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 输入指纹已变化
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /api/girder-plan-simulation/runs:
+    post:
+      summary: 执行或复用计划推演快照
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSimulationRunRequest' }
+      responses:
+        '201':
+          description: 成功或阻断终态；业务阻断在响应体中返回
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GirderPlanSimulationRun' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 指纹过期或项目版本变化
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /api/girder-plan-simulation/runs/{run_id}:
+    get:
+      summary: 查询一次计划推演快照
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: 只读计算快照
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GirderPlanSimulationRun' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/girder-plan-simulation/runs/{run_id}/confirm:
+    post:
+      summary: 确认独立策划成果
+      description: 不触发专项确认、综合联算或计划发布。
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConfirmSimulationRunRequest' }
+      responses:
+        '200':
+          description: 已确认快照
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GirderPlanSimulationRun' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 快照已失效、已阻断或输入变化
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+components:
+  parameters:
+    ProjectMasterVersionId:
+      in: path
+      name: project_master_version_id
+      required: true
+      schema: { type: string, minLength: 1 }
+    ScenarioVersionId:
+      in: path
+      name: scenario_version_id
+      required: true
+      schema: { type: string, minLength: 1 }
+    RunId:
+      in: path
+      name: run_id
+      required: true
+      schema: { type: string, minLength: 1 }
+  responses:
+    NotFound:
+      description: 指定对象不存在
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ValidationError:
+      description: 请求字段或线路图输入无效
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail: { $ref: '#/components/schemas/ErrorDetail' }
+    ErrorDetail:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        entity_refs:
+          type: array
+          items: { type: string }
+    SimulationDiagnostic:
+      type: object
+      required: [level, code, message, entity_refs]
+      properties:
+        level: { type: string, enum: [info, warning, error] }
+        code: { type: string }
+        message: { type: string }
+        subject_id: { type: [string, 'null'] }
+        subject_type: { type: [string, 'null'] }
+        entity_refs:
+          type: array
+          items: { type: string }
+        suggestion: { type: [string, 'null'] }
+    BeamDemand:
+      type: object
+      required: [beam_type_id, beam_type_name, span_count, beam_count, span_refs]
+      properties:
+        beam_type_id: { type: string, minLength: 1 }
+        beam_type_name: { type: string, minLength: 1 }
+        span_count: { type: integer, minimum: 1 }
+        beam_count: { type: integer, minimum: 1 }
+        span_refs:
+          type: array
+          minItems: 1
+          items: { type: string }
+    LineGraphNode:
+      type: object
+      required: [node_id, project_master_workpoint_id, name, node_type, side, alignment_code, start_mileage_m, end_mileage_m, sort_order, requires_erection, beam_demands, source_refs]
+      properties:
+        node_id: { type: string }
+        project_master_workpoint_id: { type: [string, 'null'] }
+        name: { type: string }
+        node_type: { type: string, enum: [yard, bridge, roadbed, tunnel, culvert, access, connection] }
+        side: { type: string, enum: [left, right, unknown] }
+        alignment_code: { type: [string, 'null'] }
+        start_mileage_m: { type: [number, 'null'] }
+        end_mileage_m: { type: [number, 'null'] }
+        sort_order: { type: integer, minimum: 0 }
+        requires_erection: { type: boolean }
+        beam_demands:
+          type: array
+          items: { $ref: '#/components/schemas/BeamDemand' }
+        source_refs:
+          type: array
+          items: { type: string }
+        current_plan_finish_date: { type: [string, 'null'], format: date }
+    ConnectionConfirmation:
+      type: object
+      required: [reason, confirmed_by, confirmed_at]
+      properties:
+        reason: { type: string, minLength: 1 }
+        confirmed_by: { type: string, minLength: 1 }
+        confirmed_at: { type: string, format: date-time }
+    LineGraphEdge:
+      type: object
+      required: [edge_id, from_node_id, to_node_id, direction, source, transfer_days]
+      properties:
+        edge_id: { type: string }
+        from_node_id: { type: string }
+        to_node_id: { type: string }
+        direction: { type: string, enum: [forward, reverse, bidirectional] }
+        source: { type: string, enum: [alignment_adjacency, manual_connection] }
+        transfer_days: { type: integer, minimum: 0 }
+        confirmation:
+          oneOf:
+            - $ref: '#/components/schemas/ConnectionConfirmation'
+            - type: 'null'
+    LineGraphSnapshot:
+      type: object
+      required: [line_graph_id, project_master_version_id, project_id, projection_version, status, nodes, edges, diagnostics, input_fingerprint]
+      properties:
+        line_graph_id: { type: string }
+        project_master_version_id: { type: string }
+        project_id: { type: string }
+        projection_version: { type: string, const: girder-plan-line-graph/v1 }
+        status: { type: string, enum: [ready, warning, blocking] }
+        nodes:
+          type: array
+          items: { $ref: '#/components/schemas/LineGraphNode' }
+        edges:
+          type: array
+          items: { $ref: '#/components/schemas/LineGraphEdge' }
+        diagnostics:
+          type: array
+          items: { $ref: '#/components/schemas/SimulationDiagnostic' }
+        input_fingerprint: { type: string }
+    BeamTypeProductionCapacity:
+      type: object
+      required: [beam_type_id, daily_capacity_pieces, initial_inventory_pieces]
+      properties:
+        beam_type_id: { type: string, minLength: 1 }
+        daily_capacity_pieces: { type: integer, minimum: 0 }
+        initial_inventory_pieces: { type: integer, minimum: 0 }
+        max_inventory_pieces:
+          type: [integer, 'null']
+          minimum: 0
+    BeamYardPlan:
+      type: object
+      required: [beam_yard_id, name, alignment_code, mileage_m, production_start_date, capacities, enabled]
+      properties:
+        beam_yard_id: { type: string }
+        name: { type: string, minLength: 1 }
+        alignment_code: { type: string, minLength: 1 }
+        mileage_m: { type: number }
+        production_start_date: { type: string, format: date }
+        capacities:
+          type: array
+          items: { $ref: '#/components/schemas/BeamTypeProductionCapacity' }
+        enabled: { type: boolean, default: true }
+    ErectionLinePlan:
+      type: object
+      required: [erection_line_id, beam_yard_id, available_date, daily_erection_capacity_pieces, first_erection_preparation_days, bridge_transfer_days, side_switch_days, enabled]
+      properties:
+        erection_line_id: { type: string }
+        beam_yard_id: { type: string }
+        available_date: { type: string, format: date }
+        daily_erection_capacity_pieces: { type: integer, minimum: 0 }
+        first_erection_preparation_days: { type: integer, minimum: 0 }
+        bridge_transfer_days: { type: integer, minimum: 0 }
+        side_switch_days: { type: integer, minimum: 0 }
+        enabled: { type: boolean, default: true }
+    ConfirmedPathSegment:
+      type: object
+      required: [from_target_node_id, to_target_node_id, edge_ids, source]
+      properties:
+        from_target_node_id: { type: string }
+        to_target_node_id: { type: string }
+        edge_ids:
+          type: array
+          minItems: 1
+          items: { type: string }
+        source: { type: string, enum: [unique_auto_path, user_selected_path] }
+    ManualRoutePlan:
+      type: object
+      required: [route_plan_id, beam_yard_id, erection_line_id, name, target_node_ids, confirmed_paths, confirmed]
+      properties:
+        route_plan_id: { type: string }
+        beam_yard_id: { type: string }
+        erection_line_id: { type: string }
+        name: { type: string }
+        target_node_ids:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+        confirmed_paths:
+          type: array
+          items: { $ref: '#/components/schemas/ConfirmedPathSegment' }
+        confirmed: { type: boolean }
+    GirderPlanSimulationParameters:
+      type: object
+      required: [default_transfer_days, bridge_readiness_buffer_days, roadbed_passage_buffer_days, tunnel_passage_buffer_days, access_passage_buffer_days, post_erection_passage_buffer_days, planning_horizon_end_date, same_day_production_available]
+      properties:
+        default_transfer_days: { type: integer, minimum: 0 }
+        bridge_readiness_buffer_days: { type: integer, minimum: 0 }
+        roadbed_passage_buffer_days: { type: integer, minimum: 0 }
+        tunnel_passage_buffer_days: { type: integer, minimum: 0 }
+        access_passage_buffer_days: { type: integer, minimum: 0 }
+        post_erection_passage_buffer_days: { type: integer, minimum: 0 }
+        planning_horizon_end_date: { type: string, format: date }
+        same_day_production_available: { type: boolean, const: false }
+    CreateScenarioVersionRequest:
+      type: object
+      required: [project_id, project_master_version_id, line_graph_id, beam_yards, erection_lines, route_plans, parameters, created_by]
+      properties:
+        scenario_id: { type: [string, 'null'] }
+        project_id: { type: string }
+        project_master_version_id: { type: string }
+        line_graph_id: { type: string }
+        expected_latest_version_no: { type: [integer, 'null'], minimum: 1 }
+        beam_yards:
+          type: array
+          items: { $ref: '#/components/schemas/BeamYardPlan' }
+        erection_lines:
+          type: array
+          items: { $ref: '#/components/schemas/ErectionLinePlan' }
+        route_plans:
+          type: array
+          items: { $ref: '#/components/schemas/ManualRoutePlan' }
+        connection_overrides:
+          type: array
+          items: { $ref: '#/components/schemas/LineGraphEdge' }
+        parameters: { $ref: '#/components/schemas/GirderPlanSimulationParameters' }
+        created_by: { type: string, minLength: 1 }
+    GirderPlanScenarioVersion:
+      allOf:
+        - $ref: '#/components/schemas/CreateScenarioVersionRequest'
+        - type: object
+          required: [scenario_version_id, scenario_id, version_no, status, input_fingerprint, created_at]
+          properties:
+            scenario_version_id: { type: string }
+            scenario_id: { type: string }
+            version_no: { type: integer, minimum: 1 }
+            status: { type: string, enum: [draft, ready, calculated, confirmed, stale, blocked] }
+            input_fingerprint: { type: string }
+            created_at: { type: string, format: date-time }
+            stale_reason: { type: [string, 'null'] }
+            confirmed_by: { type: [string, 'null'] }
+            confirmed_at: { type: [string, 'null'], format: date-time }
+            confirmation_reason: { type: [string, 'null'] }
+    ExpectedFingerprintRequest:
+      type: object
+      required: [expected_input_fingerprint]
+      properties:
+        expected_input_fingerprint: { type: string }
+    ReadinessCheck:
+      type: object
+      required: [code, status, message, entity_refs]
+      properties:
+        code: { type: string }
+        status: { type: string, enum: [passed, warning, blocking] }
+        message: { type: string }
+        entity_refs:
+          type: array
+          items: { type: string }
+    GirderPlanReadiness:
+      type: object
+      required: [status, checks, diagnostics, expanded_routes]
+      properties:
+        status: { type: string, enum: [ready, warning, blocking] }
+        checks:
+          type: array
+          items: { $ref: '#/components/schemas/ReadinessCheck' }
+        diagnostics:
+          type: array
+          items: { $ref: '#/components/schemas/SimulationDiagnostic' }
+        expanded_routes:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+    CreateSimulationRunRequest:
+      type: object
+      required: [scenario_version_id, expected_input_fingerprint]
+      properties:
+        scenario_version_id: { type: string }
+        expected_input_fingerprint: { type: string }
+        force_recompute: { type: boolean, default: false }
+    DailyBeamConsumption:
+      type: object
+      required: [date, beam_type_id, erected_pieces]
+      properties:
+        date: { type: string, format: date }
+        beam_type_id: { type: string }
+        erected_pieces: { type: integer, minimum: 0 }
+    BridgeErectionSchedule:
+      type: object
+      required: [target_node_id, beam_yard_id, route_plan_id, sequence_index, start_date, finish_date, total_beam_count, beam_type_counts, daily_erection, controlling_factors]
+      properties:
+        target_node_id: { type: string }
+        beam_yard_id: { type: string }
+        route_plan_id: { type: string }
+        sequence_index: { type: integer, minimum: 0 }
+        start_date: { type: string, format: date }
+        finish_date: { type: string, format: date }
+        total_beam_count: { type: integer, minimum: 1 }
+        beam_type_counts:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+        daily_erection:
+          type: array
+          items: { $ref: '#/components/schemas/DailyBeamConsumption' }
+        controlling_factors:
+          type: array
+          items: { type: string, enum: [line_available, supply, transfer, side_switch, cross_route_passage] }
+    YardInventoryLedgerEntry:
+      type: object
+      required: [date, beam_yard_id, beam_type_id, opening_inventory_pieces, produced_pieces, erected_pieces, closing_inventory_pieces]
+      properties:
+        date: { type: string, format: date }
+        beam_yard_id: { type: string }
+        beam_type_id: { type: string }
+        opening_inventory_pieces: { type: integer, minimum: 0 }
+        produced_pieces: { type: integer, minimum: 0 }
+        erected_pieces: { type: integer, minimum: 0 }
+        closing_inventory_pieces: { type: integer, minimum: 0 }
+    PlannedRouteRun:
+      type: object
+      required: [route_plan_id, beam_yard_id, start_date, finish_date, expanded_node_ids, waiting_days_by_reason]
+      properties:
+        route_plan_id: { type: string }
+        beam_yard_id: { type: string }
+        start_date: { type: string, format: date }
+        finish_date: { type: string, format: date }
+        expanded_node_ids:
+          type: array
+          items: { type: string }
+        waiting_days_by_reason:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+    RouteDeliveryRequirement:
+      type: object
+      required: [route_plan_id, required_date, buffer_days, source]
+      properties:
+        route_plan_id: { type: string }
+        required_date: { type: string, format: date }
+        buffer_days: { type: integer, minimum: 0 }
+        source: { type: string }
+    WorkpointDeliveryControl:
+      type: object
+      required: [node_id, project_master_workpoint_id, side, first_required_date, latest_delivery_date, buffer_days, controlling_source, route_requirements, risk_status]
+      properties:
+        node_id: { type: string }
+        project_master_workpoint_id: { type: string }
+        side: { type: string, enum: [left, right, unknown] }
+        first_required_date: { type: string, format: date }
+        latest_delivery_date: { type: string, format: date }
+        buffer_days: { type: integer, minimum: 0 }
+        controlling_source: { type: string, enum: [erection_start, roadbed_passage, tunnel_passage, access_passage, post_erection_passage] }
+        route_requirements:
+          type: array
+          items: { $ref: '#/components/schemas/RouteDeliveryRequirement' }
+        current_plan_finish_date: { type: [string, 'null'], format: date }
+        late_days: { type: [integer, 'null'], minimum: 0 }
+        risk_status: { type: string, enum: [unknown, on_time, late] }
+    GirderPlanSimulationRun:
+      type: object
+      required: [run_id, scenario_version_id, project_master_version_id, status, started_at, finished_at, input_fingerprint, result_fingerprint, bridge_schedules, inventory_ledger, route_runs, workpoint_controls, diagnostics]
+      properties:
+        run_id: { type: string }
+        scenario_version_id: { type: string }
+        project_master_version_id: { type: string }
+        status: { type: string, enum: [calculated, blocked, stale, confirmed] }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        input_fingerprint: { type: string }
+        result_fingerprint: { type: string }
+        reused_from_run_id: { type: [string, 'null'] }
+        bridge_schedules:
+          type: array
+          items: { $ref: '#/components/schemas/BridgeErectionSchedule' }
+        inventory_ledger:
+          type: array
+          items: { $ref: '#/components/schemas/YardInventoryLedgerEntry' }
+        route_runs:
+          type: array
+          items: { $ref: '#/components/schemas/PlannedRouteRun' }
+        workpoint_controls:
+          type: array
+          items: { $ref: '#/components/schemas/WorkpointDeliveryControl' }
+        diagnostics:
+          type: array
+          items: { $ref: '#/components/schemas/SimulationDiagnostic' }
+        confirmed_by: { type: [string, 'null'] }
+        confirmed_at: { type: [string, 'null'], format: date-time }
+        confirmation_reason: { type: [string, 'null'] }
+    ConfirmSimulationRunRequest:
+      type: object
+      required: [expected_input_fingerprint, confirmed_by, confirmation_reason]
+      properties:
+        expected_input_fingerprint: { type: string }
+        confirmed_by: { type: string, minLength: 1 }
+        confirmation_reason: { type: string, minLength: 1 }

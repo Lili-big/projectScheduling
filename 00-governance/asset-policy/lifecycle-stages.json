@@ -17,7 +17,7 @@
       "entry_criteria": ["需要用客户材料还原事实、提出验证问题或复核产品判断"],
       "exit_criteria": ["客户资料、验证计划、结果、结论和限制可追溯"],
       "authoritative_asset_types": ["customer-material", "research-record", "validation-plan", "validation-script", "validation-result", "validation-report"],
-      "workpackages": ["lugu", "infrastructure-version-2026q2", "dianfengwu-tj03", "json-schedule-review", "ai-assistants"],
+      "workpackages": ["lugu", "zhongtie23ju-organization", "dianfengwu-tj03", "dianfengwu-tj08", "jiangluyi-tj01", "huyu-dianchangduan-3fenbu", "json-schedule-review", "ai-assistants"],
       "next_stages": ["02-solution-analysis", "03-requirements", "04-demo", "06-delivery"]
     },
     {

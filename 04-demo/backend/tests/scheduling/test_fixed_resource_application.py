@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -10,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import app.scenario as legacy  # noqa: E402
 from app.contracts import ResourcePool, WorkpointResourceOverride  # noqa: E402
+from app.local_scenario_config import apply_local_scenario_config  # noqa: E402
 from app.scheduling.application import fixed_resource  # noqa: E402
 from app.scheduling.solver.engine import solve_shortest_duration_schedule  # noqa: E402
 from workpoint_scope_test_support import (  # noqa: E402
@@ -140,3 +142,78 @@ def test_zero_local_without_legal_shared_pool_blocks_with_task_workpoint_type_an
     assert diagnostic.entity_refs == [task_a.id, WORKPOINT_A, "cap_team", "local-a", "shared-b"]
     assert "LOCAL_QUANTITY_ZERO" in diagnostic.message
     assert "SHARED_SCOPE_MISMATCH" in diagnostic.message
+
+
+def test_project_config_cleanup_prevents_shared_resources_from_reaching_generation(tmp_path: Path) -> None:
+    base = two_workpoint_scenario(
+        ResourcePool(
+            id="local-a",
+            type="cap_team",
+            label="A 本地班组",
+            scope_mode="WORKPOINT_EXCLUSIVE",
+            workpoint_id=WORKPOINT_A,
+            quantity=1,
+            max_quantity=2,
+        )
+    )
+    local_b = ResourcePool(
+        id="local-b",
+        type="cap_team",
+        label="B 本地班组",
+        scope_mode="WORKPOINT_EXCLUSIVE",
+        workpoint_id=WORKPOINT_B,
+        quantity=1,
+        max_quantity=2,
+    )
+    shared = ResourcePool(
+        id="shared-ab",
+        type="cap_team",
+        label="AB 旧共享班组",
+        scope_mode="PROJECT_SHARED",
+        quantity=2,
+        max_quantity=3,
+        authorized_workpoint_ids=[WORKPOINT_A, WORKPOINT_B],
+    )
+    path = tmp_path / "scheduler-config.json"
+    path.write_text(
+        json.dumps({"schema_version": "local-scheduler-config/v3", "resource_pools": [base.resource_pools[0].model_dump(mode="json"), local_b.model_dump(mode="json"), shared.model_dump(mode="json")]}),
+        encoding="utf-8",
+    )
+    base.resource_pools = []
+
+    cleaned = apply_local_scenario_config(base, path=path)
+    generated = legacy.generate_schedule_input_from_scenario(cleaned)
+
+    assert {pool.id for pool in cleaned.resource_pools} == {"local-a", "local-b"}
+    assert {resource.pool_id for resource in generated.schedule_input.resources} == {"local-a", "local-b"}
+    assert generated.source_summary["shared_effective_pool_count"] == 0
+    assert not any(message.code == "PROJECT_SHARED_TRANSFER_ZERO_DAYS" for message in generated.validation)
+
+
+def test_shared_only_project_cleanup_blocks_tasks_as_unconfigured_local_resources(tmp_path: Path) -> None:
+    scenario = two_workpoint_scenario(
+        ResourcePool(
+            id="shared-ab",
+            type="cap_team",
+            label="AB 旧共享班组",
+            scope_mode="PROJECT_SHARED",
+            quantity=1,
+            max_quantity=2,
+            authorized_workpoint_ids=[WORKPOINT_A, WORKPOINT_B],
+        )
+    )
+    path = tmp_path / "scheduler-config.json"
+    path.write_text(
+        json.dumps({"schema_version": "local-scheduler-config/v3", "resource_pools": [scenario.resource_pools[0].model_dump(mode="json")]}),
+        encoding="utf-8",
+    )
+    scenario.resource_pools = []
+
+    cleaned = apply_local_scenario_config(scenario, path=path)
+    generated = legacy.generate_schedule_input_from_scenario(cleaned)
+
+    errors = [message for message in generated.validation if message.code == "RESOURCE_ALLOCATION_NO_LEGAL_CANDIDATE"]
+    assert cleaned.resource_pools == []
+    assert generated.schedule_input.resources == []
+    assert len(errors) == len(generated.schedule_input.tasks)
+    assert all(message.details["reason"] == "RESOURCE_TYPE_UNCONFIGURED" for message in errors)

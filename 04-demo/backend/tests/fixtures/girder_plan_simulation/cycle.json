@@ -1,0 +1,9 @@
+{
+  "fixture_id": "cross-route-cycle-v1",
+  "dependencies": {
+    "route-A": ["route-B"],
+    "route-B": ["route-A"]
+  },
+  "expected_diagnostic_code": "CROSS_ROUTE_DEPENDENCY_CYCLE",
+  "expected_status": "blocking"
+}

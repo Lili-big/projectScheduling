@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .api.routers import (
     assistants_router,
+    girder_plan_simulation_router,
     plan_control_router,
     project_girder_router,
     project_master_router,
@@ -18,6 +19,7 @@ from .api.routers import (
 )
 from .config.environment import load_local_config
 from .project_master.service import default_project_master_service
+from .girder_plan_simulation.service import default_girder_plan_service
 
 
 NETLIFY_FRONTEND_ORIGIN = "https://project-scheduling-lili-big.netlify.app"
@@ -40,6 +42,7 @@ def create_app() -> FastAPI:
     load_local_config()
     app = FastAPI(title="Bridge Lower-Structure CP-SAT Scheduler", version="0.1.0")
     app.state.project_master_service = default_project_master_service()
+    app.state.girder_plan_simulation_service = default_girder_plan_service()
     app.add_middleware(
         CORSMiddleware,
         allow_origins=csv_env("SCHEDULER_CORS_ORIGINS", DEFAULT_CORS_ORIGINS),
@@ -57,6 +60,7 @@ def create_app() -> FastAPI:
     app.include_router(project_girder_router)
     app.include_router(project_master_router)
     app.include_router(plan_control_router)
+    app.include_router(girder_plan_simulation_router)
 
     if DIST_DIR.exists():
         app.mount("/assets", StaticFiles(directory=DIST_DIR / "assets"), name="assets")

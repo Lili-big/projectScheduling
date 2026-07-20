@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>固定资源最小工期结果 v1</title>
+  <style>
+    body { margin: 0; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #eef2f6; color: #18212f; }
+    main { padding: 24px; display: grid; gap: 16px; }
+    section { background: #fff; border: 1px solid #dbe4ed; border-radius: 8px; overflow: hidden; }
+    h1, h2 { margin: 0; }
+    .title { padding: 16px; display: grid; gap: 6px; }
+    .title span { color: #64748b; font-size: 12px; }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 12px; }
+    .metric { min-height: 74px; padding: 14px; border: 1px solid #dbe4ed; border-radius: 8px; background: #fff; }
+    .metric span { display: block; color: #64748b; font-size: 12px; }
+    .metric strong { display: block; margin-top: 6px; font-size: 20px; }
+    .body { padding: 14px 16px 16px; }
+    .check { min-height: 34px; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 7px; background: #f8fafc; display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+    .check.warn { background: #fffbeb; border-color: #fde68a; }
+    .check.error { background: #fff1f2; border-color: #fecdd3; }
+    .check strong { min-width: 120px; color: #475569; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 8px 9px; border-bottom: 1px solid #e2e8f0; text-align: left; white-space: nowrap; }
+    th { background: #f8fafc; color: #475569; }
+    .path { margin-bottom: 8px; display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 10px; align-items: center; }
+    .steps { display: flex; gap: 6px; overflow-x: auto; white-space: nowrap; }
+    .step { padding: 4px 7px; border-radius: 5px; background: #eef6f6; color: #0f766e; font-size: 12px; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <div class="title">
+        <h1>固定资源最小工期结果 v1</h1>
+        <span>D:\codex_workspace\排程算法\01-customer-validation\json-schedule-review\customer-materials\固定资源最小工期结果.v1.json</span>
+      </div>
+    </section>
+    <div class="metrics">
+      <div class="metric"><span>状态</span><strong>OPTIMAL</strong></div>
+      <div class="metric"><span>总工期</span><strong>175 天</strong></div>
+      <div class="metric"><span>完工日期</span><strong>2026-08-23</strong></div>
+      <div class="metric"><span>任务/分配</span><strong>57 / 56</strong></div>
+    </div>
+    <section>
+      <div class="title"><h2>完整性检查</h2><span>字段只来自 JSON 和展示派生统计</span></div>
+      <div class="body">
+        <div class="check "><strong>任务</strong><span>tasks[] 共 57 条。</span></div>
+        <div class="check "><strong>资源分配</strong><span>resourceAllocations[] 共 56 条。</span></div>
+        <div class="check "><strong>分配匹配</strong><span>0 条资源分配未匹配到任务。</span></div>
+        <div class="check warn"><strong>无资源任务</strong><span>1 条任务未提供资源或标记 unconstrained。</span></div>
+        <div class="check "><strong>时间字段</strong><span>缺失 0 条，倒挂 0 条。</span></div>
+        <div class="check "><strong>里程碑/诊断</strong><span>1 / 3</span></div>
+      </div>
+    </section>
+    <section>
+      <div class="title"><h2>计划表样例</h2><span>前 20 条任务</span></div>
+      <div class="body">
+        <table>
+          <thead><tr><th>任务</th><th>开始偏移</th><th>结束偏移</th><th>开始日期</th><th>结束日期</th><th>资源</th><th>不受资源约束</th></tr></thead>
+          <tbody><tr><td>0号台桩基-0-1桩基</td><td>0</td><td>10</td><td>2026-03-01</td><td>2026-03-11</td><td>—</td><td>是</td></tr><tr><td>0号台桩基-0-2桩基</td><td>30</td><td>35</td><td>2026-03-31</td><td>2026-04-05</td><td>旋挖钻#2</td><td>否</td></tr><tr><td>0号台桩基-0-3桩基</td><td>65</td><td>70</td><td>2026-05-05</td><td>2026-05-10</td><td>旋挖钻#1</td><td>否</td></tr><tr><td>0号台桩基-0-4桩基</td><td>70</td><td>75</td><td>2026-05-10</td><td>2026-05-15</td><td>旋挖钻#1</td><td>否</td></tr><tr><td>0号台桩基-0-5桩基</td><td>90</td><td>95</td><td>2026-05-30</td><td>2026-06-04</td><td>旋挖钻#1</td><td>否</td></tr><tr><td>0号台桩基-0-6桩基</td><td>95</td><td>100</td><td>2026-06-04</td><td>2026-06-09</td><td>旋挖钻#2</td><td>否</td></tr><tr><td>0号台桩基-0-7桩基</td><td>40</td><td>45</td><td>2026-04-10</td><td>2026-04-15</td><td>旋挖钻#3</td><td>否</td></tr><tr><td>0号台桩基-0-8桩基</td><td>55</td><td>60</td><td>2026-04-25</td><td>2026-04-30</td><td>旋挖钻#1</td><td>否</td></tr><tr><td>0号台桩基-0-9桩基</td><td>55</td><td>60</td><td>2026-04-25</td><td>2026-04-30</td><td>旋挖钻#3</td><td>否</td></tr><tr><td>0号台承台-0#承台</td><td>113</td><td>143</td><td>2026-06-22</td><td>2026-07-22</td><td>承台模板#1</td><td>否</td></tr><tr><td>1号墩桩基-1-1桩基</td><td>10</td><td>15</td><td>2026-03-11</td><td>2026-03-16</td><td>旋挖钻#2</td><td>否</td></tr><tr><td>1号墩桩基-1-2桩基</td><td>5</td><td>10</td><td>2026-03-06</td><td>2026-03-11</td><td>旋挖钻#1</td><td>否</td></tr><tr><td>1号墩桩基-1-3桩基</td><td>10</td><td>15</td><td>2026-03-11</td><td>2026-03-16</td><td>旋挖钻#1</td><td>否</td></tr><tr><td>1号墩桩基-1-4桩基</td><td>0</td><td>5</td><td>2026-03-01</td><td>2026-03-06</td><td>旋挖钻#2</td><td>否</td></tr><tr><td>1号墩桩基-1-5桩基</td><td>0</td><td>5</td><td>2026-03-01</td><td>2026-03-06</td><td>旋挖钻#3</td><td>否</td></tr><tr><td>1号墩桩基-1-6桩基</td><td>10</td><td>15</td><td>2026-03-11</td><td>2026-03-16</td><td>旋挖钻#3</td><td>否</td></tr><tr><td>1号墩桩基-1-7桩基</td><td>5</td><td>10</td><td>2026-03-06</td><td>2026-03-11</td><td>旋挖钻#2</td><td>否</td></tr><tr><td>1号墩桩基-1-8桩基</td><td>0</td><td>5</td><td>2026-03-01</td><td>2026-03-06</td><td>旋挖钻#1</td><td>否</td></tr><tr><td>1号墩桩基-1-9桩基</td><td>5</td><td>10</td><td>2026-03-06</td><td>2026-03-11</td><td>旋挖钻#3</td><td>否</td></tr><tr><td>1号墩承台-1#承台</td><td>18</td><td>48</td><td>2026-03-19</td><td>2026-04-18</td><td>承台模板#1</td><td>否</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+    <section>
+      <div class="title"><h2>资源路径</h2><span>按资源分组并按开始偏移排序</span></div>
+      <div class="body">
+        <div class="path"><strong>承台模板#1</strong><div class="steps"><span class="step">1号墩承台-1#承台</span><span class="step">3号墩承台-3#承台</span><span class="step">2号墩承台-2#承台</span><span class="step">0号台承台-0#承台</span><span class="step">4号台承台-4#承台</span></div></div><div class="path"><strong>墩柱模板#1</strong><div class="steps"><span class="step">1号墩墩身-1号墩-1</span><span class="step">1号墩墩身-1号墩-2</span><span class="step">3号墩墩身-3号墩</span><span class="step">2号墩墩身-2号墩</span></div></div><div class="path"><strong>盖梁模板#1</strong><div class="steps"><span class="step">1号墩盖梁-1#盖梁</span><span class="step">3号墩盖梁-3#盖梁</span><span class="step">2号墩盖梁-2#盖梁</span></div></div><div class="path"><strong>旋挖钻#1</strong><div class="steps"><span class="step">1号墩桩基-1-8桩基</span><span class="step">1号墩桩基-1-2桩基</span><span class="step">1号墩桩基-1-3桩基</span><span class="step">3号墩桩基-3-4桩基</span><span class="step">2号墩桩基-2-5桩基</span><span class="step">3号墩桩基-3-1桩基</span><span class="step">2号墩桩基-2-1桩基</span><span class="step">3号墩桩基-3-9桩基</span><span class="step">2号墩桩基-2-4桩基</span><span class="step">3号墩桩基-3-8桩基</span><span class="step">4号台桩基-4-8桩基</span><span class="step">0号台桩基-0-8桩基</span><span class="step">2号墩桩基-2-9桩基</span><span class="step">0号台桩基-0-3桩基</span><span class="step">0号台桩基-0-4桩基</span><span class="step">4号台桩基-4-2桩基</span><span class="step">4号台桩基-4-7桩基</span><span class="step">4号台桩基-4-3桩基</span><span class="step">0号台桩基-0-5桩基</span></div></div><div class="path"><strong>旋挖钻#2</strong><div class="steps"><span class="step">1号墩桩基-1-4桩基</span><span class="step">1号墩桩基-1-7桩基</span><span class="step">1号墩桩基-1-1桩基</span><span class="step">2号墩桩基-2-6桩基</span><span class="step">2号墩桩基-2-2桩基</span><span class="step">4号台桩基-4-9桩基</span><span class="step">0号台桩基-0-2桩基</span><span class="step">3号墩桩基-3-7桩基</span><span class="step">3号墩桩基-3-3桩基</span><span class="step">3号墩桩基-3-6桩基</span><span class="step">0号台桩基-0-6桩基</span></div></div><div class="path"><strong>旋挖钻#3</strong><div class="steps"><span class="step">1号墩桩基-1-5桩基</span><span class="step">1号墩桩基-1-9桩基</span><span class="step">1号墩桩基-1-6桩基</span><span class="step">2号墩桩基-2-3桩基</span><span class="step">3号墩桩基-3-2桩基</span><span class="step">2号墩桩基-2-7桩基</span><span class="step">2号墩桩基-2-8桩基</span><span class="step">4号台桩基-4-4桩基</span><span class="step">0号台桩基-0-7桩基</span><span class="step">3号墩桩基-3-5桩基</span><span class="step">4号台桩基-4-6桩基</span><span class="step">0号台桩基-0-9桩基</span><span class="step">4号台桩基-4-1桩基</span><span class="step">4号台桩基-4-5桩基</span></div></div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
