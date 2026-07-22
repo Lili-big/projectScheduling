@@ -25,6 +25,11 @@
       "AiParameterSuggestion",
       "AiParameterSuggestionStatus",
       "AiParameterUploadedMaterialSummary",
+      "AiResourceQuantityRecommendation",
+      "AiWorkpointResourceInitializationRequest",
+      "AiWorkpointResourceInitializationResponse",
+      "AiWorkpointResourceInitializationSummary",
+      "AiWorkpointResourceRecommendation",
       "BalanceBucket",
       "BeamYardConfig",
       "BusyState",
@@ -186,6 +191,7 @@
       "ScheduleStrategyConfig",
       "ScheduledTask",
       "ScopedResourceQuantityUpdate",
+      "SolveScope",
       "SourceEvidence",
       "StructureModel",
       "TabKey",
@@ -234,6 +240,7 @@
       "importGirderWorkpoints",
       "importLocalBridgeParams",
       "initializeAiResourceAssistant",
+      "initializeAiWorkpointResources",
       "listPlanningScenarioVersions",
       "listProjectDataVersions",
       "parseAiParameterAssistant",
@@ -251,7 +258,7 @@
       "uploadBridgeParams",
       "validateGirderPlanning"
     ],
-    "scheduler_api_function_count": 40,
+    "scheduler_api_function_count": 41,
     "root_app_default_export": true
   },
   "module_lines": {
@@ -262,7 +269,7 @@
   },
   "build": {
     "output_path": "04-demo/frontend/dist",
-    "total_bytes": 6103796
+    "total_bytes": 6172110
   },
   "npm_locks": [
     {

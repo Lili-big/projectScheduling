@@ -1,0 +1,196 @@
+openapi: 3.1.0
+info:
+  title: AI Workpoint Resource Initialization API
+  version: 1.0.0
+paths:
+  /api/ai-resource-assistant/initialize-workpoint-resources:
+    post:
+      summary: 使用真实 LLM 批量推荐桥梁工点缺失的初始化资源
+      operationId: initializeWorkpointResources
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiWorkpointResourceInitializationRequest'
+      responses:
+        '200':
+          description: 整批推荐通过校验；响应只包含待加入页面临时状态的新资源池
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiWorkpointResourceInitializationResponse'
+        '409':
+          description: 项目版本或资源输入已变化，当前响应不可应用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: 项目/结构/候选输入不完整，或模型结果经一次纠错后仍不合法
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: 真实 LLM 未配置、鉴权失败、超时或服务不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    AiWorkpointResourceInitializationRequest:
+      type: object
+      additionalProperties: false
+      required: [scenario]
+      properties:
+        scenario:
+          $ref: '#/components/schemas/ScenarioInput'
+    AiWorkpointResourceInitializationResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - project_data_version_id
+        - input_fingerprint
+        - resource_pools_to_add
+        - summary
+        - llm_config_status
+      properties:
+        project_data_version_id:
+          type: string
+          minLength: 1
+        input_fingerprint:
+          type: string
+          minLength: 1
+        resource_pools_to_add:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourcePool'
+        summary:
+          $ref: '#/components/schemas/AiWorkpointResourceInitializationSummary'
+        llm_config_status:
+          $ref: '#/components/schemas/ResourceAssistantLlmConfigStatus'
+        diagnostics:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationMessage'
+          default: []
+    AiWorkpointResourceInitializationSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - workpoint_count
+        - recommended_workpoint_count
+        - unchanged_workpoint_ids
+        - added_resource_count
+      properties:
+        workpoint_count:
+          type: integer
+          minimum: 0
+        recommended_workpoint_count:
+          type: integer
+          minimum: 0
+        unchanged_workpoint_ids:
+          type: array
+          items:
+            type: string
+        added_resource_count:
+          type: integer
+          minimum: 0
+    LlmWorkpointResourceRecommendation:
+      description: 模型内部结构化输出；不得直接作为 ResourcePool 接受
+      type: object
+      additionalProperties: false
+      required: [workpoint_id, resources]
+      properties:
+        workpoint_id:
+          type: string
+          minLength: 1
+        resources:
+          type: array
+          items:
+            $ref: '#/components/schemas/LlmResourceQuantityRecommendation'
+    LlmResourceQuantityRecommendation:
+      type: object
+      additionalProperties: false
+      required: [resource_type, quantity, max_quantity, reason]
+      properties:
+        resource_type:
+          type: string
+          minLength: 1
+        quantity:
+          type: integer
+          minimum: 1
+        max_quantity:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+    ResourcePool:
+      type: object
+      required:
+        - id
+        - type
+        - label
+        - resource_mode
+        - scope_mode
+        - workpoint_id
+        - quantity
+        - max_quantity
+        - enabled
+        - calendar_id
+        - compatible_process_ids
+      properties:
+        id: { type: string }
+        type: { type: string }
+        label: { type: string }
+        resource_mode: { const: LIMITED }
+        scope_mode: { const: WORKPOINT_EXCLUSIVE }
+        workpoint_id: { type: string }
+        quantity: { type: integer, minimum: 1 }
+        max_quantity: { type: integer, minimum: 1 }
+        enabled: { const: true }
+        authorized_workpoint_ids: { type: 'null' }
+        workpoint_overrides:
+          type: array
+          maxItems: 0
+        calendar_id: { type: string }
+        compatible_process_ids:
+          type: array
+          items: { type: string }
+    ResourceAssistantLlmConfigStatus:
+      type: object
+      required: [provider, endpoint_configured, api_key_configured, timeout_seconds, status]
+      properties:
+        provider: { type: string }
+        model: { type: [string, 'null'] }
+        endpoint_configured: { type: boolean }
+        api_key_configured: { type: boolean }
+        timeout_seconds: { type: integer, minimum: 1 }
+        status:
+          enum: [configured, failed]
+        warning: { type: [string, 'null'] }
+    ValidationMessage:
+      type: object
+      required: [level, code, message]
+      properties:
+        level: { enum: [info, warning, error] }
+        code: { type: string }
+        message: { type: string }
+        subject_id: { type: [string, 'null'] }
+        entity_refs:
+          type: array
+          items: { type: string }
+    ErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          oneOf:
+            - type: string
+            - type: object
+    ScenarioInput:
+      description: 复用现有后端 ScenarioInput；必须包含当前 project_data_version_id、process_library 和 resource_pools
+      type: object
+      additionalProperties: true

@@ -216,13 +216,15 @@ def prepare_scenario(scenario: GirderPlanScenarioVersion, graph: LineGraphSnapsh
                 )
             )
             continue
-        deployment_node_id = _resolve_yard_node(yard, node_by_id)
+        deployment_node_id, deployment_status = _resolve_yard_node(yard, node_by_id)
         if deployment_node_id is None:
+            code = "YARD_DEPLOYMENT_AMBIGUOUS" if deployment_status == "ambiguous" else "YARD_DEPLOYMENT_NODE_UNKNOWN"
+            detail = "匹配到多个双幅节点" if deployment_status == "ambiguous" else "无法定位到线路图节点"
             diagnostics.append(
                 _diagnostic(
-                    "YARD_DEPLOYMENT_NODE_UNKNOWN",
+                    code,
                     "blocking",
-                    f"梁场“{yard.name}”的线路 {yard.alignment_code}、里程 {yard.mileage_m:g} 无法唯一定位到线路图节点。",
+                    f"梁场“{yard.name}”的线路 {yard.alignment_code}、里程 {yard.mileage_m:g} {detail}。",
                     "beam_yard",
                     yard.beam_yard_id,
                     "在线路图中重新选择部署节点。",
@@ -444,7 +446,13 @@ def _find_cycle(graph: dict[str, set[str]]) -> list[str]:
     return []
 
 
-def _resolve_yard_node(yard: BeamYardPlan, node_by_id) -> str | None:
+def _resolve_yard_node(yard: BeamYardPlan, node_by_id) -> tuple[str | None, str]:
+    if yard.deployment_node_id:
+        return (
+            (yard.deployment_node_id, "exact")
+            if yard.deployment_node_id in node_by_id
+            else (None, "unknown")
+        )
     candidates = [
         node
         for node in node_by_id.values()
@@ -454,17 +462,13 @@ def _resolve_yard_node(yard: BeamYardPlan, node_by_id) -> str | None:
         and min(node.start_mileage_m, node.end_mileage_m) <= yard.mileage_m <= max(node.start_mileage_m, node.end_mileage_m)
     ]
     exact_start = [node for node in candidates if node.start_mileage_m == yard.mileage_m]
-    exact_start_preferred = [node for node in exact_start if node.side == "unknown" and not node.requires_erection]
-    if len(exact_start_preferred) == 1:
-        return exact_start_preferred[0].node_id
     if len(exact_start) == 1:
-        return exact_start[0].node_id
-    preferred = [node for node in candidates if node.side == "unknown" and not node.requires_erection]
-    if len(preferred) == 1:
-        return preferred[0].node_id
+        return exact_start[0].node_id, "legacy_unique"
+    if len(exact_start) > 1:
+        return None, "ambiguous"
     if len(candidates) == 1:
-        return candidates[0].node_id
-    return None
+        return candidates[0].node_id, "legacy_unique"
+    return (None, "ambiguous") if candidates else (None, "unknown")
 
 
 def _check(

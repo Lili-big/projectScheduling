@@ -12,7 +12,7 @@ from .definitions import (
 )
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 DDL = """
@@ -75,6 +75,21 @@ CREATE TABLE IF NOT EXISTS workpoints (
     remark TEXT,
     PRIMARY KEY(version_id, workpoint_id),
     FOREIGN KEY(version_id) REFERENCES project_master_versions(version_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS route_placements (
+    version_id TEXT NOT NULL,
+    placement_id TEXT NOT NULL,
+    workpoint_id TEXT NOT NULL,
+    side TEXT NOT NULL CHECK(side IN ('left','right')),
+    mileage_prefix TEXT NOT NULL,
+    start_mileage_m REAL,
+    end_mileage_m REAL,
+    spatial_group_id TEXT NOT NULL,
+    display_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(version_id, placement_id),
+    UNIQUE(version_id, workpoint_id, side),
+    FOREIGN KEY(version_id, workpoint_id) REFERENCES workpoints(version_id, workpoint_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS structures (
@@ -196,6 +211,8 @@ CREATE TABLE IF NOT EXISTS parameter_definitions (
 
 CREATE INDEX IF NOT EXISTS ix_workpoints_version_type_order
 ON workpoints(version_id, workpoint_type, sort_order);
+CREATE INDEX IF NOT EXISTS ix_route_placements_version_side_order
+ON route_placements(version_id, side, display_order, placement_id);
 CREATE INDEX IF NOT EXISTS ix_structures_version_workpoint_side_order
 ON structures(version_id, workpoint_id, side, sort_order);
 CREATE INDEX IF NOT EXISTS ix_components_version_structure_order
@@ -212,7 +229,7 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
     current = int(connection.execute("PRAGMA user_version").fetchone()[0])
     if current > SCHEMA_VERSION:
         raise RuntimeError(f"项目主数据数据库版本 {current} 高于当前支持版本 {SCHEMA_VERSION}。")
-    if current == 0:
+    if current < SCHEMA_VERSION:
         connection.executescript(DDL)
         _seed_definitions(connection)
         connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

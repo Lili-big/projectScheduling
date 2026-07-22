@@ -1,7 +1,7 @@
 import { AlertCircle, CheckCircle2, Eye, Loader2, Play, SlidersHorizontal } from "lucide-react";
 import type { ResourceAssistantPlan, ResourceAssistantPlanResult, ResourcePool } from "../../contracts";
 import {
-  editableResourcePools,
+  editableResourcePoolsForWorkpoint,
   metricsSummary,
   resourceAssistantOutcomeDetail,
   resourceAssistantOptimizationDetails,
@@ -59,6 +59,9 @@ export function ResourcePlanCard({
         <span className={`resource-status-pill ${statusTone}`}>{resourceAssistantStatusLabels[plan.solve_status]}</span>
       </header>
       <p className="resource-plan-positioning">{plan.positioning}</p>
+      {plan.target_workpoint_name && (
+        <p className="resource-plan-scope">资源推进工点：{plan.target_workpoint_name} · 以下指标为全项目排程结果</p>
+      )}
       <div className="resource-plan-metrics">{metricsSummary(result?.metrics)}</div>
       {result && (outcomeStatus || outcomeReason === "target_missing") && (
         <div className="resource-plan-outcome">
@@ -81,7 +84,7 @@ export function ResourcePlanCard({
           <label className="resource-plan-resource" key={row.key}>
             <span title={row.label}>
               {row.label}
-              <small>{row.workpointId === null ? "项目共享总量" : "工点独享数量"}</small>
+              <small>工点独享数量</small>
             </span>
             <input
               type="number"
@@ -148,20 +151,11 @@ function editableResourceRows(
   workpointLabels: Record<string, string> = {},
 ): ResourceQuantityRow[] {
   const rows: ResourceQuantityRow[] = [];
-  for (const pool of editableResourcePools(plan)) {
-    if ((pool.scope_mode ?? "PROJECT_SHARED") === "PROJECT_SHARED") {
-      rows.push({
-        key: `${pool.id}:project`,
-        pool,
-        workpointId: null,
-        label: resourceAssistantPoolLabel(pool, plan.resource_pools),
-        quantity: pool.quantity ?? 0,
-        maxQuantity: pool.max_quantity ?? null,
-      });
-      continue;
-    }
+  const targetWorkpointId = plan.target_workpoint_id;
+  if (!targetWorkpointId) return rows;
+  for (const pool of editableResourcePoolsForWorkpoint(plan)) {
     const overrides = Object.fromEntries((pool.workpoint_overrides ?? []).map((item) => [item.workpoint_id, item]));
-    const workpointIds = pool.workpoint_id ? [pool.workpoint_id] : pool.authorized_workpoint_ids ?? Object.keys(overrides).sort();
+    const workpointIds = [targetWorkpointId];
     for (const workpointId of workpointIds) {
       const override = overrides[workpointId];
       rows.push({

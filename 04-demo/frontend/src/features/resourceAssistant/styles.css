@@ -9,6 +9,29 @@
   gap: 12px;
 }
 
+.resource-assistant-workpoint-scope {
+  display: flex;
+  align-items: end;
+  gap: 14px;
+  padding: 10px 12px;
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.resource-assistant-workpoint-scope label {
+  display: grid;
+  gap: 4px;
+  min-width: 280px;
+}
+
+.resource-assistant-workpoint-scope span,
+.resource-plan-scope {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .resource-profile-strip {
   display: grid;
   grid-template-columns: repeat(6, minmax(96px, 1fr));
@@ -569,6 +592,15 @@
   .resource-plan-grid,
   .recommendation-grid {
     grid-template-columns: 1fr;
+  }
+
+  .resource-assistant-workpoint-scope {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .resource-assistant-workpoint-scope label {
+    min-width: 0;
   }
 
   .resource-plan-resources {

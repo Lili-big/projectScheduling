@@ -62,6 +62,7 @@ export function girderTargets(nodes: LineGraphNode[]): LineGraphNode[] {
 }
 
 export function yardNodeId(yard: BeamYardPlan, nodes: LineGraphNode[]): string {
+  if (yard.deployment_node_id) return yard.deployment_node_id;
   const candidates = nodes.filter((node) => node.alignment_code === yard.alignment_code
     && node.start_mileage_m != null
     && node.end_mileage_m != null

@@ -51,12 +51,15 @@ def test_production_on_day_d_is_only_available_on_next_day(tmp_path) -> None:
 
 def test_delivery_control_uses_earliest_shared_route_and_reports_unknown_plan_risk(tmp_path) -> None:
     run = _run(tmp_path)
-    tunnel = next(item for item in run.workpoint_controls if item.node_id == "T1:unknown")
-    assert tunnel.first_required_date == date(2026, 8, 2)
-    assert tunnel.latest_delivery_date == date(2026, 7, 31)
-    assert {item.route_plan_id for item in tunnel.route_requirements} == {"ROUTE-L", "ROUTE-R"}
-    assert tunnel.risk_status == "unknown"
-    assert tunnel.late_days is None
+    controls = {item.node_id: item for item in run.workpoint_controls if item.node_id.startswith("T1:")}
+    assert set(controls) == {"T1:left", "T1:right"}
+    for side, route_id in (("left", "ROUTE-L"), ("right", "ROUTE-R")):
+        tunnel = controls[f"T1:{side}"]
+        assert tunnel.first_required_date == date(2026, 8, 2)
+        assert tunnel.latest_delivery_date == date(2026, 7, 31)
+        assert {item.route_plan_id for item in tunnel.route_requirements} == {route_id}
+        assert tunnel.risk_status == "unknown"
+        assert tunnel.late_days is None
 
 
 def test_reducing_erection_capacity_changes_dates_deterministically(tmp_path) -> None:
@@ -75,7 +78,7 @@ def test_reducing_erection_capacity_changes_dates_deterministically(tmp_path) ->
 
 def test_confirmed_connection_transfer_days_delay_first_erection(tmp_path) -> None:
     graph = line_graph()
-    edge = next(item for item in graph.edges if {item.from_node_id, item.to_node_id} == {"R0:unknown", "B1:left"})
+    edge = next(item for item in graph.edges if {item.from_node_id, item.to_node_id} == {"R0:left", "B1:left"})
     edge.transfer_days = 2
     scenario = GirderPlanRepository(tmp_path / "transfer.json").create_scenario_version(scenario_request(graph))
     run = simulate(scenario, graph)

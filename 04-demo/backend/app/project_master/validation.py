@@ -9,6 +9,7 @@ from .definitions import COMPONENT_TYPES, STRUCTURE_TYPES, WORKPOINT_TYPES
 def validate_snapshot(snapshot: ProjectMasterSnapshot) -> list[ProjectMasterImportIssue]:
     issues: list[ProjectMasterImportIssue] = []
     _validate_unique_ids(snapshot, issues)
+    _validate_route_placements(snapshot, issues)
     for workpoint in snapshot.workpoints:
         source = workpoint.source
         if workpoint.workpoint_type not in WORKPOINT_TYPES:
@@ -47,6 +48,109 @@ def validate_snapshot(snapshot: ProjectMasterSnapshot) -> list[ProjectMasterImpo
     return issues
 
 
+def _validate_route_placements(
+    snapshot: ProjectMasterSnapshot,
+    issues: list[ProjectMasterImportIssue],
+) -> None:
+    workpoint_ids = {item.workpoint_id.casefold() for item in snapshot.workpoints}
+    seen: dict[tuple[str, str], str] = {}
+    for placement in snapshot.route_placements:
+        source = placement.source
+        sheet = source.sheet_name if source else "线路关系"
+        row_no = source.row_no if source else None
+        if placement.workpoint_id.casefold() not in workpoint_ids:
+            issues.append(
+                _issue(
+                    "error",
+                    "PARENT_WORKPOINT_NOT_FOUND",
+                    sheet,
+                    row_no,
+                    "workpoint_id",
+                    f"线路落位所属工点 {placement.workpoint_id} 不存在。",
+                    placement.placement_id,
+                )
+            )
+        if placement.side not in {"left", "right"}:
+            issues.append(
+                _issue(
+                    "error",
+                    "ROUTE_SIDE_INVALID",
+                    sheet,
+                    row_no,
+                    "side",
+                    f"线路落位幅别 {placement.side} 不合法，应为 left 或 right。",
+                    placement.placement_id,
+                )
+            )
+        duplicate_key = (placement.workpoint_id.casefold(), str(placement.side).casefold())
+        if duplicate_key in seen:
+            issues.append(
+                _issue(
+                    "error",
+                    "ROUTE_PLACEMENT_DUPLICATE",
+                    sheet,
+                    row_no,
+                    "side",
+                    f"工点 {placement.workpoint_id} 的 {placement.side} 幅存在重复线路落位。",
+                    placement.placement_id,
+                )
+            )
+        else:
+            seen[duplicate_key] = placement.placement_id
+        if not str(placement.mileage_prefix).strip():
+            issues.append(
+                _issue(
+                    "error",
+                    "ROUTE_MILEAGE_PREFIX_MISSING",
+                    sheet,
+                    row_no,
+                    "mileage_prefix",
+                    "线路落位里程前缀不能为空。",
+                    placement.placement_id,
+                )
+            )
+        if not str(placement.spatial_group_id).strip():
+            issues.append(
+                _issue(
+                    "error",
+                    "ROUTE_SPATIAL_GROUP_MISSING",
+                    sheet,
+                    row_no,
+                    "spatial_group_id",
+                    "线路落位空间对应组不能为空。",
+                    placement.placement_id,
+                )
+            )
+        if (placement.start_mileage_m is None) != (placement.end_mileage_m is None):
+            issues.append(
+                _issue(
+                    "error",
+                    "ROUTE_MILEAGE_INCOMPLETE",
+                    sheet,
+                    row_no,
+                    "start_mileage_m",
+                    "线路落位起点和终点里程必须同时填写。",
+                    placement.placement_id,
+                )
+            )
+        if (
+            placement.start_mileage_m is not None
+            and placement.end_mileage_m is not None
+            and placement.end_mileage_m < placement.start_mileage_m
+        ):
+            issues.append(
+                _issue(
+                    "error",
+                    "ROUTE_MILEAGE_RANGE_INVALID",
+                    sheet,
+                    row_no,
+                    "end_mileage_m",
+                    "线路落位终点里程不得小于起点里程。",
+                    placement.placement_id,
+                )
+            )
+
+
 def _validate_unique_ids(snapshot: ProjectMasterSnapshot, issues: list[ProjectMasterImportIssue]) -> None:
     seen: dict[str, tuple[str, str]] = {}
     objects = []
@@ -56,6 +160,8 @@ def _validate_unique_ids(snapshot: ProjectMasterSnapshot, issues: list[ProjectMa
             objects.append(("structure", structure.structure_id, structure.source))
             for component in structure.components:
                 objects.append(("component", component.component_id, component.source))
+    for placement in snapshot.route_placements:
+        objects.append(("route_placement", placement.placement_id, placement.source))
     for kind, object_id, source in objects:
         key = object_id.casefold()
         if key in seen:

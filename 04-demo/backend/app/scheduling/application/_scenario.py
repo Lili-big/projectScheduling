@@ -23,6 +23,7 @@ from ...contracts import (
     ResourcePool,
     ScheduleInput,
     ScheduleResult,
+    SolveScope,
     ScenarioAlternativeResult,
     ScenarioCompareRequest,
     ScenarioCompareResponse,
@@ -53,6 +54,7 @@ from ..domain.resource_scope import (
     EffectiveResourceResolution,
     resolve_effective_resource_pools,
 )
+from ..domain.milestone_scope import task_ids_for_milestone
 
 
 CONTINUOUS_BEAM_STRUCTURE_CODE = "castInPlaceContinuousBoxGirder"
@@ -182,9 +184,16 @@ def generate_schedule_input_from_scenario(
     *,
     use_max_resources: bool = False,
     include_girder_erection: bool = False,
+    workpoint_id: str | None = None,
 ) -> GeneratedScheduleInput:
+    solve_scope = resolve_solve_scope(scenario, workpoint_id)
     validation: list[ValidationMessage] = []
-    tasks, generated_links = _build_tasks(scenario, validation, include_girder_erection=include_girder_erection)
+    tasks, generated_links = _build_tasks(
+        scenario,
+        validation,
+        include_girder_erection=include_girder_erection,
+        workpoint_id=solve_scope.workpoint_id,
+    )
     resource_resolution = resolve_effective_resource_pools(
         project_data_version_id=scenario.project_data_version_id,
         bridges=scenario.project.bridges,
@@ -209,25 +218,47 @@ def generate_schedule_input_from_scenario(
     precedence_links.extend(sequence_links)
     validation.extend(sequence_messages)
 
+    scoped_effective_pools = tuple(
+        pool
+        for pool in resource_resolution.pools
+        if solve_scope.mode == "ALL" or solve_scope.workpoint_id in pool.eligible_workpoint_ids
+    )
     resources, resource_messages = expand_effective_resource_pools(
-        resource_resolution.pools,
+        scoped_effective_pools,
         use_max_quantity=use_max_resources,
     )
     validation.extend(resource_messages)
     validation.extend(_validate_calendars(scenario))
 
     if not tasks:
-        validation.append(ValidationMessage(level="error", message="未生成任何启用的工作项。"))
+        validation.append(
+            ValidationMessage(
+                level="error",
+                code="SOLVE_SCOPE_NO_TASKS" if solve_scope.mode == "WORKPOINT" else None,
+                subject_id=solve_scope.workpoint_id,
+                entity_refs=[solve_scope.workpoint_id] if solve_scope.workpoint_id else [],
+                message=(
+                    f"所选工点“{solve_scope.workpoint_name}”（{solve_scope.workpoint_id}）未生成任何启用的工作项。"
+                    if solve_scope.mode == "WORKPOINT"
+                    else "未生成任何启用的工作项。"
+                ),
+            )
+        )
     if not resources:
         validation.append(ValidationMessage(level="info", message="未生成受限命名资源，当前场景将按资源默认充足排程。"))
 
+    scoped_milestones = (
+        scenario.milestones
+        if solve_scope.mode == "ALL"
+        else [milestone for milestone in scenario.milestones if task_ids_for_milestone(milestone, tasks)]
+    )
     schedule_input = ScheduleInput(
         project_name=scenario.project.project_name,
         start_date=scenario.project.start_date,
         tasks=tasks,
         precedence_links=precedence_links,
         resources=resources,
-        milestones=scenario.milestones,
+        milestones=scoped_milestones,
         schedule_strategy=scenario.schedule_strategy,
         time_limit_seconds=scenario.time_limit_seconds,
     )
@@ -243,11 +274,12 @@ def generate_schedule_input_from_scenario(
     return GeneratedScheduleInput(
         schedule_input=schedule_input,
         validation=validation,
+        solve_scope=solve_scope,
         source_summary={
-            "bridge_count": len(scenario.project.bridges),
+            "bridge_count": len(scenario.project.bridges) if solve_scope.mode == "ALL" else 1,
             "process_count": len(scenario.process_library),
             "resource_pool_count": len(scenario.resource_pools),
-            "milestone_count": len(scenario.milestones),
+            "milestone_count": len(scoped_milestones),
             "continuous_beam_task_count": sum(1 for task in tasks if task.structure_type == "continuous_beam"),
             "resource_scope_rule_version": RESOURCE_SCOPE_RULE_VERSION,
             "shared_effective_pool_count": resource_resolution.shared_effective_pool_count,
@@ -257,6 +289,18 @@ def generate_schedule_input_from_scenario(
             **_project_master_source_summary(scenario.project.bridges),
         },
     )
+
+
+def resolve_solve_scope(scenario: ScenarioInput, workpoint_id: str | None = None) -> SolveScope:
+    if workpoint_id is None:
+        return SolveScope()
+    normalized_id = workpoint_id.strip()
+    if not normalized_id:
+        raise ValueError("求解工点 ID 不能为空。")
+    bridge = next((item for item in scenario.project.bridges if item.id == normalized_id), None)
+    if bridge is None or bridge.workpoint_type != "bridge":
+        raise ValueError(f"求解工点 {normalized_id} 不存在、不属于当前项目版本或不是桥梁工点。")
+    return SolveScope(mode="WORKPOINT", workpoint_id=bridge.id, workpoint_name=bridge.name)
 
 
 def _project_master_source_summary(bridges: list[ProjectBridge]) -> dict[str, str]:
@@ -275,9 +319,9 @@ def _project_master_source_summary(bridges: list[ProjectBridge]) -> dict[str, st
     }
 
 
-def solve_scenario(scenario: ScenarioInput) -> ScenarioSolveResult:
+def solve_scenario(scenario: ScenarioInput, *, workpoint_id: str | None = None) -> ScenarioSolveResult:
     started_at = time.perf_counter()
-    generated = generate_schedule_input_from_scenario(scenario)
+    generated = generate_schedule_input_from_scenario(scenario, workpoint_id=workpoint_id)
     alternative_results: list[ScenarioAlternativeResult] = []
     if any(message.level == "error" for message in generated.validation):
         alternative_output = _alternative_output_not_applicable(
@@ -293,7 +337,11 @@ def solve_scenario(scenario: ScenarioInput) -> ScenarioSolveResult:
             milestone_results=[],
         )
     else:
-        result, alternative_results = _solve_fixed_resources_shortest_scenario(scenario, generated)
+        result, alternative_results = _solve_fixed_resources_shortest_scenario(
+            scenario,
+            generated,
+            workpoint_id=workpoint_id,
+        )
 
     _apply_resource_scope_diagnostics(result, scenario, generated)
     _apply_request_timing(result, started_at)
@@ -596,6 +644,8 @@ def _ai_strict_schedule_outcome(
 def _solve_fixed_resources_shortest_scenario(
     scenario: ScenarioInput,
     generated: GeneratedScheduleInput,
+    *,
+    workpoint_id: str | None = None,
 ) -> tuple[ScheduleResult, list[ScenarioAlternativeResult]]:
     budget = _FixedResourceSolveBudget(scenario.time_limit_seconds)
     critical_path = _critical_path_schedule(generated.schedule_input)
@@ -719,6 +769,7 @@ def _solve_fixed_resources_shortest_scenario(
     recommendation = _fixed_resource_recommendation(
         scenario,
         generated.schedule_input,
+        workpoint_id=workpoint_id,
         critical_path=critical_path,
         current_result=final_result,
         budget=_FixedResourceSolveBudget(scenario.time_limit_seconds),
@@ -970,6 +1021,7 @@ def _fixed_resource_recommendation(
     scenario: ScenarioInput,
     current_schedule_input: ScheduleInput,
     *,
+    workpoint_id: str | None = None,
     critical_path: dict[str, Any] | None = None,
     current_result: ScheduleResult | None = None,
     budget: _FixedResourceSolveBudget | None = None,
@@ -1025,7 +1077,11 @@ def _fixed_resource_recommendation(
             "validation": messages,
         }
 
-    max_generated = generate_schedule_input_from_scenario(scenario, use_max_resources=True)
+    max_generated = generate_schedule_input_from_scenario(
+        scenario,
+        use_max_resources=True,
+        workpoint_id=workpoint_id,
+    )
     if any(message.level == "error" for message in max_generated.validation):
         return {
             "metadata": {
@@ -1936,10 +1992,18 @@ def _apply_fixed_resource_metadata(
     result.objective_breakdown.update(metadata)
 
 
-def solve_min_resources_scenario(request: MinResourcesSolveRequest) -> ScenarioSolveResult:
+def solve_min_resources_scenario(
+    request: MinResourcesSolveRequest,
+    *,
+    workpoint_id: str | None = None,
+) -> ScenarioSolveResult:
     started_at = time.perf_counter()
     scenario = request.scenario
-    generated = generate_schedule_input_from_scenario(scenario, use_max_resources=True)
+    generated = generate_schedule_input_from_scenario(
+        scenario,
+        use_max_resources=True,
+        workpoint_id=workpoint_id,
+    )
     if any(message.level == "error" for message in generated.validation):
         result = ScheduleResult(
             status="MODEL_INVALID",
@@ -1965,10 +2029,18 @@ def solve_min_resources_scenario(request: MinResourcesSolveRequest) -> ScenarioS
     )
 
 
-def solve_resource_cost_scenario(request: ResourceCostSolveRequest) -> ScenarioSolveResult:
+def solve_resource_cost_scenario(
+    request: ResourceCostSolveRequest,
+    *,
+    workpoint_id: str | None = None,
+) -> ScenarioSolveResult:
     started_at = time.perf_counter()
     scenario = request.scenario
-    generated = generate_schedule_input_from_scenario(scenario, use_max_resources=True)
+    generated = generate_schedule_input_from_scenario(
+        scenario,
+        use_max_resources=True,
+        workpoint_id=workpoint_id,
+    )
     if any(message.level == "error" for message in generated.validation):
         result = ScheduleResult(
             status="MODEL_INVALID",
@@ -1999,6 +2071,8 @@ def solve_resource_cost_scenario(request: ResourceCostSolveRequest) -> ScenarioS
 
 
 def compare_scenarios(request: ScenarioCompareRequest) -> ScenarioCompareResponse:
+    if any(item.generated.solve_scope.mode != "ALL" for item in request.results):
+        raise ValueError("单工点试算结果不能保存为全项目方案或参与全项目方案比较。")
     summaries: list[dict[str, Any]] = []
     best_scenario_id: str | None = None
     best_score: int | None = None
@@ -2536,13 +2610,19 @@ def _build_tasks(
     validation: list[ValidationMessage],
     *,
     include_girder_erection: bool = False,
+    workpoint_id: str | None = None,
 ) -> tuple[list[Task], list[PrecedenceLink]]:
     tasks: list[Task] = []
     generated_links: list[PrecedenceLink] = []
     upper_logic_rules = _upper_structure_logic_rule_by_id(scenario.upper_structure_logic_rules)
     task_overrides = scenario.task_overrides
     inferred_levels = _inferred_control_levels(scenario)
-    for bridge in sorted(scenario.project.bridges, key=lambda item: item.order):
+    bridges = [
+        bridge
+        for bridge in scenario.project.bridges
+        if workpoint_id is None or bridge.id == workpoint_id
+    ]
+    for bridge in sorted(bridges, key=lambda item: item.order):
         for section in sorted(bridge.work_sections, key=lambda item: item.order):
             section_lower_start = len(tasks)
             for structure in sorted(section.structures, key=lambda item: item.order):

@@ -4,12 +4,19 @@ import type {
   Resource,
   ResourcePool,
   ScheduleResult,
+  SolveScope,
   ValidationMessage,
 } from "../../contracts";
 import { effectiveWorkpointResource, resourcePoolQuantity, resourceScopeLabels } from "../../domain/resources";
 import { scheduleStatusLabels } from "../../domain/labels";
 
 export const projectSharedTransferNotice = "项目共享资源在允许工点间互斥流转，转场时间 0 天、转场成本 0。使用先后由求解器确定。";
+
+export function solveScopeLabel(scope: SolveScope | null | undefined): string {
+  if (!scope || scope.mode === "ALL") return "全部工点";
+  const name = scope.workpoint_name?.trim() || "未命名工点";
+  return `单工点试算：${name}（${scope.workpoint_id ?? "未知 ID"}）`;
+}
 
 export type ResourceScopeResultRow = {
   key: string;

@@ -1,0 +1,347 @@
+openapi: 3.1.0
+info:
+  title: Unified Fixed Resource Solve Incremental Contract
+  version: 0.1.0
+  description: >-
+    056 对现有模拟固定资源、固定工期最少资源和 AI 单方案求解接口的增量契约。
+    路径、请求主体与顶层响应保持兼容；本文件重点约束统一结果元数据、调用次数和状态语义。
+paths:
+  /api/solve-scenario:
+    post:
+      summary: 按当前资源执行一次统一固定资源求工期
+      parameters:
+        - $ref: '#/components/parameters/WorkpointId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScenarioInput'
+      responses:
+        '200':
+          description: 固定资源求解结果；不自动增配，不返回方案 2
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ScenarioSolveResult'
+                  - type: object
+                    properties:
+                      alternative_results:
+                        type: array
+                        maxItems: 0
+        '422':
+          description: 请求或工点范围无效
+  /api/solve-min-resources:
+    post:
+      summary: 一次全局最少资源搜索后执行一次统一固定资源详细排程
+      parameters:
+        - $ref: '#/components/parameters/WorkpointId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MinResourcesSolveRequest'
+      responses:
+        '200':
+          description: 全局候选及其详细排程验证结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScenarioSolveResult'
+        '422':
+          description: 请求或工点范围无效
+  /api/ai-resource-assistant/solve-plan:
+    post:
+      summary: 按 AI 推荐或人工调整资源执行同一统一固定资源内核
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResourceAssistantSingleSolveRequest'
+      responses:
+        '200':
+          description: AI 单方案结果；只有 met 可进入后续正式推荐候选
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResourceAssistantSingleSolveResponse'
+        '422':
+          description: 请求或资源方案无效
+components:
+  parameters:
+    WorkpointId:
+      name: workpoint_id
+      in: query
+      required: false
+      schema:
+        type: string
+        minLength: 1
+      description: 缺省为全部工点；提供时只求该桥梁工点，沿用 054 范围隔离。
+  schemas:
+    ScenarioInput:
+      type: object
+      additionalProperties: true
+      description: 复用现有 ScenarioInput；056 不新增字段。
+    MinResourcesSolveRequest:
+      type: object
+      required: [scenario]
+      properties:
+        scenario:
+          $ref: '#/components/schemas/ScenarioInput'
+        fallback_target_days:
+          type: [integer, 'null']
+          minimum: 1
+          description: 仅在当前范围没有可匹配强制里程碑时使用，且必须来自同范围有效固定资源结果。
+      additionalProperties: false
+    ResourceAssistantPlan:
+      type: object
+      additionalProperties: true
+      description: 复用现有 AI 资源方案结构。
+    ResourceAssistantSingleSolveRequest:
+      type: object
+      required: [scenario, resource_plan]
+      properties:
+        scenario:
+          $ref: '#/components/schemas/ScenarioInput'
+        resource_plan:
+          $ref: '#/components/schemas/ResourceAssistantPlan'
+      additionalProperties: false
+    ScheduleResult:
+      type: object
+      required: [status, tasks, resource_allocations, milestone_results, validation, stats, objective_breakdown]
+      properties:
+        status:
+          type: string
+          description: 原始 solver 状态；不得被业务四态覆盖。
+        objective_days:
+          type: [integer, 'null']
+          minimum: 0
+        tasks:
+          type: array
+          items: {}
+        resource_allocations:
+          type: array
+          items: {}
+        milestone_results:
+          type: array
+          items: {}
+        validation:
+          type: array
+          items: {}
+        stats:
+          allOf:
+            - $ref: '#/components/schemas/SolveMetadata'
+        objective_breakdown:
+          allOf:
+            - $ref: '#/components/schemas/SolveMetadata'
+      additionalProperties: true
+    ScenarioSolveResult:
+      type: object
+      required: [scenario_id, scenario_name, generated, result, milestone_results, diagnostics, metrics, alternative_results]
+      properties:
+        scenario_id:
+          type: string
+        scenario_name:
+          type: string
+        generated:
+          type: object
+          additionalProperties: true
+        result:
+          $ref: '#/components/schemas/ScheduleResult'
+        milestone_results:
+          type: array
+          items: {}
+        diagnostics:
+          type: array
+          items: {}
+        metrics:
+          type: object
+          additionalProperties: true
+        alternative_results:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      additionalProperties: true
+    ResourceAssistantPlanResult:
+      type: object
+      required: [scenario_id, resource_expansion_attempted]
+      properties:
+        scenario_id:
+          type: string
+        plan_status:
+          $ref: '#/components/schemas/TargetStatus'
+        solver_status:
+          type: [string, 'null']
+        resource_expansion_attempted:
+          const: false
+        result:
+          oneOf:
+            - $ref: '#/components/schemas/ScheduleResult'
+            - type: 'null'
+      additionalProperties: true
+    ResourceAssistantSingleSolveResponse:
+      type: object
+      required: [resource_plan, plan_result, diagnostics]
+      properties:
+        resource_plan:
+          $ref: '#/components/schemas/ResourceAssistantPlan'
+        plan_result:
+          $ref: '#/components/schemas/ResourceAssistantPlanResult'
+        diagnostics:
+          type: array
+          items: {}
+      additionalProperties: false
+    TargetStatus:
+      type: string
+      enum: [met, not_met, unconfirmed, infeasible]
+    TargetAchievement:
+      type: object
+      required:
+        - business_success
+        - target_status
+        - solver_status
+        - target_present
+        - has_schedule
+        - optimality_proven
+        - hard_milestone_late_days
+        - fixed_duration_overrun_days
+        - max_target_delay_days
+        - failure_reasons
+        - evaluated_at_source
+      properties:
+        business_success:
+          type: boolean
+        target_status:
+          $ref: '#/components/schemas/TargetStatus'
+        solver_status:
+          type: string
+        selected_schedule_solver_status:
+          type: [string, 'null']
+        target_present:
+          type: boolean
+        has_schedule:
+          type: boolean
+        optimality_proven:
+          type: boolean
+        hard_milestone_late_days:
+          type: integer
+          minimum: 0
+        fixed_duration_overrun_days:
+          type: integer
+          minimum: 0
+        max_target_delay_days:
+          type: integer
+          minimum: 0
+        failure_reasons:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+        evaluated_at_source:
+          type: string
+      additionalProperties: true
+    RecommendedResourceCount:
+      type: object
+      required: [resource_pool_id, resource_type, current_quantity, recommended_quantity, max_quantity]
+      properties:
+        resource_pool_id:
+          type: string
+        resource_type:
+          type: string
+        scope_mode:
+          type: string
+        workpoint_id:
+          type: [string, 'null']
+        eligible_workpoint_ids:
+          type: array
+          items:
+            type: string
+        current_quantity:
+          type: integer
+          minimum: 0
+        recommended_quantity:
+          type: integer
+          minimum: 0
+          description: 可低于当前数量；0 表示不展开该池资源。
+        max_quantity:
+          type: integer
+          minimum: 0
+      additionalProperties: true
+    MinimumResourceVerification:
+      type: object
+      required:
+        - candidate_found
+        - candidate_verified
+        - detail_solve_attempted
+        - detail_solver_call_count
+        - retry_attempted
+      properties:
+        candidate_found:
+          type: boolean
+        candidate_verified:
+          type: boolean
+          description: 仅详细 target_status=met 时为 true。
+        detail_solve_attempted:
+          type: boolean
+        detail_solver_call_count:
+          type: integer
+          minimum: 0
+          maximum: 1
+        detail_target_status:
+          oneOf:
+            - $ref: '#/components/schemas/TargetStatus'
+            - type: 'null'
+        detail_solver_status:
+          type: [string, 'null']
+        retry_attempted:
+          const: false
+        retry_reason:
+          type: 'null'
+      additionalProperties: true
+    SolveMetadata:
+      type: object
+      properties:
+        solve_mode:
+          type: string
+        schedule_source:
+          type: string
+        solver_call_count:
+          type: integer
+          minimum: 0
+        global_search_call_count:
+          type: integer
+          minimum: 0
+          maximum: 1
+        resource_expansion_attempted:
+          const: false
+        performance_path:
+          type: string
+        objective_priority:
+          type: array
+          prefixItems:
+            - const: max_target_delay_days
+            - const: makespan_days
+          minItems: 2
+          maxItems: 2
+        target_achievement:
+          $ref: '#/components/schemas/TargetAchievement'
+        recommended_resource_counts:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecommendedResourceCount'
+        minimum_resource_verification:
+          $ref: '#/components/schemas/MinimumResourceVerification'
+        capacity_precheck_status:
+          enum: [not_run]
+        balanced_reoptimization_status:
+          enum: [not_run]
+        unbalanced_reoptimization_status:
+          enum: [not_run]
+        reoptimization_attempts:
+          type: array
+          maxItems: 0
+      additionalProperties: true

@@ -105,6 +105,39 @@ export type ResourceCatalogItem = {
   applicableProcessIds: string[];
 };
 
+export type WorkpointStructureSummaryComponentType =
+  | "pile"
+  | "cap"
+  | "middle_tie_beam"
+  | "pier_body"
+  | "ground_tie_beam"
+  | "cap_beam";
+
+export type ResolvedStructureProcess = {
+  identity: string;
+  processId: string | null;
+  label: string;
+  source: "component_explicit" | "structure_explicit" | "unique_default" | "unknown_explicit" | "missing";
+};
+
+export type WorkpointStructureSummaryItem = {
+  signature: string;
+  componentType: WorkpointStructureSummaryComponentType;
+  processId: string | null;
+  processLabel: string;
+  parameterSegments: string[];
+  quantity: number;
+  unit: string;
+  displayText: string;
+};
+
+export type WorkpointStructureSummaryGroup = {
+  componentType: WorkpointStructureSummaryComponentType;
+  label: string;
+  sortOrder: number;
+  items: WorkpointStructureSummaryItem[];
+};
+
 export const resourceScopeLabels: Record<ResourceScopeMode, string> = {
   PROJECT_SHARED: "项目共享",
   WORKPOINT_EXCLUSIVE: "工点独享",
@@ -173,6 +206,7 @@ export function normalizeResourcePoolForWorkspace(pool: ResourcePool): ResourceP
     authorized_workpoint_ids: isCanonicalLocal ? null : normalizeWorkpointIds(pool.authorized_workpoint_ids),
     workpoint_overrides: isCanonicalLocal ? [] : normalizeWorkpointOverrides(pool.workpoint_overrides),
     calendar_id: pool.calendar_id || "continuous",
+    enabled: isCanonicalLocal ? normalizedQuantity > 0 : pool.enabled,
     same_structure_resource_binding: Boolean(pool.same_structure_resource_binding),
     parallel_rule_description: normalizedParallelRuleDescription(pool),
   };
@@ -267,6 +301,37 @@ const processMethodParameterCodes = new Set([
   "construction_method",
 ]);
 
+const workpointStructureSummaryDefinitions: ReadonlyArray<{
+  componentType: WorkpointStructureSummaryComponentType;
+  label: string;
+}> = [
+  { componentType: "pile", label: "桩基" },
+  { componentType: "cap", label: "承台" },
+  { componentType: "middle_tie_beam", label: "柱系梁" },
+  { componentType: "pier_body", label: "墩身" },
+  { componentType: "ground_tie_beam", label: "桩系梁" },
+  { componentType: "cap_beam", label: "盖梁" },
+];
+
+const workpointStructureSummaryTypes = new Set<WorkpointStructureSummaryComponentType>(
+  workpointStructureSummaryDefinitions.map((item) => item.componentType),
+);
+
+const summaryPhysicalParameterPriority: Record<string, number> = {
+  diameter_m: 1,
+  length_m: 2,
+  width_m: 3,
+  height_m: 4,
+  dimensions_m: 5,
+};
+
+type NormalizedSummaryParameter = {
+  code: string;
+  signatureValue: string;
+  displayValues: string[];
+  unit: string;
+};
+
 function methodIdsFromParameters(parameters: ProjectMasterParameter[]): string[] {
   const methodIds: string[] = [];
   for (const parameter of parameters) {
@@ -278,6 +343,144 @@ function methodIdsFromParameters(parameters: ProjectMasterParameter[]): string[]
     }
   }
   return Array.from(new Set(methodIds));
+}
+
+function workpointStructureSummaryComponentType(componentType: string): WorkpointStructureSummaryComponentType | null {
+  const projected = workpointStructureSummaryTypes.has(componentType as WorkpointStructureSummaryComponentType)
+    ? componentType
+    : projectMasterComponentTypeProjection[componentType];
+  return projected && workpointStructureSummaryTypes.has(projected as WorkpointStructureSummaryComponentType)
+    ? projected as WorkpointStructureSummaryComponentType
+    : null;
+}
+
+function stableSummaryParameterValue(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "number") return Number.isFinite(value) ? formatSummaryNumber(value) : "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (Array.isArray(value)) {
+    const items = value.map(stableSummaryParameterValue).filter(Boolean);
+    return items.length > 0 ? `[${items.join(",")}]` : "";
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => [key, stableSummaryParameterValue(item)] as const)
+      .filter(([, item]) => item)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return entries.length > 0 ? `{${entries.map(([key, item]) => `${key}:${item}`).join(",")}}` : "";
+  }
+  return String(value).trim();
+}
+
+function summaryParameterDisplayValues(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(summaryParameterDisplayValues);
+  const normalized = stableSummaryParameterValue(value);
+  return normalized ? [normalized] : [];
+}
+
+function normalizedSummaryParameters(parameters: ProjectMasterParameter[]): NormalizedSummaryParameter[] {
+  return parameters
+    .filter((parameter) => !processMethodParameterCodes.has(parameter.parameter_code))
+    .map((parameter) => ({
+      code: parameter.parameter_code,
+      signatureValue: stableSummaryParameterValue(parameter.value),
+      displayValues: summaryParameterDisplayValues(parameter.value),
+      unit: parameter.unit?.trim() || (parameter.parameter_code.endsWith("_m") ? "m" : ""),
+    }))
+    .filter((parameter) => parameter.signatureValue)
+    .sort((left, right) => (
+      left.code.localeCompare(right.code)
+      || left.signatureValue.localeCompare(right.signatureValue)
+      || left.unit.localeCompare(right.unit)
+    ));
+}
+
+function summaryParameterSegments(
+  componentType: WorkpointStructureSummaryComponentType,
+  parameters: NormalizedSummaryParameter[],
+): string[] {
+  const physical = parameters
+    .filter((parameter) => parameter.code in summaryPhysicalParameterPriority)
+    .sort((left, right) => (
+      summaryPhysicalParameterPriority[left.code] - summaryPhysicalParameterPriority[right.code]
+      || left.signatureValue.localeCompare(right.signatureValue)
+    ))
+    .flatMap((parameter) => parameter.displayValues.map((value) => ({
+      text: parameter.code === "diameter_m" ? `φ${value}` : value,
+      unit: parameter.code === "diameter_m" && parameter.unit === "m" ? "" : parameter.unit,
+    })));
+  const segments: string[] = [];
+  if (physical.length > 0) {
+    const commonUnit = physical[0].unit && physical.every((item) => item.unit === physical[0].unit)
+      ? physical[0].unit
+      : "";
+    segments.push(commonUnit
+      ? `${physical.map((item) => item.text).join("×")}${commonUnit}`
+      : physical.map((item) => `${item.text}${item.unit}`).join("×"));
+  }
+
+  const forms = parameters
+    .filter((parameter) => parameter.code === "form")
+    .flatMap((parameter) => parameter.displayValues.map((value) => `${value}${parameter.unit}`));
+  segments.push(...forms);
+
+  const other = parameters
+    .filter((parameter) => !(parameter.code in summaryPhysicalParameterPriority) && parameter.code !== "form")
+    .flatMap((parameter) => parameter.displayValues.map((value) => `${value}${parameter.unit}`));
+  segments.push(...other);
+  if (segments.length === 0 && componentType === "pile") return [];
+  return segments;
+}
+
+function resolveStructureProcess(
+  componentType: WorkpointStructureSummaryComponentType,
+  componentParameters: ProjectMasterParameter[],
+  structureParameters: ProjectMasterParameter[],
+  processes: ProcessTemplate[],
+): ResolvedStructureProcess {
+  const componentMethodId = [...methodIdsFromParameters(componentParameters)].sort()[0] ?? null;
+  const structureMethodId = componentMethodId ? null : [...methodIdsFromParameters(structureParameters)].sort()[0] ?? null;
+  const explicitMethodId = componentMethodId ?? structureMethodId;
+  const candidates = processes
+    .filter((process) => process.component_type === componentType)
+    .sort((left, right) => left.id.localeCompare(right.id));
+  if (explicitMethodId) {
+    const matched = candidates.find((process) => process.id === explicitMethodId || process.method_id === explicitMethodId);
+    if (matched) {
+      return {
+        identity: `process:${matched.id}`,
+        processId: matched.id,
+        label: matched.process_name.trim() || matched.id,
+        source: componentMethodId ? "component_explicit" : "structure_explicit",
+      };
+    }
+    return {
+      identity: `unknown:${explicitMethodId}`,
+      processId: null,
+      label: `工艺未识别（${explicitMethodId}）`,
+      source: "unknown_explicit",
+    };
+  }
+  const defaults = candidates.filter((process) => process.is_default);
+  if (defaults.length === 1) {
+    return {
+      identity: `process:${defaults[0].id}`,
+      processId: defaults[0].id,
+      label: defaults[0].process_name.trim() || defaults[0].id,
+      source: "unique_default",
+    };
+  }
+  return { identity: "missing", processId: null, label: "工艺未指定", source: "missing" };
+}
+
+function formatSummaryNumber(value: number): string {
+  return Object.is(value, -0) ? "0" : String(value);
+}
+
+function summaryDisplayText(item: Omit<WorkpointStructureSummaryItem, "displayText">): string {
+  const details = [item.processLabel, ...item.parameterSegments].filter(Boolean).join("-");
+  return `${details || "参数/工艺未提供"}×${formatSummaryNumber(item.quantity)}${item.unit}`;
 }
 
 function projectedProjectMasterComponentType(structureType: string, componentType: string): ComponentType | null {
@@ -329,6 +532,54 @@ export function workpointResourceTypeProjection(
   }
 
   return [...resourceTypes].sort((left, right) => left.localeCompare(right));
+}
+
+export function workpointStructureSummaryProjection(
+  workpoint: ProjectMasterWorkpoint,
+  processes: ProcessTemplate[],
+): WorkpointStructureSummaryGroup[] {
+  const summaries = new Map<WorkpointStructureSummaryComponentType, Map<string, WorkpointStructureSummaryItem>>();
+  for (const structure of workpoint.structures) {
+    for (const component of structure.components) {
+      const componentType = workpointStructureSummaryComponentType(component.component_type);
+      const quantity = Number(component.quantity);
+      if (!componentType || !component.enabled || !Number.isFinite(quantity) || quantity <= 0) continue;
+      const normalizedParameters = normalizedSummaryParameters(component.parameters);
+      const process = resolveStructureProcess(componentType, component.parameters, structure.parameters, processes);
+      const unit = component.unit.trim();
+      const signature = JSON.stringify([
+        componentType,
+        normalizedParameters.map((parameter) => [parameter.code, parameter.signatureValue, parameter.unit]),
+        process.identity,
+        unit,
+      ]);
+      const bySignature = summaries.get(componentType) ?? new Map<string, WorkpointStructureSummaryItem>();
+      const existing = bySignature.get(signature);
+      if (existing) {
+        const next = { ...existing, quantity: existing.quantity + quantity };
+        next.displayText = summaryDisplayText(next);
+        bySignature.set(signature, next);
+      } else {
+        const itemWithoutDisplay = {
+          signature,
+          componentType,
+          processId: process.processId,
+          processLabel: process.label,
+          parameterSegments: summaryParameterSegments(componentType, normalizedParameters),
+          quantity,
+          unit,
+        };
+        bySignature.set(signature, { ...itemWithoutDisplay, displayText: summaryDisplayText(itemWithoutDisplay) });
+      }
+      summaries.set(componentType, bySignature);
+    }
+  }
+
+  return workpointStructureSummaryDefinitions.flatMap((definition, index) => {
+    const items = [...(summaries.get(definition.componentType)?.values() ?? [])]
+      .sort((left, right) => left.signature.localeCompare(right.signature));
+    return items.length > 0 ? [{ ...definition, sortOrder: index + 1, items }] : [];
+  });
 }
 
 export function effectiveWorkpointResource(pool: ResourcePool, workpointId: string): EffectiveWorkpointResource {
@@ -423,6 +674,50 @@ export function resourcePoolsSemanticFingerprint(pools: ResourcePool[]): string 
         same_structure_resource_binding: pool.same_structure_resource_binding,
       })),
   );
+}
+
+export function mergeAiWorkpointResourcePools(
+  existingPools: ResourcePool[],
+  additions: ResourcePool[],
+): ResourcePool[] {
+  if (additions.length === 0) return existingPools;
+  const existingIds = new Set(existingPools.map((pool) => pool.id));
+  const existingLocalKeys = new Set(
+    existingPools
+      .filter(isWorkpointLocalPool)
+      .map((pool) => `${pool.workpoint_id}\u0000${pool.type}`),
+  );
+  const additionIds = new Set<string>();
+  const additionKeys = new Set<string>();
+  const normalizedAdditions: ResourcePool[] = [];
+  for (const addition of additions) {
+    const normalized = normalizeResourcePoolForWorkspace(addition);
+    const key = `${normalized.workpoint_id ?? ""}\u0000${normalized.type}`;
+    const quantity = resourcePoolQuantity(normalized);
+    const maxQuantity = resourcePoolUsableLimit(normalized);
+    if (
+      !isWorkpointLocalPool(normalized)
+      || !normalized.workpoint_id
+      || normalized.resource_mode !== "LIMITED"
+      || quantity < 1
+      || maxQuantity < quantity
+      || !normalized.enabled
+    ) {
+      throw new Error("AI 推荐包含非法的工点资源，未应用任何变更。");
+    }
+    if (
+      existingIds.has(normalized.id)
+      || existingLocalKeys.has(key)
+      || additionIds.has(normalized.id)
+      || additionKeys.has(key)
+    ) {
+      throw new Error("AI 推荐与当前资源配置冲突，未应用任何变更。");
+    }
+    additionIds.add(normalized.id);
+    additionKeys.add(key);
+    normalizedAdditions.push(normalized);
+  }
+  return [...existingPools, ...normalizedAdditions];
 }
 
 export function normalizeLimitedResourcePool(pool: ResourcePool): ResourcePool {

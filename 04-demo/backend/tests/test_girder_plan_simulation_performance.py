@@ -72,6 +72,9 @@ def _performance_case(settings):
                 alignment_code=alignment,
                 start_mileage_m=index * 100,
                 end_mileage_m=(index + 1) * 100,
+                spatial_group_id=f"{alignment}-SG-{index}",
+                display_order=index,
+                placement_source="explicit",
                 requires_erection=target,
                 beam_demands=[BeamDemand(
                     beam_type_id="T32",

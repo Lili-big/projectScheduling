@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from ...contracts import (
     GeneratedScheduleInput,
@@ -44,37 +44,88 @@ def solve_endpoint(schedule_input: ScheduleInput):
 
 
 @router.post("/api/generate-schedule-input", response_model=GeneratedScheduleInput)
-def generate_schedule_input_endpoint(scenario: ScenarioInput, request: Request) -> GeneratedScheduleInput:
+def generate_schedule_input_endpoint(
+    scenario: ScenarioInput,
+    request: Request,
+    workpoint_id: str | None = None,
+) -> GeneratedScheduleInput:
     scenario, diagnostics = _materialize_project_master(scenario, request)
-    generated = generate_schedule_input_from_scenario(scenario)
+    try:
+        generated = generate_schedule_input_from_scenario(scenario, workpoint_id=workpoint_id)
+    except ValueError as exc:
+        raise _solve_scope_http_error(exc, workpoint_id) from exc
     return generated.model_copy(update={"validation": [*diagnostics, *generated.validation]})
 
 
 @router.post("/api/solve-scenario", response_model=ScenarioSolveResult)
-def solve_scenario_endpoint(scenario: ScenarioInput, request: Request) -> ScenarioSolveResult:
+def solve_scenario_endpoint(
+    scenario: ScenarioInput,
+    request: Request,
+    workpoint_id: str | None = None,
+) -> ScenarioSolveResult:
     scenario, diagnostics = _materialize_project_master(scenario, request)
-    result = solve_scenario(scenario)
+    try:
+        result = solve_scenario(scenario, workpoint_id=workpoint_id)
+    except ValueError as exc:
+        raise _solve_scope_http_error(exc, workpoint_id) from exc
     generated = result.generated.model_copy(update={"validation": [*diagnostics, *result.generated.validation]})
     return result.model_copy(update={"generated": generated, "diagnostics": [*diagnostics, *result.diagnostics]})
 
 
 @router.post("/api/solve-min-resources", response_model=ScenarioSolveResult)
-def solve_min_resources_endpoint(payload: MinResourcesSolveRequest, request: Request) -> ScenarioSolveResult:
+def solve_min_resources_endpoint(
+    payload: MinResourcesSolveRequest,
+    request: Request,
+    workpoint_id: str | None = None,
+) -> ScenarioSolveResult:
     scenario, diagnostics = _materialize_project_master(payload.scenario, request)
-    result = solve_min_resources_scenario(payload.model_copy(update={"scenario": scenario}))
+    try:
+        result = solve_min_resources_scenario(
+            payload.model_copy(update={"scenario": scenario}),
+            workpoint_id=workpoint_id,
+        )
+    except ValueError as exc:
+        raise _solve_scope_http_error(exc, workpoint_id) from exc
     return result.model_copy(update={"diagnostics": [*diagnostics, *result.diagnostics]})
 
 
 @router.post("/api/solve-resource-cost", response_model=ScenarioSolveResult)
-def solve_resource_cost_endpoint(payload: ResourceCostSolveRequest, request: Request) -> ScenarioSolveResult:
+def solve_resource_cost_endpoint(
+    payload: ResourceCostSolveRequest,
+    request: Request,
+    workpoint_id: str | None = None,
+) -> ScenarioSolveResult:
     scenario, diagnostics = _materialize_project_master(payload.scenario, request)
-    result = solve_resource_cost_scenario(payload.model_copy(update={"scenario": scenario}))
+    try:
+        result = solve_resource_cost_scenario(
+            payload.model_copy(update={"scenario": scenario}),
+            workpoint_id=workpoint_id,
+        )
+    except ValueError as exc:
+        raise _solve_scope_http_error(exc, workpoint_id) from exc
     return result.model_copy(update={"diagnostics": [*diagnostics, *result.diagnostics]})
 
 
 @router.post("/api/compare-scenarios", response_model=ScenarioCompareResponse)
 def compare_scenarios_endpoint(request: ScenarioCompareRequest) -> ScenarioCompareResponse:
-    return compare_scenarios(request)
+    try:
+        return compare_scenarios(request)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "SOLVE_SCOPE_COMPARISON_NOT_ALLOWED", "message": str(exc)},
+        ) from exc
+
+
+def _solve_scope_http_error(exc: ValueError, workpoint_id: str | None) -> HTTPException:
+    return HTTPException(
+        status_code=422,
+        detail={
+            "code": "SOLVE_SCOPE_WORKPOINT_INVALID",
+            "message": str(exc),
+            "workpoint_id": workpoint_id,
+        },
+    )
 
 
 def _materialize_project_master(scenario: ScenarioInput, request: Request) -> tuple[ScenarioInput, list]:

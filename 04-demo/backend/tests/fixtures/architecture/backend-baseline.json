@@ -1,7 +1,7 @@
 {
   "format_version": 1,
   "api": {
-    "route_count": 65,
+    "route_count": 66,
     "routes": [
       {
         "method": "POST",
@@ -117,6 +117,28 @@
             "description": "Successful Response",
             "json_schema": {
               "$ref": "#/components/schemas/ResourceAssistantInitialResponse"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "json_schema": {
+              "$ref": "#/components/schemas/HTTPValidationError"
+            }
+          }
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/api/ai-resource-assistant/initialize-workpoint-resources",
+        "operation_id": "initialize_workpoint_resources_endpoint_api_ai_resource_assistant_initialize_workpoint_resources_post",
+        "request_schema": {
+          "$ref": "#/components/schemas/AiWorkpointResourceInitializationRequest"
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "json_schema": {
+              "$ref": "#/components/schemas/AiWorkpointResourceInitializationResponse"
             }
           },
           "422": {
@@ -1342,7 +1364,7 @@
     ]
   },
   "models": {
-    "count": 156,
+    "count": 162,
     "schemas": {
       "AbutmentConfig": {
         "properties": {
@@ -4455,6 +4477,9 @@
                 "default": {},
                 "title": "Source Summary",
                 "type": "object"
+              },
+              "solve_scope": {
+                "$ref": "#/$defs/SolveScope"
               }
             },
             "required": [
@@ -6105,6 +6130,30 @@
                 "title": "Scenario Name",
                 "type": "string"
               },
+              "target_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Id"
+              },
+              "target_workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Name"
+              },
               "profile": {
                 "enum": [
                   "economy",
@@ -7096,6 +7145,45 @@
               "finish_date"
             ],
             "title": "ScheduledTask",
+            "type": "object"
+          },
+          "SolveScope": {
+            "properties": {
+              "mode": {
+                "default": "ALL",
+                "enum": [
+                  "ALL",
+                  "WORKPOINT"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Name"
+              }
+            },
+            "title": "SolveScope",
             "type": "object"
           },
           "StructureModel": {
@@ -13897,6 +13985,2387 @@
         "title": "AiParameterUploadedMaterialSummary",
         "type": "object"
       },
+      "AiResourceQuantityRecommendation": {
+        "additionalProperties": false,
+        "properties": {
+          "resource_type": {
+            "minLength": 1,
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "quantity": {
+            "minimum": 1,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "max_quantity": {
+            "minimum": 1,
+            "title": "Max Quantity",
+            "type": "integer"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resource_type",
+          "quantity",
+          "max_quantity"
+        ],
+        "title": "AiResourceQuantityRecommendation",
+        "type": "object"
+      },
+      "AiWorkpointResourceInitializationRequest": {
+        "$defs": {
+          "BeamYardConfig": {
+            "properties": {
+              "beam_yard_id": {
+                "title": "Beam Yard Id",
+                "type": "string"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "mileage_m": {
+                "title": "Mileage M",
+                "type": "number"
+              },
+              "side": {
+                "default": "unknown",
+                "enum": [
+                  "left",
+                  "right",
+                  "both",
+                  "unknown"
+                ],
+                "title": "Side",
+                "type": "string"
+              },
+              "corridor_id": {
+                "title": "Corridor Id",
+                "type": "string"
+              },
+              "production_start_date": {
+                "format": "date",
+                "title": "Production Start Date",
+                "type": "string"
+              },
+              "daily_production_capacity": {
+                "minimum": 0,
+                "title": "Daily Production Capacity",
+                "type": "number"
+              },
+              "initial_inventory_by_type": {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "title": "Initial Inventory By Type",
+                "type": "object"
+              },
+              "max_inventory_by_type": {
+                "anyOf": [
+                  {
+                    "additionalProperties": {
+                      "type": "number"
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Inventory By Type"
+              },
+              "calendar_id": {
+                "default": "continuous",
+                "title": "Calendar Id",
+                "type": "string"
+              },
+              "enabled": {
+                "default": true,
+                "title": "Enabled",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "beam_yard_id",
+              "name",
+              "mileage_m",
+              "corridor_id",
+              "production_start_date",
+              "daily_production_capacity"
+            ],
+            "title": "BeamYardConfig",
+            "type": "object"
+          },
+          "ComponentModel": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "component_type": {
+                "enum": [
+                  "pile",
+                  "cap",
+                  "spread_foundation",
+                  "ground_tie_beam",
+                  "middle_tie_beam",
+                  "pier_body",
+                  "cap_beam",
+                  "abutment_body",
+                  "precast_beam",
+                  "beam_erection",
+                  "cast_in_place_continuous_beam",
+                  "cast_in_place_box_beam",
+                  "steel_box_beam",
+                  "bridge_deck_system"
+                ],
+                "title": "Component Type",
+                "type": "string"
+              },
+              "quantity": {
+                "minimum": 0,
+                "title": "Quantity",
+                "type": "number"
+              },
+              "quantity_label": {
+                "default": "",
+                "title": "Quantity Label",
+                "type": "string"
+              },
+              "structure_parameter_label": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Structure Parameter Label"
+              },
+              "method_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Method Id"
+              },
+              "productivity_option_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Productivity Option Id"
+              },
+              "enabled": {
+                "default": true,
+                "title": "Enabled",
+                "type": "boolean"
+              },
+              "properties": {
+                "type": "object",
+                "additionalProperties": true,
+                "default": {},
+                "title": "Properties"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "component_type",
+              "quantity"
+            ],
+            "title": "ComponentModel",
+            "type": "object"
+          },
+          "ErectionMachineConfig": {
+            "properties": {
+              "erection_machine_id": {
+                "title": "Erection Machine Id",
+                "type": "string"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "beam_yard_id": {
+                "title": "Beam Yard Id",
+                "type": "string"
+              },
+              "available_date": {
+                "format": "date",
+                "title": "Available Date",
+                "type": "string"
+              },
+              "daily_erection_capacity": {
+                "exclusiveMinimum": 0,
+                "title": "Daily Erection Capacity",
+                "type": "number"
+              },
+              "first_span_preparation_days": {
+                "default": 0,
+                "minimum": 0,
+                "title": "First Span Preparation Days",
+                "type": "integer"
+              },
+              "span_launching_days": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Span Launching Days",
+                "type": "integer"
+              },
+              "bridge_transfer_days": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Bridge Transfer Days",
+                "type": "integer"
+              },
+              "side_switch_days": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Side Switch Days",
+                "type": "integer"
+              },
+              "calendar_id": {
+                "default": "continuous",
+                "title": "Calendar Id",
+                "type": "string"
+              },
+              "enabled": {
+                "default": true,
+                "title": "Enabled",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "erection_machine_id",
+              "name",
+              "beam_yard_id",
+              "available_date",
+              "daily_erection_capacity"
+            ],
+            "title": "ErectionMachineConfig",
+            "type": "object"
+          },
+          "ErectionOwnerOverride": {
+            "properties": {
+              "bridge_id": {
+                "title": "Bridge Id",
+                "type": "string"
+              },
+              "side": {
+                "enum": [
+                  "left",
+                  "right"
+                ],
+                "title": "Side",
+                "type": "string"
+              },
+              "owner_route_id": {
+                "title": "Owner Route Id",
+                "type": "string"
+              },
+              "reason": {
+                "title": "Reason",
+                "type": "string"
+              },
+              "confirmed_by": {
+                "title": "Confirmed By",
+                "type": "string"
+              },
+              "confirmed_at": {
+                "format": "date-time",
+                "title": "Confirmed At",
+                "type": "string"
+              }
+            },
+            "required": [
+              "bridge_id",
+              "side",
+              "owner_route_id",
+              "reason",
+              "confirmed_by",
+              "confirmed_at"
+            ],
+            "title": "ErectionOwnerOverride",
+            "type": "object"
+          },
+          "GirderPlanningConfig": {
+            "properties": {
+              "enabled": {
+                "default": false,
+                "title": "Enabled",
+                "type": "boolean"
+              },
+              "beam_yards": {
+                "items": {
+                  "$ref": "#/$defs/BeamYardConfig"
+                },
+                "title": "Beam Yards",
+                "type": "array"
+              },
+              "erection_machines": {
+                "items": {
+                  "$ref": "#/$defs/ErectionMachineConfig"
+                },
+                "title": "Erection Machines",
+                "type": "array"
+              },
+              "routes": {
+                "items": {
+                  "$ref": "#/$defs/GirderRouteConfig"
+                },
+                "title": "Routes",
+                "type": "array"
+              },
+              "parameters": {
+                "$ref": "#/$defs/GirderPlanningParameters"
+              },
+              "owner_overrides": {
+                "items": {
+                  "$ref": "#/$defs/ErectionOwnerOverride"
+                },
+                "title": "Owner Overrides",
+                "type": "array"
+              },
+              "manual_passage_overrides": {
+                "items": {
+                  "$ref": "#/$defs/PassageOverride"
+                },
+                "title": "Manual Passage Overrides",
+                "type": "array"
+              },
+              "coarse_mode": {
+                "default": false,
+                "title": "Coarse Mode",
+                "type": "boolean"
+              }
+            },
+            "title": "GirderPlanningConfig",
+            "type": "object"
+          },
+          "GirderPlanningParameters": {
+            "properties": {
+              "substructure_acceptance_buffer_days": {
+                "default": 7,
+                "minimum": 0,
+                "title": "Substructure Acceptance Buffer Days",
+                "type": "integer"
+              },
+              "roadbed_passage_buffer_days": {
+                "default": 4,
+                "minimum": 0,
+                "title": "Roadbed Passage Buffer Days",
+                "type": "integer"
+              },
+              "tunnel_passage_buffer_days": {
+                "default": 6,
+                "minimum": 0,
+                "title": "Tunnel Passage Buffer Days",
+                "type": "integer"
+              },
+              "post_erection_passage_buffer_days": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Post Erection Passage Buffer Days",
+                "type": "integer"
+              },
+              "post_erection_buffer_confirmed": {
+                "default": false,
+                "title": "Post Erection Buffer Confirmed",
+                "type": "boolean"
+              },
+              "default_transfer_days": {
+                "default": 2,
+                "minimum": 0,
+                "title": "Default Transfer Days",
+                "type": "integer"
+              },
+              "default_bridge_preparation_days": {
+                "default": 3,
+                "minimum": 0,
+                "title": "Default Bridge Preparation Days",
+                "type": "integer"
+              },
+              "max_iterations": {
+                "default": 10,
+                "maximum": 50,
+                "minimum": 1,
+                "title": "Max Iterations",
+                "type": "integer"
+              },
+              "date_tolerance_days": {
+                "const": 0,
+                "default": 0,
+                "title": "Date Tolerance Days",
+                "type": "integer"
+              },
+              "enable_supply_constraint": {
+                "const": true,
+                "default": true,
+                "title": "Enable Supply Constraint",
+                "type": "boolean"
+              },
+              "enable_passage_constraint": {
+                "const": true,
+                "default": true,
+                "title": "Enable Passage Constraint",
+                "type": "boolean"
+              },
+              "enable_stock_limit": {
+                "const": true,
+                "default": true,
+                "title": "Enable Stock Limit",
+                "type": "boolean"
+              }
+            },
+            "title": "GirderPlanningParameters",
+            "type": "object"
+          },
+          "GirderRouteConfig": {
+            "properties": {
+              "route_id": {
+                "title": "Route Id",
+                "type": "string"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "beam_yard_id": {
+                "title": "Beam Yard Id",
+                "type": "string"
+              },
+              "erection_machine_id": {
+                "title": "Erection Machine Id",
+                "type": "string"
+              },
+              "route_direction": {
+                "default": "custom",
+                "enum": [
+                  "mileage_increasing",
+                  "mileage_decreasing",
+                  "custom"
+                ],
+                "title": "Route Direction",
+                "type": "string"
+              },
+              "enabled": {
+                "default": true,
+                "title": "Enabled",
+                "type": "boolean"
+              },
+              "confirmed": {
+                "default": false,
+                "title": "Confirmed",
+                "type": "boolean"
+              },
+              "nodes": {
+                "items": {
+                  "$ref": "#/$defs/GirderRouteNode"
+                },
+                "title": "Nodes",
+                "type": "array"
+              }
+            },
+            "required": [
+              "route_id",
+              "name",
+              "beam_yard_id",
+              "erection_machine_id"
+            ],
+            "title": "GirderRouteConfig",
+            "type": "object"
+          },
+          "GirderRouteNode": {
+            "properties": {
+              "route_node_id": {
+                "title": "Route Node Id",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "sequence_index": {
+                "minimum": 0,
+                "title": "Sequence Index",
+                "type": "integer"
+              },
+              "node_kind": {
+                "default": "workpoint",
+                "enum": [
+                  "workpoint",
+                  "turn",
+                  "connection"
+                ],
+                "title": "Node Kind",
+                "type": "string"
+              },
+              "connection_days": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Connection Days"
+              }
+            },
+            "required": [
+              "route_node_id",
+              "workpoint_id",
+              "sequence_index"
+            ],
+            "title": "GirderRouteNode",
+            "type": "object"
+          },
+          "LogicRule": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "scope": {
+                "default": "same_structure",
+                "enum": [
+                  "same_structure",
+                  "structure_sequence"
+                ],
+                "title": "Scope",
+                "type": "string"
+              },
+              "structure_type": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "pier",
+                      "abutment",
+                      "upper_structure",
+                      "continuous_beam"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Structure Type"
+              },
+              "to_component": {
+                "enum": [
+                  "pile",
+                  "cap",
+                  "spread_foundation",
+                  "ground_tie_beam",
+                  "middle_tie_beam",
+                  "pier_body",
+                  "cap_beam",
+                  "abutment_body",
+                  "precast_beam",
+                  "beam_erection",
+                  "cast_in_place_continuous_beam",
+                  "cast_in_place_box_beam",
+                  "steel_box_beam",
+                  "bridge_deck_system"
+                ],
+                "title": "To Component",
+                "type": "string"
+              },
+              "predecessor_candidates": {
+                "items": {
+                  "enum": [
+                    "pile",
+                    "cap",
+                    "spread_foundation",
+                    "ground_tie_beam",
+                    "middle_tie_beam",
+                    "pier_body",
+                    "cap_beam",
+                    "abutment_body",
+                    "precast_beam",
+                    "beam_erection",
+                    "cast_in_place_continuous_beam",
+                    "cast_in_place_box_beam",
+                    "steel_box_beam",
+                    "bridge_deck_system"
+                  ],
+                  "type": "string"
+                },
+                "minItems": 1,
+                "title": "Predecessor Candidates",
+                "type": "array"
+              },
+              "predecessor_strategy": {
+                "default": "first_available",
+                "enum": [
+                  "all",
+                  "first_available"
+                ],
+                "title": "Predecessor Strategy",
+                "type": "string"
+              },
+              "relationship": {
+                "default": "FS",
+                "enum": [
+                  "FS",
+                  "SS",
+                  "FF",
+                  "SF"
+                ],
+                "title": "Relationship",
+                "type": "string"
+              },
+              "lag_days": {
+                "minimum": 0,
+                "title": "Lag Days",
+                "type": "integer"
+              },
+              "severity": {
+                "default": "error",
+                "enum": [
+                  "error",
+                  "warning"
+                ],
+                "title": "Severity",
+                "type": "string"
+              },
+              "note": {
+                "default": "",
+                "title": "Note",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "to_component",
+              "predecessor_candidates",
+              "lag_days"
+            ],
+            "title": "LogicRule",
+            "type": "object"
+          },
+          "MilestoneConstraint": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "level": {
+                "default": "internal",
+                "enum": [
+                  "contract",
+                  "control",
+                  "internal"
+                ],
+                "title": "Level",
+                "type": "string"
+              },
+              "mode": {
+                "default": "soft",
+                "enum": [
+                  "hard",
+                  "soft"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "scope_type": {
+                "default": "project",
+                "enum": [
+                  "project",
+                  "bridge",
+                  "work_section",
+                  "structure",
+                  "component"
+                ],
+                "title": "Scope Type",
+                "type": "string"
+              },
+              "scope_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Scope Id"
+              },
+              "target_event": {
+                "default": "finish",
+                "enum": [
+                  "start",
+                  "finish"
+                ],
+                "title": "Target Event",
+                "type": "string"
+              },
+              "target_date": {
+                "format": "date",
+                "title": "Target Date",
+                "type": "string"
+              },
+              "penalty_per_day": {
+                "default": 10,
+                "minimum": 0,
+                "title": "Penalty Per Day",
+                "type": "integer"
+              },
+              "related_structure_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Related Structure Ids",
+                "type": "array"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "target_date"
+            ],
+            "title": "MilestoneConstraint",
+            "type": "object"
+          },
+          "ObjectiveTermConfig": {
+            "properties": {
+              "enabled": {
+                "default": true,
+                "title": "Enabled",
+                "type": "boolean"
+              },
+              "weight": {
+                "maximum": 10000000000,
+                "minimum": 0,
+                "title": "Weight",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "weight"
+            ],
+            "title": "ObjectiveTermConfig",
+            "type": "object"
+          },
+          "PassageOverride": {
+            "properties": {
+              "workpoint_id": {
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "action": {
+                "enum": [
+                  "include",
+                  "exclude",
+                  "readiness"
+                ],
+                "title": "Action",
+                "type": "string"
+              },
+              "related_route_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Related Route Id"
+              },
+              "explicit_readiness_date": {
+                "anyOf": [
+                  {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Explicit Readiness Date"
+              },
+              "reason": {
+                "title": "Reason",
+                "type": "string"
+              }
+            },
+            "required": [
+              "workpoint_id",
+              "action",
+              "reason"
+            ],
+            "title": "PassageOverride",
+            "type": "object"
+          },
+          "ProcessTemplate": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "component_type": {
+                "enum": [
+                  "pile",
+                  "cap",
+                  "spread_foundation",
+                  "ground_tie_beam",
+                  "middle_tie_beam",
+                  "pier_body",
+                  "cap_beam",
+                  "abutment_body",
+                  "precast_beam",
+                  "beam_erection",
+                  "cast_in_place_continuous_beam",
+                  "cast_in_place_box_beam",
+                  "steel_box_beam",
+                  "bridge_deck_system"
+                ],
+                "title": "Component Type",
+                "type": "string"
+              },
+              "process_name": {
+                "title": "Process Name",
+                "type": "string"
+              },
+              "method_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Method Id"
+              },
+              "duration_method": {
+                "enum": [
+                  "units_per_day",
+                  "days_per_unit",
+                  "fixed_days"
+                ],
+                "title": "Duration Method",
+                "type": "string"
+              },
+              "quantity_source": {
+                "title": "Quantity Source",
+                "type": "string"
+              },
+              "productivity_value": {
+                "exclusiveMinimum": 0,
+                "title": "Productivity Value",
+                "type": "number"
+              },
+              "productivity_unit": {
+                "title": "Productivity Unit",
+                "type": "string"
+              },
+              "resource_type": {
+                "title": "Resource Type",
+                "type": "string"
+              },
+              "productivity_options": {
+                "items": {
+                  "$ref": "#/$defs/ProductivityOption"
+                },
+                "title": "Productivity Options",
+                "type": "array"
+              },
+              "applicability": {
+                "additionalProperties": true,
+                "default": {},
+                "title": "Applicability",
+                "type": "object"
+              },
+              "is_default": {
+                "default": false,
+                "title": "Is Default",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "component_type",
+              "process_name",
+              "duration_method",
+              "quantity_source",
+              "productivity_value",
+              "productivity_unit",
+              "resource_type"
+            ],
+            "title": "ProcessTemplate",
+            "type": "object"
+          },
+          "ProductivityOption": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "duration_method": {
+                "enum": [
+                  "units_per_day",
+                  "days_per_unit",
+                  "fixed_days"
+                ],
+                "title": "Duration Method",
+                "type": "string"
+              },
+              "quantity_source": {
+                "title": "Quantity Source",
+                "type": "string"
+              },
+              "productivity_value": {
+                "exclusiveMinimum": 0,
+                "title": "Productivity Value",
+                "type": "number"
+              },
+              "productivity_unit": {
+                "title": "Productivity Unit",
+                "type": "string"
+              },
+              "standard_section_height_m": {
+                "anyOf": [
+                  {
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Standard Section Height M"
+              },
+              "is_default": {
+                "default": false,
+                "title": "Is Default",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "duration_method",
+              "quantity_source",
+              "productivity_value",
+              "productivity_unit"
+            ],
+            "title": "ProductivityOption",
+            "type": "object"
+          },
+          "ProjectBridge": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "order": {
+                "default": 0,
+                "title": "Order",
+                "type": "integer"
+              },
+              "workpoint_type": {
+                "default": "bridge",
+                "enum": [
+                  "road",
+                  "bridge",
+                  "tunnel"
+                ],
+                "title": "Workpoint Type",
+                "type": "string"
+              },
+              "import_source": {
+                "additionalProperties": true,
+                "default": {},
+                "title": "Import Source",
+                "type": "object"
+              },
+              "work_sections": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/WorkSection"
+                },
+                "title": "Work Sections",
+                "type": "array"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "title": "ProjectBridge",
+            "type": "object"
+          },
+          "ProjectModel": {
+            "properties": {
+              "project_id": {
+                "title": "Project Id",
+                "type": "string"
+              },
+              "project_name": {
+                "title": "Project Name",
+                "type": "string"
+              },
+              "start_date": {
+                "format": "date",
+                "title": "Start Date",
+                "type": "string"
+              },
+              "bridges": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/ProjectBridge"
+                },
+                "title": "Bridges",
+                "type": "array"
+              }
+            },
+            "required": [
+              "project_id",
+              "project_name",
+              "start_date"
+            ],
+            "title": "ProjectModel",
+            "type": "object"
+          },
+          "ResourceCalendar": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "working_weekdays": {
+                "default": [
+                  0,
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6
+                ],
+                "items": {
+                  "type": "integer"
+                },
+                "title": "Working Weekdays",
+                "type": "array"
+              },
+              "blackout_dates": {
+                "default": [],
+                "items": {
+                  "format": "date",
+                  "type": "string"
+                },
+                "title": "Blackout Dates",
+                "type": "array"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "title": "ResourceCalendar",
+            "type": "object"
+          },
+          "ResourcePool": {
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "type": {
+                "title": "Type",
+                "type": "string"
+              },
+              "label": {
+                "title": "Label",
+                "type": "string"
+              },
+              "resource_mode": {
+                "default": "LIMITED",
+                "enum": [
+                  "LIMITED",
+                  "UNLIMITED"
+                ],
+                "title": "Resource Mode",
+                "type": "string"
+              },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": 0,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
+              },
+              "calendar_id": {
+                "default": "continuous",
+                "title": "Calendar Id",
+                "type": "string"
+              },
+              "enabled": {
+                "default": true,
+                "title": "Enabled",
+                "type": "boolean"
+              },
+              "compatible_process_ids": {
+                "default": [],
+                "items": {
+                  "type": "string"
+                },
+                "title": "Compatible Process Ids",
+                "type": "array"
+              },
+              "cost_type": {
+                "default": "none",
+                "enum": [
+                  "none",
+                  "monthly_rental",
+                  "one_time_purchase"
+                ],
+                "title": "Cost Type",
+                "type": "string"
+              },
+              "incremental_unit_cost": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Incremental Unit Cost",
+                "type": "integer"
+              },
+              "billing_period_days": {
+                "default": 30,
+                "minimum": 1,
+                "title": "Billing Period Days",
+                "type": "integer"
+              },
+              "same_structure_resource_binding": {
+                "default": false,
+                "title": "Same Structure Resource Binding",
+                "type": "boolean"
+              },
+              "parallel_rule_description": {
+                "default": "",
+                "title": "Parallel Rule Description",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "label"
+            ],
+            "title": "ResourcePool",
+            "type": "object"
+          },
+          "ScenarioInput": {
+            "properties": {
+              "scenario_id": {
+                "title": "Scenario Id",
+                "type": "string"
+              },
+              "scenario_name": {
+                "title": "Scenario Name",
+                "type": "string"
+              },
+              "project_data_version_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Project Data Version Id"
+              },
+              "project": {
+                "$ref": "#/$defs/ProjectModel"
+              },
+              "process_library": {
+                "items": {
+                  "$ref": "#/$defs/ProcessTemplate"
+                },
+                "title": "Process Library",
+                "type": "array"
+              },
+              "logic_rules": {
+                "items": {
+                  "$ref": "#/$defs/LogicRule"
+                },
+                "title": "Logic Rules",
+                "type": "array"
+              },
+              "upper_structure_logic_rules": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/UpperStructureLogicRule"
+                },
+                "title": "Upper Structure Logic Rules",
+                "type": "array"
+              },
+              "task_overrides": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/TaskOverride"
+                },
+                "title": "Task Overrides",
+                "type": "object"
+              },
+              "resource_calendars": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/ResourceCalendar"
+                },
+                "title": "Resource Calendars",
+                "type": "array"
+              },
+              "resource_pools": {
+                "items": {
+                  "$ref": "#/$defs/ResourcePool"
+                },
+                "title": "Resource Pools",
+                "type": "array"
+              },
+              "milestones": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/MilestoneConstraint"
+                },
+                "title": "Milestones",
+                "type": "array"
+              },
+              "schedule_strategy": {
+                "$ref": "#/$defs/ScheduleStrategyConfig"
+              },
+              "time_limit_seconds": {
+                "default": 15.0,
+                "exclusiveMinimum": 0,
+                "title": "Time Limit Seconds",
+                "type": "number"
+              },
+              "girder_planning": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/GirderPlanningConfig"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              }
+            },
+            "required": [
+              "scenario_id",
+              "scenario_name",
+              "project",
+              "process_library",
+              "logic_rules",
+              "resource_pools"
+            ],
+            "title": "ScenarioInput",
+            "type": "object"
+          },
+          "ScheduleStrategyConfig": {
+            "properties": {
+              "strategy": {
+                "default": "comprehensive",
+                "enum": [
+                  "shortest_duration",
+                  "min_resource",
+                  "resource_cost",
+                  "control_priority",
+                  "balanced_normal",
+                  "comprehensive"
+                ],
+                "title": "Strategy",
+                "type": "string"
+              },
+              "resource_guarantee": {
+                "default": "priority",
+                "enum": [
+                  "strict",
+                  "priority",
+                  "off"
+                ],
+                "title": "Resource Guarantee",
+                "type": "string"
+              },
+              "normal_balance_bucket": {
+                "default": "month",
+                "enum": [
+                  "week",
+                  "month"
+                ],
+                "title": "Normal Balance Bucket",
+                "type": "string"
+              },
+              "normal_earliest_start_offset": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Normal Earliest Start Offset",
+                "type": "integer"
+              },
+              "normal_latest_finish_offset": {
+                "anyOf": [
+                  {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Normal Latest Finish Offset"
+              },
+              "normal_max_early_finish_days": {
+                "default": 60,
+                "minimum": 0,
+                "title": "Normal Max Early Finish Days",
+                "type": "integer"
+              },
+              "max_parallel_normal_per_work_section": {
+                "default": 5,
+                "minimum": 1,
+                "title": "Max Parallel Normal Per Work Section",
+                "type": "integer"
+              },
+              "enable_balance_objective": {
+                "default": false,
+                "title": "Enable Balance Objective",
+                "type": "boolean"
+              },
+              "objective_terms": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/ObjectiveTermConfig"
+                },
+                "propertyNames": {
+                  "enum": [
+                    "control_node_late",
+                    "makespan_and_soft_milestone",
+                    "resource_idle"
+                  ]
+                },
+                "title": "Objective Terms",
+                "type": "object"
+              }
+            },
+            "title": "ScheduleStrategyConfig",
+            "type": "object"
+          },
+          "StructureModel": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "structure_type": {
+                "enum": [
+                  "pier",
+                  "abutment",
+                  "upper_structure",
+                  "continuous_beam"
+                ],
+                "title": "Structure Type",
+                "type": "string"
+              },
+              "order": {
+                "default": 0,
+                "title": "Order",
+                "type": "integer"
+              },
+              "support_no": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Support No"
+              },
+              "support_index": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Support Index"
+              },
+              "control_level": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "control",
+                      "key",
+                      "normal",
+                      "rough"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Control Level"
+              },
+              "components": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/ComponentModel"
+                },
+                "title": "Components",
+                "type": "array"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "structure_type"
+            ],
+            "title": "StructureModel",
+            "type": "object"
+          },
+          "TaskOverride": {
+            "properties": {
+              "method_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Method Id"
+              },
+              "productivity_option_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Productivity Option Id"
+              }
+            },
+            "title": "TaskOverride",
+            "type": "object"
+          },
+          "UpperStructureComponent": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "structure_type": {
+                "title": "Structure Type",
+                "type": "string"
+              },
+              "side": {
+                "default": "none",
+                "enum": [
+                  "left",
+                  "right",
+                  "none"
+                ],
+                "title": "Side",
+                "type": "string"
+              },
+              "span_index": {
+                "title": "Span Index",
+                "type": "integer"
+              },
+              "support_range": {
+                "title": "Support Range",
+                "type": "string"
+              },
+              "span_length_m": {
+                "title": "Span Length M",
+                "type": "number"
+              },
+              "beam_count_per_span": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Beam Count Per Span"
+              },
+              "span_group_expression": {
+                "title": "Span Group Expression",
+                "type": "string"
+              },
+              "structure_parameter_label": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Structure Parameter Label"
+              },
+              "control_level": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "control",
+                      "key",
+                      "normal",
+                      "rough"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Control Level"
+              },
+              "properties": {
+                "type": "object",
+                "additionalProperties": true,
+                "default": {},
+                "title": "Properties"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "structure_type",
+              "span_index",
+              "support_range",
+              "span_length_m",
+              "span_group_expression"
+            ],
+            "title": "UpperStructureComponent",
+            "type": "object"
+          },
+          "UpperStructureLogicRule": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "relationship": {
+                "default": "FS",
+                "enum": [
+                  "FS",
+                  "SS",
+                  "FF",
+                  "SF"
+                ],
+                "title": "Relationship",
+                "type": "string"
+              },
+              "lag_days": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Lag Days",
+                "type": "integer"
+              },
+              "max_finish_gap_days": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Finish Gap Days"
+              },
+              "severity": {
+                "default": "error",
+                "enum": [
+                  "error",
+                  "warning"
+                ],
+                "title": "Severity",
+                "type": "string"
+              },
+              "note": {
+                "default": "",
+                "title": "Note",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "title": "UpperStructureLogicRule",
+            "type": "object"
+          },
+          "WorkSection": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "order": {
+                "default": 0,
+                "title": "Order",
+                "type": "integer"
+              },
+              "side": {
+                "default": "none",
+                "enum": [
+                  "left",
+                  "right",
+                  "none"
+                ],
+                "title": "Side",
+                "type": "string"
+              },
+              "structures": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/StructureModel"
+                },
+                "title": "Structures",
+                "type": "array"
+              },
+              "upper_structures": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/UpperStructureComponent"
+                },
+                "title": "Upper Structures",
+                "type": "array"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "title": "WorkSection",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "additionalProperties": true,
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "scenario": {
+            "$ref": "#/$defs/ScenarioInput"
+          }
+        },
+        "required": [
+          "scenario"
+        ],
+        "title": "AiWorkpointResourceInitializationRequest",
+        "type": "object"
+      },
+      "AiWorkpointResourceInitializationResponse": {
+        "$defs": {
+          "AiWorkpointResourceInitializationSummary": {
+            "additionalProperties": false,
+            "properties": {
+              "workpoint_count": {
+                "minimum": 0,
+                "title": "Workpoint Count",
+                "type": "integer"
+              },
+              "recommended_workpoint_count": {
+                "minimum": 0,
+                "title": "Recommended Workpoint Count",
+                "type": "integer"
+              },
+              "unchanged_workpoint_ids": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Unchanged Workpoint Ids",
+                "type": "array"
+              },
+              "added_resource_count": {
+                "minimum": 0,
+                "title": "Added Resource Count",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "workpoint_count",
+              "recommended_workpoint_count",
+              "added_resource_count"
+            ],
+            "title": "AiWorkpointResourceInitializationSummary",
+            "type": "object"
+          },
+          "ResourceAssistantLlmConfigStatus": {
+            "properties": {
+              "provider": {
+                "default": "local",
+                "title": "Provider",
+                "type": "string"
+              },
+              "model": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Model"
+              },
+              "endpoint_configured": {
+                "default": false,
+                "title": "Endpoint Configured",
+                "type": "boolean"
+              },
+              "api_key_configured": {
+                "default": false,
+                "title": "Api Key Configured",
+                "type": "boolean"
+              },
+              "timeout_seconds": {
+                "default": 30,
+                "title": "Timeout Seconds",
+                "type": "integer"
+              },
+              "status": {
+                "default": "local_fallback",
+                "enum": [
+                  "local_fallback",
+                  "configured",
+                  "failed"
+                ],
+                "title": "Status",
+                "type": "string"
+              },
+              "warning": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Warning"
+              }
+            },
+            "title": "ResourceAssistantLlmConfigStatus",
+            "type": "object"
+          },
+          "ResourcePool": {
+            "additionalProperties": true,
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "type": {
+                "title": "Type",
+                "type": "string"
+              },
+              "label": {
+                "title": "Label",
+                "type": "string"
+              },
+              "resource_mode": {
+                "default": "LIMITED",
+                "enum": [
+                  "LIMITED",
+                  "UNLIMITED"
+                ],
+                "title": "Resource Mode",
+                "type": "string"
+              },
+              "scope_mode": {
+                "default": "PROJECT_SHARED",
+                "enum": [
+                  "PROJECT_SHARED",
+                  "WORKPOINT_EXCLUSIVE"
+                ],
+                "title": "Scope Mode",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": 0,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              },
+              "authorized_workpoint_ids": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Authorized Workpoint Ids"
+              },
+              "workpoint_overrides": {
+                "items": {
+                  "$ref": "#/$defs/WorkpointResourceOverride"
+                },
+                "title": "Workpoint Overrides",
+                "type": "array"
+              },
+              "calendar_id": {
+                "default": "continuous",
+                "title": "Calendar Id",
+                "type": "string"
+              },
+              "enabled": {
+                "default": true,
+                "title": "Enabled",
+                "type": "boolean"
+              },
+              "compatible_process_ids": {
+                "default": [],
+                "items": {
+                  "type": "string"
+                },
+                "title": "Compatible Process Ids",
+                "type": "array"
+              },
+              "cost_type": {
+                "default": "none",
+                "enum": [
+                  "none",
+                  "monthly_rental",
+                  "one_time_purchase"
+                ],
+                "title": "Cost Type",
+                "type": "string"
+              },
+              "incremental_unit_cost": {
+                "default": 0,
+                "minimum": 0,
+                "title": "Incremental Unit Cost",
+                "type": "integer"
+              },
+              "billing_period_days": {
+                "default": 30,
+                "minimum": 1,
+                "title": "Billing Period Days",
+                "type": "integer"
+              },
+              "same_structure_resource_binding": {
+                "default": false,
+                "title": "Same Structure Resource Binding",
+                "type": "boolean"
+              },
+              "parallel_rule_description": {
+                "default": "",
+                "title": "Parallel Rule Description",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "label"
+            ],
+            "title": "ResourcePool",
+            "type": "object"
+          },
+          "ValidationMessage": {
+            "properties": {
+              "level": {
+                "enum": [
+                  "info",
+                  "warning",
+                  "error"
+                ],
+                "title": "Level",
+                "type": "string"
+              },
+              "message": {
+                "title": "Message",
+                "type": "string"
+              },
+              "subject_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Subject Id"
+              },
+              "code": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Code"
+              },
+              "entity_refs": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Entity Refs",
+                "type": "array"
+              },
+              "suggestion": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Suggestion"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
+              }
+            },
+            "required": [
+              "level",
+              "message"
+            ],
+            "title": "ValidationMessage",
+            "type": "object"
+          },
+          "WorkpointResourceOverride": {
+            "additionalProperties": true,
+            "properties": {
+              "workpoint_id": {
+                "minLength": 1,
+                "title": "Workpoint Id",
+                "type": "string"
+              },
+              "enabled": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Enabled"
+              },
+              "quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Quantity"
+              },
+              "max_quantity": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Quantity"
+              }
+            },
+            "required": [
+              "workpoint_id"
+            ],
+            "title": "WorkpointResourceOverride",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "project_data_version_id": {
+            "minLength": 1,
+            "title": "Project Data Version Id",
+            "type": "string"
+          },
+          "input_fingerprint": {
+            "minLength": 1,
+            "title": "Input Fingerprint",
+            "type": "string"
+          },
+          "resource_pools_to_add": {
+            "items": {
+              "$ref": "#/$defs/ResourcePool"
+            },
+            "title": "Resource Pools To Add",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/$defs/AiWorkpointResourceInitializationSummary"
+          },
+          "llm_config_status": {
+            "$ref": "#/$defs/ResourceAssistantLlmConfigStatus"
+          },
+          "diagnostics": {
+            "items": {
+              "$ref": "#/$defs/ValidationMessage"
+            },
+            "title": "Diagnostics",
+            "type": "array"
+          }
+        },
+        "required": [
+          "project_data_version_id",
+          "input_fingerprint",
+          "summary",
+          "llm_config_status"
+        ],
+        "title": "AiWorkpointResourceInitializationResponse",
+        "type": "object"
+      },
+      "AiWorkpointResourceInitializationSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "workpoint_count": {
+            "minimum": 0,
+            "title": "Workpoint Count",
+            "type": "integer"
+          },
+          "recommended_workpoint_count": {
+            "minimum": 0,
+            "title": "Recommended Workpoint Count",
+            "type": "integer"
+          },
+          "unchanged_workpoint_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unchanged Workpoint Ids",
+            "type": "array"
+          },
+          "added_resource_count": {
+            "minimum": 0,
+            "title": "Added Resource Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "workpoint_count",
+          "recommended_workpoint_count",
+          "added_resource_count"
+        ],
+        "title": "AiWorkpointResourceInitializationSummary",
+        "type": "object"
+      },
+      "AiWorkpointResourceRecommendation": {
+        "$defs": {
+          "AiResourceQuantityRecommendation": {
+            "additionalProperties": false,
+            "properties": {
+              "resource_type": {
+                "minLength": 1,
+                "title": "Resource Type",
+                "type": "string"
+              },
+              "quantity": {
+                "minimum": 1,
+                "title": "Quantity",
+                "type": "integer"
+              },
+              "max_quantity": {
+                "minimum": 1,
+                "title": "Max Quantity",
+                "type": "integer"
+              },
+              "reason": {
+                "default": "",
+                "title": "Reason",
+                "type": "string"
+              }
+            },
+            "required": [
+              "resource_type",
+              "quantity",
+              "max_quantity"
+            ],
+            "title": "AiResourceQuantityRecommendation",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "workpoint_id": {
+            "minLength": 1,
+            "title": "Workpoint Id",
+            "type": "string"
+          },
+          "resources": {
+            "items": {
+              "$ref": "#/$defs/AiResourceQuantityRecommendation"
+            },
+            "title": "Resources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "workpoint_id"
+        ],
+        "title": "AiWorkpointResourceRecommendation",
+        "type": "object"
+      },
       "BeamYardConfig": {
         "properties": {
           "beam_yard_id": {
@@ -14966,6 +17435,9 @@
                 "default": {},
                 "title": "Source Summary",
                 "type": "object"
+              },
+              "solve_scope": {
+                "$ref": "#/$defs/SolveScope"
               }
             },
             "required": [
@@ -16321,6 +18793,30 @@
               "scenario_name": {
                 "title": "Scenario Name",
                 "type": "string"
+              },
+              "target_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Id"
+              },
+              "target_workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Name"
               },
               "profile": {
                 "enum": [
@@ -17699,6 +20195,45 @@
               "finish_date"
             ],
             "title": "ScheduledTask",
+            "type": "object"
+          },
+          "SolveScope": {
+            "properties": {
+              "mode": {
+                "default": "ALL",
+                "enum": [
+                  "ALL",
+                  "WORKPOINT"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Name"
+              }
+            },
+            "title": "SolveScope",
             "type": "object"
           },
           "StructureModel": {
@@ -25503,6 +28038,45 @@
             "title": "ScheduleStrategyConfig",
             "type": "object"
           },
+          "SolveScope": {
+            "properties": {
+              "mode": {
+                "default": "ALL",
+                "enum": [
+                  "ALL",
+                  "WORKPOINT"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Name"
+              }
+            },
+            "title": "SolveScope",
+            "type": "object"
+          },
           "Task": {
             "properties": {
               "id": {
@@ -25819,6 +28393,9 @@
             "default": {},
             "title": "Source Summary",
             "type": "object"
+          },
+          "solve_scope": {
+            "$ref": "#/$defs/SolveScope"
           }
         },
         "required": [
@@ -30497,6 +33074,9 @@
                 "default": {},
                 "title": "Source Summary",
                 "type": "object"
+              },
+              "solve_scope": {
+                "$ref": "#/$defs/SolveScope"
               }
             },
             "required": [
@@ -31935,6 +34515,45 @@
               "finish_date"
             ],
             "title": "ScheduledTask",
+            "type": "object"
+          },
+          "SolveScope": {
+            "properties": {
+              "mode": {
+                "default": "ALL",
+                "enum": [
+                  "ALL",
+                  "WORKPOINT"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Name"
+              }
+            },
+            "title": "SolveScope",
             "type": "object"
           },
           "Task": {
@@ -33881,7 +36500,6 @@
             "items": {
               "$ref": "#/$defs/ResourcePool"
             },
-            "minItems": 1,
             "title": "Resource Pools",
             "type": "array"
           },
@@ -37405,6 +40023,9 @@
                 "default": {},
                 "title": "Source Summary",
                 "type": "object"
+              },
+              "solve_scope": {
+                "$ref": "#/$defs/SolveScope"
               }
             },
             "required": [
@@ -39460,6 +42081,30 @@
                 "title": "Scenario Name",
                 "type": "string"
               },
+              "target_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Id"
+              },
+              "target_workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Name"
+              },
               "profile": {
                 "enum": [
                   "economy",
@@ -40451,6 +43096,45 @@
               "finish_date"
             ],
             "title": "ScheduledTask",
+            "type": "object"
+          },
+          "SolveScope": {
+            "properties": {
+              "mode": {
+                "default": "ALL",
+                "enum": [
+                  "ALL",
+                  "WORKPOINT"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Name"
+              }
+            },
+            "title": "SolveScope",
             "type": "object"
           },
           "StructureModel": {
@@ -42440,6 +45124,9 @@
                 "default": {},
                 "title": "Source Summary",
                 "type": "object"
+              },
+              "solve_scope": {
+                "$ref": "#/$defs/SolveScope"
               }
             },
             "required": [
@@ -45148,6 +47835,30 @@
                 "title": "Scenario Name",
                 "type": "string"
               },
+              "target_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Id"
+              },
+              "target_workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Name"
+              },
               "profile": {
                 "enum": [
                   "economy",
@@ -46139,6 +48850,45 @@
               "finish_date"
             ],
             "title": "ScheduledTask",
+            "type": "object"
+          },
+          "SolveScope": {
+            "properties": {
+              "mode": {
+                "default": "ALL",
+                "enum": [
+                  "ALL",
+                  "WORKPOINT"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Name"
+              }
+            },
+            "title": "SolveScope",
             "type": "object"
           },
           "SourceEvidence": {
@@ -47479,6 +50229,9 @@
                 "default": {},
                 "title": "Source Summary",
                 "type": "object"
+              },
+              "solve_scope": {
+                "$ref": "#/$defs/SolveScope"
               }
             },
             "required": [
@@ -48924,6 +51677,30 @@
                 "title": "Scenario Name",
                 "type": "string"
               },
+              "target_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Id"
+              },
+              "target_workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Name"
+              },
               "profile": {
                 "enum": [
                   "economy",
@@ -49915,6 +52692,45 @@
               "finish_date"
             ],
             "title": "ScheduledTask",
+            "type": "object"
+          },
+          "SolveScope": {
+            "properties": {
+              "mode": {
+                "default": "ALL",
+                "enum": [
+                  "ALL",
+                  "WORKPOINT"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Name"
+              }
+            },
+            "title": "SolveScope",
             "type": "object"
           },
           "StructureModel": {
@@ -65295,6 +68111,30 @@
                 "title": "Scenario Name",
                 "type": "string"
               },
+              "target_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Id"
+              },
+              "target_workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Name"
+              },
               "profile": {
                 "enum": [
                   "economy",
@@ -66299,6 +69139,9 @@
                 "default": {},
                 "title": "Source Summary",
                 "type": "object"
+              },
+              "solve_scope": {
+                "$ref": "#/$defs/SolveScope"
               }
             },
             "required": [
@@ -67247,6 +70090,30 @@
               "scenario_name": {
                 "title": "Scenario Name",
                 "type": "string"
+              },
+              "target_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Id"
+              },
+              "target_workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Name"
               },
               "profile": {
                 "enum": [
@@ -68671,6 +71538,45 @@
               "finish_date"
             ],
             "title": "ScheduledTask",
+            "type": "object"
+          },
+          "SolveScope": {
+            "properties": {
+              "mode": {
+                "default": "ALL",
+                "enum": [
+                  "ALL",
+                  "WORKPOINT"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Name"
+              }
+            },
+            "title": "SolveScope",
             "type": "object"
           },
           "Task": {
@@ -71486,6 +74392,11 @@
           "scenario": {
             "$ref": "#/$defs/ScenarioInput"
           },
+          "target_workpoint_id": {
+            "minLength": 1,
+            "title": "Target Workpoint Id",
+            "type": "string"
+          },
           "generation_mode": {
             "default": "llm_first",
             "enum": [
@@ -71497,7 +74408,8 @@
           }
         },
         "required": [
-          "scenario"
+          "scenario",
+          "target_workpoint_id"
         ],
         "title": "ResourceAssistantInitialRequest",
         "type": "object"
@@ -71756,6 +74668,30 @@
               "scenario_name": {
                 "title": "Scenario Name",
                 "type": "string"
+              },
+              "target_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Id"
+              },
+              "target_workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Name"
               },
               "profile": {
                 "enum": [
@@ -72956,6 +75892,30 @@
             "title": "Scenario Name",
             "type": "string"
           },
+          "target_workpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Workpoint Id"
+          },
+          "target_workpoint_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Workpoint Name"
+          },
           "profile": {
             "enum": [
               "economy",
@@ -73090,6 +76050,9 @@
                 "default": {},
                 "title": "Source Summary",
                 "type": "object"
+              },
+              "solve_scope": {
+                "$ref": "#/$defs/SolveScope"
               }
             },
             "required": [
@@ -74587,6 +77550,45 @@
               "finish_date"
             ],
             "title": "ScheduledTask",
+            "type": "object"
+          },
+          "SolveScope": {
+            "properties": {
+              "mode": {
+                "default": "ALL",
+                "enum": [
+                  "ALL",
+                  "WORKPOINT"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Name"
+              }
+            },
+            "title": "SolveScope",
             "type": "object"
           },
           "Task": {
@@ -75926,6 +78928,9 @@
                 "default": {},
                 "title": "Source Summary",
                 "type": "object"
+              },
+              "solve_scope": {
+                "$ref": "#/$defs/SolveScope"
               }
             },
             "required": [
@@ -76627,6 +79632,30 @@
               "scenario_name": {
                 "title": "Scenario Name",
                 "type": "string"
+              },
+              "target_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Id"
+              },
+              "target_workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Name"
               },
               "profile": {
                 "enum": [
@@ -77853,6 +80882,45 @@
               "finish_date"
             ],
             "title": "ScheduledTask",
+            "type": "object"
+          },
+          "SolveScope": {
+            "properties": {
+              "mode": {
+                "default": "ALL",
+                "enum": [
+                  "ALL",
+                  "WORKPOINT"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Name"
+              }
+            },
+            "title": "SolveScope",
             "type": "object"
           },
           "Task": {
@@ -79401,6 +82469,30 @@
                 "title": "Scenario Name",
                 "type": "string"
               },
+              "target_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Id"
+              },
+              "target_workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Name"
+              },
               "profile": {
                 "enum": [
                   "economy",
@@ -80396,6 +83488,9 @@
                 "default": {},
                 "title": "Source Summary",
                 "type": "object"
+              },
+              "solve_scope": {
+                "$ref": "#/$defs/SolveScope"
               }
             },
             "required": [
@@ -81097,6 +84192,30 @@
               "scenario_name": {
                 "title": "Scenario Name",
                 "type": "string"
+              },
+              "target_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Id"
+              },
+              "target_workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Name"
               },
               "profile": {
                 "enum": [
@@ -82325,6 +85444,45 @@
             "title": "ScheduledTask",
             "type": "object"
           },
+          "SolveScope": {
+            "properties": {
+              "mode": {
+                "default": "ALL",
+                "enum": [
+                  "ALL",
+                  "WORKPOINT"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Name"
+              }
+            },
+            "title": "SolveScope",
+            "type": "object"
+          },
           "Task": {
             "properties": {
               "id": {
@@ -82754,6 +85912,30 @@
               "scenario_name": {
                 "title": "Scenario Name",
                 "type": "string"
+              },
+              "target_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Id"
+              },
+              "target_workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Name"
               },
               "profile": {
                 "enum": [
@@ -83235,6 +86417,30 @@
               "scenario_name": {
                 "title": "Scenario Name",
                 "type": "string"
+              },
+              "target_workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Id"
+              },
+              "target_workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Workpoint Name"
               },
               "profile": {
                 "enum": [
@@ -85902,6 +89108,9 @@
                 "default": {},
                 "title": "Source Summary",
                 "type": "object"
+              },
+              "solve_scope": {
+                "$ref": "#/$defs/SolveScope"
               }
             },
             "required": [
@@ -86884,6 +90093,45 @@
             "title": "ScheduledTask",
             "type": "object"
           },
+          "SolveScope": {
+            "properties": {
+              "mode": {
+                "default": "ALL",
+                "enum": [
+                  "ALL",
+                  "WORKPOINT"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Name"
+              }
+            },
+            "title": "SolveScope",
+            "type": "object"
+          },
           "Task": {
             "properties": {
               "id": {
@@ -87255,6 +90503,9 @@
                 "default": {},
                 "title": "Source Summary",
                 "type": "object"
+              },
+              "solve_scope": {
+                "$ref": "#/$defs/SolveScope"
               }
             },
             "required": [
@@ -88344,6 +91595,45 @@
               "finish_date"
             ],
             "title": "ScheduledTask",
+            "type": "object"
+          },
+          "SolveScope": {
+            "properties": {
+              "mode": {
+                "default": "ALL",
+                "enum": [
+                  "ALL",
+                  "WORKPOINT"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Name"
+              }
+            },
+            "title": "SolveScope",
             "type": "object"
           },
           "Task": {
@@ -90540,6 +93830,9 @@
                 "default": {},
                 "title": "Source Summary",
                 "type": "object"
+              },
+              "solve_scope": {
+                "$ref": "#/$defs/SolveScope"
               }
             },
             "required": [
@@ -91573,6 +94866,45 @@
               "finish_date"
             ],
             "title": "ScheduledTask",
+            "type": "object"
+          },
+          "SolveScope": {
+            "properties": {
+              "mode": {
+                "default": "ALL",
+                "enum": [
+                  "ALL",
+                  "WORKPOINT"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "workpoint_id": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Id"
+              },
+              "workpoint_name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Workpoint Name"
+              }
+            },
+            "title": "SolveScope",
             "type": "object"
           },
           "Task": {
@@ -93641,6 +96973,45 @@
           "quantity"
         ],
         "title": "ScopedResourceQuantityUpdate",
+        "type": "object"
+      },
+      "SolveScope": {
+        "properties": {
+          "mode": {
+            "default": "ALL",
+            "enum": [
+              "ALL",
+              "WORKPOINT"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "workpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workpoint Id"
+          },
+          "workpoint_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Workpoint Name"
+          }
+        },
+        "title": "SolveScope",
         "type": "object"
       },
       "SourceEvidence": {
@@ -95731,6 +99102,26 @@
         "kind": "class"
       },
       {
+        "name": "AiResourceQuantityRecommendation",
+        "kind": "class"
+      },
+      {
+        "name": "AiWorkpointResourceInitializationRequest",
+        "kind": "class"
+      },
+      {
+        "name": "AiWorkpointResourceInitializationResponse",
+        "kind": "class"
+      },
+      {
+        "name": "AiWorkpointResourceInitializationSummary",
+        "kind": "class"
+      },
+      {
+        "name": "AiWorkpointResourceRecommendation",
+        "kind": "class"
+      },
+      {
         "name": "Any",
         "kind": "class"
       },
@@ -96275,6 +99666,10 @@
         "kind": "class"
       },
       {
+        "name": "SolveScope",
+        "kind": "class"
+      },
+      {
         "name": "SourceEvidence",
         "kind": "class"
       },
@@ -96537,6 +99932,10 @@
         "kind": "class"
       },
       {
+        "name": "SolveScope",
+        "kind": "class"
+      },
+      {
         "name": "StructureModel",
         "kind": "class"
       },
@@ -96609,6 +100008,10 @@
         "kind": "function"
       },
       {
+        "name": "resolve_solve_scope",
+        "kind": "function"
+      },
+      {
         "name": "solve_ai_strict_fixed_resource_scenario",
         "kind": "function"
       },
@@ -96642,6 +100045,10 @@
       },
       {
         "name": "solve_scenario",
+        "kind": "function"
+      },
+      {
+        "name": "task_ids_for_milestone",
         "kind": "function"
       },
       {
@@ -96811,10 +100218,6 @@
         "kind": "function"
       },
       {
-        "name": "get_args",
-        "kind": "function"
-      },
-      {
         "name": "objective_terms_used",
         "kind": "function"
       },
@@ -96868,10 +100271,10 @@
     ]
   },
   "fixed_scenario": {
-    "scenario_sha256": "0c1ed6ee38ca82fd8ec62879a8e95bc431e19ea29643c26c63c8ffa20b5d71f0",
-    "generated_sha256": "7bd3e8c2c5e7e4bdf6863a2fca719a84263d9b791f061de1b649fd386dc03d93",
+    "scenario_sha256": "afcc4c233b62713ee83674094a0cc50ee1c1f6936da00920dd3ab7e5fa62fd7b",
+    "generated_sha256": "a59b23aa15e0699c3bd304dfebe4ca6752ad3090e0b8187fd2606d65e0a6c8df",
     "task_count": 68,
-    "resource_pool_count": 9,
+    "resource_pool_count": 0,
     "milestone_count": 1
   }
 }

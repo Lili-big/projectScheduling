@@ -18,6 +18,7 @@ from ..contracts.project_master import (
     ParameterValue,
     ProjectMasterComponent,
     ProjectMasterImportIssue,
+    ProjectMasterRoutePlacement,
     ProjectMasterSnapshot,
     ProjectMasterStructure,
     ProjectMasterWorkpoint,
@@ -26,8 +27,10 @@ from ..contracts.project_master import (
 from .definitions import DEFINITION_VERSION, schedule_support_for
 
 
-TEMPLATE_VERSION = "1.0"
-SHEETS = ("填写说明", "工点信息", "结构物信息", "构件参数")
+TEMPLATE_VERSION = "1.1"
+SUPPORTED_TEMPLATE_VERSIONS = {"1.0", TEMPLATE_VERSION}
+REQUIRED_SHEETS = ("填写说明", "工点信息", "结构物信息", "构件参数")
+SHEETS = (*REQUIRED_SHEETS, "线路关系")
 _SPREADSHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 _DOCUMENT_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
@@ -40,6 +43,16 @@ WORKPOINT_COLUMNS = (
     ("end_mileage_m", "终点里程(m)"),
     ("sort_order", "排序号"),
     ("remark", "备注"),
+)
+ROUTE_PLACEMENT_COLUMNS = (
+    ("placement_id", "线路落位ID"),
+    ("workpoint_id", "所属工点ID"),
+    ("side", "幅别"),
+    ("mileage_prefix", "里程前缀"),
+    ("start_mileage_m", "起点里程(m)"),
+    ("end_mileage_m", "终点里程(m)"),
+    ("spatial_group_id", "空间对应组"),
+    ("display_order", "展示顺序"),
 )
 STRUCTURE_COLUMNS = (
     ("structure_id", "结构物ID"),
@@ -89,10 +102,12 @@ def create_template_bytes() -> bytes:
     guide.append(["层级", "工点 → 结构物 → 构件参数；一座桥梁只维护一个工点，左右幅写在结构物 side。"])
     guide.append(["幅别", "left=左幅，right=右幅，shared=共用，none=不适用（桥梁正式结构慎用）。"])
     guide.append(["参数列", "类型特有参数使用 param.<parameter_code>，不得写 JSON。"])
+    guide.append(["线路关系", "可选；每个工点每个幅别一行，同一空间对应组仅表示左右平行对齐，不自动形成通行连接。"])
     _style_sheet(guide)
     _append_data_sheet(workbook, "工点信息", WORKPOINT_COLUMNS)
     _append_data_sheet(workbook, "结构物信息", STRUCTURE_COLUMNS)
     _append_data_sheet(workbook, "构件参数", COMPONENT_COLUMNS)
+    _append_data_sheet(workbook, "线路关系", ROUTE_PLACEMENT_COLUMNS)
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
@@ -106,7 +121,7 @@ def parse_workbook(content: bytes) -> tuple[ProjectMasterSnapshot, list[ProjectM
         issue = _issue("error", "WORKBOOK_INVALID", "填写说明", None, None, f"Excel 文件无法读取：{exc}")
         return ProjectMasterSnapshot(), [issue], _fingerprint(ProjectMasterSnapshot())
 
-    missing = [name for name in SHEETS if name not in sheets]
+    missing = [name for name in REQUIRED_SHEETS if name not in sheets]
     if missing:
         issues.append(
             _issue(
@@ -124,7 +139,7 @@ def parse_workbook(content: bytes) -> tuple[ProjectMasterSnapshot, list[ProjectM
     guide_rows = dict(sheets["填写说明"])
     first_row = guide_rows.get(1, ())
     template_version = _text(first_row[1] if len(first_row) > 1 else None)
-    if template_version != TEMPLATE_VERSION:
+    if template_version not in SUPPORTED_TEMPLATE_VERSIONS:
         issues.append(
             _issue(
                 "error",
@@ -132,13 +147,14 @@ def parse_workbook(content: bytes) -> tuple[ProjectMasterSnapshot, list[ProjectM
                 "填写说明",
                 1,
                 "template_version",
-                f"模板版本 {template_version or '空'} 不受支持，当前要求 {TEMPLATE_VERSION}。",
+                f"模板版本 {template_version or '空'} 不受支持，当前支持 1.0 和 {TEMPLATE_VERSION}。",
             )
         )
 
     workpoint_rows = _read_rows("工点信息", sheets["工点信息"], issues)
     structure_rows = _read_rows("结构物信息", sheets["结构物信息"], issues)
     component_rows = _read_rows("构件参数", sheets["构件参数"], issues)
+    route_placement_rows = _read_rows("线路关系", sheets.get("线路关系", []), issues) if "线路关系" in sheets else []
 
     workpoints: list[ProjectMasterWorkpoint] = []
     workpoint_by_key: dict[str, ProjectMasterWorkpoint] = {}
@@ -172,6 +188,70 @@ def parse_workbook(content: bytes) -> tuple[ProjectMasterSnapshot, list[ProjectM
             continue
         workpoints.append(item)
         workpoint_by_key[object_id.casefold()] = item
+
+    route_placements: list[ProjectMasterRoutePlacement] = []
+    for row_no, row in route_placement_rows:
+        object_id = _text(row.get("placement_id"))
+        parent_id = _text(row.get("workpoint_id"))
+        if not object_id or not parent_id:
+            issues.append(
+                _issue(
+                    "error",
+                    "REQUIRED_FIELD",
+                    "线路关系",
+                    row_no,
+                    None,
+                    "线路落位ID和所属工点ID不能为空。",
+                    object_kind="route_placement",
+                    object_id=object_id or None,
+                )
+            )
+            continue
+        if parent_id.casefold() not in workpoint_by_key:
+            issues.append(
+                _issue(
+                    "error",
+                    "PARENT_WORKPOINT_NOT_FOUND",
+                    "线路关系",
+                    row_no,
+                    "workpoint_id",
+                    f"所属工点 {parent_id} 不存在。",
+                    object_kind="route_placement",
+                    object_id=object_id,
+                )
+            )
+        try:
+            placement = ProjectMasterRoutePlacement.model_construct(
+                placement_id=object_id,
+                workpoint_id=parent_id,
+                side=_text(row.get("side")).lower(),
+                mileage_prefix=_text(row.get("mileage_prefix")).upper(),
+                start_mileage_m=_optional_float(row.get("start_mileage_m")),
+                end_mileage_m=_optional_float(row.get("end_mileage_m")),
+                spatial_group_id=_text(row.get("spatial_group_id")),
+                display_order=_non_negative_integer(row.get("display_order"), 0),
+                source=SourceEvidence.model_construct(
+                    batch_id=None,
+                    sheet_name="线路关系",
+                    row_no=row_no,
+                    column_name=None,
+                ),
+            )
+        except Exception as exc:
+            issues.append(
+                _issue(
+                    "error",
+                    "FIELD_TYPE_INVALID",
+                    "线路关系",
+                    row_no,
+                    None,
+                    str(exc),
+                    object_kind="route_placement",
+                    object_id=object_id,
+                )
+            )
+            continue
+        route_placements.append(placement)
 
     structure_by_key: dict[str, ProjectMasterStructure] = {}
     for row_no, row in structure_rows:
@@ -272,7 +352,10 @@ def parse_workbook(content: bytes) -> tuple[ProjectMasterSnapshot, list[ProjectM
     # after parsing. Avoid re-validating the complete 50k+ object tree here;
     # doing so dominates large-workbook import time without adding row-local
     # diagnostics beyond the checks already performed in this module.
-    snapshot = ProjectMasterSnapshot.model_construct(workpoints=workpoints)
+    snapshot = ProjectMasterSnapshot.model_construct(
+        workpoints=workpoints,
+        route_placements=route_placements,
+    )
     return snapshot, issues, _fingerprint(snapshot)
 
 
@@ -281,6 +364,7 @@ def export_snapshot(snapshot: ProjectMasterSnapshot) -> bytes:
     workpoint_sheet = workbook["工点信息"]
     structure_sheet = workbook["结构物信息"]
     component_sheet = workbook["构件参数"]
+    route_placement_sheet = workbook["线路关系"]
     workpoint_headers = [code for code, _ in WORKPOINT_COLUMNS]
     structure_headers = [cell.value for cell in structure_sheet[1]]
     component_headers = [cell.value for cell in component_sheet[1]]
@@ -327,6 +411,19 @@ def export_snapshot(snapshot: ProjectMasterSnapshot) -> bytes:
                 }
                 component_values.update({f"param.{item.parameter_code}": item.value for item in component.parameters})
                 component_sheet.append([component_values.get(header) for header in component_headers])
+    for placement in snapshot.route_placements:
+        route_placement_sheet.append(
+            [
+                placement.placement_id,
+                placement.workpoint_id,
+                placement.side,
+                placement.mileage_prefix,
+                placement.start_mileage_m,
+                placement.end_mileage_m,
+                placement.spatial_group_id,
+                placement.display_order,
+            ]
+        )
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
@@ -579,7 +676,19 @@ def _fingerprint(snapshot: ProjectMasterSnapshot) -> str:
             structures.append(structure_data)
         workpoint_data["structures"] = structures
         payload.append(workpoint_data)
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    fingerprint_payload: Any = payload
+    if snapshot.route_placements:
+        fingerprint_payload = {
+            "workpoints": payload,
+            "route_placements": [
+                placement.model_dump(exclude={"source"}, mode="json")
+                for placement in sorted(
+                    snapshot.route_placements,
+                    key=lambda item: item.placement_id.casefold(),
+                )
+            ],
+        }
+    encoded = json.dumps(fingerprint_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -675,9 +784,12 @@ def _boolean(value: Any, default: bool) -> bool:
 
 __all__ = [
     "COMPONENT_COLUMNS",
+    "REQUIRED_SHEETS",
+    "ROUTE_PLACEMENT_COLUMNS",
     "SHEETS",
     "STRUCTURE_COLUMNS",
     "TEMPLATE_VERSION",
+    "SUPPORTED_TEMPLATE_VERSIONS",
     "WORKPOINT_COLUMNS",
     "content_fingerprint",
     "create_template_bytes",

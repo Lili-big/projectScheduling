@@ -24,17 +24,19 @@ from app.contracts.girder_plan_simulation import (
     CreateSimulationRunRequest,
     ExpectedFingerprintRequest,
 )
-from girder_plan_simulation_fixture_helpers import scenario_request, service
+from girder_plan_simulation_fixture_helpers import continuous_route_snapshot, scenario_request, service
 
 
-def _request(tmp_path):
-    state = SimpleNamespace(girder_plan_simulation_service=service(tmp_path))
+def _request(tmp_path, snapshot=None):
+    state = SimpleNamespace(girder_plan_simulation_service=service(tmp_path, snapshot))
     return SimpleNamespace(app=SimpleNamespace(state=state))
 
 
 def test_full_api_journey_keeps_independent_state(tmp_path) -> None:
     request = _request(tmp_path)
     graph = get_line_graph_endpoint("PMV1", request)
+    assert graph.projection_version == "girder-plan-line-graph/v3"
+    assert {item.side for item in graph.nodes} == {"left", "right"}
     scenario_payload = scenario_request(graph)
     scenario = create_scenario_endpoint(scenario_payload, request)
 
@@ -97,6 +99,19 @@ def test_api_rejects_missing_or_stale_inputs(tmp_path) -> None:
     assert stale.value.detail["code"] == "SCENARIO_INPUT_FINGERPRINT_STALE"
 
 
+def test_legacy_line_projection_is_marked_stale_without_deleting_history(tmp_path) -> None:
+    simulation_service = service(tmp_path)
+    graph = simulation_service.get_line_graph("PMV1")
+    payload = scenario_request(graph)
+    payload.line_graph_id = "lgs-legacy-v1"
+    legacy = simulation_service.repository.create_scenario_version(payload)
+
+    refreshed = simulation_service.get_scenario(legacy.scenario_version_id)
+    assert refreshed.status == "stale"
+    assert "双幅线路图" in (refreshed.stale_reason or "")
+    assert simulation_service.repository.get_scenario_version(legacy.scenario_version_id).status == "stale"
+
+
 def test_api_returns_object_level_diagnostics_for_blocked_plan(tmp_path) -> None:
     request = _request(tmp_path)
     graph = get_line_graph_endpoint("PMV1", request)
@@ -150,3 +165,20 @@ def test_stale_run_and_blank_confirmation_are_not_confirmable(tmp_path) -> None:
             confirmed_by="   ",
             confirmation_reason="   ",
         )
+
+
+def test_v3_segmented_graph_does_not_reuse_legacy_whole_bridge_target(tmp_path) -> None:
+    request = _request(tmp_path, continuous_route_snapshot())
+    graph = get_line_graph_endpoint("PMV1", request)
+    assert graph.projection_version == "girder-plan-line-graph/v3"
+    assert any(item.bridge_segment_kind == "continuous" for item in graph.nodes)
+
+    scenario = create_scenario_endpoint(scenario_request(graph), request)
+    readiness = validate_scenario_endpoint(
+        scenario.scenario_version_id,
+        ExpectedFingerprintRequest(expected_input_fingerprint=scenario.input_fingerprint),
+        request,
+    )
+
+    assert readiness.status == "blocking"
+    assert any(item.code == "ROUTE_TARGET_INVALID" and item.object_id == "B1:left" for item in readiness.diagnostics)

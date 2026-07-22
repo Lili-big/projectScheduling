@@ -82,6 +82,23 @@ export type ProjectMasterWorkpoint = {
   source?: ProjectMasterSource | null;
 };
 
+export type ProjectMasterRoutePlacement = {
+  placement_id: string;
+  workpoint_id: string;
+  side: "left" | "right";
+  mileage_prefix: string;
+  start_mileage_m?: number | null;
+  end_mileage_m?: number | null;
+  spatial_group_id: string;
+  display_order: number;
+  source?: ProjectMasterSource | null;
+};
+
+export type ProjectMasterSnapshot = {
+  workpoints: ProjectMasterWorkpoint[];
+  route_placements: ProjectMasterRoutePlacement[];
+};
+
 export type ProjectMasterCounts = {
   workpoints: number;
   structures: number;
@@ -107,7 +124,7 @@ export type ProjectMasterIssue = {
 
 export type ProjectMasterDiffEntry = {
   diff_id?: string | null;
-  object_kind: "workpoint" | "structure" | "component" | "parameter";
+  object_kind: "workpoint" | "route_placement" | "structure" | "component" | "parameter";
   object_id: string;
   change_type: "added" | "modified" | "deleted" | "unchanged";
   field_name?: string | null;

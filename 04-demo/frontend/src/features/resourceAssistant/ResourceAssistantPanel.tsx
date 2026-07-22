@@ -24,6 +24,7 @@ import type {
   ResourceAssistantPlan,
   ResourceAssistantPlanResult,
   ResourceAssistantRecommendation,
+  ProjectMasterWorkpoint,
   ScenarioInput,
 } from "../../contracts";
 import { PanelTitle } from "../../components/common/PanelTitle";
@@ -41,16 +42,19 @@ const DEFAULT_BASELINE_REASON = "确认为执行基准计划";
 
 export function ResourceAssistantPanel({
   scenario,
+  workpoints,
   renderPlanDetail,
   onOpenPlanControl,
   integratedSnapshotId,
 }: {
   scenario: ScenarioInput | null;
+  workpoints: ProjectMasterWorkpoint[];
   renderPlanDetail?: (plan: ResourceAssistantPlan, result: ResourceAssistantPlanResult) => ReactNode;
   onOpenPlanControl?: () => void;
   integratedSnapshotId?: string | null;
 }) {
   const [initial, setInitial] = useState<ResourceAssistantInitialResponse | null>(null);
+  const [targetWorkpointId, setTargetWorkpointId] = useState("");
   const [plans, setPlans] = useState<ResourceAssistantPlan[]>([]);
   const [planResults, setPlanResults] = useState<ResourceAssistantPlanResult[]>([]);
   const [comparison, setComparison] = useState<ResourceAssistantComparison | null>(null);
@@ -72,6 +76,7 @@ export function ResourceAssistantPanel({
   const plansRef = useRef<ResourceAssistantPlan[]>([]);
   const resultsRef = useRef<ResourceAssistantPlanResult[]>([]);
   const comparisonRequestRef = useRef(0);
+  const scopeRequestRef = useRef(0);
   const baselineConfirmedByInputRef = useRef<HTMLInputElement | null>(null);
   const baselineReasonInputRef = useRef<HTMLInputElement | null>(null);
   const scenarioFingerprint = useMemo(
@@ -79,9 +84,16 @@ export function ResourceAssistantPanel({
     [scenario],
   );
   const workpointLabels = useMemo(
-    () => Object.fromEntries((scenario?.project.bridges ?? []).map((bridge) => [bridge.id, bridge.name])),
-    [scenario],
+    () => Object.fromEntries(workpoints.map((workpoint) => [workpoint.workpoint_id, workpoint.workpoint_name])),
+    [workpoints],
   );
+  const selectableWorkpoints = useMemo(
+    () => workpoints.filter(
+      (workpoint) => workpoint.workpoint_type === "bridge" && workpoint.schedule_support === "bridge_supported",
+    ),
+    [workpoints],
+  );
+  const targetWorkpoint = selectableWorkpoints.find((workpoint) => workpoint.workpoint_id === targetWorkpointId) ?? null;
 
   function replacePlans(nextPlans: ResourceAssistantPlan[]) {
     plansRef.current = nextPlans;
@@ -101,10 +113,12 @@ export function ResourceAssistantPanel({
   }
 
   useEffect(() => {
+    scopeRequestRef.current += 1;
     plansRef.current = [];
     resultsRef.current = [];
     comparisonRequestRef.current += 1;
     setInitial(null);
+    setTargetWorkpointId("");
     setPlans([]);
     setPlanResults([]);
     setComparison(null);
@@ -150,23 +164,34 @@ export function ResourceAssistantPanel({
 
   async function refreshComparison(nextPlans: ResourceAssistantPlan[], nextResults: ResourceAssistantPlanResult[]) {
     const requestId = ++comparisonRequestRef.current;
+    const scopeId = scopeRequestRef.current;
     try {
       const nextComparison = await compareAiResourceAssistantResults({ resource_plans: nextPlans, plan_results: nextResults });
-      if (requestId === comparisonRequestRef.current) setComparison(nextComparison);
+      if (requestId === comparisonRequestRef.current && scopeId === scopeRequestRef.current) setComparison(nextComparison);
     } catch (exc) {
-      if (requestId === comparisonRequestRef.current) {
+      if (requestId === comparisonRequestRef.current && scopeId === scopeRequestRef.current) {
         setError(exc instanceof Error ? `方案已求解，但指标对比刷新失败：${exc.message}` : "方案已求解，但指标对比刷新失败。");
       }
     }
   }
 
   async function handleGenerate() {
-    if (!scenario) return;
+    if (!scenario || !targetWorkpoint) return;
+    const scopeId = scopeRequestRef.current;
+    const requestedWorkpointId = targetWorkpoint.workpoint_id;
     setGenerating(true);
     setError(null);
     setLlmContextDownload(null);
     try {
-      const response = await initializeAiResourceAssistant({ scenario, generation_mode: "llm_first" });
+      const response = await initializeAiResourceAssistant({
+        scenario,
+        target_workpoint_id: requestedWorkpointId,
+        generation_mode: "llm_first",
+      });
+      if (scopeId !== scopeRequestRef.current || targetWorkpointId !== requestedWorkpointId) return;
+      if (response.resource_plans.some((plan) => plan.target_workpoint_id !== requestedWorkpointId)) {
+        throw new Error("资源方案返回的推进工点与当前选择不一致。请重新生成。")
+      }
       setInitial(response);
       setLlmContextDownload({
         context: response.llm_generation_context,
@@ -179,9 +204,9 @@ export function ResourceAssistantPanel({
       setDetailPlanId(null);
       setSelectedPlanId(response.resource_plans[0]?.scenario_id || null);
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "资源方案生成失败");
+      if (scopeId === scopeRequestRef.current) setError(exc instanceof Error ? exc.message : "资源方案生成失败");
     } finally {
-      setGenerating(false);
+      if (scopeId === scopeRequestRef.current) setGenerating(false);
     }
   }
 
@@ -189,6 +214,11 @@ export function ResourceAssistantPanel({
     if (!scenario || solvingPlanIds[planId]) return;
     const targetPlan = plansRef.current.find((plan) => plan.scenario_id === planId);
     if (!targetPlan) return;
+    const scopeId = scopeRequestRef.current;
+    if (!targetPlan.target_workpoint_id || targetPlan.target_workpoint_id !== targetWorkpointId) {
+      setError("当前方案与所选资源推进工点不一致，请重新生成三方案。");
+      return;
+    }
     setError(null);
     replaceResults(resultsRef.current.filter((result) => result.scenario_id !== planId));
     if (detailPlanId === planId) setDetailPlanId(null);
@@ -201,6 +231,7 @@ export function ResourceAssistantPanel({
     );
     try {
       const response = await solveAiResourceAssistantPlan({ scenario, resource_plan: targetPlan });
+      if (scopeId !== scopeRequestRef.current) return;
       const nextPlans = plansRef.current.map((plan) => (plan.scenario_id === planId ? response.resource_plan : plan));
       const nextResults = [...resultsRef.current.filter((result) => result.scenario_id !== planId), response.plan_result];
       replacePlans(nextPlans);
@@ -209,6 +240,7 @@ export function ResourceAssistantPanel({
       setRecommendationError(null);
       await refreshComparison(nextPlans, nextResults);
     } catch (exc) {
+      if (scopeId !== scopeRequestRef.current) return;
       replacePlans(
         plansRef.current.map((plan) =>
           plan.scenario_id === planId ? { ...plan, solve_status: "failed", stale_reason: "本次求解请求失败，可重试。" } : plan,
@@ -216,25 +248,29 @@ export function ResourceAssistantPanel({
       );
       setError(exc instanceof Error ? exc.message : `${targetPlan.scenario_name} 求解失败`);
     } finally {
-      setSolvingPlanIds((current) => ({ ...current, [planId]: false }));
+      if (scopeId === scopeRequestRef.current) {
+        setSolvingPlanIds((current) => ({ ...current, [planId]: false }));
+      }
     }
   }
 
   async function handleRecommendation() {
     if (!allPlansComplete || recommending) return;
     setRecommending(true);
+    const scopeId = scopeRequestRef.current;
     setRecommendationError(null);
     try {
       const response = await generateAiResourceAssistantRecommendation({
         resource_plans: plansRef.current,
         plan_results: resultsRef.current,
       });
+      if (scopeId !== scopeRequestRef.current) return;
       setComparison(response.comparison);
       setRecommendation(response.recommendation);
     } catch (exc) {
-      setRecommendationError(exc instanceof Error ? exc.message : "推荐生成失败，可重试。");
+      if (scopeId === scopeRequestRef.current) setRecommendationError(exc instanceof Error ? exc.message : "推荐生成失败，可重试。");
     } finally {
-      setRecommending(false);
+      if (scopeId === scopeRequestRef.current) setRecommending(false);
     }
   }
 
@@ -243,6 +279,10 @@ export function ResourceAssistantPanel({
     const plan = plansRef.current.find((item) => item.scenario_id === planId);
     const planResult = resultsRef.current.find((item) => item.scenario_id === planId);
     if (!plan || !planResult || !planResult.result || !["OPTIMAL", "FEASIBLE"].includes(planResult.result.status)) return;
+    if (!plan.target_workpoint_id || plan.target_workpoint_id !== targetWorkpointId) {
+      setError("当前方案与所选资源推进工点不一致，请重新生成三方案。");
+      return;
+    }
     if (!baselineConfirmedBy.trim()) {
       setError("请先填写基准确认人。");
       focusBaselineConfirmationInput(baselineConfirmedByInputRef.current);
@@ -285,6 +325,10 @@ export function ResourceAssistantPanel({
   ) {
     const plan = plansRef.current.find((item) => item.scenario_id === planId);
     if (!plan) return;
+    if (!plan.target_workpoint_id || workpointId !== plan.target_workpoint_id || workpointId !== targetWorkpointId) {
+      setError("只能调整当前资源推进工点的本地资源。");
+      return;
+    }
     setError(null);
     try {
       const response = await updateAiResourceAssistantPlan({
@@ -308,6 +352,32 @@ export function ResourceAssistantPanel({
         <PanelTitle title="AI多方案比选" subtitle="待导入项目数据" />
       </section>
     );
+  }
+
+  function handleTargetWorkpointChange(nextWorkpointId: string) {
+    if (nextWorkpointId === targetWorkpointId) return;
+    scopeRequestRef.current += 1;
+    comparisonRequestRef.current += 1;
+    plansRef.current = [];
+    resultsRef.current = [];
+    setTargetWorkpointId(nextWorkpointId);
+    setInitial(null);
+    setPlans([]);
+    setPlanResults([]);
+    setComparison(null);
+    setRecommendation(null);
+    setSelectedPlanId(null);
+    setDetailPlanId(null);
+    setGenerating(false);
+    setSolvingPlanIds({});
+    setRecommending(false);
+    setConfirmingBaseline(false);
+    setBaselineVersionNo(null);
+    setBaselinePlanId(null);
+    setBaselineReason(DEFAULT_BASELINE_REASON);
+    setError(null);
+    setRecommendationError(null);
+    setLlmContextDownload(null);
   }
 
   if (detailPlan && detailResult && renderPlanDetail) {
@@ -339,7 +409,7 @@ export function ResourceAssistantPanel({
           subtitle={initial ? `${initial.project_profile.project_name} / ${llmConfigStatusLabel(initial.llm_config_status)}` : scenario.scenario_name}
           action={
             <div className="actions">
-              <button className="secondary" type="button" disabled={generating || isAnySolving || recommending} onClick={handleGenerate}>
+              <button className="secondary" type="button" disabled={!targetWorkpoint || generating || isAnySolving || recommending} onClick={handleGenerate}>
                 {generating ? <Loader2 size={15} className="spin" /> : <Sparkles size={15} />}
                 生成三方案
               </button>
@@ -369,6 +439,30 @@ export function ResourceAssistantPanel({
             </div>
           }
         />
+        <div className="resource-assistant-workpoint-scope">
+          <label>
+            资源推进工点
+            <select
+              value={targetWorkpointId}
+              disabled={generating || isAnySolving || recommending || selectableWorkpoints.length === 0}
+              onChange={(event) => handleTargetWorkpointChange(event.target.value)}
+            >
+              <option value="">请选择工点</option>
+              {selectableWorkpoints.map((workpoint) => (
+                <option key={workpoint.workpoint_id} value={workpoint.workpoint_id}>
+                  {workpointOptionLabel(workpoint.workpoint_id, workpoint.workpoint_name, selectableWorkpoints)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span>
+            {selectableWorkpoints.length === 0
+              ? "当前项目没有可参与 AI 资源推进的桥梁工点。"
+              : targetWorkpoint
+                ? `AI 仅调整“${targetWorkpoint.workpoint_name}”的本地资源；求解和指标仍为全项目口径。`
+                : "请先选择资源推进工点。"}
+          </span>
+        </div>
         {error && <div className="notice danger">{error}</div>}
         {plans.length > 0 && (
           <div className="notice">
@@ -438,6 +532,16 @@ function focusBaselineConfirmationInput(input: HTMLInputElement | null) {
     input?.scrollIntoView({ behavior: "smooth", block: "center" });
     input?.focus({ preventScroll: true });
   });
+}
+
+function workpointOptionLabel(
+  workpointId: string,
+  workpointName: string,
+  workpoints: ProjectMasterWorkpoint[],
+): string {
+  return workpoints.filter((item) => item.workpoint_name === workpointName).length > 1
+    ? `${workpointName}（${workpointId}）`
+    : workpointName;
 }
 
 function resourceAssistantScenarioFingerprint(scenario: ScenarioInput | null): string {

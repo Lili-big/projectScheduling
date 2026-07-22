@@ -94,6 +94,43 @@ def generate_resource_plan_payload(
     return plans, llm_config_status()
 
 
+def generate_workpoint_resource_initialization_payload(
+    context: dict[str, Any],
+    validation_errors: list[dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], ResourceAssistantLlmConfigStatus]:
+    """Call an external model for initialization without a local fallback."""
+
+    provider = _provider()
+    _validate_strict_external_config(provider)
+    try:
+        raw = _call_llm_json(
+            instruction=_workpoint_resource_initialization_instruction(),
+            payload={
+                "task": (
+                    "workpoint_resource_initialization_correction"
+                    if validation_errors
+                    else "workpoint_resource_initialization"
+                ),
+                "context": context,
+                "output_schema": _workpoint_resource_initialization_output_schema(),
+                **({"validation_errors": validation_errors} if validation_errors else {}),
+            },
+            provider=provider,
+        )
+        recommendations = _extract_workpoint_resource_recommendations(raw)
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise AiResourceAssistantLlmError("AI resource initializer returned invalid JSON.") from exc
+    if recommendations is None:
+        raise AiResourceAssistantLlmError("AI resource initializer response does not match the required schema.")
+    return recommendations, llm_config_status()
+
+
+def strict_workpoint_resource_llm_config_status() -> ResourceAssistantLlmConfigStatus:
+    provider = _provider()
+    _validate_strict_external_config(provider)
+    return llm_config_status()
+
+
 def explain_recommendation(
     recommendation: ResourceAssistantRecommendation,
     comparison: ResourceAssistantComparison,
@@ -175,8 +212,14 @@ def _call_llm_json(*, instruction: str, payload: dict[str, Any], provider: str) 
     try:
         with urllib.request.urlopen(request, timeout=_timeout_seconds()) as response:
             return json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-        raise AiResourceAssistantLlmError(f"AI 资源助手服务调用失败：{exc}") from exc
+    except urllib.error.HTTPError as exc:
+        raise AiResourceAssistantLlmError(f"AI resource service returned HTTP {exc.code}.") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        reason = getattr(exc, "reason", None)
+        label = type(reason or exc).__name__
+        raise AiResourceAssistantLlmError(f"AI resource service call failed ({label}).") from exc
+    except json.JSONDecodeError as exc:
+        raise AiResourceAssistantLlmError("AI resource service returned invalid JSON.") from exc
 
 
 def _openai_compatible_payload(instruction: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -208,6 +251,21 @@ def _extract_plans(raw: Any) -> list[dict[str, Any]] | None:
     if isinstance(payload, list):
         return [item for item in payload if isinstance(item, dict)]
     return None
+
+
+def _extract_workpoint_resource_recommendations(raw: Any) -> list[dict[str, Any]] | None:
+    payload = _extract_json_payload(raw)
+    if isinstance(payload, dict) and isinstance(payload.get("workpoints"), list):
+        values = payload["workpoints"]
+    elif isinstance(payload, dict) and isinstance(payload.get("recommendations"), list):
+        values = payload["recommendations"]
+    elif isinstance(payload, list):
+        values = payload
+    else:
+        return None
+    if not all(isinstance(item, dict) for item in values):
+        return None
+    return list(values)
 
 
 def _extract_explanation(raw: Any) -> str:
@@ -284,13 +342,66 @@ def _env_value(primary_env: str, shared_env: str, default: str) -> str:
     return os.getenv(shared_env, default).strip()
 
 
+def _validate_strict_external_config(provider: str) -> None:
+    if provider in LOCAL_PROVIDERS:
+        raise AiResourceAssistantLlmError(
+            f"{PROVIDER_ENV} must select an external provider for AI resource initialization."
+        )
+    if provider not in SUPPORTED_OPENAI_COMPATIBLE_PROVIDERS | SUPPORTED_GENERIC_PROVIDERS:
+        raise AiResourceAssistantLlmError("AI resource initializer provider is not supported.")
+    missing = [
+        name
+        for name, value in (
+            (ENDPOINT_ENV, _endpoint()),
+            (MODEL_ENV, _model()),
+            (API_KEY_ENV, _api_key()),
+        )
+        if not value
+    ]
+    if missing:
+        raise AiResourceAssistantLlmError(
+            "AI resource initializer configuration is incomplete: " + ", ".join(missing) + "."
+        )
+
+
+def _workpoint_resource_initialization_instruction() -> str:
+    return (
+        "You are a bridge-construction resource initialization assistant. Return JSON only, never Markdown. "
+        "Return exactly one workpoint record for every workpoint in context.workpoints, preserving its workpoint_id. "
+        "For each workpoint, choose only resource_type values listed in that workpoint's candidates. "
+        "Each chosen resource must contain positive integer quantity, integer max_quantity not less than quantity, "
+        "and a concise reason. It is valid to return an empty resources list. Do not invent resource pool IDs, "
+        "scope, calendars, process IDs, costs, workpoints, or resource types. If validation_errors are provided, "
+        "correct every error and return the complete batch again."
+    )
+
+
+def _workpoint_resource_initialization_output_schema() -> dict[str, Any]:
+    return {
+        "workpoints": [
+            {
+                "workpoint_id": "string",
+                "resources": [
+                    {
+                        "resource_type": "candidate resource_type",
+                        "quantity": "positive integer",
+                        "max_quantity": "integer >= quantity",
+                        "reason": "string",
+                    }
+                ],
+            }
+        ]
+    }
+
+
 def _plan_generation_instruction() -> str:
     return (
         "你是桥梁施工资源配置方案助手。只返回 JSON，不输出 Markdown。"
         "你需要在同一次响应中生成 economy、balanced、crash 三套资源配置初始方案。"
-        "输入中的 reference_examples 是当前项目的确定性三方案基线；resource_types 是唯一允许输出的资源类型。"
-        "新数量统一在 scoped_resource_quantities 中按 resource_pool_id 输出；PROJECT_SHARED 的 workpoint_id 为空，"
-        "WORKPOINT_EXCLUSIVE 必须输出其 workpoint_id。旧 resource_quantities 只兼容可唯一定位的单个项目共享池。"
+        "target_workpoint 是本轮唯一资源推进工点，editable_resource_pools 是唯一允许输出的资源记录。"
+        "resource_quantities 必须为空。新数量只能在 scoped_resource_quantities 中按 editable_resource_pools 的"
+        "resource_pool_id + target_workpoint.workpoint_id 输出。"
+        "不得输出项目共享池、其他工点资源或 editable_resource_pools 之外的资源。"
         "不得输出或修改 scope_mode、workpoint_id、authorized_workpoint_ids、workpoint_overrides，不得新增资源池或工点。"
         "实际工作量为零、未映射、禁用或数据异常的资源在三个方案中都必须输出 0，不得扩充。"
         "所有数量必须是非负整数，不得超过 current_resource_pools 中原始 max_quantity，"
@@ -308,7 +419,7 @@ def _plan_generation_output_schema() -> dict[str, Any]:
             {
                 "profile": "economy",
                 "positioning": "经济方案",
-                "resource_quantities": {"rotary_drill": 4, "pier_body_team": 6},
+                "resource_quantities": {},
                 "scoped_resource_quantities": [
                     {"resource_pool_id": "pool-exclusive", "workpoint_id": "WP-A", "quantity": 2}
                 ],

@@ -101,11 +101,20 @@ DEMO_MOBILIZATION_COSTS: dict[str, float] = {
 
 
 def initialize_resource_assistant(request: ResourceAssistantInitialRequest) -> ResourceAssistantInitialResponse:
+    target_workpoint = _resolve_target_workpoint(request.scenario, request.target_workpoint_id)
+    editable_resource_keys = _target_editable_resource_keys(request.scenario, target_workpoint.id)
+    if not editable_resource_keys:
+        raise ValueError("所选工点没有可由 AI 调整的本地资源，请先到资源配置维护。")
     generated = generate_schedule_input_from_scenario(request.scenario)
     profile = build_project_profile(request.scenario, generated)
     reference_examples = build_reference_examples(request.scenario, profile)
     profile.reference_examples = reference_examples
-    llm_generation_context = build_llm_generation_context(profile, request.scenario)
+    llm_generation_context = build_llm_generation_context(
+        profile,
+        request.scenario,
+        target_workpoint_id=target_workpoint.id,
+        target_workpoint_name=target_workpoint.name,
+    )
 
     generation_source = "local_fallback"
     fallback_reason: str | None = None
@@ -113,13 +122,23 @@ def initialize_resource_assistant(request: ResourceAssistantInitialRequest) -> R
     llm_status = llm_config_status()
     if request.generation_mode == "llm_first":
         raw_plan_payload, llm_status = generate_resource_plan_payload(llm_generation_context)
-        validation_errors = _validate_raw_plan_payload(raw_plan_payload, request.scenario, profile)
+        validation_errors = _validate_raw_plan_payload(
+            raw_plan_payload,
+            request.scenario,
+            profile,
+            target_workpoint_id=target_workpoint.id,
+        )
         if raw_plan_payload and validation_errors:
             raw_plan_payload, llm_status = generate_resource_plan_payload(
                 llm_generation_context,
                 validation_errors=validation_errors,
             )
-            validation_errors = _validate_raw_plan_payload(raw_plan_payload, request.scenario, profile)
+            validation_errors = _validate_raw_plan_payload(
+                raw_plan_payload,
+                request.scenario,
+                profile,
+                target_workpoint_id=target_workpoint.id,
+            )
         if raw_plan_payload and not validation_errors:
             generation_source = "llm"
         elif raw_plan_payload:
@@ -134,18 +153,21 @@ def initialize_resource_assistant(request: ResourceAssistantInitialRequest) -> R
         raw_plans=raw_plan_payload,
         generation_source=generation_source,
         reference_examples=reference_examples,
+        target_workpoint_id=target_workpoint.id,
+        target_workpoint_name=target_workpoint.name,
     )
     generation_id = _stable_hash(
         {
             "scenario": request.scenario.model_dump(mode="json"),
             "plans": [plan.model_dump(mode="json") for plan in plans],
             "source": generation_source,
+            "target_workpoint_id": target_workpoint.id,
         }
     )[:12]
     generation = ResourceAssistantGenerationRecord(
         generation_id=f"resource-generation-{generation_id}",
         source=generation_source,
-        input_fingerprint=_scenario_fingerprint(request.scenario),
+        input_fingerprint=_generation_input_fingerprint(request.scenario, target_workpoint.id),
         prompt_summary="工程画像 + 约束提示 + 非硬约束参考样例一次性生成三类资源配置。",
         reference_examples_used=reference_examples,
         constraint_hints_used=profile.constraint_hints,
@@ -170,6 +192,7 @@ def update_resource_plan(request: ResourceAssistantUpdatePlanRequest) -> Resourc
     plan = request.resource_plan
     if plan is None:
         raise ValueError("resource_plan is required for resource assistant plan update.")
+    _validate_target_resource_updates(plan, request)
     pools = [pool.model_copy(deep=True) for pool in plan.resource_pools]
     pools = _apply_legacy_project_quantity_updates(pools, request.resource_updates)
     pools = _apply_scoped_quantity_updates(pools, request.scoped_resource_updates)
@@ -307,7 +330,144 @@ def _plan_authorized_workpoint_ids(pool: ResourcePool) -> set[str]:
     return {override.workpoint_id for override in pool.workpoint_overrides}
 
 
+def _resolve_target_workpoint(scenario: ScenarioInput, target_workpoint_id: str):
+    normalized = str(target_workpoint_id or "").strip()
+    if not normalized:
+        raise ValueError("请先选择资源推进工点。")
+    workpoint = next(
+        (
+            bridge
+            for bridge in scenario.project.bridges
+            if bridge.id == normalized and bridge.workpoint_type == "bridge"
+        ),
+        None,
+    )
+    if workpoint is None:
+        raise ValueError("所选工点已不属于当前项目版本，请重新选择。")
+    return workpoint
+
+
+def _target_pool_quantity_bounds(pool: ResourcePool, target_workpoint_id: str) -> tuple[int, int] | None:
+    if (
+        pool.scope_mode != "WORKPOINT_EXCLUSIVE"
+        or not pool.enabled
+        or pool.resource_mode != "LIMITED"
+    ):
+        return None
+    if pool.workpoint_id is not None:
+        if pool.workpoint_id != target_workpoint_id:
+            return None
+        current = int(pool.quantity or 0)
+        maximum = int(pool.max_quantity if pool.max_quantity is not None else current)
+        return (current, maximum) if current > 0 or maximum > 0 else None
+    override = next(
+        (item for item in pool.workpoint_overrides if item.workpoint_id == target_workpoint_id),
+        None,
+    )
+    if override is None or override.enabled is False:
+        return None
+    current = int(override.quantity if override.quantity is not None else pool.quantity or 0)
+    maximum = int(
+        override.max_quantity
+        if override.max_quantity is not None
+        else pool.max_quantity
+        if pool.max_quantity is not None
+        else current
+    )
+    return (current, maximum) if current > 0 or maximum > 0 else None
+
+
+def _target_editable_resource_keys(scenario: ScenarioInput, target_workpoint_id: str) -> set[tuple[str, str]]:
+    return {
+        (pool.id, target_workpoint_id)
+        for pool in scenario.resource_pools
+        if _target_pool_quantity_bounds(pool, target_workpoint_id) is not None
+    }
+
+
+def _target_editable_resource_context(scenario: ScenarioInput, target_workpoint_id: str) -> list[dict[str, Any]]:
+    editable: list[dict[str, Any]] = []
+    for pool in sorted(scenario.resource_pools, key=lambda item: item.id):
+        bounds = _target_pool_quantity_bounds(pool, target_workpoint_id)
+        if bounds is None:
+            continue
+        editable.append(
+            {
+                "resource_pool_id": pool.id,
+                "resource_type": pool.type,
+                "resource_label": pool.label,
+                "workpoint_id": target_workpoint_id,
+                "current_quantity": bounds[0],
+                "max_quantity": bounds[1],
+            }
+        )
+    return editable
+
+
+def _validate_target_resource_updates(
+    plan: ResourceAssistantPlan,
+    request: ResourceAssistantUpdatePlanRequest,
+) -> None:
+    target_workpoint_id = str(plan.target_workpoint_id or "").strip()
+    if not target_workpoint_id:
+        raise ValueError("当前方案缺少资源推进工点，请重新选择工点并生成三方案。")
+    if request.resource_updates:
+        raise ValueError("单工点资源方案不接受按资源类型批量更新，请按资源池和工点更新。")
+    pools_by_id = {pool.id: pool for pool in plan.resource_pools}
+    for update in request.scoped_resource_updates:
+        if update.workpoint_id != target_workpoint_id:
+            raise ValueError("只能调整当前资源推进工点的本地资源。")
+        pool = pools_by_id.get(update.resource_pool_id)
+        if pool is None:
+            raise ValueError(f"资源池 {update.resource_pool_id} 不在当前方案中。")
+        bounds = _target_pool_quantity_bounds(pool, target_workpoint_id)
+        if bounds is None:
+            raise ValueError("共享池、其他工点资源、停用资源或无可调空间资源不能在本轮修改。")
+        _validated_quantity(update.quantity, bounds[1], subject=pool.label)
+
+
+def _validate_plan_target_group(plans: list[ResourceAssistantPlan]) -> str:
+    target_ids = {str(plan.target_workpoint_id or "").strip() for plan in plans}
+    if "" in target_ids:
+        raise ValueError("当前方案缺少资源推进工点，请重新选择工点并生成三方案。")
+    if len(target_ids) != 1:
+        raise ValueError("只能比较或推荐同一资源推进工点的方案。")
+    return next(iter(target_ids))
+
+
+def _pool_snapshot_without_target_quantity(pool: ResourcePool, target_workpoint_id: str) -> dict[str, Any]:
+    payload = pool.model_dump(mode="json")
+    if pool.scope_mode != "WORKPOINT_EXCLUSIVE":
+        return payload
+    if pool.workpoint_id == target_workpoint_id:
+        payload["quantity"] = "__TARGET_QUANTITY__"
+        return payload
+    for override in payload.get("workpoint_overrides", []):
+        if override.get("workpoint_id") == target_workpoint_id:
+            override["quantity"] = "__TARGET_QUANTITY__"
+    return payload
+
+
+def _validate_plan_target_scope(scenario: ScenarioInput, plan: ResourceAssistantPlan) -> None:
+    target_workpoint_id = str(plan.target_workpoint_id or "").strip()
+    _resolve_target_workpoint(scenario, target_workpoint_id)
+    if not _target_editable_resource_keys(scenario, target_workpoint_id):
+        raise ValueError("所选工点没有可由 AI 调整的本地资源，请先到资源配置维护。")
+    base_by_id = {pool.id: pool for pool in scenario.resource_pools}
+    plan_by_id = {pool.id: pool for pool in plan.resource_pools}
+    if set(base_by_id) != set(plan_by_id):
+        raise ValueError("资源方案不得新增、删除或替换资源池。")
+    for pool_id, base_pool in base_by_id.items():
+        candidate = plan_by_id[pool_id]
+        if _pool_snapshot_without_target_quantity(base_pool, target_workpoint_id) != _pool_snapshot_without_target_quantity(
+            candidate,
+            target_workpoint_id,
+        ):
+            raise ValueError("资源方案只能改变所选工点本地资源数量，其他工点和共享池必须保持当前配置。")
+
+
 def batch_solve_resource_plans(request: ResourceAssistantBatchSolveRequest) -> ResourceAssistantBatchSolveResponse:
+    _validate_plan_target_group(request.resource_plans)
     profile: ResourceAssistantProjectProfile | None = None
     selected_plan_ids = _selected_plan_ids(request)
     solved_plans: list[ResourceAssistantPlan] = []
@@ -343,6 +503,7 @@ def batch_solve_resource_plans(request: ResourceAssistantBatchSolveRequest) -> R
 
 
 def solve_resource_plan(request: ResourceAssistantSingleSolveRequest) -> ResourceAssistantSingleSolveResponse:
+    _validate_plan_target_scope(request.scenario, request.resource_plan)
     solved_plan, plan_result, diagnostics = _solve_single_plan(request.scenario, request.resource_plan, None)
     return ResourceAssistantSingleSolveResponse(
         resource_plan=solved_plan,
@@ -370,6 +531,7 @@ def generate_resource_plan_recommendation(
 
 
 def _validate_result_ids(request: ResourceAssistantResultsRequest, *, require_all: bool) -> None:
+    _validate_plan_target_group(request.resource_plans)
     plan_ids = [plan.scenario_id for plan in request.resource_plans]
     result_ids = [result.scenario_id for result in request.plan_results]
     if len(plan_ids) != len(set(plan_ids)):
@@ -668,18 +830,29 @@ def build_deterministic_recommendation(
     )
 
 
-def build_llm_generation_context(profile: ResourceAssistantProjectProfile, scenario: ScenarioInput) -> dict[str, Any]:
+def build_llm_generation_context(
+    profile: ResourceAssistantProjectProfile,
+    scenario: ScenarioInput,
+    *,
+    target_workpoint_id: str,
+    target_workpoint_name: str,
+) -> dict[str, Any]:
     return {
         "project_profile": profile.model_dump(mode="json"),
+        "target_workpoint": {
+            "workpoint_id": target_workpoint_id,
+            "workpoint_name": target_workpoint_name,
+        },
+        "editable_resource_pools": _target_editable_resource_context(scenario, target_workpoint_id),
         "resource_types": profile.resource_types,
         "constraint_hints": profile.constraint_hints,
         "reference_examples": [item.model_dump(mode="json") for item in profile.reference_examples],
         "current_resource_pools": [pool.model_dump(mode="json") for pool in scenario.resource_pools],
         "rules": [
             "一次性输出 economy、balanced、crash 三套方案。",
-            "只能输出 current_resource_pools 中存在的资源类型。",
-            "新数量统一在 scoped_resource_quantities 中按 resource_pool_id 输出；共享池 workpoint_id 为空。",
-            "工点本地池在 scoped_resource_quantities 中按 resource_pool_id + workpoint_id 输出；旧 resource_quantities 只兼容可唯一定位的项目共享池。",
+            "只能输出 editable_resource_pools 中列出的目标工点本地资源。",
+            "resource_quantities 必须为空；新数量统一在 scoped_resource_quantities 中按 resource_pool_id + target_workpoint.workpoint_id 输出。",
+            "不得输出共享池、其他工点资源或 editable_resource_pools 之外的资源。",
             "不得改变 scope_mode、workpoint_id、authorized_workpoint_ids、workpoint_overrides 或新增工点。",
             "桩机必须按工艺资源类型分别给数量。",
             "任何实际工作量为零、未映射、禁用或数据异常的资源，economy、balanced、crash 均必须为 0。",
@@ -788,6 +961,7 @@ def _deterministic_resource_baseline(
 def _deterministic_scoped_resource_baseline(
     scenario: ScenarioInput,
     profile: ResourceAssistantProjectProfile,
+    target_workpoint_id: str | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     profile_by_pool = {
         str(item.get("resource_pool_id")): item
@@ -800,6 +974,24 @@ def _deterministic_scoped_resource_baseline(
         "crash": [],
     }
     for pool in scenario.resource_pools:
+        if target_workpoint_id is not None:
+            bounds = _target_pool_quantity_bounds(pool, target_workpoint_id)
+            if bounds is None:
+                continue
+            current, maximum = bounds
+            values = (math.ceil(current * 0.75), current, math.ceil(current * 1.25))
+            previous = 0
+            for profile_name, raw_value in zip(("economy", "balanced", "crash"), values):
+                quantity = min(max(previous, int(raw_value)), maximum)
+                previous = quantity
+                result[profile_name].append(
+                    {
+                        "resource_pool_id": pool.id,
+                        "workpoint_id": target_workpoint_id,
+                        "quantity": quantity,
+                    }
+                )
+            continue
         if pool.scope_mode == "PROJECT_SHARED":
             current = max(0, int(pool.quantity or 0))
             maximum = max(current, int(pool.max_quantity or current))
@@ -843,6 +1035,7 @@ def _validate_raw_plan_payload(
     raw_plans: list[dict[str, Any]] | None,
     scenario: ScenarioInput,
     profile: ResourceAssistantProjectProfile,
+    target_workpoint_id: str | None = None,
 ) -> list[dict[str, Any]]:
     if not raw_plans:
         return []
@@ -860,12 +1053,16 @@ def _validate_raw_plan_payload(
     project_workpoint_ids = sorted(
         bridge.id for bridge in scenario.project.bridges if bridge.workpoint_type == "bridge"
     )
-    expected_scoped_keys = {
-        (pool.id, workpoint_id)
-        for pool in scenario.resource_pools
-        if pool.scope_mode == "WORKPOINT_EXCLUSIVE"
-        for workpoint_id in _scenario_authorized_workpoint_ids(pool, project_workpoint_ids)
-    }
+    expected_scoped_keys = (
+        _target_editable_resource_keys(scenario, target_workpoint_id)
+        if target_workpoint_id is not None
+        else {
+            (pool.id, workpoint_id)
+            for pool in scenario.resource_pools
+            if pool.scope_mode == "WORKPOINT_EXCLUSIVE"
+            for workpoint_id in _scenario_authorized_workpoint_ids(pool, project_workpoint_ids)
+        }
+    )
     workpoint_states = {
         (str(item.get("resource_pool_id")), str(workpoint.get("workpoint_id"))): workpoint
         for item in profile.resource_types
@@ -890,6 +1087,14 @@ def _validate_raw_plan_payload(
         if not isinstance(quantities, dict):
             errors.append({"code": "INVALID_RESOURCE_MAP", "profile": profile_name, "expected": "resource_quantities 必须是对象"})
             quantities = {}
+        if target_workpoint_id is not None and quantities:
+            errors.append(
+                {
+                    "code": "TARGET_SCOPE_LEGACY_MAP_NOT_ALLOWED",
+                    "profile": profile_name,
+                    "expected": "单工点资源推进时 resource_quantities 必须为空",
+                }
+            )
         parsed_shared[profile_name] = {}
         for resource_type, value in quantities.items():
             matching_pools = pools_by_type.get(resource_type, [])
@@ -928,6 +1133,21 @@ def _validate_raw_plan_payload(
             pool = pools_by_id.get(pool_id)
             if pool is None:
                 errors.append({"code": "UNKNOWN_RESOURCE_POOL", "profile": profile_name, "resource_pool_id": pool_id})
+                continue
+            if target_workpoint_id is not None and (
+                pool.scope_mode != "WORKPOINT_EXCLUSIVE"
+                or workpoint_id != target_workpoint_id
+                or (pool_id, workpoint_id) not in expected_scoped_keys
+            ):
+                errors.append(
+                    {
+                        "code": "TARGET_SCOPE_VIOLATION",
+                        "profile": profile_name,
+                        "resource_pool_id": pool_id,
+                        "workpoint_id": workpoint_id or None,
+                        "expected": "只能输出所选工点已有的可调本地资源",
+                    }
+                )
                 continue
             if pool.scope_mode == "PROJECT_SHARED":
                 if workpoint_id:
@@ -971,16 +1191,17 @@ def _validate_raw_plan_payload(
             parsed_scoped[profile_name][key] = value
         for pool_id, workpoint_id in sorted(expected_scoped_keys - seen_scoped):
             errors.append({"code": "MISSING_SCOPED_RESOURCE", "profile": profile_name, "resource_pool_id": pool_id, "workpoint_id": workpoint_id})
-        for pool in sorted(
-            (item for item in scenario.resource_pools if item.scope_mode == "PROJECT_SHARED"),
-            key=lambda item: item.id,
-        ):
-            if (pool.id, "") in seen_scoped:
-                continue
-            matching_shared = [item for item in pools_by_type[pool.type] if item.scope_mode == "PROJECT_SHARED"]
-            if len(matching_shared) == 1 and pool.type in quantities:
-                continue
-            errors.append({"code": "MISSING_RESOURCE_POOL", "profile": profile_name, "resource_pool_id": pool.id, "resource_type": pool.type, "expected": "同类型多共享池必须逐池输出结构化数量"})
+        if target_workpoint_id is None:
+            for pool in sorted(
+                (item for item in scenario.resource_pools if item.scope_mode == "PROJECT_SHARED"),
+                key=lambda item: item.id,
+            ):
+                if (pool.id, "") in seen_scoped:
+                    continue
+                matching_shared = [item for item in pools_by_type[pool.type] if item.scope_mode == "PROJECT_SHARED"]
+                if len(matching_shared) == 1 and pool.type in quantities:
+                    continue
+                errors.append({"code": "MISSING_RESOURCE_POOL", "profile": profile_name, "resource_pool_id": pool.id, "resource_type": pool.type, "expected": "同类型多共享池必须逐池输出结构化数量"})
         if not isinstance(raw.get("organization_strategy"), str):
             errors.append({"code": "INVALID_STRATEGY_TYPE", "profile": profile_name, "expected": "organization_strategy 必须是字符串"})
     for resource_type in shared_types:
@@ -1011,10 +1232,16 @@ def _plans_from_payload_or_fallback(
     raw_plans: list[dict[str, Any]] | None,
     generation_source: str,
     reference_examples: list[ResourceAssistantReferenceExample],
+    target_workpoint_id: str | None = None,
+    target_workpoint_name: str | None = None,
 ) -> list[ResourceAssistantPlan]:
     raw_by_profile = _raw_plans_by_profile(raw_plans or [])
     if not raw_by_profile:
-        scoped_baseline = _deterministic_scoped_resource_baseline(scenario, project_profile)
+        scoped_baseline = _deterministic_scoped_resource_baseline(
+            scenario,
+            project_profile,
+            target_workpoint_id,
+        )
         raw_by_profile = {
             example.profile: {
                 "profile": example.profile,
@@ -1042,6 +1269,8 @@ def _plans_from_payload_or_fallback(
             ResourceAssistantPlan(
                 scenario_id=f"{scenario.scenario_id}-ai-{profile}",
                 scenario_name=str(raw.get("scenario_name") or PROFILE_LABELS[profile]),
+                target_workpoint_id=target_workpoint_id,
+                target_workpoint_name=target_workpoint_name,
                 profile=profile,  # type: ignore[arg-type]
                 positioning=str(raw.get("positioning") or PROFILE_POSITIONING[profile]),
                 generation_source=generation_source,  # type: ignore[arg-type]
@@ -1175,6 +1404,7 @@ def _solve_single_plan(
 ) -> tuple[ResourceAssistantPlan, ResourceAssistantPlanResult, list[ValidationMessage]]:
     diagnostics: list[ValidationMessage] = []
     try:
+        _validate_plan_target_scope(scenario, plan)
         plan_scenario = scenario.model_copy(
             deep=True,
             update={
@@ -2069,10 +2299,20 @@ def _scenario_fingerprint(scenario: ScenarioInput) -> str:
     return _stable_hash(scenario.model_dump(mode="json"))
 
 
+def _generation_input_fingerprint(scenario: ScenarioInput, target_workpoint_id: str) -> str:
+    return _stable_hash(
+        {
+            "scenario": scenario.model_dump(mode="json"),
+            "target_workpoint_id": target_workpoint_id,
+        }
+    )
+
+
 def _plan_input_fingerprint(scenario: ScenarioInput, plan: ResourceAssistantPlan) -> str:
     return _stable_hash(
         {
             "scenario": scenario.model_dump(mode="json"),
+            "target_workpoint_id": plan.target_workpoint_id,
             "resource_pools": [pool.model_dump(mode="json") for pool in plan.resource_pools],
         }
     )

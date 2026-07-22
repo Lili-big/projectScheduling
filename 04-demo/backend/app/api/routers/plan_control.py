@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from ..errors import plan_control_http_error
 from ...contracts import (
@@ -25,15 +25,17 @@ from ...plan_control.forecasting import (
     create_forecast,
     create_progress_snapshot,
 )
+from .scheduling import _materialize_project_master
 
 
 router = APIRouter()
 
 
 @router.post("/api/plan-control/baselines", response_model=PlanVersion)
-def create_baseline_plan_endpoint(request: CreateBaselinePlanRequest) -> PlanVersion:
+def create_baseline_plan_endpoint(payload: CreateBaselinePlanRequest, request: Request) -> PlanVersion:
     try:
-        return create_baseline_plan(request)
+        scenario, _ = _materialize_project_master(payload.scenario, request)
+        return create_baseline_plan(payload.model_copy(update={"scenario": scenario}))
     except (PlanControlValidationError, PlanControlRepositoryError) as exc:
         raise plan_control_http_error(exc) from exc
 

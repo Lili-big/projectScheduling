@@ -18,6 +18,7 @@ from ._models import (
     ScheduledTask,
     ScheduleInput,
     ScheduleResult,
+    SolveScope,
     TaskExecutionConstraint,
     WbsRequest,
     WbsResponse,

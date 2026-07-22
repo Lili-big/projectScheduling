@@ -268,6 +268,16 @@ export function editableResourcePools(plan: ResourceAssistantPlan): ResourcePool
   return plan.resource_pools.filter((pool) => pool.enabled && (pool.resource_mode ?? "LIMITED") === "LIMITED");
 }
 
+export function editableResourcePoolsForWorkpoint(plan: ResourceAssistantPlan): ResourcePool[] {
+  const targetWorkpointId = plan.target_workpoint_id;
+  if (!targetWorkpointId) return [];
+  return editableResourcePools(plan).filter((pool) => {
+    if ((pool.scope_mode ?? "PROJECT_SHARED") !== "WORKPOINT_EXCLUSIVE") return false;
+    if (pool.workpoint_id) return pool.workpoint_id === targetWorkpointId;
+    return (pool.workpoint_overrides ?? []).some((item) => item.workpoint_id === targetWorkpointId && item.enabled !== false);
+  });
+}
+
 export function resourceAssistantResourceLabel(resourceType: string, pools: ResourcePool[] = []): string {
   return resourceTypeLabel(resourceType, pools);
 }

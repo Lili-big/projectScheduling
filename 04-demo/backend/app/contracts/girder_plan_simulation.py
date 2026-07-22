@@ -13,6 +13,7 @@ ReadinessStatus = Literal["ready", "warning", "blocking"]
 ScenarioStatus = Literal["draft", "ready", "calculated", "confirmed", "stale", "blocked"]
 RunStatus = Literal["calculated", "blocked", "stale", "confirmed"]
 NodeSide = Literal["left", "right", "unknown"]
+BridgeSegmentKind = Literal["approach_small", "continuous", "approach_large"]
 
 
 class SimulationDiagnostic(BaseModel):
@@ -69,11 +70,15 @@ class LineGraphNode(BaseModel):
     project_master_workpoint_id: str | None = None
     name: str
     node_type: Literal["yard", "bridge", "roadbed", "tunnel", "culvert", "access", "connection"]
+    bridge_segment_kind: BridgeSegmentKind | None = None
     side: Literal["left", "right", "unknown"] = "unknown"
     alignment_code: str | None = None
     start_mileage_m: float | None = None
     end_mileage_m: float | None = None
     sort_order: int = Field(default=0, ge=0)
+    spatial_group_id: str
+    display_order: int = Field(ge=0)
+    placement_source: Literal["explicit", "inferred"]
     requires_erection: bool = False
     beam_demands: list[BeamDemand] = Field(default_factory=list)
     source_refs: list[str] = Field(default_factory=list)
@@ -109,7 +114,7 @@ class LineGraphSnapshot(BaseModel):
     project_id: str
     project_master_version_id: str
     input_fingerprint: str
-    projection_version: Literal["girder-plan-line-graph/v1"] = "girder-plan-line-graph/v1"
+    projection_version: Literal["girder-plan-line-graph/v3"] = "girder-plan-line-graph/v3"
     status: ReadinessStatus
     nodes: list[LineGraphNode] = Field(default_factory=list)
     edges: list[LineGraphEdge] = Field(default_factory=list)
@@ -132,6 +137,7 @@ class BeamTypeCapacity(BaseModel):
 class BeamYardPlan(BaseModel):
     beam_yard_id: str
     name: str = Field(min_length=1)
+    deployment_node_id: str | None = None
     alignment_code: str = Field(min_length=1)
     mileage_m: float
     production_start_date: date

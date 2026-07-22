@@ -153,7 +153,17 @@ class GirderPlanSimulationService:
         except ProjectMasterRepositoryError:
             current = False
         if current:
-            return scenario
+            graph = self.get_line_graph(
+                scenario.project_master_version_id,
+                connection_overrides=scenario.connection_overrides,
+            )
+            if graph.line_graph_id == scenario.line_graph_id:
+                return scenario
+            return self.repository.set_scenario_status(
+                scenario.scenario_version_id,
+                "stale",
+                stale_reason="项目线路投影或线路落位已变化，请基于当前双幅线路图创建新版本并重算。",
+            )
         return self.repository.set_scenario_status(
             scenario.scenario_version_id,
             "stale",

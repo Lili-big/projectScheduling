@@ -105,7 +105,7 @@ Copy-Item .local.env.example .local.env
 
 - `BRIDGE_IMPORT_LLM_*`：桥梁导入适配器。
 - `PROCESS_NL_LLM_*`：自然语言工艺设置的统一 LLM 适配器。
-- `AI_RESOURCE_ASSISTANT_*`：资源助手可选覆盖；未设置时复用 `PROCESS_NL_LLM_*`。
+- `AI_RESOURCE_ASSISTANT_*`：资源助手可选覆盖；未设置时复用 `PROCESS_NL_LLM_*`。“AI快速配置工装”必须配置真实外部 provider、endpoint、model 和 API Key，调用失败时不会使用本地推荐回退；修改 `.local.env` 后需重启后端。
 - `AI_PARAMETER_ASSISTANT_*`：参数助手代码支持的可选外部模型配置；真实值只放 `.local.env`。
 - `SCHEDULER_CORS_ORIGINS`、`SCHEDULER_CORS_ORIGIN_REGEX`：后端跨域。
 - `VITE_API_BASE_URL`：生产前端连接完整后端的地址。
@@ -118,7 +118,7 @@ Copy-Item .local.env.example .local.env
 - `.local-data/state/plan-control-store.json`：计划管控、项目/方案版本和联合快照。
 - `04-demo/examples/bridge-import/渠溪河特大桥结构设计表.xlsx`：默认桥梁导入样例。
 
-`.local.env` 和 `.local-data/` 已忽略，不要提交密钥或个人运行数据。
+`.local.env` 和 `.local-data/` 已忽略，不要提交密钥或个人运行数据。模型密钥只放后端 `.local.env`，不得使用 `VITE_*` 变量或传给浏览器。
 
 后台进程、PID、stdout/stderr 和历史日志处理只按 [`04-demo/runtime/README.md`](./04-demo/runtime/README.md) 操作。
 

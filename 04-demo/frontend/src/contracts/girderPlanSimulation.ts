@@ -21,11 +21,15 @@ export type LineGraphNode = {
   project_master_workpoint_id?: string | null;
   name: string;
   node_type: "yard" | "bridge" | "roadbed" | "tunnel" | "culvert" | "access" | "connection";
+  bridge_segment_kind?: "approach_small" | "continuous" | "approach_large" | null;
   side: "left" | "right" | "unknown";
   alignment_code?: string | null;
   start_mileage_m?: number | null;
   end_mileage_m?: number | null;
   sort_order: number;
+  spatial_group_id: string;
+  display_order: number;
+  placement_source: "explicit" | "inferred";
   requires_erection: boolean;
   beam_demands: BeamDemand[];
   source_refs: string[];
@@ -51,7 +55,7 @@ export type LineGraphSnapshot = {
   project_id: string;
   project_master_version_id: string;
   input_fingerprint: string;
-  projection_version: "girder-plan-line-graph/v1";
+  projection_version: "girder-plan-line-graph/v3";
   status: "ready" | "warning" | "blocking";
   nodes: LineGraphNode[];
   edges: LineGraphEdge[];
@@ -68,6 +72,7 @@ export type BeamTypeCapacity = {
 export type BeamYardPlan = {
   beam_yard_id: string;
   name: string;
+  deployment_node_id?: string | null;
   alignment_code: string;
   mileage_m: number;
   production_start_date: string;

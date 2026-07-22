@@ -29,3 +29,34 @@ test("domain API entrypoints cover all functions without copies", () => {
   const source = files.map((file) => readFileSync(resolve(root, "src/api", file), "utf8")).join("\n");
   for (const name of fixture.public_contracts.scheduler_api_functions) assert.match(source, new RegExp(`\\b${name}\\b`));
 });
+
+test("resource assistant API exposes the 059 local scenario-only initializer", () => {
+  const source = readFileSync(resolve(root, "src/api/resourceAssistantApi.ts"), "utf8");
+  const implementation = readFileSync(resolve(root, "src/api/_schedulerApi.ts"), "utf8");
+  assert.match(source, /initializeAiWorkpointResources/);
+  assert.match(implementation, /initialize-workpoint-resources/);
+  const initializer = implementation.match(/export function initializeAiWorkpointResources[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(initializer, /AiWorkpointResourceInitializationRequest/);
+  assert.doesNotMatch(initializer, /api.?key|authorization/i);
+});
+
+test("scheduling API keeps bodies compatible while adding optional workpoint query", () => {
+  const api = readFileSync(resolve(root, "src/api/_schedulerApi.ts"), "utf8");
+  assert.match(api, /function schedulingPath\(path: string, workpointId\?: string \| null\)/);
+  assert.match(api, /\?workpoint_id=\$\{encodeURIComponent\(normalized\)\}/);
+  assert.match(api, /schedulingPath\("\/api\/generate-schedule-input", workpointId\)/);
+  assert.match(api, /schedulingPath\("\/api\/solve-scenario", workpointId\)/);
+  assert.match(api, /schedulingPath\("\/api\/solve-min-resources", workpointId\)/);
+  assert.match(api, /schedulingPath\("\/api\/solve-resource-cost", workpointId\)/);
+});
+
+test("demo API mirror exposes the v2 dual-carriageway girder contract", () => {
+  const mirror = readFileSync(resolve(root, "..", "tools", "demo-api-mirror", "api.mts"), "utf8");
+  assert.match(mirror, /girder-plan-line-graph\/v2/);
+  assert.match(mirror, /R0:left/);
+  assert.match(mirror, /R0:right/);
+  assert.match(mirror, /spatial_group_id/);
+  assert.match(mirror, /placement_source/);
+  assert.match(mirror, /yard\.deployment_node_id/);
+  assert.doesNotMatch(mirror, /R0:unknown|T1:unknown/);
+});

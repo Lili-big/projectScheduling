@@ -12,7 +12,11 @@ function toDataUrl(source) {
 
 async function loadDomain() {
   const path = resolve(root, "src/domain/resourceAssistant.ts");
-  const source = ts.transpileModule(readFileSync(path, "utf8"), {
+  const rawSource = readFileSync(path, "utf8").replace(
+    /import \{ resourceTypeLabel \} from "\.\/resources";/,
+    "const resourceTypeLabel = (value) => value;",
+  );
+  const source = ts.transpileModule(rawSource, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
     fileName: path,
   }).outputText;
@@ -22,6 +26,8 @@ async function loadDomain() {
 function plan() {
   return {
     scenario_id: "plan-1",
+    target_workpoint_id: "WP-A",
+    target_workpoint_name: "工点 A",
     generation_source: "fallback",
     changed_from_standard: false,
     solve_status: "ready_to_solve",
@@ -44,11 +50,12 @@ test("quantity edits update only the selected pool id", async () => {
   assert.equal(updated.solve_status, "stale");
 });
 
-test("assistant UI always sends scoped updates including shared null workpoint", () => {
+test("assistant UI only exposes scoped updates for the selected local workpoint", () => {
   const panel = readFileSync(resolve(root, "src/features/resourceAssistant/ResourceAssistantPanel.tsx"), "utf8");
   const card = readFileSync(resolve(root, "src/features/resourceAssistant/ResourcePlanCard.tsx"), "utf8");
   assert.match(panel, /resource_updates:\s*\{\}/);
   assert.match(panel, /scoped_resource_updates:\s*\[\{ resource_pool_id: resourcePoolId, workpoint_id: workpointId, quantity \}\]/);
-  assert.match(panel, /workpoint_id:\s*pool\.workpoint_id/);
-  assert.match(card, /pool\.workpoint_id/);
+  assert.match(panel, /workpointId !== plan\.target_workpoint_id/);
+  assert.match(card, /editableResourcePoolsForWorkpoint\(plan\)/);
+  assert.doesNotMatch(card, /项目共享总量/);
 });

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
+import json
 import sys
+import urllib.error
 from collections import Counter
 from datetime import date, timedelta
 from pathlib import Path
@@ -13,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import app.services.ai_resource_scheduling_assistant as assistant_module  # noqa: E402
+import app.services.ai_resource_explainer as explainer_module  # noqa: E402
 from app.models import (  # noqa: E402
     GeneratedScheduleInput,
     PrecedenceLink,
@@ -1442,3 +1445,98 @@ def _nested_mapping_keys(value: object) -> set[str]:
         for nested in value:
             keys.update(_nested_mapping_keys(nested))
     return keys
+
+
+def _strict_initializer_env(monkeypatch) -> None:
+    for name in (
+        "PROCESS_NL_LLM_PROVIDER",
+        "PROCESS_NL_LLM_ENDPOINT",
+        "PROCESS_NL_LLM_MODEL",
+        "PROCESS_NL_LLM_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_PROVIDER", "openai")
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_ENDPOINT", "https://model.example/v1/chat/completions")
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_MODEL", "model-x")
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_API_KEY", "secret-value")
+
+
+def test_workpoint_initializer_rejects_local_provider_while_existing_plan_generation_keeps_fallback(monkeypatch) -> None:
+    monkeypatch.setenv("AI_RESOURCE_ASSISTANT_PROVIDER", "local")
+
+    with pytest.raises(explainer_module.AiResourceAssistantLlmError, match="external provider"):
+        explainer_module.generate_workpoint_resource_initialization_payload({"workpoints": []})
+    plans, status = explainer_module.generate_resource_plan_payload({})
+    assert plans is None
+    assert status.status == "local_fallback"
+
+
+@pytest.mark.parametrize(
+    ("missing_name", "shared_name"),
+    [
+        ("AI_RESOURCE_ASSISTANT_ENDPOINT", "PROCESS_NL_LLM_ENDPOINT"),
+        ("AI_RESOURCE_ASSISTANT_MODEL", "PROCESS_NL_LLM_MODEL"),
+        ("AI_RESOURCE_ASSISTANT_API_KEY", "PROCESS_NL_LLM_API_KEY"),
+    ],
+)
+def test_workpoint_initializer_requires_complete_external_configuration(monkeypatch, missing_name, shared_name) -> None:
+    _strict_initializer_env(monkeypatch)
+    monkeypatch.delenv(missing_name, raising=False)
+    monkeypatch.delenv(shared_name, raising=False)
+
+    with pytest.raises(explainer_module.AiResourceAssistantLlmError) as exc_info:
+        explainer_module.generate_workpoint_resource_initialization_payload({"workpoints": []})
+    assert missing_name in str(exc_info.value)
+    assert "secret-value" not in str(exc_info.value)
+
+
+@pytest.mark.parametrize("status_code", [401, 403])
+def test_workpoint_initializer_sanitizes_http_authentication_failures(monkeypatch, status_code) -> None:
+    _strict_initializer_env(monkeypatch)
+
+    def fail(_request, timeout):
+        raise urllib.error.HTTPError(
+            "https://model.example/v1/chat/completions",
+            status_code,
+            "secret-value must never be returned",
+            None,
+            None,
+        )
+
+    monkeypatch.setattr(explainer_module.urllib.request, "urlopen", fail)
+    with pytest.raises(explainer_module.AiResourceAssistantLlmError) as exc_info:
+        explainer_module.generate_workpoint_resource_initialization_payload({"workpoints": []})
+    assert str(status_code) in str(exc_info.value)
+    assert "secret-value" not in str(exc_info.value)
+
+
+def test_workpoint_initializer_sanitizes_timeout_and_invalid_json(monkeypatch) -> None:
+    _strict_initializer_env(monkeypatch)
+    monkeypatch.setattr(
+        explainer_module.urllib.request,
+        "urlopen",
+        lambda _request, timeout: (_ for _ in ()).throw(TimeoutError("secret-value")),
+    )
+    with pytest.raises(explainer_module.AiResourceAssistantLlmError) as timeout_error:
+        explainer_module.generate_workpoint_resource_initialization_payload({"workpoints": []})
+    assert "secret-value" not in str(timeout_error.value)
+
+    class InvalidJsonResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b"not-json-secret-value"
+
+    monkeypatch.setattr(
+        explainer_module.urllib.request,
+        "urlopen",
+        lambda _request, timeout: InvalidJsonResponse(),
+    )
+    with pytest.raises(explainer_module.AiResourceAssistantLlmError) as json_error:
+        explainer_module.generate_workpoint_resource_initialization_payload({"workpoints": []})
+    assert "invalid JSON" in str(json_error.value)
+    assert "secret-value" not in str(json_error.value)

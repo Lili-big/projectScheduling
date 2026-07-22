@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 WorkpointType = Literal[
@@ -18,6 +18,7 @@ WorkpointType = Literal[
     "other",
 ]
 StructureSide = Literal["left", "right", "shared", "none"]
+RouteSide = Literal["left", "right"]
 VersionStatus = Literal["draft", "confirmed", "superseded"]
 ImportStatus = Literal[
     "uploaded",
@@ -94,8 +95,49 @@ class ProjectMasterWorkpoint(BaseModel):
     source: SourceEvidence | None = None
 
 
+class ProjectMasterRoutePlacement(BaseModel):
+    placement_id: str
+    workpoint_id: str
+    side: RouteSide
+    mileage_prefix: str
+    start_mileage_m: float | None = None
+    end_mileage_m: float | None = None
+    spatial_group_id: str
+    display_order: int = Field(default=0, ge=0)
+    source: SourceEvidence | None = None
+
+    @field_validator("placement_id", "workpoint_id", "spatial_group_id")
+    @classmethod
+    def required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("线路落位稳定标识、工点标识和空间对应组不能为空。")
+        return value
+
+    @field_validator("mileage_prefix")
+    @classmethod
+    def normalize_mileage_prefix(cls, value: str) -> str:
+        value = value.strip().upper()
+        if not value:
+            raise ValueError("线路落位里程前缀不能为空。")
+        return value
+
+    @model_validator(mode="after")
+    def validate_mileage_range(self):
+        if (self.start_mileage_m is None) != (self.end_mileage_m is None):
+            raise ValueError("线路落位起点里程和终点里程必须同时填写。")
+        if (
+            self.start_mileage_m is not None
+            and self.end_mileage_m is not None
+            and self.end_mileage_m < self.start_mileage_m
+        ):
+            raise ValueError("线路落位终点里程不得小于起点里程。")
+        return self
+
+
 class ProjectMasterSnapshot(BaseModel):
     workpoints: list[ProjectMasterWorkpoint] = Field(default_factory=list)
+    route_placements: list[ProjectMasterRoutePlacement] = Field(default_factory=list)
 
 
 class ProjectMasterCounts(BaseModel):
@@ -127,7 +169,7 @@ class ProjectMasterImportIssue(BaseModel):
 
 class ProjectMasterDiffEntry(BaseModel):
     diff_id: str | None = None
-    object_kind: Literal["workpoint", "structure", "component", "parameter"]
+    object_kind: Literal["workpoint", "route_placement", "structure", "component", "parameter"]
     object_id: str
     change_type: Literal["added", "modified", "deleted", "unchanged"]
     field_name: str | None = None

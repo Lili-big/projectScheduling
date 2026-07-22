@@ -50,5 +50,7 @@
 | `047-workpoint-resource-configuration` | completed | 40/40 |
 | `048-workpoint-first-resource-allocation` | active_partial | 57/59 |
 | `051-girder-plan-simulation` | completed | 47/47 |
+| `054-single-workpoint-solve` | active_partial | 26/27 |
+| `056-unified-fixed-resource-solve` | active_partial | 0/33 |
 
 使用规则：先读目标目录的 `spec.md`、`plan.md` 和 `tasks.md`。`completed` 只表示该规格任务清单已勾选，不替代当前代码验证；`active_partial` 中未完成项不得在 README/agent 中写成已实现。

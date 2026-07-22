@@ -37,6 +37,7 @@ DEFAULT_RESOURCE_MAX_QUANTITIES: dict[str, int] = {
     "cap_beam_team": 10,
     "abutment_team": 10,
 }
+EXCLUDED_RESOURCE_CATALOG_TYPES = {"precast_beam_team"}
 BRIDGE_COMPLETION_MILESTONE_NAME = "下部及现浇结构施工完成"
 
 
@@ -352,6 +353,8 @@ def derive_resource_catalog(scenario: ScenarioInput) -> list[dict[str, object]]:
     )
     catalog: list[dict[str, object]] = []
     for resource_type in resource_types:
+        if resource_type in EXCLUDED_RESOURCE_CATALOG_TYPES:
+            continue
         default_pool = default_by_type.get(resource_type)
         configured_pool = configured_by_type.get(resource_type)
         if default_pool is not None:
@@ -419,7 +422,7 @@ def derive_workpoint_possible_resource_types(
                     resource_type = process.resource_type if process is not None else ""
             if resource_type:
                 resource_types.add(resource_type)
-    return sorted(resource_types)
+    return sorted(resource_types - EXCLUDED_RESOURCE_CATALOG_TYPES)
 
 
 def _upper_resource_component_type(upper: UpperStructureComponent) -> str | None:

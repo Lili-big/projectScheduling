@@ -56,6 +56,7 @@ export const excludedResourceCatalogTypes = new Set([
   "girder_erector",
   "beam_yard",
   "beam_yard_production_line",
+  "precast_beam_team",
 ]);
 
 export const projectMasterComponentTypeProjection: Record<string, ComponentType> = {

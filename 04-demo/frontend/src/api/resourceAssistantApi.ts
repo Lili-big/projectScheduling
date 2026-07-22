@@ -3,6 +3,7 @@ export {
   compareAiResourceAssistantResults,
   generateAiResourceAssistantRecommendation,
   initializeAiResourceAssistant,
+  initializeAiWorkpointResources,
   solveAiResourceAssistantPlan,
   updateAiResourceAssistantPlan,
 } from "./_schedulerApi";

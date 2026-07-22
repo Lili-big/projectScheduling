@@ -1,0 +1,244 @@
+openapi: 3.0.3
+info:
+  title: Single Workpoint Scheduling Scope Delta
+  version: 1.0.0
+  description: >-
+    Existing scheduling endpoints gain an optional request-scoped bridge workpoint filter.
+    Request bodies remain backward compatible; omitted workpoint_id means full-project solving.
+paths:
+  /api/generate-schedule-input:
+    post:
+      summary: Generate full-project or single-workpoint schedule input
+      parameters:
+        - $ref: '#/components/parameters/WorkpointId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScenarioInput'
+      responses:
+        '200':
+          description: Generated input with authoritative solve scope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeneratedScheduleInput'
+        '422':
+          $ref: '#/components/responses/InvalidWorkpointScope'
+  /api/solve-scenario:
+    post:
+      summary: Solve shortest duration for a full project or one workpoint
+      parameters:
+        - $ref: '#/components/parameters/WorkpointId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScenarioInput'
+      responses:
+        '200':
+          description: Scoped solve result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScenarioSolveResult'
+        '422':
+          $ref: '#/components/responses/InvalidWorkpointScope'
+  /api/solve-min-resources:
+    post:
+      summary: Solve minimum resources for a full project or one workpoint
+      parameters:
+        - $ref: '#/components/parameters/WorkpointId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MinResourcesSolveRequest'
+      responses:
+        '200':
+          description: Scoped solve result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScenarioSolveResult'
+        '422':
+          $ref: '#/components/responses/InvalidWorkpointScope'
+  /api/solve-resource-cost:
+    post:
+      summary: Solve resource cost for a full project or one workpoint
+      parameters:
+        - $ref: '#/components/parameters/WorkpointId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResourceCostSolveRequest'
+      responses:
+        '200':
+          description: Scoped solve result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScenarioSolveResult'
+        '422':
+          $ref: '#/components/responses/InvalidWorkpointScope'
+  /api/compare-scenarios:
+    post:
+      summary: Compare full-project scenarios only
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [results]
+              properties:
+                results:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/ScenarioSolveResult'
+      responses:
+        '200':
+          description: Existing scenario comparison response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '422':
+          description: A workpoint-scoped or mixed-scope result was submitted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  parameters:
+    WorkpointId:
+      name: workpoint_id
+      in: query
+      required: false
+      description: Stable bridge workpoint ID. Omit for full-project generation or solving.
+      schema:
+        type: string
+        minLength: 1
+  responses:
+    InvalidWorkpointScope:
+      description: Workpoint ID is missing, stale, outside the current project version, or not a bridge workpoint
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ScenarioInput:
+      type: object
+      description: Existing ScenarioInput schema; unchanged by this feature.
+      additionalProperties: true
+    MinResourcesSolveRequest:
+      type: object
+      required: [scenario]
+      properties:
+        scenario:
+          $ref: '#/components/schemas/ScenarioInput'
+        fallback_target_days:
+          type: integer
+          minimum: 1
+          nullable: true
+    ResourceCostSolveRequest:
+      type: object
+      required: [scenario]
+      properties:
+        scenario:
+          $ref: '#/components/schemas/ScenarioInput'
+        fallback_target_days:
+          type: integer
+          minimum: 1
+          nullable: true
+    SolveScope:
+      type: object
+      required: [mode, workpoint_id, workpoint_name]
+      properties:
+        mode:
+          type: string
+          enum: [ALL, WORKPOINT]
+        workpoint_id:
+          type: string
+          nullable: true
+        workpoint_name:
+          type: string
+          nullable: true
+      description: >-
+        ALL requires null workpoint fields. WORKPOINT requires the authoritative ID and name
+        resolved after project-master materialization.
+    GeneratedScheduleInput:
+      type: object
+      required: [schedule_input, validation, source_summary, solve_scope]
+      properties:
+        schedule_input:
+          type: object
+          additionalProperties: true
+        validation:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        source_summary:
+          type: object
+          additionalProperties: true
+        solve_scope:
+          $ref: '#/components/schemas/SolveScope'
+    ScenarioSolveResult:
+      type: object
+      required: [scenario_id, scenario_name, generated, result, milestone_results, diagnostics, metrics]
+      properties:
+        scenario_id:
+          type: string
+        scenario_name:
+          type: string
+        generated:
+          $ref: '#/components/schemas/GeneratedScheduleInput'
+        result:
+          type: object
+          additionalProperties: true
+        milestone_results:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        diagnostics:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        metrics:
+          type: object
+          additionalProperties: true
+        alternative_results:
+          type: array
+          items:
+            type: object
+            required: [generated]
+            properties:
+              generated:
+                $ref: '#/components/schemas/GeneratedScheduleInput'
+            additionalProperties: true
+    ErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          oneOf:
+            - type: string
+            - type: object
+              required: [code, message]
+              properties:
+                code:
+                  type: string
+                message:
+                  type: string
+                workpoint_id:
+                  type: string
+                  nullable: true

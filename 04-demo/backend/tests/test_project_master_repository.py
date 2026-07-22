@@ -11,6 +11,7 @@ sys.path.insert(0, str(BACKEND_ROOT))
 from app.contracts.project_master import (  # noqa: E402
     ProjectMasterComponent,
     ProjectMasterDiffEntry,
+    ProjectMasterRoutePlacement,
     ProjectMasterSnapshot,
     ProjectMasterStructure,
     ProjectMasterWorkpoint,
@@ -50,7 +51,19 @@ def _snapshot() -> ProjectMasterSnapshot:
                     )
                 ],
             )
-        ]
+        ],
+        route_placements=[
+            ProjectMasterRoutePlacement(
+                placement_id="RP-B01-L",
+                workpoint_id="WP-B01",
+                side="left",
+                mileage_prefix="ZK",
+                start_mileage_m=100,
+                end_mileage_m=200,
+                spatial_group_id="SG-001",
+                display_order=1,
+            )
+        ],
     )
 
 
@@ -86,11 +99,29 @@ def test_schema_enables_foreign_keys_indexes_and_version(tmp_path: Path) -> None
     path = tmp_path / "project-master.db"
     ProjectMasterRepository(path)
     connection = sqlite3.connect(path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
     assert {row[1] for row in connection.execute("PRAGMA index_list(project_master_versions)")} >= {
         "uq_project_master_current"
     }
     assert connection.execute("SELECT COUNT(*) FROM workpoint_type_definitions").fetchone()[0] >= 9
+    assert connection.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='route_placements'").fetchone()[0] == 1
+
+
+def test_schema_v1_database_adds_route_placements_without_rewriting_workpoints(tmp_path: Path) -> None:
+    path = tmp_path / "project-master.db"
+    repository = ProjectMasterRepository(path)
+    _, version = _draft(repository)
+    with sqlite3.connect(path) as connection:
+        before = connection.execute("SELECT workpoint_name FROM workpoints WHERE version_id=?", (version.version_id,)).fetchone()[0]
+        connection.execute("DROP TABLE route_placements")
+        connection.execute("PRAGMA user_version = 1")
+
+    ProjectMasterRepository(path)
+
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("SELECT workpoint_name FROM workpoints WHERE version_id=?", (version.version_id,)).fetchone()[0] == before
+        assert connection.execute("SELECT COUNT(*) FROM route_placements").fetchone()[0] == 0
 
 
 def test_repository_persists_tree_and_restores_after_restart(tmp_path: Path) -> None:
@@ -103,6 +134,7 @@ def test_repository_persists_tree_and_restores_after_restart(tmp_path: Path) -> 
 
     assert snapshot.workpoints[0].workpoint_id == "WP-B01"
     assert snapshot.workpoints[0].structures[0].components[0].quantity == 4
+    assert snapshot.route_placements[0].placement_id == "RP-B01-L"
     assert restored.get_version_detail(version.version_id).diff_counts.added == 1
 
 

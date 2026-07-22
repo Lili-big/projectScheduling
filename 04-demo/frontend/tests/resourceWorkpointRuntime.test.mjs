@@ -476,20 +476,35 @@ function workpoint(id, name, sortOrder) {
   };
 }
 
-function resourceComponent(id, type, { methodId = null, enabled = true } = {}) {
+function resourceParameter(parameterCode, value, { unit = null, sortOrder = 1 } = {}) {
+  return {
+    parameter_code: parameterCode,
+    value_type: typeof value === "number" ? "number" : "text",
+    value,
+    unit,
+    sort_order: sortOrder,
+    source: null,
+  };
+}
+
+function resourceComponent(id, type, {
+  methodId = null,
+  enabled = true,
+  quantity = 1,
+  unit = "个",
+  parameters = [],
+} = {}) {
   return {
     component_id: id,
     structure_id: "runtime-lower",
     component_name: id,
     component_type: type,
-    quantity: 1,
-    unit: "个",
+    quantity,
+    unit,
     enabled,
     sort_order: 1,
     remark: null,
-    parameters: methodId
-      ? [{ parameter_code: "method_id", value_type: "text", value: methodId, unit: null, sort_order: 1, source: null }]
-      : [],
+    parameters: [...parameters, ...(methodId ? [resourceParameter("method_id", methodId)] : [])],
     source: null,
   };
 }
@@ -513,8 +528,21 @@ function resourceDetail(item, { empty = false } = {}) {
         remark: null,
         parameters: [],
         components: [
-          resourceComponent("runtime-pile", "pile", { methodId: "rotary_drill" }),
-          resourceComponent("runtime-cap", "cap"),
+          resourceComponent("runtime-pile", "pile", {
+            methodId: "rotary_drill",
+            quantity: 5,
+            unit: "根",
+            parameters: [resourceParameter("diameter_m", 1.8, { unit: "m" })],
+          }),
+          resourceComponent("runtime-cap", "cap", {
+            quantity: 2,
+            unit: "个",
+            parameters: [
+              resourceParameter("length_m", 3, { unit: "m", sortOrder: 1 }),
+              resourceParameter("width_m", 4, { unit: "m", sortOrder: 2 }),
+              resourceParameter("height_m", 12, { unit: "m", sortOrder: 3 }),
+            ],
+          }),
           resourceComponent("runtime-pier", "pier_body"),
           resourceComponent("runtime-cap-beam", "cap_beam"),
         ],
@@ -637,8 +665,12 @@ test("T015 production workspace matches Chinese resources from structures across
   assert.equal(firstResourceState.sharedEditor, false, JSON.stringify(firstResourceState));
   assert.equal(await evaluate("document.querySelectorAll('.resource-workpoint-section input[aria-label*=" + JSON.stringify("获准") + "]').length"), 0);
   assert.equal(await evaluate("Boolean(document.querySelector('.resource-catalog-add'))"), true);
-  assert.equal(await evaluate("document.querySelector('.resource-workpoint-table input[aria-label$='当前投入']')?.value"), "0");
-  assert.equal(await evaluate("document.querySelector('.resource-workpoint-table input[aria-label$='可增上限']')?.value"), "0");
+  assert.equal(await evaluate("Boolean(document.querySelector('.resource-workpoint-detail-grid'))"), true);
+  assert.equal(await evaluate("document.querySelector('.resource-structure-panel')?.innerText.includes('旋挖钻-φ1.8×5根')"), true);
+  assert.equal(await evaluate("document.querySelector('.resource-structure-panel')?.innerText.includes('3×4×12m×2个')"), true);
+  assert.equal(await evaluate("document.querySelectorAll('.resource-config-panel table, .resource-config-panel thead, .resource-config-panel code, .resource-config-panel input[type=checkbox]').length"), 0);
+  assert.equal(await evaluate("document.querySelector('.resource-config-list input[aria-label$='当前投入']')?.value"), "0");
+  assert.equal(await evaluate("document.querySelector('.resource-config-list input[aria-label$='可增上限']')?.value"), "0");
   assert.equal(evidence.requests.saves.length, 0);
   assert.ok(evidence.requests.generations.length > 0);
   assert.equal(evidence.requests.generations.some(({ body }) => body.resource_pools?.some((pool) => pool.scope_mode === "PROJECT_SHARED")), false);
@@ -659,18 +691,18 @@ test("T015 production workspace matches Chinese resources from structures across
   await waitForExpression("document.querySelector('.resource-scope-panel')?.innerText.includes('旋挖钻机')", "return to matched workpoint");
   const editedValue = 3;
   await evaluate(`(() => {
-    const input = document.querySelector('.resource-workpoint-table input[aria-label$="当前投入"]');
+    const input = document.querySelector('.resource-config-list input[aria-label$="当前投入"]');
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
     setValue.call(input, String(${editedValue}));
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
   })()`);
-  await waitForExpression(`document.querySelector('.resource-workpoint-table input[aria-label$="当前投入"]')?.value === '${editedValue}'`, "workpoint-local quantity");
+  await waitForExpression(`document.querySelector('.resource-config-list input[aria-label$="当前投入"]')?.value === '${editedValue}'`, "workpoint-local quantity");
 
   networkMode.saveFailureRemaining = 1;
   assert.equal(await clickText("保存"), true);
   await waitForExpression("[...document.querySelectorAll('button')].some((item) => item.textContent.trim() === '重试保存')", "save failure retry");
-  assert.equal(await evaluate(`document.querySelector('.resource-workpoint-table input[aria-label$="当前投入"]')?.value === '${editedValue}'`), true);
+  assert.equal(await evaluate(`document.querySelector('.resource-config-list input[aria-label$="当前投入"]')?.value === '${editedValue}'`), true);
   assert.equal(await clickText("重试保存"), true);
   await waitForExpression(`document.querySelector('button[aria-label="保存"]')?.disabled === true`, "successful save");
 
@@ -678,6 +710,7 @@ test("T015 production workspace matches Chinese resources from structures across
   const savedPool = evidence.requests.saves[1].body.resource_pools.find((pool) => pool.scope_mode === "WORKPOINT_EXCLUSIVE" && pool.workpoint_id);
   assert.equal(savedPool.scope_mode, "WORKPOINT_EXCLUSIVE");
   assert.equal(savedPool.workpoint_overrides.length, 0);
+  assert.equal(savedPool.enabled, true);
   assert.ok(oracle.currentWorkpoints.some((item) => item.workpoint_id === savedPool.workpoint_id));
   assert.equal(evidence.requests.saves[1].body.resource_pools.some((pool) => pool.scope_mode === "PROJECT_SHARED"), false);
 
@@ -685,7 +718,8 @@ test("T015 production workspace matches Chinese resources from structures across
   await evaluate("document.querySelectorAll('.resource-workpoint-nav button')[1].click()");
   await waitForExpression("Boolean(document.querySelector('[data-resource-suggestion-empty=true]'))", "empty second workpoint before retained pool check");
   await evaluate("document.querySelectorAll('.resource-workpoint-nav button')[0].click()");
-  await waitForExpression(`document.querySelector('.resource-workpoint-table input[aria-label$="当前投入"]')?.value === '${editedValue}'`, "configured pool retained after structure mismatch");
+  await waitForExpression("Boolean(document.querySelector('[data-structure-summary-empty=true]'))", "empty structure summary before retained pool check");
+  await waitForExpression(`document.querySelector('.resource-config-list input[aria-label$="当前投入"]')?.value === '${editedValue}'`, "configured pool retained after structure mismatch");
   networkMode.firstDetailWithoutStructures = false;
 
   networkMode.workpointMode = "fail";
@@ -699,7 +733,7 @@ test("T015 production workspace matches Chinese resources from structures across
   await navigate(`${frontendUrl}/?resource-workpoint-runtime=${runId}-empty`);
   await openResourcesAfterTaskReady();
   await waitForExpression(`Boolean(document.querySelector('[data-resource-empty="true"]'))`, "authoritative empty state");
-  assert.equal(await evaluate("document.querySelectorAll('.resource-workpoint-table tbody tr').length"), 0);
+  assert.equal(await evaluate("document.querySelectorAll('.resource-config-item').length"), 0);
 
   networkMode.workpointMode = "fail";
   await navigate(`${frontendUrl}/?resource-workpoint-runtime=${runId}-version-race`);
@@ -748,6 +782,10 @@ test("T015 production workspace matches Chinese resources from structures across
     workpointLocalRecordVisible: true,
     ChineseNamesVisible: true,
     structureMatchedTypesVisible: true,
+    structureSummaryVisible: true,
+    resourceFieldHeadersVisible: false,
+    resourceEnableToggleVisible: false,
+    savedPoolEnabledDerivedFromQuantity: true,
     suggestionsStartAtZero: true,
     staleDetailCommits: 0,
     configuredPoolRetainedAfterMismatch: true,

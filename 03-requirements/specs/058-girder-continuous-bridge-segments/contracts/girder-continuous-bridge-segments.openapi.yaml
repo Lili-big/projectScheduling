@@ -1,0 +1,130 @@
+openapi: 3.1.0
+info:
+  title: 架梁计划推演三段式线路图契约增量
+  version: 3.0.0
+paths:
+  /api/girder-plan-simulation/line-graphs/{project_master_version_id}:
+    get:
+      summary: 获取含连续结构桥梁分段的 v3 线路图
+      parameters:
+        - name: project_master_version_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 返回 ready、warning 或 blocking 的线路图终态
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LineGraphSnapshotV3' }
+        '404':
+          description: 项目主数据版本不存在
+components:
+  schemas:
+    BridgeSegmentKind:
+      type: string
+      enum: [approach_small, continuous, approach_large]
+    BeamDemand:
+      type: object
+      required: [beam_type_id, beam_type_name, span_count, beam_count, span_refs]
+      properties:
+        beam_type_id: { type: string }
+        beam_type_name: { type: string }
+        span_count: { type: integer, minimum: 1 }
+        beam_count: { type: integer, minimum: 1 }
+        span_refs: { type: array, minItems: 1, items: { type: string } }
+    LineGraphNodeV3:
+      type: object
+      required:
+        - node_id
+        - name
+        - node_type
+        - side
+        - sort_order
+        - spatial_group_id
+        - display_order
+        - placement_source
+        - requires_erection
+        - beam_demands
+        - source_refs
+      properties:
+        node_id:
+          type: string
+          description: 分段节点为 workpoint_id:side:bridge_segment_kind
+        project_master_workpoint_id: { type: [string, 'null'] }
+        name: { type: string }
+        node_type:
+          type: string
+          enum: [yard, bridge, roadbed, tunnel, culvert, access, connection]
+        bridge_segment_kind:
+          anyOf:
+            - { $ref: '#/components/schemas/BridgeSegmentKind' }
+            - { type: 'null' }
+        side: { type: string, enum: [left, right, unknown] }
+        alignment_code: { type: [string, 'null'] }
+        start_mileage_m: { type: [number, 'null'] }
+        end_mileage_m: { type: [number, 'null'] }
+        sort_order: { type: integer, minimum: 0 }
+        spatial_group_id: { type: string }
+        display_order: { type: integer, minimum: 0 }
+        placement_source: { type: string, enum: [explicit, inferred] }
+        requires_erection: { type: boolean }
+        beam_demands:
+          type: array
+          items: { $ref: '#/components/schemas/BeamDemand' }
+        source_refs: { type: array, items: { type: string } }
+        current_plan_finish_date: { type: [string, 'null'], format: date }
+    LineGraphEdge:
+      type: object
+      required: [edge_id, from_node_id, to_node_id, direction, source, transfer_days]
+      properties:
+        edge_id: { type: string }
+        from_node_id: { type: string }
+        to_node_id: { type: string }
+        direction: { type: string, enum: [forward, reverse, bidirectional] }
+        source: { type: string, enum: [alignment_adjacency, manual_connection] }
+        transfer_days: { type: integer, minimum: 0 }
+        confirmation: { type: [object, 'null'] }
+    SimulationDiagnostic:
+      type: object
+      required: [level, code, message, entity_refs]
+      properties:
+        level: { type: string, enum: [info, warning, error] }
+        code:
+          type: string
+          description: 包含 BRIDGE_SEGMENT_STRUCTURE_DATA_MISSING、BRIDGE_SEGMENT_CONTINUOUS_BLOCK_AMBIGUOUS、BRIDGE_SEGMENT_APPROACH_MISSING、BRIDGE_SEGMENT_LENGTH_MISMATCH、BRIDGE_SEGMENT_PRECAST_CONFLICT
+        message: { type: string }
+        subject_id: { type: [string, 'null'] }
+        subject_type: { type: [string, 'null'] }
+        entity_refs: { type: array, items: { type: string } }
+        suggestion: { type: [string, 'null'] }
+    LineGraphSnapshotV3:
+      type: object
+      required:
+        - line_graph_id
+        - project_id
+        - project_master_version_id
+        - input_fingerprint
+        - projection_version
+        - status
+        - nodes
+        - edges
+        - diagnostics
+      properties:
+        line_graph_id: { type: string }
+        project_id: { type: string }
+        project_master_version_id: { type: string }
+        input_fingerprint: { type: string }
+        projection_version:
+          type: string
+          const: girder-plan-line-graph/v3
+        status: { type: string, enum: [ready, warning, blocking] }
+        nodes:
+          type: array
+          items: { $ref: '#/components/schemas/LineGraphNodeV3' }
+        edges:
+          type: array
+          items: { $ref: '#/components/schemas/LineGraphEdge' }
+        diagnostics:
+          type: array
+          items: { $ref: '#/components/schemas/SimulationDiagnostic' }

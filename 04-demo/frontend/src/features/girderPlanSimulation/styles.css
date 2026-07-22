@@ -28,23 +28,69 @@
 .girder-sim-diagnostics > button { cursor: pointer; }
 .girder-sim-diagnostics > .blocking { border-color: #d92d20; background: #fff0ef; }
 .girder-sim-diagnostics > .success { border-color: #18a66b; background: #ecfbf4; }
-.girder-sim-lines { display: grid; gap: 14px; overflow-x: auto; }
-.girder-sim-line { display: grid; grid-template-columns: 72px minmax(800px, 1fr); align-items: center; gap: 10px; }
-.girder-sim-line-track { display: flex; align-items: stretch; gap: 8px; padding: 9px; border-radius: 8px; background: linear-gradient(180deg, #f8fbff, #eef4fb); }
-.girder-sim-node { display: grid; min-width: 112px; gap: 2px; text-align: left; border-top-width: 4px !important; }
-.girder-sim-node.bridge { border-top-color: #3f78ca !important; }
-.girder-sim-node.tunnel { border-top-color: #7659aa !important; }
-.girder-sim-node.roadbed { border-top-color: #4d9a61 !important; }
-.girder-sim-node.selected { outline: 2px solid #1765c0; }
-.girder-sim-node.late { background: #fff0ef; }
-.girder-sim-node em { color: #b42318; font-size: 11px; font-style: normal; }
+.girder-sim-line-legend { display: flex; gap: 8px 18px; align-items: center; flex-wrap: wrap; margin: 4px 0 14px; padding: 9px 12px; border: 1px solid #e1e8f1; border-radius: 8px; background: #fafcff; }
+.girder-sim-legend-item { --node-color: #718096; display: inline-flex; gap: 6px; align-items: center; color: #52657b; font-size: 12px; }
+.girder-sim-legend-item svg { padding: 4px; border-radius: 50%; background: color-mix(in srgb, var(--node-color) 12%, white); color: var(--node-color); }
+.girder-sim-legend-line { display: inline-block; width: 28px; height: 8px; border-radius: 999px; background: var(--node-color); box-shadow: 0 0 0 1px color-mix(in srgb, var(--node-color) 75%, white); }
+.girder-sim-legend-line.bridge { height: 10px; background: repeating-linear-gradient(120deg, #2f6fcb 0 9px, #78a8ea 9px 14px); }
+.girder-sim-legend-line.tunnel { height: 11px; background: linear-gradient(180deg, #8c73bb, #624691); }
+.girder-sim-scale-note { margin-left: auto; padding-left: 14px; border-left: 1px solid #d9e2ed; color: #718096; font-size: 11px; }
+.girder-sim-legend-item.bridge, .girder-sim-node-label.bridge { --node-color: #2f6fcb; }
+.girder-sim-legend-item.tunnel, .girder-sim-node-label.tunnel { --node-color: #7255a6; }
+.girder-sim-legend-item.roadbed, .girder-sim-node-label.roadbed, .girder-sim-track-marker.roadbed { --node-color: #35875a; }
+.girder-sim-node-label.connection, .girder-sim-node-label.access, .girder-sim-node-label.culvert { --node-color: #d17419; }
+.girder-sim-legend-item.connection, .girder-sim-track-marker.connection { --node-color: #d17419; }
+.girder-sim-legend-item.yard, .girder-sim-yard-marker { --node-color: #b14f77; }
+.girder-sim-lines { display: grid; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+.girder-sim-line { display: grid; grid-template-columns: 54px minmax(0, 1fr); align-items: stretch; gap: 7px; }
+.girder-sim-line > strong { display: flex; flex-direction: column; align-items: center; justify-content: center; position: sticky; left: 0; z-index: 5; padding: 0 3px; border-right: 1px solid #d8e2f0; background: #fff; color: #183153; font-size: 12px; }
+.girder-sim-line > strong small { color: #7890aa; font-size: 9px; font-weight: 500; }
+.girder-sim-axis-line { position: sticky; top: 0; z-index: 4; align-items: end; background: #fff; }
+.girder-sim-axis-line > strong { justify-content: flex-end; padding-bottom: 6px; color: #476684; font-size: 10px; }
+.girder-sim-mileage-axis-track { display: grid; align-items: end; padding: 0 5px; border-bottom: 2px solid #9eb2ca; background: #fff; }
+.girder-sim-mileage-axis-slot { position: relative; display: flex; min-width: 0; justify-content: center; padding: 0 2px 7px; color: #315d8b; font-size: 8px; white-space: nowrap; }
+.girder-sim-mileage-axis-slot::before { content: ""; position: absolute; left: 0; bottom: -4px; width: 1px; height: 10px; background: #7892b0; }
+.girder-sim-mileage-axis-slot:last-child::after { content: ""; position: absolute; right: 0; bottom: -4px; width: 1px; height: 10px; background: #7892b0; }
+.girder-sim-mileage-axis-slot.local { color: #9a6a2a; }
+.girder-sim-mileage-axis-slot.local span { padding: 1px 3px; border-radius: 999px; background: #fff7e8; }
+.girder-sim-line-track { display: grid; align-items: stretch; gap: 0; padding: 8px 5px; border: 1px solid #e0e8f2; border-radius: 8px; background: linear-gradient(180deg, #fbfdff, #f3f7fb); }
+.girder-sim-node-slot { position: relative; display: grid; grid-template-rows: 58px 34px minmax(42px, auto); min-width: 0; overflow: visible; }
+.girder-sim-node-slot::before { content: ""; grid-row: 2; grid-column: 1; align-self: center; width: 100%; height: 4px; background: #7994b5; box-shadow: 0 1px 0 rgba(255, 255, 255, .85) inset; }
+.girder-sim-node-slot:first-child::before { border-radius: 99px 0 0 99px; }
+.girder-sim-node-slot:last-child::before { border-radius: 0 99px 99px 0; }
+.girder-sim-node-labels { position: relative; grid-row: 1; z-index: 4; overflow: visible; }
+.girder-sim-slot-empty { position: absolute; right: 2px; bottom: 4px; left: 2px; display: grid; min-height: 38px; place-items: center; border: 1px dashed #d4deea; border-radius: 5px; color: #98a2b3; font-size: 8px; }
+.girder-sim-node-label { --node-color: #718096; position: absolute; display: grid !important; z-index: 4; width: max-content !important; min-width: 0 !important; min-height: 0 !important; max-width: none !important; gap: 0; overflow: visible; padding: 2px 4px !important; border: 0 !important; border-left: 2px solid var(--node-color) !important; border-radius: 3px !important; background: rgba(255,255,255,.9) !important; color: #183153 !important; box-shadow: 0 1px 3px rgba(34,69,105,.08); text-align: left; white-space: nowrap; transform: translateX(-50%); }
+.girder-sim-node-label.lane-0 { bottom: 30px; }
+.girder-sim-node-label.lane-1 { bottom: 3px; }
+.girder-sim-node-label > span { overflow: visible; font-size: 9px; font-weight: 700; line-height: 13px; white-space: nowrap; }
+.girder-sim-node-label small { color: #60738b; font-size: 7px; line-height: 9px; white-space: nowrap; }
+.girder-sim-node-label small b { color: var(--node-color); }
+.girder-sim-node-label em { display: none; }
+.girder-sim-node-label.selected { outline: 2px solid #1765c0; }
+.girder-sim-node-label.late { background: #fff0ef !important; }
+.girder-sim-track-node { position: relative; display: block; grid-row: 2; grid-column: 1; z-index: 2; }
+.girder-sim-track-span { position: absolute; top: 50%; min-height: 0 !important; padding: 0 !important; border: 0; border-radius: 999px; background: #7994b5; box-shadow: 0 1px 3px rgba(24, 49, 83, .15); transform: translateY(-50%); }
+.girder-sim-track-span.roadbed { height: 6px; background: linear-gradient(180deg, #65a97e, #35875a); }
+.girder-sim-track-span.bridge { height: 12px; border: 2px solid #fff !important; background: repeating-linear-gradient(120deg, #2f6fcb 0 11px, #78a8ea 11px 17px); box-shadow: 0 0 0 2px #2f6fcb, 0 2px 7px rgba(47, 111, 203, .28); cursor: pointer; }
+.girder-sim-track-span.bridge.continuous { background: repeating-linear-gradient(90deg, #184f9e 0 8px, #f5b544 8px 12px); }
+.girder-sim-track-span.tunnel { height: 14px; border: 2px solid #fff !important; background: linear-gradient(180deg, #8c73bb, #624691); box-shadow: 0 0 0 2px #7255a6, inset 0 -4px 0 rgba(255,255,255,.18), 0 2px 7px rgba(114, 85, 166, .3); cursor: pointer; }
+.girder-sim-track-span.selected { outline: 2px solid #0d4f9c; outline-offset: 3px; }
+.girder-sim-track-span.connection, .girder-sim-track-span.access, .girder-sim-track-span.culvert { height: 9px; background: repeating-linear-gradient(90deg, #d17419 0 9px, #f2bd75 9px 14px); }
+.girder-sim-track-marker { --node-color: #718096; position: absolute; top: 50%; display: grid; z-index: 2; place-items: center; width: 20px; height: 20px; border: 2px solid #fff; border-radius: 50%; background: var(--node-color); color: #fff; box-shadow: 0 0 0 2px var(--node-color), 0 1px 4px rgba(24, 49, 83, .18); transform: translate(-50%, -50%); }
+.girder-sim-track-marker svg { width: 11px; height: 11px; }
+.girder-sim-yard-markers { position: relative; grid-row: 3; min-height: 42px; }
+.girder-sim-yard-marker { --node-color: #b14f77; position: absolute; display: inline-flex; z-index: 3; gap: 3px; align-items: center; max-width: 92px; padding: 2px 4px; border: 1px solid color-mix(in srgb, var(--node-color) 40%, white); border-radius: 6px; background: #fff7fb; color: var(--node-color); box-shadow: 0 1px 4px rgba(177, 79, 119, .15); font-size: 8px; white-space: nowrap; transform: translateX(-50%); }
+.girder-sim-yard-marker::before { content: ""; position: absolute; left: 50%; bottom: 100%; height: 9px; border-left: 2px dashed var(--node-color); }
+.girder-sim-yard-marker > span { display: grid; min-width: 0; font-weight: 650; }
+.girder-sim-yard-marker small { overflow: hidden; color: #8b5a70; font-size: 9px; font-weight: 400; text-overflow: ellipsis; }
 .girder-sim-connection { justify-content: flex-end; margin-top: 10px; }
 .girder-sim-grid { display: grid; gap: 10px; }
 .girder-sim-grid.four { grid-template-columns: repeat(4, minmax(150px, 1fr)); }
 .girder-sim-grid.six { grid-template-columns: repeat(6, minmax(130px, 1fr)); }
 .girder-sim-yard, .girder-sim-route { display: grid; gap: 11px; margin-top: 12px; padding: 12px; border: 1px solid #e0e7f0; border-radius: 8px; background: #fbfdff; }
 .girder-sim-capacity-heading, .girder-sim-route-title { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-.girder-sim-capacity-row { display: grid; grid-template-columns: 1.1fr repeat(3, .8fr) auto; gap: 8px; }
+.girder-sim-capacity-row { display: grid; grid-template-columns: 1.1fr repeat(3, .8fr) auto; gap: 8px; align-items: end; }
 .girder-sim-target-picker { display: flex; gap: 8px 16px; flex-wrap: wrap; }
 .girder-sim-target-picker label { display: flex; align-items: center; gap: 5px; }
 .girder-sim-target-picker label.assigned { color: #98a2b3; }

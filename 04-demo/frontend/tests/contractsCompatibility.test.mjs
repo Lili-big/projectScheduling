@@ -11,6 +11,10 @@ const resourceScopeOpenApi = readFileSync(
   resolve(root, "..", "..", "03-requirements/specs/048-workpoint-first-resource-allocation/contracts/workpoint-resource-allocation.openapi.yaml"),
   "utf8",
 );
+const aiResourceInitializationOpenApi = readFileSync(
+  resolve(root, "..", "..", "03-requirements/specs/059-ai-batch-resource-initialization/contracts/ai-workpoint-resource-initialization.openapi.yaml"),
+  "utf8",
+);
 
 function names(path, seen = new Set()) {
   if (seen.has(path)) return [];
@@ -27,7 +31,17 @@ function names(path, seen = new Set()) {
 }
 
 test("legacy scheduler types re-export all frozen contract names", () => {
-  const resourceScopeAdditions = ["ResourcePoolQuantityResult", "ResourceScopeMode", "ScopedResourceQuantityUpdate", "WorkpointResourceOverride"];
+  const resourceScopeAdditions = [
+    "AiResourceQuantityRecommendation",
+    "AiWorkpointResourceInitializationRequest",
+    "AiWorkpointResourceInitializationResponse",
+    "AiWorkpointResourceInitializationSummary",
+    "AiWorkpointResourceRecommendation",
+    "ResourcePoolQuantityResult",
+    "ResourceScopeMode",
+    "ScopedResourceQuantityUpdate",
+    "WorkpointResourceOverride",
+  ];
   assert.deepEqual(
     names(resolve(root, "src/types/scheduler.ts")),
     [...new Set([...fixture.public_contracts.scheduler_type_exports, ...resourceScopeAdditions])].sort(),
@@ -69,4 +83,29 @@ test("resource-scope types align with the incremental contract and keep legacy i
   assert.match(schedulerContract, /resource_updates:\s*Record<string, number>/);
   assert.match(schedulerContract, /scoped_resource_updates\?:\s*ScopedResourceQuantityUpdate\[\]/);
   assert.doesNotMatch(schedulerContract, /\bmin_quantity\b/);
+});
+
+test("AI resource comparison requires a target workpoint while old plans stay readable", () => {
+  assert.match(
+    schedulerContract,
+    /export type ResourceAssistantInitialRequest = \{[\s\S]*?target_workpoint_id:\s*string;/,
+  );
+  assert.match(
+    schedulerContract,
+    /export type ResourceAssistantPlan = \{[\s\S]*?target_workpoint_id\?:\s*string \| null;/,
+  );
+  assert.match(
+    schedulerContract,
+    /export type ResourceAssistantPlan = \{[\s\S]*?target_workpoint_name\?:\s*string \| null;/,
+  );
+});
+
+test("AI workpoint resource initialization types match the 059 scenario-only contract", () => {
+  assert.match(aiResourceInitializationOpenApi, /initialize-workpoint-resources:/);
+  assert.match(aiResourceInitializationOpenApi, /AiWorkpointResourceInitializationRequest:[\s\S]*?required:\s*\[scenario\]/);
+  assert.match(schedulerContract, /export type AiWorkpointResourceInitializationRequest = \{\s*scenario:\s*ScenarioInput;\s*\}/);
+  assert.match(schedulerContract, /export type AiWorkpointResourceInitializationResponse = \{[\s\S]*?resource_pools_to_add:\s*ResourcePool\[\]/);
+  assert.match(schedulerContract, /export type AiWorkpointResourceInitializationSummary = \{[\s\S]*?added_resource_count:\s*number/);
+  const requestType = schedulerContract.match(/export type AiWorkpointResourceInitializationRequest = \{[\s\S]*?\n\};/)?.[0] ?? "";
+  assert.doesNotMatch(requestType, /api.?key|endpoint|authorization/i);
 });

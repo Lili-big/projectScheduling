@@ -21,6 +21,15 @@ def test_assistant_contracts_keep_identity_and_status_schema() -> None:
     assert "optimization_stages" in schema["properties"]
 
 
+def test_resource_assistant_workpoint_scope_contract_is_required_for_new_requests_and_optional_for_history() -> None:
+    request_schema = assistants.ResourceAssistantInitialRequest.model_json_schema()
+    plan_schema = assistants.ResourceAssistantPlan.model_json_schema()
+
+    assert "target_workpoint_id" in request_schema["required"]
+    assert {"target_workpoint_id", "target_workpoint_name"} <= plan_schema["properties"].keys()
+    assert "target_workpoint_id" not in plan_schema.get("required", [])
+
+
 def test_resource_assistant_update_plan_keeps_legacy_and_scoped_updates() -> None:
     legacy_request = assistants.ResourceAssistantUpdatePlanRequest(
         plan_id="plan-legacy",
@@ -87,3 +96,72 @@ def test_resource_assistant_plan_result_adds_pool_scoped_quantities_without_remo
     schema = assistants.ResourceAssistantPlanResult.model_json_schema()
     assert {"input_resource_quantities", "resource_pool_quantities"} <= schema["properties"].keys()
     assert assistants.ResourcePoolQuantityResult is legacy.ResourcePoolQuantityResult
+
+
+def test_ai_workpoint_resource_initialization_contract_is_scenario_only_and_exports_summary() -> None:
+    request_schema = assistants.AiWorkpointResourceInitializationRequest.model_json_schema()
+    response_schema = assistants.AiWorkpointResourceInitializationResponse.model_json_schema()
+
+    assert request_schema["required"] == ["scenario"]
+    assert set(request_schema["properties"]) == {"scenario"}
+    assert {
+        "project_data_version_id",
+        "input_fingerprint",
+        "resource_pools_to_add",
+        "summary",
+        "llm_config_status",
+        "diagnostics",
+    } == set(response_schema["properties"])
+    assert assistants.AiWorkpointResourceInitializationRequest is legacy.AiWorkpointResourceInitializationRequest
+    assert assistants.AiWorkpointResourceInitializationResponse is legacy.AiWorkpointResourceInitializationResponse
+
+
+def test_ai_workpoint_resource_recommendation_requires_positive_consistent_quantities() -> None:
+    recommendation = assistants.AiWorkpointResourceRecommendation.model_validate(
+        {
+            "workpoint_id": "WP-A",
+            "resources": [
+                {
+                    "resource_type": "rotary_drill",
+                    "quantity": 2,
+                    "max_quantity": 3,
+                    "reason": "two active pile fronts",
+                }
+            ],
+        }
+    )
+
+    assert recommendation.resources[0].quantity == 2
+    with pytest.raises(ValueError):
+        assistants.AiResourceQuantityRecommendation.model_validate(
+            {"resource_type": "rotary_drill", "quantity": 0, "max_quantity": 1, "reason": ""}
+        )
+    with pytest.raises(ValueError, match="max_quantity"):
+        assistants.AiResourceQuantityRecommendation.model_validate(
+            {"resource_type": "rotary_drill", "quantity": 2, "max_quantity": 1, "reason": ""}
+        )
+    with pytest.raises(ValueError, match="duplicate resource_type"):
+        assistants.AiWorkpointResourceRecommendation.model_validate(
+            {
+                "workpoint_id": "WP-A",
+                "resources": [
+                    {"resource_type": "rotary_drill", "quantity": 1, "max_quantity": 1, "reason": ""},
+                    {"resource_type": "rotary_drill", "quantity": 1, "max_quantity": 1, "reason": ""},
+                ],
+            }
+        )
+
+
+def test_ai_workpoint_resource_initialization_openapi_keeps_secret_fields_out() -> None:
+    contract = (
+        BACKEND_ROOT.parents[1]
+        / "03-requirements/specs/059-ai-batch-resource-initialization/contracts/ai-workpoint-resource-initialization.openapi.yaml"
+    ).read_text(encoding="utf-8")
+
+    assert "/api/ai-resource-assistant/initialize-workpoint-resources:" in contract
+    request_section = contract.split("AiWorkpointResourceInitializationRequest:", 1)[1].split(
+        "AiWorkpointResourceInitializationResponse:", 1
+    )[0]
+    assert "required: [scenario]" in request_section
+    assert "api_key" not in request_section.lower()
+    assert "authorization" not in request_section.lower()

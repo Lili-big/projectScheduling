@@ -20,11 +20,15 @@ export function YardPlanEditor({
     const lineId = `line-${suffix}`;
     const today = new Date().toISOString().slice(0, 10);
     const firstNode = graph?.nodes.find((node) => node.alignment_code != null && node.start_mileage_m != null);
+    const firstMileage = firstNode?.start_mileage_m != null && firstNode.end_mileage_m != null
+      ? (firstNode.start_mileage_m + firstNode.end_mileage_m) / 2
+      : firstNode?.start_mileage_m ?? 0;
     onYardsChange([...yards, {
       beam_yard_id: yardId,
       name: `${yards.length + 1}号梁场`,
+      deployment_node_id: firstNode?.node_id ?? null,
       alignment_code: firstNode?.alignment_code ?? "",
-      mileage_m: firstNode?.start_mileage_m ?? 0,
+      mileage_m: firstMileage,
       production_start_date: today,
       capacities: [],
       enabled: true,
@@ -64,6 +68,9 @@ export function YardPlanEditor({
       {yards.map((yard, index) => {
         const line = lines.find((item) => item.beam_yard_id === yard.beam_yard_id);
         const selectedNodeId = yardNodeId(yard, graph?.nodes ?? []);
+        const selectedNode = graph?.nodes.find((node) => node.node_id === selectedNodeId);
+        const deploymentMissing = Boolean(yard.deployment_node_id)
+          && !(graph?.nodes ?? []).some((node) => node.node_id === yard.deployment_node_id);
         return (
           <article className="girder-sim-yard" key={yard.beam_yard_id} data-entity-id={yard.beam_yard_id} tabIndex={-1}>
             <div className="girder-sim-grid four">
@@ -71,12 +78,22 @@ export function YardPlanEditor({
               <label>部署位置<select value={selectedNodeId} onChange={(event) => {
                 const node = graph?.nodes.find((item) => item.node_id === event.target.value);
                 if (node?.alignment_code != null && node.start_mileage_m != null) {
-                  updateYard(index, { alignment_code: node.alignment_code, mileage_m: node.start_mileage_m });
+                  const centerMileage = node.end_mileage_m == null ? node.start_mileage_m : (node.start_mileage_m + node.end_mileage_m) / 2;
+                  updateYard(index, { deployment_node_id: node.node_id, alignment_code: node.alignment_code, mileage_m: centerMileage });
                 }
               }}>
                 {selectedNodeId === "" && <option value="">请选择可定位节点</option>}
-                {(graph?.nodes ?? []).filter((node) => node.alignment_code != null && node.start_mileage_m != null).map((node) => <option value={node.node_id} key={node.node_id}>{node.name}｜{node.alignment_code} K{((node.start_mileage_m ?? 0) / 1000).toFixed(3)}</option>)}
+                {deploymentMissing && <option value={yard.deployment_node_id ?? ""}>原部署节点已失效，请重新选择</option>}
+                {(graph?.nodes ?? []).filter((node) => node.alignment_code != null && node.start_mileage_m != null).map((node) => <option value={node.node_id} key={node.node_id}>{node.side === "left" ? "左幅" : "右幅"}｜{node.name}｜{node.alignment_code} {formatMileage(node.start_mileage_m!)}</option>)}
               </select></label>
+              <label>梁场中心里程（m）<input
+                type="number"
+                step="0.001"
+                min={selectedNode?.start_mileage_m ?? undefined}
+                max={selectedNode?.end_mileage_m ?? undefined}
+                value={yard.mileage_m}
+                onChange={(event) => updateYard(index, { mileage_m: Number(event.target.value) })}
+              /></label>
               <label>投产日期<input type="date" value={yard.production_start_date} onChange={(event) => updateYard(index, { production_start_date: event.target.value })} /></label>
               <label>架梁可用日期<input type="date" value={line?.available_date ?? ""} onChange={(event) => updateLine(yard.beam_yard_id, { available_date: event.target.value })} /></label>
               <label>架梁能力（片/天）<input type="number" min="1" value={line?.daily_erection_capacity_pieces ?? 0} onChange={(event) => updateLine(yard.beam_yard_id, { daily_erection_capacity_pieces: Number(event.target.value) })} /></label>
@@ -87,10 +104,10 @@ export function YardPlanEditor({
             <div className="girder-sim-capacity-heading"><strong>分梁型产能与期初库存</strong><button type="button" onClick={() => updateYard(index, { capacities: [...yard.capacities, emptyCapacity()] })}>增加梁型</button></div>
             {yard.capacities.map((capacity, capacityIndex) => (
               <div className="girder-sim-capacity-row" key={`${yard.beam_yard_id}-${capacityIndex}`}>
-                <input aria-label="梁型" placeholder="梁型，如 T32" value={capacity.beam_type_id} onChange={(event) => updateCapacity(yard, index, capacityIndex, { beam_type_id: event.target.value }, updateYard)} />
-                <input aria-label="制梁能力" type="number" min="0" value={capacity.daily_capacity_pieces} onChange={(event) => updateCapacity(yard, index, capacityIndex, { daily_capacity_pieces: Number(event.target.value) }, updateYard)} />
-                <input aria-label="期初库存" type="number" min="0" value={capacity.initial_inventory_pieces} onChange={(event) => updateCapacity(yard, index, capacityIndex, { initial_inventory_pieces: Number(event.target.value) }, updateYard)} />
-                <input aria-label="最大库存" type="number" min="0" placeholder="最大库存（可空）" value={capacity.max_inventory_pieces ?? ""} onChange={(event) => updateCapacity(yard, index, capacityIndex, { max_inventory_pieces: event.target.value === "" ? null : Number(event.target.value) }, updateYard)} />
+                <label>梁型<input aria-label="梁型" placeholder="如 T32" value={capacity.beam_type_id} onChange={(event) => updateCapacity(yard, index, capacityIndex, { beam_type_id: event.target.value }, updateYard)} /></label>
+                <label>制梁能力（片/天）<input aria-label="制梁能力" type="number" min="0" value={capacity.daily_capacity_pieces} onChange={(event) => updateCapacity(yard, index, capacityIndex, { daily_capacity_pieces: Number(event.target.value) }, updateYard)} /></label>
+                <label>期初库存（片）<input aria-label="期初库存" type="number" min="0" value={capacity.initial_inventory_pieces} onChange={(event) => updateCapacity(yard, index, capacityIndex, { initial_inventory_pieces: Number(event.target.value) }, updateYard)} /></label>
+                <label>最大库存（片，可空）<input aria-label="最大库存" type="number" min="0" placeholder="不限制" value={capacity.max_inventory_pieces ?? ""} onChange={(event) => updateCapacity(yard, index, capacityIndex, { max_inventory_pieces: event.target.value === "" ? null : Number(event.target.value) }, updateYard)} /></label>
                 <button type="button" onClick={() => updateYard(index, { capacities: yard.capacities.filter((_, itemIndex) => itemIndex !== capacityIndex) })}>删除梁型</button>
               </div>
             ))}
@@ -100,6 +117,11 @@ export function YardPlanEditor({
       })}
     </section>
   );
+}
+
+function formatMileage(mileage: number): string {
+  const kilometers = Math.floor(mileage / 1000);
+  return `${kilometers}+${(mileage - kilometers * 1000).toFixed(0).padStart(3, "0")}`;
 }
 
 function emptyCapacity(): BeamTypeCapacity {

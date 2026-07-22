@@ -10,7 +10,7 @@ sys.path.insert(0, str(BACKEND_ROOT))
 from app.contracts.project_master import ConfirmProjectMasterVersionRequest  # noqa: E402
 from app.project_master.repository import ProjectMasterRepository  # noqa: E402
 from app.project_master.service import ProjectMasterService  # noqa: E402
-from project_master_fixture_helpers import large_project_master_workbook  # noqa: E402
+from project_master_fixture_helpers import large_project_master_workbook, valid_project_master_workbook  # noqa: E402
 
 
 def test_twenty_confirmed_workpoints_trace_to_batch_sheet_and_row(tmp_path: Path) -> None:
@@ -38,3 +38,20 @@ def test_twenty_confirmed_workpoints_trace_to_batch_sheet_and_row(tmp_path: Path
             assert structure.source.batch_id == batch.batch_id
             assert structure.source.sheet_name == "结构物信息"
             assert structure.source.row_no >= 3
+
+
+def test_route_placement_traces_to_relationship_sheet_and_import_batch(tmp_path: Path) -> None:
+    service = ProjectMasterService(ProjectMasterRepository(tmp_path / "master.db"))
+    batch = service.import_workbook(
+        project_id="route-traceability",
+        file_name="route.xlsx",
+        content=valid_project_master_workbook(),
+        created_by="tester",
+        expected_current_version_id=None,
+    )
+    snapshot = service.repository.load_snapshot(batch.created_version_id or "")
+
+    assert snapshot.route_placements
+    assert all(item.source is not None for item in snapshot.route_placements)
+    assert all(item.source.batch_id == batch.batch_id for item in snapshot.route_placements if item.source)
+    assert all(item.source.sheet_name == "线路关系" for item in snapshot.route_placements if item.source)

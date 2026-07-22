@@ -61,6 +61,15 @@ const pools = [
   },
 ];
 
+test("solve scope label distinguishes full project and single-workpoint trial", async () => {
+  const { solveScopeLabel } = await loadPresenter();
+  assert.equal(solveScopeLabel({ mode: "ALL", workpoint_id: null, workpoint_name: null }), "全部工点");
+  assert.equal(
+    solveScopeLabel({ mode: "WORKPOINT", workpoint_id: "WP-A", workpoint_name: "A 工点" }),
+    "单工点试算：A 工点（WP-A）",
+  );
+});
+
 function generated() {
   return {
     source_summary: {},

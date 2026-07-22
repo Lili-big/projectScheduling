@@ -28,7 +28,7 @@ def test_legacy_python_modules_keep_their_public_import_surface() -> None:
 def test_models_keep_their_pydantic_json_schemas() -> None:
     expected = _baseline()["models"]
     current = _models_manifest()
-    assert len(current) == expected["count"] == 156
+    assert len(current) == expected["count"] == 157
     # 045 refreshes the fixture after the lifecycle move, so all currently
     # public schemas (including the approved 043-compatible and 047
     # resource-scope additions) are

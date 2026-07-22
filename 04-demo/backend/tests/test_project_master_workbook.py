@@ -23,11 +23,12 @@ from project_master_fixture_helpers import (  # noqa: E402
 )
 
 
-def test_template_has_fixed_four_sheets_and_two_header_rows() -> None:
+def test_template_has_route_relationship_sheet_and_two_header_rows() -> None:
     workbook = load_workbook(BytesIO(create_template_bytes()), data_only=True)
-    assert workbook.sheetnames == ["填写说明", "工点信息", "结构物信息", "构件参数"]
+    assert workbook.sheetnames == ["填写说明", "工点信息", "结构物信息", "构件参数", "线路关系"]
     assert workbook["工点信息"].cell(1, 1).value == "workpoint_id"
     assert workbook["工点信息"].cell(2, 1).value == "工点ID"
+    assert workbook["线路关系"].cell(1, 1).value == "placement_id"
 
 
 def test_parse_valid_workbook_keeps_one_bridge_and_left_right_structures() -> None:
@@ -38,6 +39,11 @@ def test_parse_valid_workbook_keeps_one_bridge_and_left_right_structures() -> No
     assert len(snapshot.workpoints) == 3
     bridge = next(item for item in snapshot.workpoints if item.workpoint_type == "bridge")
     assert {item.side for item in bridge.structures} >= {"left", "right", "shared"}
+    assert {(item.side, item.mileage_prefix) for item in snapshot.route_placements} >= {
+        ("left", "ZK"),
+        ("right", "K"),
+        ("left", "BK"),
+    }
     assert len(fingerprint) == 64
 
 
@@ -48,6 +54,22 @@ def test_invalid_parent_and_case_insensitive_duplicate_are_blocking() -> None:
 
     assert "PARENT_WORKPOINT_NOT_FOUND" in codes
     assert "STABLE_ID_DUPLICATE" in codes
+    assert "ROUTE_PLACEMENT_DUPLICATE" in codes
+    assert "ROUTE_MILEAGE_RANGE_INVALID" in codes
+    assert "PARENT_WORKPOINT_NOT_FOUND" in codes
+
+
+def test_legacy_1_0_workbook_without_route_relationship_sheet_remains_readable() -> None:
+    workbook = load_workbook(BytesIO(valid_project_master_workbook()))
+    workbook["填写说明"].cell(1, 2).value = "1.0"
+    del workbook["线路关系"]
+    output = BytesIO()
+    workbook.save(output)
+
+    snapshot, issues, _ = parse_workbook(output.getvalue())
+
+    assert not [item for item in issues if item.severity == "error"]
+    assert snapshot.route_placements == []
 
 
 def test_exported_snapshot_can_be_imported_without_business_loss() -> None:
@@ -57,6 +79,7 @@ def test_exported_snapshot_can_be_imported_without_business_loss() -> None:
 
     assert not [item for item in issues if item.severity == "error"]
     assert restored_fingerprint == original_fingerprint
+    assert restored.route_placements == original.route_placements
 
 
 def test_fast_reader_keeps_side_and_non_negative_quantity_validation() -> None:

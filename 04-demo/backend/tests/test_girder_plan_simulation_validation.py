@@ -20,8 +20,9 @@ from app.contracts.girder_plan_simulation import (
     ManualRoutePlan,
 )
 from app.girder_plan_simulation.repository import GirderPlanRepository
-from app.girder_plan_simulation.validation import prepare_scenario
-from girder_plan_simulation_fixture_helpers import line_graph, scenario_request
+from app.girder_plan_simulation.validation import _resolve_yard_node, prepare_scenario
+from girder_plan_simulation_fixture_helpers import continuous_route_snapshot, line_graph, scenario_request
+from app.girder_plan_simulation.topology import build_line_graph
 
 
 def test_ready_scenario_expands_intermediate_nodes_without_reordering(tmp_path) -> None:
@@ -30,10 +31,40 @@ def test_ready_scenario_expands_intermediate_nodes_without_reordering(tmp_path) 
     prepared = prepare_scenario(scenario, graph)
     assert prepared.readiness.status == "ready"
     assert prepared.readiness.expanded_routes["ROUTE-L"] == [
-        "R0:unknown",
+        "R0:left",
         "B1:left",
-        "T1:unknown",
+        "T1:left",
         "B2:left",
+    ]
+
+
+def test_segmented_bridge_route_targets_expand_continuous_structure_between_approaches(tmp_path) -> None:
+    graph = build_line_graph(
+        project_id="P1",
+        project_master_version_id="PMV1",
+        snapshot=continuous_route_snapshot(),
+    )
+    request = scenario_request(graph)
+    request.route_plans[0].target_node_ids = [
+        "B1:left:approach_small",
+        "B1:left:approach_large",
+        "B2:left",
+    ]
+    request.route_plans[1].target_node_ids = [
+        "B1:right:approach_small",
+        "B1:right:approach_large",
+        "B2:right",
+    ]
+    scenario = GirderPlanRepository(tmp_path / "segmented.json").create_scenario_version(request)
+
+    prepared = prepare_scenario(scenario, graph)
+
+    assert prepared.readiness.status == "ready"
+    assert prepared.readiness.expanded_routes["ROUTE-L"][:4] == [
+        "R0:left",
+        "B1:left:approach_small",
+        "B1:left:continuous",
+        "B1:left:approach_large",
     ]
 
 
@@ -70,23 +101,54 @@ def test_each_enabled_yard_requires_exactly_one_line_route_and_unique_beam_types
     assert {"YARD_LINE_COUNT_INVALID", "YARD_ROUTE_COUNT_INVALID", "BEAM_TYPE_CAPACITY_DUPLICATED"} <= codes
 
 
+def test_yard_deployment_prefers_stable_node_and_legacy_location_must_be_unique() -> None:
+    graph = line_graph()
+    nodes = {item.node_id: item for item in graph.nodes}
+    exact = scenario_request(graph).beam_yards[0]
+    assert _resolve_yard_node(exact, nodes) == ("R0:left", "exact")
+
+    legacy = exact.model_copy(update={"deployment_node_id": None, "alignment_code": "ZK", "mileage_m": 0})
+    nodes["R0:right"].alignment_code = "ZK"
+    assert _resolve_yard_node(legacy, nodes) == (None, "ambiguous")
+    left_only = {node_id: node for node_id, node in nodes.items() if node.side == "left"}
+    assert _resolve_yard_node(legacy, left_only) == ("R0:left", "legacy_unique")
+
+
+def test_ambiguous_legacy_yard_deployment_returns_object_level_blocking_diagnostic(tmp_path) -> None:
+    graph = line_graph()
+    next(item for item in graph.nodes if item.node_id == "R0:right").alignment_code = "ZK"
+    request = scenario_request(graph)
+    request.beam_yards[0].deployment_node_id = None
+    request.beam_yards[0].alignment_code = "ZK"
+    scenario = GirderPlanRepository(tmp_path / "ambiguous-yard.json").create_scenario_version(request)
+
+    readiness = prepare_scenario(scenario, graph).readiness
+    diagnostic = next(item for item in readiness.diagnostics if item.code == "YARD_DEPLOYMENT_AMBIGUOUS")
+    assert readiness.status == "blocking"
+    assert diagnostic.object_id == "Y-L"
+    assert diagnostic.severity == "blocking"
+    assert diagnostic.suggestion
+
+
 def test_cross_route_dependency_cycle_returns_explicit_chain(tmp_path) -> None:
     target_a = LineGraphNode(
         node_id="A:left", project_master_workpoint_id="A", name="A桥左幅", node_type="bridge", side="left",
-        alignment_code="A", start_mileage_m=10, end_mileage_m=20, requires_erection=True,
+        alignment_code="A", start_mileage_m=10, end_mileage_m=20, spatial_group_id="SG-A", display_order=1,
+        placement_source="explicit", requires_erection=True,
         beam_demands=[BeamDemand(beam_type_id="T", beam_type_name="T", span_count=1, beam_count=1, span_refs=["A-SPAN-1"])],
     )
     target_b = LineGraphNode(
         node_id="B:left", project_master_workpoint_id="B", name="B桥左幅", node_type="bridge", side="left",
-        alignment_code="B", start_mileage_m=10, end_mileage_m=20, requires_erection=True,
+        alignment_code="B", start_mileage_m=10, end_mileage_m=20, spatial_group_id="SG-B", display_order=1,
+        placement_source="explicit", requires_erection=True,
         beam_demands=[BeamDemand(beam_type_id="T", beam_type_name="T", span_count=1, beam_count=1, span_refs=["B-SPAN-1"])],
     )
     graph = LineGraphSnapshot(
         line_graph_id="LG-CYCLE", project_id="P1", project_master_version_id="PMV1", input_fingerprint="sha256:cycle",
         status="ready",
         nodes=[
-            LineGraphNode(node_id="DA:unknown", name="A梁场", node_type="roadbed", alignment_code="A", start_mileage_m=0, end_mileage_m=1),
-            LineGraphNode(node_id="DB:unknown", name="B梁场", node_type="roadbed", alignment_code="B", start_mileage_m=0, end_mileage_m=1),
+            LineGraphNode(node_id="DA:unknown", name="A梁场", node_type="roadbed", alignment_code="A", start_mileage_m=0, end_mileage_m=1, spatial_group_id="SG-DA", display_order=0, placement_source="explicit"),
+            LineGraphNode(node_id="DB:unknown", name="B梁场", node_type="roadbed", alignment_code="B", start_mileage_m=0, end_mileage_m=1, spatial_group_id="SG-DB", display_order=0, placement_source="explicit"),
             target_a, target_b,
         ],
         edges=[
@@ -98,8 +160,8 @@ def test_cross_route_dependency_cycle_returns_explicit_chain(tmp_path) -> None:
     request = CreateScenarioVersionRequest(
         project_id="P1", project_master_version_id="PMV1", line_graph_id=graph.line_graph_id,
         beam_yards=[
-            BeamYardPlan(beam_yard_id="YA", name="YA", alignment_code="A", mileage_m=0, production_start_date=date(2026, 1, 1), capacities=[BeamTypeCapacity(beam_type_id="T", daily_capacity_pieces=1, initial_inventory_pieces=1)]),
-            BeamYardPlan(beam_yard_id="YB", name="YB", alignment_code="B", mileage_m=0, production_start_date=date(2026, 1, 1), capacities=[BeamTypeCapacity(beam_type_id="T", daily_capacity_pieces=1, initial_inventory_pieces=1)]),
+            BeamYardPlan(beam_yard_id="YA", name="YA", deployment_node_id="DA:unknown", alignment_code="A", mileage_m=0, production_start_date=date(2026, 1, 1), capacities=[BeamTypeCapacity(beam_type_id="T", daily_capacity_pieces=1, initial_inventory_pieces=1)]),
+            BeamYardPlan(beam_yard_id="YB", name="YB", deployment_node_id="DB:unknown", alignment_code="B", mileage_m=0, production_start_date=date(2026, 1, 1), capacities=[BeamTypeCapacity(beam_type_id="T", daily_capacity_pieces=1, initial_inventory_pieces=1)]),
         ],
         erection_lines=[
             ErectionLinePlan(erection_line_id="LA", beam_yard_id="YA", available_date=date(2026, 1, 1), daily_erection_capacity_pieces=1),

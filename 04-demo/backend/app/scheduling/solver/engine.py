@@ -8,10 +8,9 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any, get_args
+from typing import Any
 
 from ...contracts import (
-    ComponentType,
     DEFAULT_OBJECTIVE_TERM_WEIGHTS,
     MilestoneConstraint,
     OBJECTIVE_METRIC_DEFINITIONS,
@@ -28,6 +27,7 @@ from ...contracts import (
     objective_terms_used,
 )
 from ..domain.resource_scope import RESOURCE_SCOPE_RULE_VERSION
+from ..domain.milestone_scope import task_ids_for_milestone as _task_ids_for_milestone
 
 CONTINUITY_PRIMARY_WEIGHT = 1_000_000
 CONTROL_NODE_LATE_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["control_node_late"]
@@ -8424,46 +8424,6 @@ def _build_horizon(schedule_input: ScheduleInput) -> int:
     total_duration = sum(task.duration_days for task in schedule_input.tasks)
     total_lag = sum(link.lag_days for link in schedule_input.precedence_links)
     return max(1, total_duration + total_lag + 30)
-
-
-def _is_lower_or_cast_in_place_beam_task(task: Task) -> bool:
-    return task.structure_type in {"pier", "abutment"} or task.component_type in {
-        "cast_in_place_continuous_beam",
-        "cast_in_place_box_beam",
-    }
-
-
-def _task_ids_for_milestone(milestone: MilestoneConstraint, tasks: list[Task]) -> list[str]:
-    related_ids = {
-        task.id
-        for task in tasks
-        if task.structure_id in set(milestone.related_structure_ids)
-    }
-    if milestone.scope_type == "project":
-        return sorted(related_ids | {task.id for task in tasks if _is_lower_or_cast_in_place_beam_task(task)})
-    if milestone.scope_type == "bridge":
-        return sorted(related_ids | {
-            task.id
-            for task in tasks
-            if task.bridge_id == milestone.scope_id and _is_lower_or_cast_in_place_beam_task(task)
-        })
-    if milestone.scope_type == "work_section":
-        return sorted(related_ids | {
-            task.id
-            for task in tasks
-            if task.work_section_id == milestone.scope_id and _is_lower_or_cast_in_place_beam_task(task)
-        })
-    if milestone.scope_type == "structure":
-        return sorted(related_ids | {task.id for task in tasks if task.structure_id == milestone.scope_id})
-    if milestone.scope_type == "component":
-        if milestone.scope_id in get_args(ComponentType):
-            return sorted(related_ids | {task.id for task in tasks if task.component_type == milestone.scope_id})
-        return sorted(related_ids | {
-            task.id
-            for task in tasks
-            if task.component_id == milestone.scope_id or task.id == milestone.scope_id
-        })
-    return sorted(related_ids)
 
 
 def _matched_hard_milestone_count(schedule_input: ScheduleInput) -> int:

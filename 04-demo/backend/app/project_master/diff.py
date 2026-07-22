@@ -32,6 +32,10 @@ def diff_snapshots(
 
 def _flatten(snapshot: ProjectMasterSnapshot) -> dict[tuple[str, str], dict[str, Any]]:
     result: dict[tuple[str, str], dict[str, Any]] = {}
+    for placement in snapshot.route_placements:
+        result[("route_placement", placement.placement_id)] = placement.model_dump(
+            exclude={"source"}, mode="json"
+        )
     for workpoint in snapshot.workpoints:
         result[("workpoint", workpoint.workpoint_id)] = workpoint.model_dump(
             exclude={"source", "structures"}, mode="json"

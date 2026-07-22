@@ -67,6 +67,10 @@ def valid_project_master_workbook(*, workpoint_name: str = "一号特大桥", ze
     components.append(["CP-R-SP1-BEAM", "ST-R-SP1", "右幅第1跨预制梁", "precast_beam", 10, "片", "是", 1, None])
     components.append(["CP-L-CIP2", "ST-L-CIP2", "左幅第2联现浇箱梁", "cast_in_place_box_beam", 1, "联", "是", 1, None])
     components.append(["CP-R-CB2", "ST-R-CB2", "右幅第2联连续梁节段", "cast_in_place_continuous_beam", 12, "段", "是", 1, None])
+    placements = workbook["线路关系"]
+    placements.append(["RP-B01-L", "WP-B01", "left", "ZK", 1000, 1800, "SG-001", 1])
+    placements.append(["RP-B01-R", "WP-B01", "right", "K", 1010, 1810, "SG-001", 1])
+    placements.append(["RP-R01-L", "WP-R01", "left", "BK", 0, 600, "SG-002", 2])
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
@@ -78,6 +82,9 @@ def invalid_project_master_workbook() -> bytes:
     structures.append(["ST-ORPHAN", "WP-MISSING", "孤立结构", "substructure", "bridge_pier", "none", "WS-X", "未知工区", None, 99])
     workpoints = workbook["工点信息"]
     workpoints.append(["wp-b01", "重复桥梁", "bridge", "Z1", 1000, 1800, 9])
+    placements = workbook["线路关系"]
+    placements.append(["RP-B01-L-DUP", "WP-B01", "left", "ZK", 1000, 900, "SG-001", 2])
+    placements.append(["RP-ORPHAN", "WP-MISSING", "right", "AK", 0, 100, "SG-X", 3])
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()

@@ -9,7 +9,7 @@ sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.bootstrap import create_app  # noqa: E402
 from app.contracts import ScenarioInput  # noqa: E402
-from app.contracts.project_master import ProjectMasterSnapshot  # noqa: E402
+from app.contracts.project_master import ProjectMasterRoutePlacement, ProjectMasterSnapshot  # noqa: E402
 from app.project_master.definitions import COMPONENT_TYPES  # noqa: E402
 from app.project_master.validation import validate_snapshot  # noqa: E402
 from project_master_fixture_helpers import abutment_projection_snapshot  # noqa: E402
@@ -35,7 +35,17 @@ def test_openapi_exposes_project_master_contract_and_keeps_shared_field_names() 
     assert "project_data_version_id" in scenario["properties"]
     assert "project_master_version_id" not in scenario["properties"]
     assert "project_master_fingerprint" not in scenario["properties"]
-    assert ProjectMasterSnapshot.model_json_schema()["title"] == "ProjectMasterSnapshot"
+    snapshot_schema = ProjectMasterSnapshot.model_json_schema()
+    assert snapshot_schema["title"] == "ProjectMasterSnapshot"
+    assert "route_placements" in snapshot_schema["properties"]
+    assert set(ProjectMasterRoutePlacement.model_json_schema()["properties"]) >= {
+        "placement_id",
+        "workpoint_id",
+        "side",
+        "mileage_prefix",
+        "spatial_group_id",
+        "display_order",
+    }
 
 
 def test_legacy_import_endpoints_are_visible_but_deprecated() -> None:

@@ -40,6 +40,7 @@ LogicSeverity = Literal["error", "warning"]
 PileMethod = Literal["rotary_drill", "impact_drill", "manual_pile"]
 ResourceMode = Literal["LIMITED", "UNLIMITED"]
 ResourceScopeMode = Literal["PROJECT_SHARED", "WORKPOINT_EXCLUSIVE"]
+SolveScopeMode = Literal["ALL", "WORKPOINT"]
 ResourceCostType = Literal["none", "monthly_rental", "one_time_purchase"]
 MilestoneLevel = Literal["contract", "control", "internal"]
 MilestoneMode = Literal["hard", "soft"]
@@ -1076,10 +1077,29 @@ class ScheduleResult(BaseModel):
     objective_breakdown: dict[str, Any] = {}
 
 
+class SolveScope(BaseModel):
+    mode: SolveScopeMode = "ALL"
+    workpoint_id: str | None = None
+    workpoint_name: str | None = None
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> "SolveScope":
+        if self.mode == "ALL":
+            if self.workpoint_id is not None or self.workpoint_name is not None:
+                raise ValueError("ALL solve scope must not set workpoint fields")
+            return self
+        self.workpoint_id = (self.workpoint_id or "").strip()
+        self.workpoint_name = (self.workpoint_name or "").strip()
+        if not self.workpoint_id or not self.workpoint_name:
+            raise ValueError("WORKPOINT solve scope requires workpoint_id and workpoint_name")
+        return self
+
+
 class GeneratedScheduleInput(BaseModel):
     schedule_input: ScheduleInput
     validation: list[ValidationMessage] = []
     source_summary: dict[str, Any] = {}
+    solve_scope: SolveScope = Field(default_factory=SolveScope)
 
 
 class ScenarioAlternativeResult(BaseModel):
@@ -1163,6 +1183,8 @@ class ResourceAssistantProjectProfile(BaseModel):
 class ResourceAssistantPlan(BaseModel):
     scenario_id: str
     scenario_name: str
+    target_workpoint_id: str | None = None
+    target_workpoint_name: str | None = None
     profile: ResourceAssistantPlanProfile
     positioning: str
     generation_source: ResourceAssistantGenerationSource = "local_fallback"
@@ -1365,6 +1387,7 @@ class ResourceAssistantRecommendation(BaseModel):
 
 class ResourceAssistantInitialRequest(BaseModel):
     scenario: ScenarioInput
+    target_workpoint_id: str = Field(min_length=1)
     generation_mode: ResourceAssistantGenerationMode = "llm_first"
 
 
@@ -1375,6 +1398,67 @@ class ResourceAssistantInitialResponse(BaseModel):
     reference_examples: list[ResourceAssistantReferenceExample] = Field(default_factory=list)
     constraint_hints: list[str] = Field(default_factory=list)
     llm_generation_context: dict[str, Any] = Field(default_factory=dict)
+    llm_config_status: ResourceAssistantLlmConfigStatus
+    diagnostics: list[ValidationMessage] = Field(default_factory=list)
+
+
+class AiResourceQuantityRecommendation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    resource_type: str = Field(min_length=1)
+    quantity: int = Field(ge=1)
+    max_quantity: int = Field(ge=1)
+    reason: str = ""
+
+    @model_validator(mode="after")
+    def validate_quantity_limit(self) -> "AiResourceQuantityRecommendation":
+        self.resource_type = self.resource_type.strip()
+        if not self.resource_type:
+            raise ValueError("resource_type must not be blank")
+        if self.max_quantity < self.quantity:
+            raise ValueError("max_quantity must be greater than or equal to quantity")
+        return self
+
+
+class AiWorkpointResourceRecommendation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workpoint_id: str = Field(min_length=1)
+    resources: list[AiResourceQuantityRecommendation] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_recommendation_identity(self) -> "AiWorkpointResourceRecommendation":
+        self.workpoint_id = self.workpoint_id.strip()
+        if not self.workpoint_id:
+            raise ValueError("workpoint_id must not be blank")
+        resource_types = [item.resource_type for item in self.resources]
+        if len(set(resource_types)) != len(resource_types):
+            raise ValueError("duplicate resource_type in workpoint recommendation")
+        return self
+
+
+class AiWorkpointResourceInitializationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scenario: ScenarioInput
+
+
+class AiWorkpointResourceInitializationSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workpoint_count: int = Field(ge=0)
+    recommended_workpoint_count: int = Field(ge=0)
+    unchanged_workpoint_ids: list[str] = Field(default_factory=list)
+    added_resource_count: int = Field(ge=0)
+
+
+class AiWorkpointResourceInitializationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_data_version_id: str = Field(min_length=1)
+    input_fingerprint: str = Field(min_length=1)
+    resource_pools_to_add: list[ResourcePool] = Field(default_factory=list)
+    summary: AiWorkpointResourceInitializationSummary
     llm_config_status: ResourceAssistantLlmConfigStatus
     diagnostics: list[ValidationMessage] = Field(default_factory=list)
 

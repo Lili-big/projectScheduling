@@ -1,0 +1,209 @@
+openapi: 3.1.0
+info:
+  title: AI 多方案按工点推进资源契约增量
+  version: 1.0.0
+  description: >-
+    描述现有 AI 资源助手接口为单工点资源推进增加的字段和校验。
+    未列出的既有字段与端点行为保持当前实现。
+paths:
+  /api/ai-resource-assistant/initialize:
+    post:
+      summary: 为指定工点生成三套完整项目资源方案
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResourceAssistantInitialRequest'
+      responses:
+        '200':
+          description: 三套方案均带同一目标工点身份和完整资源快照
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResourceAssistantInitialResponse'
+        '422':
+          description: 工点缺失、身份无效、无合法可调本地资源或 AI 输出越权
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/ai-resource-assistant/update-plan:
+    post:
+      summary: 只更新方案目标工点的本地资源数量
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResourceAssistantUpdatePlanRequest'
+      responses:
+        '200':
+          description: 更新后的完整资源方案
+        '422':
+          description: 共享池、其他工点、未知池、停用池或越界数量更新被拒绝
+  /api/ai-resource-assistant/solve-plan:
+    post:
+      summary: 使用完整资源快照求解全项目排程
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResourceAssistantSingleSolveRequest'
+      responses:
+        '200':
+          description: 全项目任务、里程碑、指标和诊断结果
+        '422':
+          description: 目标身份缺失或非目标资源与当前场景不一致
+  /api/ai-resource-assistant/compare-results:
+    post:
+      summary: 比较同一目标工点的全项目方案结果
+      responses:
+        '200':
+          description: 全项目指标对比
+        '422':
+          description: 三方案目标工点不一致或存在无目标身份的当前方案
+  /api/ai-resource-assistant/generate-recommendation:
+    post:
+      summary: 推荐同一目标工点的全项目方案
+      responses:
+        '200':
+          description: 基于全项目指标的推荐解释
+        '422':
+          description: 三方案目标工点不一致或结果不匹配
+  /api/plan-control/baselines:
+    post:
+      summary: 将带有效目标工点身份的可行全项目方案确认为基准
+      responses:
+        '200':
+          description: 基准计划快照保留目标工点身份和完整项目结果
+        '422':
+          description: 方案缺少目标工点身份或身份不属于当前项目版本
+components:
+  schemas:
+    ScenarioInput:
+      type: object
+      description: 现有完整项目场景；本契约不改变其结构
+      additionalProperties: true
+    ResourcePool:
+      type: object
+      required: [id, type, scope_mode]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        type:
+          type: string
+          minLength: 1
+        scope_mode:
+          type: string
+          enum: [PROJECT_SHARED, WORKPOINT_EXCLUSIVE]
+        workpoint_id:
+          type: [string, 'null']
+        quantity:
+          type: [integer, 'null']
+          minimum: 0
+        max_quantity:
+          type: [integer, 'null']
+          minimum: 0
+      additionalProperties: true
+    ResourceAssistantPlan:
+      type: object
+      required: [scenario_id, profile, resource_pools]
+      properties:
+        scenario_id:
+          type: string
+        profile:
+          type: string
+          enum: [economy, balanced, crash, custom]
+        target_workpoint_id:
+          type: [string, 'null']
+          description: 新生成方案必填；null 仅用于历史兼容读取
+        target_workpoint_name:
+          type: [string, 'null']
+          description: 后端解析的显示名称，不作为身份键
+        resource_pools:
+          type: array
+          description: 完整项目资源快照；仅目标工点本地池数量可变化
+          items:
+            $ref: '#/components/schemas/ResourcePool'
+      additionalProperties: true
+    ResourceAssistantInitialRequest:
+      type: object
+      required: [scenario, target_workpoint_id]
+      properties:
+        scenario:
+          $ref: '#/components/schemas/ScenarioInput'
+        target_workpoint_id:
+          type: string
+          minLength: 1
+        generation_mode:
+          type: string
+          enum: [llm_first, local_fallback_only]
+          default: llm_first
+      additionalProperties: false
+    ResourceAssistantInitialResponse:
+      type: object
+      required: [resource_plans]
+      properties:
+        resource_plans:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/ResourceAssistantPlan'
+      additionalProperties: true
+    ScopedResourceQuantityUpdate:
+      type: object
+      required: [resource_pool_id, workpoint_id, quantity]
+      properties:
+        resource_pool_id:
+          type: string
+          minLength: 1
+        workpoint_id:
+          type: string
+          minLength: 1
+          description: 必须等于方案 target_workpoint_id
+        quantity:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+    ResourceAssistantUpdatePlanRequest:
+      type: object
+      required: [plan_id, resource_plan, scoped_resource_updates]
+      properties:
+        plan_id:
+          type: string
+        resource_plan:
+          $ref: '#/components/schemas/ResourceAssistantPlan'
+        resource_updates:
+          type: object
+          maxProperties: 0
+          description: 单工点方案不接受旧按类型更新
+        scoped_resource_updates:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScopedResourceQuantityUpdate'
+      additionalProperties: false
+    ResourceAssistantSingleSolveRequest:
+      type: object
+      required: [scenario, resource_plan]
+      properties:
+        scenario:
+          $ref: '#/components/schemas/ScenarioInput'
+        resource_plan:
+          $ref: '#/components/schemas/ResourceAssistantPlan'
+      additionalProperties: false
+    ErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: object
+                additionalProperties: true
+      additionalProperties: true

@@ -7,6 +7,8 @@ from ...contracts import (
     AiParameterApplyRequest,
     AiParameterApplyResponse,
     AiParameterParseResponse,
+    AiWorkpointResourceInitializationRequest,
+    AiWorkpointResourceInitializationResponse,
     ProcessNlRequest,
     ProcessNlResponse,
     ResourceAssistantBatchSolveRequest,
@@ -33,15 +35,39 @@ from ...assistants.resource.application import (
     solve_resource_plan,
     update_resource_plan,
 )
+from ...services.ai_resource_explainer import AiResourceAssistantLlmError
+from ...services.ai_workpoint_resource_initializer import initialize_workpoint_resources
+from .scheduling import _materialize_project_master
 
 
 router = APIRouter()
 
 
-@router.post("/api/ai-resource-assistant/initialize", response_model=ResourceAssistantInitialResponse)
-def initialize_resource_assistant_endpoint(request: ResourceAssistantInitialRequest) -> ResourceAssistantInitialResponse:
+@router.post(
+    "/api/ai-resource-assistant/initialize-workpoint-resources",
+    response_model=AiWorkpointResourceInitializationResponse,
+)
+def initialize_workpoint_resources_endpoint(
+    payload: AiWorkpointResourceInitializationRequest,
+    request: Request,
+) -> AiWorkpointResourceInitializationResponse:
     try:
-        return initialize_resource_assistant(request)
+        scenario, _ = _materialize_project_master(payload.scenario, request)
+        return initialize_workpoint_resources(scenario)
+    except AiResourceAssistantLlmError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/api/ai-resource-assistant/initialize", response_model=ResourceAssistantInitialResponse)
+def initialize_resource_assistant_endpoint(
+    payload: ResourceAssistantInitialRequest,
+    request: Request,
+) -> ResourceAssistantInitialResponse:
+    try:
+        scenario, _ = _materialize_project_master(payload.scenario, request)
+        return initialize_resource_assistant(payload.model_copy(update={"scenario": scenario}))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -55,13 +81,21 @@ def update_resource_plan_endpoint(request: ResourceAssistantUpdatePlanRequest) -
 
 
 @router.post("/api/ai-resource-assistant/batch-solve", response_model=ResourceAssistantBatchSolveResponse)
-def batch_solve_resource_plans_endpoint(request: ResourceAssistantBatchSolveRequest) -> ResourceAssistantBatchSolveResponse:
-    return batch_solve_resource_plans(request)
+def batch_solve_resource_plans_endpoint(
+    payload: ResourceAssistantBatchSolveRequest,
+    request: Request,
+) -> ResourceAssistantBatchSolveResponse:
+    scenario, _ = _materialize_project_master(payload.scenario, request)
+    return batch_solve_resource_plans(payload.model_copy(update={"scenario": scenario}))
 
 
 @router.post("/api/ai-resource-assistant/solve-plan", response_model=ResourceAssistantSingleSolveResponse)
-def solve_resource_plan_endpoint(request: ResourceAssistantSingleSolveRequest) -> ResourceAssistantSingleSolveResponse:
-    return solve_resource_plan(request)
+def solve_resource_plan_endpoint(
+    payload: ResourceAssistantSingleSolveRequest,
+    request: Request,
+) -> ResourceAssistantSingleSolveResponse:
+    scenario, _ = _materialize_project_master(payload.scenario, request)
+    return solve_resource_plan(payload.model_copy(update={"scenario": scenario}))
 
 
 @router.post("/api/ai-resource-assistant/compare-results", response_model=ResourceAssistantComparison)

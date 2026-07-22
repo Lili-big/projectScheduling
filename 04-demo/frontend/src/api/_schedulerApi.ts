@@ -1,5 +1,7 @@
 import { apiGet, apiPost, apiPostFormData, apiPut } from "./client";
 import type {
+  AiWorkpointResourceInitializationRequest,
+  AiWorkpointResourceInitializationResponse,
   AiParameterApplyRequest,
   AiParameterApplyResponse,
   AiParameterParseResponse,
@@ -99,20 +101,34 @@ export function importLocalBridgeParams(scenario: ScenarioInput): Promise<Import
   return apiPost<ImportBridgeParamsResponse>("/api/import-local-bridge-params", scenario);
 }
 
-export function generateScheduleInput(scenario: ScenarioInput): Promise<GeneratedScheduleInput> {
-  return apiPost<GeneratedScheduleInput>("/api/generate-schedule-input", scenario);
+function schedulingPath(path: string, workpointId?: string | null): string {
+  const normalized = workpointId?.trim();
+  return normalized ? `${path}?workpoint_id=${encodeURIComponent(normalized)}` : path;
 }
 
-export function solveScenario(scenario: ScenarioInput): Promise<ScenarioSolveResult> {
-  return apiPost<ScenarioSolveResult>("/api/solve-scenario", scenario);
+export function generateScheduleInput(
+  scenario: ScenarioInput,
+  workpointId?: string | null,
+): Promise<GeneratedScheduleInput> {
+  return apiPost<GeneratedScheduleInput>(schedulingPath("/api/generate-schedule-input", workpointId), scenario);
 }
 
-export function solveMinResources(request: MinResourcesSolveRequest): Promise<ScenarioSolveResult> {
-  return apiPost<ScenarioSolveResult>("/api/solve-min-resources", request);
+export function solveScenario(scenario: ScenarioInput, workpointId?: string | null): Promise<ScenarioSolveResult> {
+  return apiPost<ScenarioSolveResult>(schedulingPath("/api/solve-scenario", workpointId), scenario);
 }
 
-export function solveResourceCost(request: ResourceCostSolveRequest): Promise<ScenarioSolveResult> {
-  return apiPost<ScenarioSolveResult>("/api/solve-resource-cost", request);
+export function solveMinResources(
+  request: MinResourcesSolveRequest,
+  workpointId?: string | null,
+): Promise<ScenarioSolveResult> {
+  return apiPost<ScenarioSolveResult>(schedulingPath("/api/solve-min-resources", workpointId), request);
+}
+
+export function solveResourceCost(
+  request: ResourceCostSolveRequest,
+  workpointId?: string | null,
+): Promise<ScenarioSolveResult> {
+  return apiPost<ScenarioSolveResult>(schedulingPath("/api/solve-resource-cost", workpointId), request);
 }
 
 export function compareScenarios(request: ScenarioCompareRequest): Promise<CompareResponse> {
@@ -123,6 +139,15 @@ export function initializeAiResourceAssistant(
   request: ResourceAssistantInitialRequest,
 ): Promise<ResourceAssistantInitialResponse> {
   return apiPost<ResourceAssistantInitialResponse>("/api/ai-resource-assistant/initialize", request);
+}
+
+export function initializeAiWorkpointResources(
+  request: AiWorkpointResourceInitializationRequest,
+): Promise<AiWorkpointResourceInitializationResponse> {
+  return apiPost<AiWorkpointResourceInitializationResponse>(
+    "/api/ai-resource-assistant/initialize-workpoint-resources",
+    request,
+  );
 }
 
 export function updateAiResourceAssistantPlan(

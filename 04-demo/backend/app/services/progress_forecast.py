@@ -85,6 +85,14 @@ def create_baseline_plan(
         raise PlanControlValidationError("只能把已完成求解且可行或最优的方案设为基准计划。")
     if request.resource_plan.scenario_id != request.plan_result.scenario_id:
         raise PlanControlValidationError("资源方案与求解结果标识不一致。")
+    target_workpoint_id = str(request.resource_plan.target_workpoint_id or "").strip()
+    if not target_workpoint_id:
+        raise PlanControlValidationError("当前方案缺少资源推进工点，请重新选择工点并生成三方案。")
+    if not any(
+        bridge.id == target_workpoint_id and bridge.workpoint_type == "bridge"
+        for bridge in request.scenario.project.bridges
+    ):
+        raise PlanControlValidationError("资源推进工点已不属于当前项目版本，请重新生成方案。")
     if not request.confirmed_by.strip() or not request.confirmation_reason.strip():
         raise PlanControlValidationError("确认人和选择原因不能为空。")
     project_id = request.scenario.scenario_id

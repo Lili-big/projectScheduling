@@ -675,6 +675,13 @@ export type GeneratedScheduleInput = {
   schedule_input: ScheduleInput;
   validation: ValidationMessage[];
   source_summary: Record<string, unknown>;
+  solve_scope: SolveScope;
+};
+
+export type SolveScope = {
+  mode: "ALL" | "WORKPOINT";
+  workpoint_id: string | null;
+  workpoint_name: string | null;
 };
 
 export type ScheduleResult = {
@@ -795,6 +802,8 @@ export type ResourceAssistantProjectProfile = {
 
 export type ResourceAssistantLlmGenerationContext = {
   project_profile: ResourceAssistantProjectProfile;
+  target_workpoint: { workpoint_id: string; workpoint_name: string };
+  editable_resource_pools: Array<Record<string, unknown>>;
   resource_types: Array<Record<string, unknown>>;
   constraint_hints: string[];
   reference_examples: ResourceAssistantReferenceExample[];
@@ -805,6 +814,8 @@ export type ResourceAssistantLlmGenerationContext = {
 export type ResourceAssistantPlan = {
   scenario_id: string;
   scenario_name: string;
+  target_workpoint_id?: string | null;
+  target_workpoint_name?: string | null;
   profile: ResourceAssistantPlanProfile;
   positioning: string;
   generation_source: ResourceAssistantGenerationSource;
@@ -960,6 +971,7 @@ export type ResourceAssistantRecommendation = {
 
 export type ResourceAssistantInitialRequest = {
   scenario: ScenarioInput;
+  target_workpoint_id: string;
   generation_mode?: ResourceAssistantGenerationMode;
 };
 
@@ -970,6 +982,38 @@ export type ResourceAssistantInitialResponse = {
   reference_examples: ResourceAssistantReferenceExample[];
   constraint_hints: string[];
   llm_generation_context: ResourceAssistantLlmGenerationContext;
+  llm_config_status: ResourceAssistantLlmConfigStatus;
+  diagnostics: ValidationMessage[];
+};
+
+export type AiResourceQuantityRecommendation = {
+  resource_type: string;
+  quantity: number;
+  max_quantity: number;
+  reason: string;
+};
+
+export type AiWorkpointResourceRecommendation = {
+  workpoint_id: string;
+  resources: AiResourceQuantityRecommendation[];
+};
+
+export type AiWorkpointResourceInitializationRequest = {
+  scenario: ScenarioInput;
+};
+
+export type AiWorkpointResourceInitializationSummary = {
+  workpoint_count: number;
+  recommended_workpoint_count: number;
+  unchanged_workpoint_ids: string[];
+  added_resource_count: number;
+};
+
+export type AiWorkpointResourceInitializationResponse = {
+  project_data_version_id: string;
+  input_fingerprint: string;
+  resource_pools_to_add: ResourcePool[];
+  summary: AiWorkpointResourceInitializationSummary;
   llm_config_status: ResourceAssistantLlmConfigStatus;
   diagnostics: ValidationMessage[];
 };

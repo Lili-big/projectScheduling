@@ -7,6 +7,7 @@ const toolDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(toolDir, "..", "..", "..");
 const apiSource = readFileSync(join(toolDir, "api.mts"), "utf8");
 const girderOpenApi = readFileSync(join(repoRoot, "03-requirements", "specs", "051-girder-plan-simulation", "contracts", "girder-plan-simulation.openapi.yaml"), "utf8");
+const girderSegmentOpenApi = readFileSync(join(repoRoot, "03-requirements", "specs", "058-girder-continuous-bridge-segments", "contracts", "girder-continuous-bridge-segments.openapi.yaml"), "utf8");
 const girderBackendContract = readFileSync(join(repoRoot, "04-demo", "backend", "app", "contracts", "girder_plan_simulation.py"), "utf8");
 const girderFrontendContract = readFileSync(join(repoRoot, "04-demo", "frontend", "src", "contracts", "girderPlanSimulation.ts"), "utf8");
 const netlifyConfig = readFileSync(join(repoRoot, "netlify.toml"), "utf8");
@@ -46,6 +47,11 @@ for (const sharedField of [
 for (const state of ["draft", "ready", "calculated", "confirmed", "stale", "blocked"]) {
   if (!girderBackendContract.includes(`"${state}"`) || !girderFrontendContract.includes(`"${state}"`) || !apiSource.includes(`"${state}"`)) {
     throw new Error(`girder plan lifecycle state is not synchronized: ${state}`);
+  }
+}
+for (const [label, source] of [["v3 OpenAPI", girderSegmentOpenApi], ["backend", girderBackendContract], ["frontend", girderFrontendContract], ["mirror", apiSource]]) {
+  if (!source.includes("bridge_segment_kind") || !source.includes("girder-plan-line-graph/v3")) {
+    throw new Error(`${label} misses synchronized v3 bridge segment contract`);
   }
 }
 if (!/opening_inventory_pieces: opening, produced_pieces: produced, erected_pieces: erected, closing_inventory_pieces: inventory/.test(apiSource)) {

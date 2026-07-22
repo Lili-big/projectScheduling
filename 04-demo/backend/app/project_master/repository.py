@@ -17,6 +17,7 @@ from ..contracts.project_master import (
     ProjectMasterDiffEntry,
     ProjectMasterImportBatch,
     ProjectMasterImportIssue,
+    ProjectMasterRoutePlacement,
     ProjectMasterSnapshot,
     ProjectMasterStructure,
     ProjectMasterVersionDetail,
@@ -436,6 +437,10 @@ class ProjectMasterRepository:
             workpoint_rows = connection.execute(
                 "SELECT * FROM workpoints WHERE version_id=? ORDER BY sort_order, workpoint_id", (version_id,)
             ).fetchall()
+            route_placement_rows = connection.execute(
+                "SELECT * FROM route_placements WHERE version_id=? ORDER BY display_order, placement_id",
+                (version_id,),
+            ).fetchall()
             structure_rows = connection.execute(
                 "SELECT * FROM structures WHERE version_id=? ORDER BY workpoint_id, sort_order, structure_id", (version_id,)
             ).fetchall()
@@ -517,7 +522,21 @@ class ProjectMasterRepository:
                     source=self._source(evidence.get(("workpoint", row["workpoint_id"], None))),
                 )
                 for row in workpoint_rows
-            ]
+            ],
+            route_placements=[
+                ProjectMasterRoutePlacement(
+                    placement_id=row["placement_id"],
+                    workpoint_id=row["workpoint_id"],
+                    side=row["side"],
+                    mileage_prefix=row["mileage_prefix"],
+                    start_mileage_m=row["start_mileage_m"],
+                    end_mileage_m=row["end_mileage_m"],
+                    spatial_group_id=row["spatial_group_id"],
+                    display_order=row["display_order"],
+                    source=self._source(evidence.get(("route_placement", row["placement_id"], None))),
+                )
+                for row in route_placement_rows
+            ],
         )
 
     def list_workpoints(
@@ -577,6 +596,7 @@ class ProjectMasterRepository:
         snapshot: ProjectMasterSnapshot,
     ) -> None:
         workpoint_rows: list[tuple] = []
+        route_placement_rows: list[tuple] = []
         structure_rows: list[tuple] = []
         structure_parameter_rows: list[tuple] = []
         component_rows: list[tuple] = []
@@ -692,7 +712,24 @@ class ProjectMasterRepository:
                             parameter.source,
                         )
 
+        for placement in snapshot.route_placements:
+            route_placement_rows.append(
+                (
+                    version_id,
+                    placement.placement_id,
+                    placement.workpoint_id,
+                    placement.side,
+                    placement.mileage_prefix,
+                    placement.start_mileage_m,
+                    placement.end_mileage_m,
+                    placement.spatial_group_id,
+                    placement.display_order,
+                )
+            )
+            append_source("route_placement", placement.placement_id, None, placement.source)
+
         connection.executemany("INSERT INTO workpoints VALUES (?,?,?,?,?,?,?,?,?,?)", workpoint_rows)
+        connection.executemany("INSERT INTO route_placements VALUES (?,?,?,?,?,?,?,?,?)", route_placement_rows)
         connection.executemany("INSERT INTO structures VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", structure_rows)
         connection.executemany("INSERT INTO structure_parameters VALUES (?,?,?,?,?,?,?)", structure_parameter_rows)
         connection.executemany("INSERT INTO components VALUES (?,?,?,?,?,?,?,?,?,?)", component_rows)

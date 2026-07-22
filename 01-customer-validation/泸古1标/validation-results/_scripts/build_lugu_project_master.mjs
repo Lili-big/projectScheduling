@@ -21,6 +21,17 @@ const WORKPOINT_COLUMNS = [
   ["remark", "备注"],
 ];
 
+const ROUTE_PLACEMENT_COLUMNS = [
+  ["placement_id", "线路落位ID"],
+  ["workpoint_id", "所属工点ID"],
+  ["side", "幅别"],
+  ["mileage_prefix", "里程前缀"],
+  ["start_mileage_m", "起点里程(m)"],
+  ["end_mileage_m", "终点里程(m)"],
+  ["spatial_group_id", "空间对应组"],
+  ["display_order", "展示顺序"],
+];
+
 const STRUCTURE_COLUMNS = [
   ["structure_id", "结构物ID"],
   ["workpoint_id", "所属工点ID"],
@@ -277,6 +288,41 @@ function createWorkpoints(workpointSheet) {
     item.remark = truncate(`来源：架梁工点导入模板第${item.sourceRows.map((row) => row.sourceRow).join("/")}行；${sideMileage}${aliasNote}`);
   }
   return ordered;
+}
+
+function createRoutePlacements(workpoints, quality) {
+  const placements = [];
+  for (const workpoint of workpoints) {
+    for (const side of workpoint.expectedSides) {
+      const sourceRows = workpoint.sourceRows.filter((row) => row.side === side);
+      const starts = sourceRows.map((row) => mileageToMeters(row.startMileage)).filter((value) => value !== null);
+      const ends = sourceRows.map((row) => mileageToMeters(row.endMileage)).filter((value) => value !== null);
+      const prefixes = [...new Set(sourceRows
+        .flatMap((row) => [mileagePrefix(row.startMileage), mileagePrefix(row.endMileage)])
+        .filter(Boolean))];
+      if (!starts.length || !ends.length) {
+        quality.errors.push(`${workpoint.workpointName}${sideName(side)}缺少线路落位里程。`);
+        continue;
+      }
+      if (prefixes.length !== 1) {
+        quality.errors.push(`${workpoint.workpointName}${sideName(side)}无法确定唯一里程前缀：${prefixes.join("/") || "空"}。`);
+        continue;
+      }
+      placements.push({
+        placement_id: `RP-${workpoint.workpointId.replace(/^WP-/, "")}-${sideCode(side)}`,
+        workpoint_id: workpoint.workpointId,
+        side,
+        mileage_prefix: prefixes[0],
+        start_mileage_m: Math.min(...starts),
+        end_mileage_m: Math.max(...ends),
+        spatial_group_id: workpoint.parallel,
+        display_order: parallelNumber(workpoint.parallel),
+      });
+    }
+  }
+  return placements.sort((a, b) => a.display_order - b.display_order
+    || ["left", "right"].indexOf(a.side) - ["left", "right"].indexOf(b.side)
+    || a.placement_id.localeCompare(b.placement_id));
 }
 
 function findColumn(topHeaders, predicate) {
@@ -644,7 +690,7 @@ function parseBridge(config, sheet, workpoint, specialDefinitions, structureObje
   }
 }
 
-function assertQuality(workpoints, structures, components, quality) {
+function assertQuality(workpoints, routePlacements, structures, components, quality) {
   const duplicateCheck = (items, key, label) => {
     const seen = new Set();
     for (const item of items) {
@@ -653,9 +699,13 @@ function assertQuality(workpoints, structures, components, quality) {
     }
   };
   duplicateCheck(workpoints, "workpoint_id", "工点");
+  duplicateCheck(routePlacements, "placement_id", "线路落位");
   duplicateCheck(structures, "structure_id", "结构物");
   duplicateCheck(components, "component_id", "构件");
   const workpointIds = new Set(workpoints.map((item) => item.workpoint_id));
+  for (const placement of routePlacements) if (!workpointIds.has(placement.workpoint_id)) quality.errors.push(`线路落位 ${placement.placement_id} 的父工点不存在。`);
+  const placementKeys = new Set(routePlacements.map((item) => `${item.workpoint_id}|${item.side}`));
+  if (placementKeys.size !== routePlacements.length) quality.errors.push("同一工点同一幅别存在重复线路落位。 ");
   const structureIds = new Set(structures.map((item) => item.structure_id));
   for (const structure of structures) if (!workpointIds.has(structure.workpoint_id)) quality.errors.push(`结构物 ${structure.structure_id} 的父工点不存在。`);
   for (const component of components) if (!structureIds.has(component.structure_id)) quality.errors.push(`构件 ${component.component_id} 的父结构物不存在。`);
@@ -763,6 +813,7 @@ const workpointObjects = workpointGroups.map((item) => ({
   sort_order: item.sortOrder,
   remark: item.remark,
 }));
+const routePlacementObjects = createRoutePlacements(workpointGroups, quality);
 
 structureObjects.sort((a, b) => {
   const workpointDiff = workpointObjects.findIndex((item) => item.workpoint_id === a.workpoint_id) - workpointObjects.findIndex((item) => item.workpoint_id === b.workpoint_id);
@@ -773,11 +824,12 @@ structureObjects.sort((a, b) => {
 });
 const structurePosition = new Map(structureObjects.map((item, index) => [item.structure_id, index]));
 componentObjects.sort((a, b) => (structurePosition.get(a.structure_id) ?? 999999) - (structurePosition.get(b.structure_id) ?? 999999) || a.sort_order - b.sort_order);
-assertQuality(workpointObjects, structureObjects, componentObjects, quality);
+assertQuality(workpointObjects, routePlacementObjects, structureObjects, componentObjects, quality);
 
 const workbook = Workbook.create();
 const guide = workbook.worksheets.add("填写说明");
 const workpointSheet = workbook.worksheets.add("工点信息");
+const routePlacementSheet = workbook.worksheets.add("线路关系");
 const structureSheet = workbook.worksheets.add("结构物信息");
 const componentSheet = workbook.worksheets.add("构件参数");
 
@@ -787,6 +839,13 @@ writeDataSheet(
   workpointObjects,
   [23, 30, 14, 14, 16, 16, 10, 70],
   [{ column: "C", values: ["bridge", "roadbed", "tunnel", "culvert", "interchange", "service_area", "station_yard", "access_road", "other"] }],
+);
+writeDataSheet(
+  routePlacementSheet,
+  ROUTE_PLACEMENT_COLUMNS,
+  routePlacementObjects,
+  [28, 23, 12, 14, 16, 16, 18, 12],
+  [{ column: "C", values: ["left", "right"] }],
 );
 writeDataSheet(
   structureSheet,
@@ -813,11 +872,11 @@ writeDataSheet(
 guide.showGridLines = false;
 guide.freezePanes.freezeRows(2);
 guide.getRange("A1:B6").values = [
-  ["template_version", "1.0"],
+  ["template_version", "1.1"],
   ["definition_version", "project-master/v1"],
-  ["导入语义", "当前项目完整主数据快照；工点 → 结构物 → 构件参数。"],
+  ["导入语义", "当前项目完整主数据快照；线路关系保存左右幅归属、分幅里程和空间对应组。"],
   ["桥梁口径", "一座物理桥梁只维护一个工点；左右幅作为结构物 side 属性。"],
-  ["来源文件", "工点来自《泸古1标架梁工点导入模板》；桥梁结构来自《泸古高速TJ-1标桥梁进度统计表4.27(1)》。"],
+  ["来源文件", "工点及P001～P026平行对应组来自《泸古1标架梁工点导入模板》；桥梁结构来自《泸古高速TJ-1标桥梁进度统计表4.27(1)》。"],
   ["排除字段", quality.exclusions.join("；")],
 ];
 guide.getRange("A8:D8").merge();
@@ -842,6 +901,7 @@ const notes = [
   "3. 两河口大桥连续刚构节段数16、永宁河特大桥连续刚构节段数22，均取自“特殊结构物施工工艺”表。",
   "4. 夏蓉高速2号桥前5跨依据桥梁表识别为两联现浇箱梁，后3跨为25m预制T梁。",
   "5. 所有原始资源、工效、计划时间、进度及错误公式均未写入本主数据文件。",
+  "6. 线路关系按P001～P026平行对应组落位；同组允许一对多，例如P003保留左幅B1匝道路基与右幅3座夏蓉高速桥的对应关系。",
 ];
 guide.getRange(`A17:D${16 + notes.length}`).values = notes.map((note) => [note, null, null, null]);
 for (let index = 17; index <= 16 + notes.length; index += 1) guide.getRange(`A${index}:D${index}`).merge();
@@ -861,6 +921,8 @@ guide.getRange(`A17:D${16 + notes.length}`).format.rowHeight = 38;
 
 workpointSheet.getRange(`E3:F${workpointObjects.length + 2}`).format.numberFormat = "0.000";
 workpointSheet.getRange(`G3:G${workpointObjects.length + 2}`).format.numberFormat = "0";
+routePlacementSheet.getRange(`E3:F${routePlacementObjects.length + 2}`).format.numberFormat = "0.000";
+routePlacementSheet.getRange(`H3:H${routePlacementObjects.length + 2}`).format.numberFormat = "0";
 structureSheet.getRange(`J3:J${structureObjects.length + 2}`).format.numberFormat = "0";
 structureSheet.getRange(`L3:L${structureObjects.length + 2}`).format.numberFormat = "0";
 structureSheet.getRange(`M3:M${structureObjects.length + 2}`).format.numberFormat = "0.000";
@@ -872,6 +934,7 @@ const inspectionParts = [];
 for (const request of [
   { kind: "region", sheetId: "填写说明", range: "A1:D22" },
   { kind: "region", sheetId: "工点信息", range: `A1:H${Math.min(workpointObjects.length + 2, 20)}` },
+  { kind: "region", sheetId: "线路关系", range: `A1:H${Math.min(routePlacementObjects.length + 2, 20)}` },
   { kind: "region", sheetId: "结构物信息", range: `A1:S${Math.min(structureObjects.length + 2, 20)}` },
   { kind: "region", sheetId: "构件参数", range: `A1:M${Math.min(componentObjects.length + 2, 20)}` },
   { kind: "formula", sheetId: "填写说明", range: "A1:D22" },
@@ -884,6 +947,7 @@ await fs.writeFile(`${outputDir}/泸古TJ-1标统一主数据_inspect.ndjson`, i
 const previewRanges = {
   "填写说明": "A1:D22",
   "工点信息": `A1:H${Math.min(workpointObjects.length + 2, 42)}`,
+  "线路关系": `A1:H${Math.min(routePlacementObjects.length + 2, 58)}`,
   "结构物信息": `A1:S${Math.min(structureObjects.length + 2, 42)}`,
   "构件参数": `A1:M${Math.min(componentObjects.length + 2, 42)}`,
 };
@@ -899,6 +963,8 @@ const report = {
   sourceFiles: { workpoints: workpointPath, bridgeStructures: bridgePath },
   counts: {
     workpoints: workpointObjects.length,
+    routePlacements: routePlacementObjects.length,
+    spatialGroups: new Set(routePlacementObjects.map((item) => item.spatial_group_id)).size,
     bridgeWorkpoints: workpointObjects.filter((item) => item.workpoint_type === "bridge").length,
     roadbedWorkpoints: workpointObjects.filter((item) => item.workpoint_type === "roadbed").length,
     tunnelWorkpoints: workpointObjects.filter((item) => item.workpoint_type === "tunnel").length,

@@ -30,6 +30,17 @@ def test_repository_versions_fingerprints_and_stale_history(tmp_path) -> None:
         repository.create_scenario_version(stale)
 
 
+def test_stable_yard_deployment_node_participates_in_fingerprint(tmp_path) -> None:
+    repository = GirderPlanRepository(tmp_path / "deployment" / "girder-plan.json")
+    first = repository.create_scenario_version(scenario_request(scenario_id="S-DEPLOY"))
+    request = scenario_request(scenario_id="S-DEPLOY")
+    request.expected_latest_version_no = 1
+    request.beam_yards[0].deployment_node_id = "R0:right"
+    second = repository.create_scenario_version(request)
+    assert first.input_fingerprint != second.input_fingerprint
+    assert repository.get_scenario_version(first.scenario_version_id).status == "stale"
+
+
 def test_run_snapshot_is_immutable_reusable_and_confirmable(tmp_path) -> None:
     repository = GirderPlanRepository(tmp_path / "girder-plan.json")
     scenario = repository.create_scenario_version(scenario_request())

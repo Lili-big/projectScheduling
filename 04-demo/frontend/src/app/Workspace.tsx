@@ -60,6 +60,7 @@ import type {
   AiParameterApplyRequest,
   AiParameterApplyResponse,
   AiParameterParseResponse,
+  AiWorkpointResourceInitializationResponse,
   ComponentModel,
   UpperStructureModel,
   StructureModel,
@@ -154,6 +155,7 @@ import {
   defaultResourceTypeForProcess,
   defaultResourceTypeForTask,
   isLimitedResourcePoolAvailable,
+  mergeAiWorkpointResourcePools,
   normalizeLimitedResourcePool,
   normalizeResourcePoolForWorkspace,
   normalizeScenarioResourcePools,
@@ -207,6 +209,7 @@ import {
   buildResourceScopeResult,
   formatScheduleStatus,
   ScheduleResultsWorkspace,
+  solveScopeLabel,
 } from "../features/scheduleResults";
 import {
   generateScheduleWorkflow,
@@ -387,7 +390,9 @@ export default function App() {
   });
   const [resourceWorkpointReloadToken, setResourceWorkpointReloadToken] = useState(0);
   const [resourceSaveError, setResourceSaveError] = useState<string | null>(null);
+  const [selectedSolveWorkpointId, setSelectedSolveWorkpointId] = useState("");
   const resourceWorkpointRequestRef = useRef(0);
+  const solveRequestRef = useRef(0);
   const scenarioRef = useRef<ScenarioInput | null>(scenario);
   scenarioRef.current = scenario;
   const currentResourceWorkpoints = useMemo(
@@ -403,8 +408,13 @@ export default function App() {
   }, []);
 
   const scenarioFingerprint = useMemo(() => (scenario ? scenarioFingerprintForSolve(scenario) : null), [scenario]);
+  const solveFingerprint = useMemo(
+    () => (scenario ? scenarioFingerprintForSolve(scenario, selectedSolveWorkpointId || null) : null),
+    [scenario, selectedSolveWorkpointId],
+  );
   const currentGenerated = scenarioFingerprint !== null && generatedScenarioFingerprint === scenarioFingerprint ? generated : null;
-  const currentSolveResult = scenarioFingerprint !== null && solveResultScenarioFingerprint === scenarioFingerprint ? solveResult : null;
+  const currentSolveGenerated = solveFingerprint !== null && generatedScenarioFingerprint === solveFingerprint ? generated : null;
+  const currentSolveResult = solveFingerprint !== null && solveResultScenarioFingerprint === solveFingerprint ? solveResult : null;
   const {
     autoTaskViewFingerprintRef,
     busy,
@@ -421,6 +431,7 @@ export default function App() {
       setSolveResultScenarioFingerprint(null);
       setComparison(null);
       setIntegratedSnapshot(null);
+      setSelectedSolveWorkpointId("");
       setSavedResults([]);
     },
   });
@@ -447,6 +458,16 @@ export default function App() {
       if (requestId === resourceWorkpointRequestRef.current) resourceWorkpointRequestRef.current += 1;
     };
   }, [resourceWorkpointReloadToken, scenario?.project_data_version_id]);
+
+  useEffect(() => {
+    if (!selectedSolveWorkpointId || resourceWorkpointState.status !== "ready") return;
+    if (resourceWorkpointState.versionId !== (scenario?.project_data_version_id ?? "")) return;
+    if (resourceWorkpointState.workpoints.some((item) => item.workpoint_id === selectedSolveWorkpointId)) return;
+    solveRequestRef.current += 1;
+    setSelectedSolveWorkpointId("");
+    clearSolveScopeOutputs();
+    setError("原试算工点已不属于当前项目版本，已恢复为全部工点。");
+  }, [resourceWorkpointState, scenario?.project_data_version_id, selectedSolveWorkpointId]);
 
   useEffect(() => {
     if (activeTab !== "tasks" || !scenario || !scenarioFingerprint || currentGenerated || busy) return;
@@ -527,23 +548,27 @@ export default function App() {
   async function solveCurrent() {
     if (!scenario) return;
     const requestScenario = normalizeScenarioForWorkspace(scenario);
-    const requestFingerprint = scenarioFingerprintForSolve(requestScenario);
+    const requestWorkpointId = selectedSolveWorkpointId || null;
+    const requestFingerprint = scenarioFingerprintForSolve(requestScenario, requestWorkpointId);
+    const requestId = ++solveRequestRef.current;
     setBusy("solving");
     setError(null);
     openModule("results");
     try {
-      await solveWith(requestScenario, requestFingerprint);
+      await solveWith(requestScenario, requestFingerprint, requestWorkpointId, requestId);
     } catch (err) {
-      setError(errorText(err));
+      if (requestId === solveRequestRef.current) setError(errorText(err));
     } finally {
-      setBusy(null);
+      if (requestId === solveRequestRef.current) setBusy(null);
     }
   }
 
   async function solveMinResources() {
     if (!scenario) return;
     const requestScenario = normalizeScenarioForWorkspace(scenario);
-    const requestFingerprint = scenarioFingerprintForSolve(requestScenario);
+    const requestWorkpointId = selectedSolveWorkpointId || null;
+    const requestFingerprint = scenarioFingerprintForSolve(requestScenario, requestWorkpointId);
+    const requestId = ++solveRequestRef.current;
     const hasHardMilestone = requestScenario.milestones.some((milestone) => milestone.mode === "hard");
     const matchingSolveResult = solveResultScenarioFingerprint === requestFingerprint ? solveResult : null;
     const fallbackTargetDays = matchingSolveResult?.result.objective_days ?? null;
@@ -554,26 +579,32 @@ export default function App() {
     setBusy("minResources");
     setError(null);
     try {
-      const solved = await solveMinResourcesRequest({
-        scenario: requestScenario,
-        fallback_target_days: fallbackTargetDays,
-      });
+      const solved = await solveMinResourcesRequest(
+        {
+          scenario: requestScenario,
+          fallback_target_days: fallbackTargetDays,
+        },
+        requestWorkpointId,
+      );
+      if (requestId !== solveRequestRef.current) return;
       setGenerated(solved.generated);
       setGeneratedScenarioFingerprint(requestFingerprint);
       setSolveResult(solved);
       setSolveResultScenarioFingerprint(requestFingerprint);
       openModule("results");
     } catch (err) {
-      setError(errorText(err));
+      if (requestId === solveRequestRef.current) setError(errorText(err));
     } finally {
-      setBusy(null);
+      if (requestId === solveRequestRef.current) setBusy(null);
     }
   }
 
   async function solveResourceCost() {
     if (!scenario) return;
     const requestScenario = normalizeScenarioForWorkspace(scenario);
-    const requestFingerprint = scenarioFingerprintForSolve(requestScenario);
+    const requestWorkpointId = selectedSolveWorkpointId || null;
+    const requestFingerprint = scenarioFingerprintForSolve(requestScenario, requestWorkpointId);
+    const requestId = ++solveRequestRef.current;
     const hasHardMilestone = requestScenario.milestones.some((milestone) => milestone.mode === "hard");
     const matchingSolveResult = solveResultScenarioFingerprint === requestFingerprint ? solveResult : null;
     const fallbackTargetDays = matchingSolveResult?.result.objective_days ?? null;
@@ -584,24 +615,39 @@ export default function App() {
     setBusy("resourceCost");
     setError(null);
     try {
-      const solved = await solveResourceCostRequest({
-        scenario: requestScenario,
-        fallback_target_days: fallbackTargetDays,
-      });
+      const solved = await solveResourceCostRequest(
+        {
+          scenario: requestScenario,
+          fallback_target_days: fallbackTargetDays,
+        },
+        requestWorkpointId,
+      );
+      if (requestId !== solveRequestRef.current) return;
       setGenerated(solved.generated);
       setGeneratedScenarioFingerprint(requestFingerprint);
       setSolveResult(solved);
       setSolveResultScenarioFingerprint(requestFingerprint);
       openModule("results");
     } catch (err) {
-      setError(errorText(err));
+      if (requestId === solveRequestRef.current) setError(errorText(err));
     } finally {
-      setBusy(null);
+      if (requestId === solveRequestRef.current) setBusy(null);
     }
   }
 
-  async function solveWith(nextScenario: ScenarioInput, fingerprint = scenarioFingerprintForSolve(nextScenario)) {
-    const { solved } = await solveScenarioWorkflow(nextScenario, normalizeScenarioForWorkspace, solveScenario);
+  async function solveWith(
+    nextScenario: ScenarioInput,
+    fingerprint = scenarioFingerprintForSolve(nextScenario, selectedSolveWorkpointId || null),
+    workpointId: string | null = selectedSolveWorkpointId || null,
+    requestId = solveRequestRef.current,
+  ) {
+    const { solved } = await solveScenarioWorkflow(
+      nextScenario,
+      normalizeScenarioForWorkspace,
+      solveScenario,
+      workpointId,
+    );
+    if (requestId !== solveRequestRef.current) return;
     setGenerated(solved.generated);
     setGeneratedScenarioFingerprint(fingerprint);
     setSolveResult(solved);
@@ -669,6 +715,10 @@ export default function App() {
 
   function saveCurrentResult(resultToSave: ScenarioSolveResult | null = currentSolveResult) {
     if (!resultToSave) return;
+    if (resultToSave.generated.solve_scope.mode !== "ALL") {
+      setError("单工点结果仅用于试算，不能保存为全项目方案。");
+      return;
+    }
     const nextResult = {
       ...resultToSave,
       scenario_id: `${resultToSave.scenario_id}-${savedResults.length + 1}`,
@@ -802,6 +852,22 @@ export default function App() {
     setIntegratedSnapshot(null);
   }
 
+  function clearSolveScopeOutputs() {
+    setGenerated(null);
+    setGeneratedScenarioFingerprint(null);
+    setSolveResult(null);
+    setSolveResultScenarioFingerprint(null);
+    setComparison(null);
+  }
+
+  function changeSolveWorkpoint(workpointId: string) {
+    if (workpointId === selectedSolveWorkpointId) return;
+    solveRequestRef.current += 1;
+    setSelectedSolveWorkpointId(workpointId);
+    clearSolveScopeOutputs();
+    setError(null);
+  }
+
   function updateLogic(index: number, patch: Partial<LogicRule>) {
     setLogicDirty(true);
     setScenario((current) =>
@@ -859,6 +925,30 @@ export default function App() {
       ...current,
       resource_pools: removeResourcePoolById(current.resource_pools, poolId),
     } : current);
+  }
+
+  function applyAiWorkpointResources(
+    response: AiWorkpointResourceInitializationResponse,
+    requestVersionId: string,
+    requestResourceFingerprint: string,
+  ) {
+    const latestScenario = scenarioRef.current;
+    if (
+      !latestScenario
+      || (latestScenario.project_data_version_id ?? "") !== requestVersionId
+      || response.project_data_version_id !== requestVersionId
+      || resourcePoolsSemanticFingerprint(latestScenario.resource_pools) !== requestResourceFingerprint
+    ) {
+      throw new Error("项目版本或资源配置已变化，本次 AI 推荐未应用，请重新生成。");
+    }
+    const mergedPools = mergeAiWorkpointResourcePools(
+      latestScenario.resource_pools,
+      response.resource_pools_to_add,
+    );
+    if (mergedPools === latestScenario.resource_pools) return;
+    setResourcesDirty(true);
+    setResourceSaveError(null);
+    setScenario((current) => current ? { ...current, resource_pools: mergedPools } : current);
   }
 
   function updateMilestone(index: number, patch: Partial<MilestoneConstraint>) {
@@ -979,6 +1069,7 @@ export default function App() {
             onUpsertResourcePool={upsertResourcePool}
             onAddResourcePool={addResourcePool}
             onRemoveResourcePool={removeResourcePool}
+            onApplyAiWorkpointResources={applyAiWorkpointResources}
             onSaveLocalConfig={saveCurrentResourceConfig}
             savingLocalConfig={busy === "savingResources"}
             localConfigDirty={resourcesDirty}
@@ -988,6 +1079,7 @@ export default function App() {
         {activeTab === "resourceAssistant" && (
           <ResourceAssistantPanel
             scenario={scenario}
+            workpoints={currentResourceWorkpoints}
             integratedSnapshotId={integratedSnapshot?.status === "converged" ? integratedSnapshot.integrated_snapshot_id : null}
             onOpenPlanControl={() => openModule("planControl")}
             renderPlanDetail={(plan, planResult) => (
@@ -997,6 +1089,9 @@ export default function App() {
                 generated={planResult.generated ?? null}
                 solveResult={resourceAssistantDetailSolveResult(plan, planResult)}
                 resourceWorkpoints={currentResourceWorkpoints}
+                resourceWorkpointState={{ status: "ready", versionId: scenario?.project_data_version_id ?? "", workpoints: currentResourceWorkpoints }}
+                selectedSolveWorkpointId=""
+                onSolveWorkpointChange={() => undefined}
                 externalDiagnostics={planResult.diagnostics}
                 onPatchScenario={() => undefined}
                 onPatchProject={() => undefined}
@@ -1034,7 +1129,7 @@ export default function App() {
           <TaskViewTab
             scenario={scenario}
             generated={currentGenerated}
-            solveResult={currentSolveResult}
+            solveResult={selectedSolveWorkpointId ? null : currentSolveResult}
             onGenerateTaskView={generateOnly}
             onUpdateTaskProcess={updateTaskProcessAndGenerate}
             onUpdateStructureControlLevel={updateStructureControlLevel}
@@ -1044,9 +1139,12 @@ export default function App() {
         {activeTab === "results" && (
           <ResultsTab
             scenario={scenario}
-            generated={currentGenerated}
+            generated={currentSolveGenerated}
             solveResult={currentSolveResult}
             resourceWorkpoints={currentResourceWorkpoints}
+            resourceWorkpointState={resourceWorkpointState}
+            selectedSolveWorkpointId={selectedSolveWorkpointId}
+            onSolveWorkpointChange={changeSolveWorkpoint}
             onPatchScenario={patchScenario}
             onPatchProject={patchProject}
             onSolveCurrent={solveCurrent}
@@ -1510,6 +1608,9 @@ function ResultsTab({
   generated,
   solveResult,
   resourceWorkpoints,
+  resourceWorkpointState,
+  selectedSolveWorkpointId,
+  onSolveWorkpointChange,
   externalDiagnostics = [],
   onPatchScenario,
   onPatchProject,
@@ -1527,6 +1628,9 @@ function ResultsTab({
   generated: GeneratedScheduleInput | null;
   solveResult: ScenarioSolveResult | null;
   resourceWorkpoints: ProjectMasterWorkpoint[];
+  resourceWorkpointState: ResourceWorkpointState;
+  selectedSolveWorkpointId: string;
+  onSolveWorkpointChange: (workpointId: string) => void;
   externalDiagnostics?: ValidationMessage[];
   onPatchScenario: (patch: Partial<ScenarioInput>) => void;
   onPatchProject: (patch: Partial<ProjectModel>) => void;
@@ -1556,6 +1660,8 @@ function ResultsTab({
   const planStatus = useMemo(() => derivePlanStatus(result), [result]);
   const summary = useMemo(() => buildSummary(scenario, generated, activeSolveResult), [scenario, generated, activeSolveResult]);
   const generatedForDetails = activeSolveResult?.generated ?? generated;
+  const activeSolveScope = generatedForDetails?.solve_scope ?? null;
+  const singleWorkpointResult = activeSolveScope?.mode === "WORKPOINT";
   const resourceRecommendationStatus = resourceRecommendationStatusFromResult(result);
   const alternativeOutput = alternativeOutputFromResult(solveResult?.result ?? result);
   const resourceCostSummary = resourceCostSummaryFromResult(result);
@@ -1758,6 +1864,30 @@ function ResultsTab({
                 onChange={(event) => onPatchScenario({ time_limit_seconds: Math.min(15, Number(event.target.value)) })}
               />
             </label>
+            <label>
+              求解范围
+              <select
+                value={selectedSolveWorkpointId}
+                disabled={Boolean(busy) || resourceWorkpointState.status !== "ready"}
+                onChange={(event) => onSolveWorkpointChange(event.target.value)}
+              >
+                <option value="">全部工点</option>
+                {resourceWorkpoints.map((workpoint) => (
+                  <option value={workpoint.workpoint_id} key={workpoint.workpoint_id}>
+                    {workpoint.workpoint_name}（{workpoint.workpoint_id}）
+                  </option>
+                ))}
+              </select>
+              {resourceWorkpointState.status === "loading" && <span>正在加载桥梁工点…</span>}
+              {resourceWorkpointState.status === "error" && <span>工点加载失败：{resourceWorkpointState.message}</span>}
+              {resourceWorkpointState.status === "ready" && resourceWorkpoints.length === 0 && <span>当前版本没有可试算的桥梁工点</span>}
+            </label>
+          </div>
+          <div className="notice info">
+            <strong>当前求解范围：</strong>
+            <span>{activeSolveScope ? solveScopeLabel(activeSolveScope) : selectedSolveWorkpointId
+              ? `单工点试算：${resourceWorkpoints.find((item) => item.workpoint_id === selectedSolveWorkpointId)?.workpoint_name ?? "未命名工点"}（${selectedSolveWorkpointId}）`
+              : "全部工点"}</span>
           </div>
           <div className="objective-config">
               <div className="objective-config-header">
@@ -2039,10 +2169,16 @@ function ResultsTab({
           </div>
           {!isReadOnly && (
             <div className="actions inline">
-              <button className="secondary" onClick={() => onSaveCurrent(activeSolveResult)} disabled={!activeSolveResult}>
+              <button
+                className="secondary"
+                onClick={() => onSaveCurrent(activeSolveResult)}
+                disabled={!activeSolveResult || singleWorkpointResult}
+                title={singleWorkpointResult ? "单工点结果仅用于试算，不能保存为全项目方案" : undefined}
+              >
                 <Save size={15} />
                 保存方案
               </button>
+              {singleWorkpointResult && <span>单工点结果仅用于试算，不能保存为全项目方案。</span>}
             </div>
           )}
         </div>
@@ -4910,6 +5046,6 @@ async function loadAllBridgeWorkpoints(versionId: string): Promise<ProjectMaster
   ));
 }
 
-function scenarioFingerprintForSolve(scenario: ScenarioInput): string {
-  return serializeScenarioFingerprint(normalizeScenarioForWorkspace(scenario));
+function scenarioFingerprintForSolve(scenario: ScenarioInput, workpointId: string | null = null): string {
+  return serializeScenarioFingerprint(normalizeScenarioForWorkspace(scenario), workpointId);
 }

@@ -1,0 +1,157 @@
+openapi: 3.1.0
+info:
+  title: 架梁双幅线路拓扑契约增量
+  version: 2.0.0
+  description: >-
+    定义功能 055 对既有项目主数据和架梁计划推演线路图接口的增量。
+    未列出的功能 051 字段和端点保持原契约。
+paths:
+  /api/girder-plan-simulation/line-graphs/{project_master_version_id}:
+    get:
+      summary: 从已确认项目主数据派生双幅线路图
+      parameters:
+        - name: project_master_version_id
+          in: path
+          required: true
+          schema: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: v2 双幅线路图及对象级诊断
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LineGraphSnapshotV2' }
+        '404':
+          description: 项目主数据版本不存在或未确认
+components:
+  schemas:
+    ProjectMasterRoutePlacement:
+      type: object
+      required:
+        - placement_id
+        - workpoint_id
+        - side
+        - mileage_prefix
+        - spatial_group_id
+        - display_order
+      properties:
+        placement_id: { type: string, minLength: 1 }
+        workpoint_id: { type: string, minLength: 1 }
+        side: { type: string, enum: [left, right] }
+        mileage_prefix: { type: string, minLength: 1 }
+        start_mileage_m: { type: [number, 'null'] }
+        end_mileage_m: { type: [number, 'null'] }
+        spatial_group_id: { type: string, minLength: 1 }
+        display_order: { type: integer, minimum: 0 }
+        source:
+          anyOf:
+            - { $ref: '#/components/schemas/SourceEvidence' }
+            - { type: 'null' }
+    SourceEvidence:
+      type: object
+      properties:
+        batch_id: { type: [string, 'null'] }
+        sheet_name: { type: string }
+        row_no: { type: integer, minimum: 1 }
+        column_name: { type: [string, 'null'] }
+    LineGraphNodeV2:
+      type: object
+      required:
+        - node_id
+        - name
+        - node_type
+        - side
+        - sort_order
+        - spatial_group_id
+        - display_order
+        - placement_source
+        - requires_erection
+        - beam_demands
+        - source_refs
+      properties:
+        node_id: { type: string }
+        project_master_workpoint_id: { type: [string, 'null'] }
+        name: { type: string }
+        node_type:
+          type: string
+          enum: [yard, bridge, roadbed, tunnel, culvert, access, connection]
+        side: { type: string, enum: [left, right] }
+        alignment_code:
+          type: [string, 'null']
+          description: 原始里程前缀；不再表示展示线路分组
+        start_mileage_m: { type: [number, 'null'] }
+        end_mileage_m: { type: [number, 'null'] }
+        sort_order: { type: integer, minimum: 0 }
+        spatial_group_id: { type: string }
+        display_order: { type: integer, minimum: 0 }
+        placement_source: { type: string, enum: [explicit, inferred] }
+        requires_erection: { type: boolean }
+        beam_demands: { type: array, items: { type: object } }
+        source_refs: { type: array, items: { type: string } }
+        current_plan_finish_date: { type: [string, 'null'], format: date }
+    LineGraphEdge:
+      type: object
+      required: [edge_id, from_node_id, to_node_id, direction, source, transfer_days]
+      properties:
+        edge_id: { type: string }
+        from_node_id: { type: string }
+        to_node_id: { type: string }
+        direction: { type: string, enum: [forward, reverse, bidirectional] }
+        source: { type: string, enum: [alignment_adjacency, manual_connection] }
+        transfer_days: { type: integer, minimum: 0 }
+        confirmation: { type: [object, 'null'] }
+    SimulationDiagnostic:
+      type: object
+      required: [level, code, message, entity_refs]
+      properties:
+        level: { type: string, enum: [info, warning, error] }
+        code: { type: string }
+        message: { type: string }
+        subject_id: { type: [string, 'null'] }
+        subject_type: { type: [string, 'null'] }
+        entity_refs: { type: array, items: { type: string } }
+        suggestion: { type: [string, 'null'] }
+    LineGraphSnapshotV2:
+      type: object
+      required:
+        - line_graph_id
+        - project_id
+        - project_master_version_id
+        - input_fingerprint
+        - projection_version
+        - status
+        - nodes
+        - edges
+        - diagnostics
+      properties:
+        line_graph_id: { type: string }
+        project_id: { type: string }
+        project_master_version_id: { type: string }
+        input_fingerprint: { type: string }
+        projection_version:
+          type: string
+          const: girder-plan-line-graph/v2
+        status: { type: string, enum: [ready, warning, blocking] }
+        nodes: { type: array, items: { $ref: '#/components/schemas/LineGraphNodeV2' } }
+        edges: { type: array, items: { $ref: '#/components/schemas/LineGraphEdge' } }
+        diagnostics: { type: array, items: { $ref: '#/components/schemas/SimulationDiagnostic' } }
+    BeamYardPlanV2:
+      type: object
+      required:
+        - beam_yard_id
+        - name
+        - alignment_code
+        - mileage_m
+        - production_start_date
+        - capacities
+        - enabled
+      properties:
+        beam_yard_id: { type: string }
+        name: { type: string }
+        deployment_node_id:
+          type: [string, 'null']
+          description: 新方案保存稳定双幅节点；旧方案为空时走唯一兼容匹配
+        alignment_code: { type: string }
+        mileage_m: { type: number }
+        production_start_date: { type: string, format: date }
+        capacities: { type: array, items: { type: object } }
+        enabled: { type: boolean }

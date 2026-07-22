@@ -88,6 +88,39 @@ def test_workpoint_first_resource_fields_are_additive_on_existing_api_schemas() 
     assert "details" in validation_properties
 
 
+def test_ai_resource_assistant_requires_one_target_workpoint_per_new_session() -> None:
+    schemas = app.openapi()["components"]["schemas"]
+    initial_request = schemas["ResourceAssistantInitialRequest"]
+    plan = schemas["ResourceAssistantPlan"]
+
+    assert "target_workpoint_id" in initial_request["required"]
+    assert initial_request["properties"]["target_workpoint_id"]["minLength"] == 1
+    assert {"target_workpoint_id", "target_workpoint_name"} <= plan["properties"].keys()
+    assert "target_workpoint_id" not in plan.get("required", [])
+    assert "target_workpoint_name" not in plan.get("required", [])
+
+
+def test_ai_workpoint_resource_initializer_adds_a_scenario_only_secret_free_contract() -> None:
+    routes = _route_manifest(app)
+    by_operation = {(item["method"], item["path"]): item for item in routes}
+    route = by_operation[("POST", "/api/ai-resource-assistant/initialize-workpoint-resources")]
+    assert route["request_schema"] == {
+        "$ref": "#/components/schemas/AiWorkpointResourceInitializationRequest"
+    }
+    assert route["responses"]["200"]["json_schema"] == {
+        "$ref": "#/components/schemas/AiWorkpointResourceInitializationResponse"
+    }
+
+    schemas = app.openapi()["components"]["schemas"]
+    request_schema = schemas["AiWorkpointResourceInitializationRequest"]
+    response_schema = schemas["AiWorkpointResourceInitializationResponse"]
+    assert request_schema["required"] == ["scenario"]
+    assert set(request_schema["properties"]) == {"scenario"}
+    serialized = json.dumps({"request": request_schema, "response": response_schema}).lower()
+    assert "api_key" not in serialized
+    assert "authorization" not in serialized
+
+
 def test_local_scenario_config_contract_accepts_and_returns_empty_resource_pools() -> None:
     scenario = default_scenario()
     request = LocalScenarioConfigSaveRequest(

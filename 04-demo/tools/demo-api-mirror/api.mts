@@ -307,7 +307,22 @@ type GeneratedScheduleInput = {
   };
   validation: Array<{ level: "info" | "warning" | "error"; message: string; subject_id?: string | null }>;
   source_summary: Record<string, unknown>;
+  solve_scope: {
+    mode: "ALL" | "WORKPOINT";
+    workpoint_id: string | null;
+    workpoint_name: string | null;
+  };
 };
+
+class SolveScopeError extends Error {
+  constructor(
+    readonly workpointId: string | null,
+    message: string,
+    readonly code = "SOLVE_SCOPE_WORKPOINT_INVALID",
+  ) {
+    super(message);
+  }
+}
 
 const CONTINUOUS_BEAM_STRUCTURE_CODE = "castInPlaceContinuousBoxGirder";
 const CONTINUOUS_BEAM_RESOURCE_TYPE = "cast_in_place_continuous_beam_team";
@@ -500,18 +515,22 @@ export default async function handler(req: Request, context: Context) {
       return await importUploadedBridgeParams(req);
     }
     if (endpoint === "generate-schedule-input" && req.method === "POST") {
-      return json(generateScheduleInput(await req.json()));
+      const workpointId = new URL(req.url).searchParams.get("workpoint_id");
+      return json(generateScheduleInput(await req.json(), false, workpointId));
     }
     if (endpoint === "solve-scenario" && req.method === "POST") {
-      return json(solveScenario(await req.json(), false));
+      const workpointId = new URL(req.url).searchParams.get("workpoint_id");
+      return json(solveScenario(await req.json(), false, workpointId));
     }
     if (endpoint === "solve-min-resources" && req.method === "POST") {
       const body = await req.json();
-      return json(solveScenario(body.scenario, true));
+      const workpointId = new URL(req.url).searchParams.get("workpoint_id");
+      return json(solveScenario(body.scenario, true, workpointId));
     }
     if (endpoint === "solve-resource-cost" && req.method === "POST") {
       const body = await req.json();
-      return json(solveResourceCostScenario(body.scenario ?? body));
+      const workpointId = new URL(req.url).searchParams.get("workpoint_id");
+      return json(solveResourceCostScenario(body.scenario ?? body, workpointId));
     }
     if (endpoint === "compare-scenarios" && req.method === "POST") {
       return json(compareScenarios(await req.json()));
@@ -528,6 +547,15 @@ export default async function handler(req: Request, context: Context) {
     }
     return json({ detail: `Unknown API endpoint: /api/${endpoint}` }, 404);
   } catch (error) {
+    if (error instanceof SolveScopeError) {
+      return json({
+        detail: {
+          code: error.code,
+          message: error.message,
+          workpoint_id: error.workpointId,
+        },
+      }, 422);
+    }
     return json({ detail: error instanceof Error ? error.message : String(error) }, 500);
   }
 }
@@ -856,34 +884,39 @@ async function handleGirderPlanSimulation(endpoint: string, req: Request): Promi
 
 function mirrorLineGraph(projectMasterVersionId: string) {
   const nodes = [
-    mirrorNode("R0:unknown", "起点路基", "roadbed", "unknown", 0, false, []),
-    mirrorNode("B1:left", "一号桥·左幅", "bridge", "left", 1000, true, [{ beam_type_id: "T32", beam_type_name: "T32", span_count: 1, beam_count: 8, span_refs: ["B1-left"] }]),
-    mirrorNode("B1:right", "一号桥·右幅", "bridge", "right", 1000, true, [{ beam_type_id: "T32", beam_type_name: "T32", span_count: 1, beam_count: 8, span_refs: ["B1-right"] }]),
-    mirrorNode("T1:unknown", "共用隧道", "tunnel", "unknown", 2000, false, []),
-    mirrorNode("B2:left", "二号桥·左幅", "bridge", "left", 3000, true, [{ beam_type_id: "T40", beam_type_name: "T40", span_count: 1, beam_count: 8, span_refs: ["B2-left"] }]),
-    mirrorNode("B2:right", "二号桥·右幅", "bridge", "right", 3000, true, [{ beam_type_id: "T40", beam_type_name: "T40", span_count: 1, beam_count: 8, span_refs: ["B2-right"] }]),
+    mirrorNode("R0:left", "起点路基·左幅", "roadbed", "left", "ZK", 0, "SG-000", 0, false, []),
+    mirrorNode("R0:right", "起点路基·右幅", "roadbed", "right", "K", 0, "SG-000", 0, false, []),
+    mirrorNode("B1:left:approach_small", "一号桥·左幅·小里程引桥段", "bridge", "left", "ZK", 1000, "SG-001", 1, true, [{ beam_type_id: "T32", beam_type_name: "T32", span_count: 1, beam_count: 4, span_refs: ["B1-left-S1"] }], 1030, "approach_small"),
+    mirrorNode("B1:left:continuous", "一号桥·左幅·连续结构段", "bridge", "left", "ZK", 1030, "SG-001", 1, false, [], 1070, "continuous"),
+    mirrorNode("B1:left:approach_large", "一号桥·左幅·大里程引桥段", "bridge", "left", "ZK", 1070, "SG-001", 1, true, [{ beam_type_id: "T40", beam_type_name: "T40", span_count: 1, beam_count: 4, span_refs: ["B1-left-S3"] }], 1100, "approach_large"),
+    mirrorNode("B1:right:approach_small", "一号桥·右幅·小里程引桥段", "bridge", "right", "K", 1000, "SG-001", 1, true, [{ beam_type_id: "T32", beam_type_name: "T32", span_count: 1, beam_count: 4, span_refs: ["B1-right-S1"] }], 1025, "approach_small"),
+    mirrorNode("B1:right:continuous", "一号桥·右幅·连续结构段", "bridge", "right", "K", 1025, "SG-001", 1, false, [], 1060, "continuous"),
+    mirrorNode("B1:right:approach_large", "一号桥·右幅·大里程引桥段", "bridge", "right", "K", 1060, "SG-001", 1, true, [{ beam_type_id: "T40", beam_type_name: "T40", span_count: 1, beam_count: 4, span_refs: ["B1-right-S3"] }], 1100, "approach_large"),
+    mirrorNode("T1:left", "共用隧道·左幅", "tunnel", "left", "ZK", 2000, "SG-002", 2, false, []),
+    mirrorNode("T1:right", "共用隧道·右幅", "tunnel", "right", "K", 2000, "SG-002", 2, false, []),
+    mirrorNode("B2:left", "二号桥·左幅", "bridge", "left", "ZK", 3000, "SG-003", 3, true, [{ beam_type_id: "T40", beam_type_name: "T40", span_count: 1, beam_count: 8, span_refs: ["B2-left"] }]),
+    mirrorNode("B2:right", "二号桥·右幅", "bridge", "right", "K", 3000, "SG-003", 3, true, [{ beam_type_id: "T40", beam_type_name: "T40", span_count: 1, beam_count: 8, span_refs: ["B2-right"] }]),
   ];
   const edgePairs = [
-    ["R0:unknown", "B1:left"], ["R0:unknown", "B1:right"], ["B1:left", "T1:unknown"], ["B1:right", "T1:unknown"], ["T1:unknown", "B2:left"], ["T1:unknown", "B2:right"],
+    ["R0:left", "B1:left:approach_small"], ["B1:left:approach_small", "B1:left:continuous"], ["B1:left:continuous", "B1:left:approach_large"], ["B1:left:approach_large", "T1:left"], ["T1:left", "B2:left"],
+    ["R0:right", "B1:right:approach_small"], ["B1:right:approach_small", "B1:right:continuous"], ["B1:right:continuous", "B1:right:approach_large"], ["B1:right:approach_large", "T1:right"], ["T1:right", "B2:right"],
   ];
   const edges = edgePairs.map(([from, to], index) => ({ edge_id: `mirror-edge-${index + 1}`, from_node_id: from, to_node_id: to, direction: "bidirectional", source: "alignment_adjacency", transfer_days: 0, confirmation: null }));
-  return { line_graph_id: `lgs-mirror-${stableMirrorHash(projectMasterVersionId)}`, project_id: "demo-project", project_master_version_id: projectMasterVersionId, input_fingerprint: `mirror:${stableMirrorHash(JSON.stringify(nodes))}`, projection_version: "girder-plan-line-graph/v1", status: "ready", nodes, edges, diagnostics: [] };
+  return { line_graph_id: `lgs-mirror-v3-${stableMirrorHash(projectMasterVersionId)}`, project_id: "demo-project", project_master_version_id: projectMasterVersionId, input_fingerprint: `mirror:${stableMirrorHash(JSON.stringify(nodes))}`, projection_version: "girder-plan-line-graph/v3", status: "ready", nodes, edges, diagnostics: [] };
 }
 
-function mirrorNode(node_id: string, name: string, node_type: string, side: string, mileage: number, requires_erection: boolean, beam_demands: any[]) {
-  return { node_id, project_master_workpoint_id: node_id.split(":")[0], name, node_type, side, alignment_code: "A", start_mileage_m: mileage, end_mileage_m: mileage + 100, sort_order: mileage / 100, requires_erection, beam_demands, source_refs: [node_id.split(":")[0]], current_plan_finish_date: null };
+function mirrorNode(node_id: string, name: string, node_type: string, side: string, alignment_code: string, mileage: number, spatial_group_id: string, display_order: number, requires_erection: boolean, beam_demands: any[], end_mileage_m = mileage + 100, bridge_segment_kind: string | null = null) {
+  return { node_id, project_master_workpoint_id: node_id.split(":")[0], name, node_type, bridge_segment_kind, side, alignment_code, start_mileage_m: mileage, end_mileage_m, sort_order: display_order, spatial_group_id, display_order, placement_source: "explicit", requires_erection, beam_demands, source_refs: [node_id.split(":")[0]], current_plan_finish_date: null };
 }
 
 function mirrorYardNodeId(yard: any, graph: any): string | undefined {
+  if (yard.deployment_node_id) return graph.nodes.some((node: any) => node.node_id === yard.deployment_node_id) ? yard.deployment_node_id : undefined;
   const candidates = graph.nodes.filter((node: any) => node.alignment_code === yard.alignment_code
     && Number(node.start_mileage_m) <= Number(yard.mileage_m)
     && Number(yard.mileage_m) <= Number(node.end_mileage_m));
   const exactStart = candidates.filter((node: any) => Number(node.start_mileage_m) === Number(yard.mileage_m));
-  const exactStartPreferred = exactStart.filter((node: any) => node.side === "unknown" && !node.requires_erection);
-  if (exactStartPreferred.length === 1) return exactStartPreferred[0].node_id;
   if (exactStart.length === 1) return exactStart[0].node_id;
-  const preferred = candidates.filter((node: any) => node.side === "unknown" && !node.requires_erection);
-  return (preferred.length === 1 ? preferred[0] : candidates.length === 1 ? candidates[0] : undefined)?.node_id;
+  return candidates.length === 1 ? candidates[0].node_id : undefined;
 }
 
 function mirrorGirderReadiness(scenario: any) {
@@ -891,9 +924,14 @@ function mirrorGirderReadiness(scenario: any) {
   const graph = mirrorLineGraph(scenario.project_master_version_id);
   const required = graph.nodes.filter((item) => item.requires_erection).map((item) => item.node_id);
   const assignments = new Map<string, number>();
+  const nodeById = new Map(graph.nodes.map((item) => [item.node_id, item]));
   for (const route of scenario.route_plans || []) {
     if (!route.confirmed) diagnostics.push(mirrorDiagnostic("ROUTE_ORDER_NOT_CONFIRMED", "route", route.route_plan_id, "人工顺序尚未确认。"));
-    for (const target of route.target_node_ids || []) assignments.set(target, (assignments.get(target) || 0) + 1);
+    for (const target of route.target_node_ids || []) {
+      const node = nodeById.get(target) as any;
+      if (!node?.requires_erection) diagnostics.push(mirrorDiagnostic("ROUTE_TARGET_INVALID", "bridge_side", target, "人工顺序包含无效待架目标。"));
+      assignments.set(target, (assignments.get(target) || 0) + 1);
+    }
   }
   for (const target of required) {
     const count = assignments.get(target) || 0;
@@ -908,9 +946,45 @@ function mirrorGirderReadiness(scenario: any) {
     diagnostics,
     expanded_routes: Object.fromEntries((scenario.route_plans || []).map((route) => {
       const yard = scenario.beam_yards?.find((item) => item.beam_yard_id === route.beam_yard_id);
-      return [route.route_plan_id, [yard ? mirrorYardNodeId(yard, graph) : undefined, ...(route.target_node_ids || [])].filter(Boolean)];
+      const start = yard ? mirrorYardNodeId(yard, graph) : undefined;
+      return [route.route_plan_id, mirrorExpandedRoute(graph, start, route.target_node_ids || [])];
     })),
   };
+}
+
+function mirrorExpandedRoute(graph: any, start: string | undefined, targets: string[]): string[] {
+  if (!start) return targets;
+  const expanded = [start];
+  let previous = start;
+  for (const target of targets) {
+    const path = mirrorShortestPath(graph, previous, target);
+    expanded.push(...(path.length > 1 ? path.slice(1) : [target]));
+    previous = target;
+  }
+  return expanded;
+}
+
+function mirrorShortestPath(graph: any, from: string, to: string): string[] {
+  if (from === to) return [from];
+  const adjacency = new Map<string, string[]>();
+  for (const edge of graph.edges || []) {
+    adjacency.set(edge.from_node_id, [...(adjacency.get(edge.from_node_id) || []), edge.to_node_id]);
+    adjacency.set(edge.to_node_id, [...(adjacency.get(edge.to_node_id) || []), edge.from_node_id]);
+  }
+  const queue: string[][] = [[from]];
+  const visited = new Set<string>([from]);
+  while (queue.length) {
+    const path = queue.shift()!;
+    const current = path[path.length - 1];
+    for (const next of adjacency.get(current) || []) {
+      if (visited.has(next)) continue;
+      const candidate = [...path, next];
+      if (next === to) return candidate;
+      visited.add(next);
+      queue.push(candidate);
+    }
+  }
+  return [];
 }
 
 function mirrorGirderRun(scenario: any, readiness: any) {
@@ -1565,15 +1639,36 @@ function resourceUnboundedReason(poolModel: ResourcePool | undefined): string {
   return "不可用";
 }
 
-function generateScheduleInput(scenario: ScenarioInput, useMaxResources = false): GeneratedScheduleInput {
-  const built = buildTasks(scenario);
+function generateScheduleInput(
+  scenario: ScenarioInput,
+  useMaxResources = false,
+  workpointId: string | null = null,
+): GeneratedScheduleInput {
+  const solveScope = resolveSolveScope(scenario, workpointId);
+  const scopedScenario = solveScope.mode === "ALL"
+    ? scenario
+    : {
+      ...scenario,
+      project: {
+        ...scenario.project,
+        bridges: scenario.project.bridges.filter((bridge) => bridge.id === solveScope.workpoint_id),
+      },
+    };
+  const built = buildTasks(scopedScenario);
   const resourceWarnings: GeneratedScheduleInput["validation"] = [];
   const tasks = applyRequiredResourceTypes(built.tasks, scenario.resource_pools, resourceWarnings, useMaxResources);
   const precedenceLinks = [
     ...buildPrecedenceLinks(tasks, scenario.logic_rules),
     ...built.generatedLinks,
   ];
-  const resources = expandResources(scenario.resource_pools, useMaxResources);
+  const resources = expandResources(scenario.resource_pools, useMaxResources).filter((resource) => (
+    solveScope.mode === "ALL"
+    || !resource.eligible_workpoint_ids?.length
+    || resource.eligible_workpoint_ids.includes(solveScope.workpoint_id ?? "")
+  ));
+  const milestones = solveScope.mode === "ALL"
+    ? scenario.milestones
+    : scenario.milestones.filter((milestone) => tasksForMilestone(milestone, tasks as ScheduledTask[]).length > 0);
   const scheduleStrategy = normalizeScheduleStrategy(scenario.schedule_strategy);
   return {
     schedule_input: {
@@ -1582,7 +1677,7 @@ function generateScheduleInput(scenario: ScenarioInput, useMaxResources = false)
       tasks,
       precedence_links: precedenceLinks,
       resources,
-      milestones: scenario.milestones,
+      milestones,
       schedule_strategy: scheduleStrategy,
       time_limit_seconds: scenario.time_limit_seconds,
     },
@@ -1595,13 +1690,26 @@ function generateScheduleInput(scenario: ScenarioInput, useMaxResources = false)
       },
     ],
     source_summary: {
-      bridge_count: scenario.project.bridges.length,
+      bridge_count: solveScope.mode === "ALL" ? scenario.project.bridges.length : 1,
       process_count: scenario.process_library.length,
       resource_pool_count: scenario.resource_pools.length,
-      milestone_count: scenario.milestones.length,
+      milestone_count: milestones.length,
       continuous_beam_task_count: tasks.filter((task) => task.structure_type === "continuous_beam").length,
     },
+    solve_scope: solveScope,
   };
+}
+
+function resolveSolveScope(scenario: ScenarioInput, workpointId: string | null) {
+  if (workpointId === null) {
+    return { mode: "ALL" as const, workpoint_id: null, workpoint_name: null };
+  }
+  const normalizedId = workpointId.trim();
+  const bridge = scenario.project.bridges.find((item) => item.id === normalizedId);
+  if (!normalizedId || !bridge || (bridge.workpoint_type && bridge.workpoint_type !== "bridge")) {
+    throw new SolveScopeError(workpointId, `求解工点 ${normalizedId || workpointId} 不存在、不属于当前项目版本或不是桥梁工点。`);
+  }
+  return { mode: "WORKPOINT" as const, workpoint_id: bridge.id, workpoint_name: bridge.name };
 }
 
 function buildTasks(scenario: ScenarioInput): { tasks: Task[]; generatedLinks: PrecedenceLink[] } {
@@ -2732,8 +2840,8 @@ function expandResources(pools: ResourcePool[], useMaxResources: boolean): Resou
   });
 }
 
-function solveScenario(scenario: ScenarioInput, useMaxResources: boolean) {
-  const generated = generateScheduleInput(scenario, useMaxResources);
+function solveScenario(scenario: ScenarioInput, useMaxResources: boolean, workpointId: string | null = null) {
+  const generated = generateScheduleInput(scenario, useMaxResources, workpointId);
   const result = schedule(generated, useMaxResources ? "max_resources" : "current_resources");
   const diagnostics = [
     ...generated.validation,
@@ -2760,8 +2868,8 @@ function solveScenario(scenario: ScenarioInput, useMaxResources: boolean) {
   };
 }
 
-function solveResourceCostScenario(scenario: ScenarioInput) {
-  const solved = solveScenario(scenario, false);
+function solveResourceCostScenario(scenario: ScenarioInput, workpointId: string | null = null) {
+  const solved = solveScenario(scenario, false, workpointId);
   const usedResourceTypes = new Set(
     solved.generated.schedule_input.tasks.flatMap((task) => task.compatible_resource_types ?? []),
   );
@@ -3477,6 +3585,13 @@ function componentPileNo(item: ComponentModel) {
 }
 
 function compareScenarios(body: { results?: Array<ReturnType<typeof solveScenario>> }) {
+  if ((body.results ?? []).some((item) => item.generated.solve_scope.mode !== "ALL")) {
+    throw new SolveScopeError(
+      null,
+      "单工点试算结果不能保存为全项目方案或参与全项目方案比较。",
+      "SOLVE_SCOPE_COMPARISON_NOT_ALLOWED",
+    );
+  }
   const summaries = (body.results ?? []).map((item) => {
     const penalty = item.milestone_results.reduce((sum, milestoneModel) => sum + milestoneModel.penalty, 0);
     const score = (item.result.objective_days ?? 0) + penalty;

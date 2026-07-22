@@ -42,15 +42,27 @@ export function GirderPlanSimulationPanel({ projectId }: { projectId: string }) 
     let active = true;
     setBusy("loading");
     setError(null);
-    Promise.all([listProjectMasterVersions(projectId, 1, 200), getCurrentProjectMasterVersion(projectId), listGirderPlanScenarios(projectId)])
-      .then(async ([versionPage, current, savedScenarios]) => {
+    const scenariosPromise = listGirderPlanScenarios(projectId);
+    Promise.all([listProjectMasterVersions(projectId, 1, 200), getCurrentProjectMasterVersion(projectId)])
+      .then(async ([versionPage, current]) => {
         if (!active) return;
         const confirmed = versionPage.items.filter((item) => item.status === "confirmed");
         setProjectVersions(confirmed.length ? confirmed : [current]);
-        setScenarios(savedScenarios);
         setProjectVersionId(current.version_id);
-        const loadedGraph = await getGirderPlanLineGraph(current.version_id);
-        if (active) setGraph(loadedGraph);
+        const [graphResult, scenariosResult] = await Promise.allSettled([
+          getGirderPlanLineGraph(current.version_id),
+          scenariosPromise,
+        ]);
+        if (!active) return;
+        if (graphResult.status === "fulfilled") setGraph(graphResult.value);
+        else setGraph(null);
+        if (scenariosResult.status === "fulfilled") setScenarios(scenariosResult.value);
+        else setScenarios([]);
+        const failures = [
+          graphResult.status === "rejected" ? `线路图加载失败：${messageOf(graphResult.reason)}` : null,
+          scenariosResult.status === "rejected" ? `策划方案加载失败：${messageOf(scenariosResult.reason)}` : null,
+        ].filter((item): item is string => Boolean(item));
+        setError(failures.length ? failures.join("；") : null);
       })
       .catch((reason) => active && setError(messageOf(reason)))
       .finally(() => active && setBusy(null));
@@ -218,7 +230,7 @@ export function GirderPlanSimulationPanel({ projectId }: { projectId: string }) 
       {error && <div className="girder-sim-notice error">{error}<button type="button" onClick={() => setReloadToken((value) => value + 1)}>重试</button></div>}
       {selectedVersion && <div className="girder-sim-version-note">当前项目版本：{selectedVersion.version_id}｜内容指纹 {selectedVersion.content_fingerprint}</div>}
       {scenario?.status === "stale" && <div className="girder-sim-notice warning">方案已失效：{scenario.stale_reason ?? "项目版本或方案输入已经变化"}。请基于当前输入保存新版本并重新计算。</div>}
-      <LineGraphView graph={graph} controls={run?.workpoint_controls} onConfirmConnection={confirmConnection} />
+      <LineGraphView graph={graph} controls={run?.workpoint_controls} yards={draft.beamYards} onConfirmConnection={confirmConnection} />
       {draft.connectionOverrides.length > 0 && <div className="girder-sim-note">已维护 {draft.connectionOverrides.length} 条方案级人工连接，保存方案后由后端重新生成线路图指纹。</div>}
       <YardPlanEditor graph={graph} yards={draft.beamYards} lines={draft.erectionLines} onYardsChange={(beamYards) => setDraft((current) => ({ ...current, beamYards }))} onLinesChange={(erectionLines) => setDraft((current) => ({ ...current, erectionLines }))} />
       <RouteSequenceEditor graph={graph} yards={draft.beamYards} lines={draft.erectionLines} routes={draft.routePlans} readiness={readiness} onChange={(routePlans) => setDraft((current) => ({ ...current, routePlans }))} />
@@ -245,5 +257,9 @@ function NumberParameter({ label, value, onChange }: { label: string; value: num
 }
 
 function messageOf(reason: unknown): string {
-  return reason instanceof Error ? reason.message : String(reason);
+  const message = reason instanceof Error ? reason.message : String(reason);
+  if (/Unexpected token\s*['"]?<['"]?|<!doctype|not valid JSON/i.test(message)) {
+    return "后端服务尚未加载架梁计划推演接口，请重启后端后重试";
+  }
+  return message;
 }

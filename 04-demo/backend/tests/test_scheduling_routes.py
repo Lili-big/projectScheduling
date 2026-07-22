@@ -27,6 +27,66 @@ def test_scheduling_router_exposes_demo_and_task_generation() -> None:
     assert generated["schedule_input"]["tasks"]
 
 
+def test_scheduling_router_scopes_generation_by_query_without_changing_request_body() -> None:
+    scenario_status, scenario = json_request(app, "GET", "/api/demo-scenario")
+    assert scenario_status == 200
+    workpoint_id = scenario["project"]["bridges"][0]["id"]
+
+    status, generated = json_request(
+        app,
+        "POST",
+        f"/api/generate-schedule-input?workpoint_id={workpoint_id}",
+        scenario,
+    )
+
+    assert status == 200
+    assert generated["solve_scope"]["mode"] == "WORKPOINT"
+    assert generated["solve_scope"]["workpoint_id"] == workpoint_id
+    assert {task["bridge_id"] for task in generated["schedule_input"]["tasks"]} == {workpoint_id}
+
+
+def test_all_scheduling_routes_use_the_same_workpoint_scope() -> None:
+    _, scenario = json_request(app, "GET", "/api/demo-scenario")
+    workpoint_id = scenario["project"]["bridges"][0]["id"]
+    requests = [
+        ("/api/generate-schedule-input", scenario),
+        ("/api/solve-scenario", scenario),
+        ("/api/solve-min-resources", {"scenario": scenario, "fallback_target_days": 5}),
+        ("/api/solve-resource-cost", {"scenario": scenario, "fallback_target_days": 5}),
+    ]
+
+    for path, payload in requests:
+        status, response = json_request(
+            app,
+            "POST",
+            f"{path}?workpoint_id={workpoint_id}",
+            payload,
+        )
+        assert status == 200, path
+        assert response["solve_scope" if path == "/api/generate-schedule-input" else "generated"]["mode" if path == "/api/generate-schedule-input" else "solve_scope"] == (
+            "WORKPOINT" if path == "/api/generate-schedule-input" else {
+                "mode": "WORKPOINT",
+                "workpoint_id": workpoint_id,
+                "workpoint_name": scenario["project"]["bridges"][0]["name"],
+            }
+        )
+
+
+def test_scheduling_router_rejects_unknown_workpoint_without_full_project_fallback() -> None:
+    _, scenario = json_request(app, "GET", "/api/demo-scenario")
+
+    status, response = json_request(
+        app,
+        "POST",
+        "/api/solve-scenario?workpoint_id=WP-MISSING",
+        scenario,
+    )
+
+    assert status == 422
+    assert response["detail"]["code"] == "SOLVE_SCOPE_WORKPOINT_INVALID"
+    assert response["detail"]["workpoint_id"] == "WP-MISSING"
+
+
 def test_scheduling_router_keeps_validation_error_shape() -> None:
     status, response = json_request(app, "POST", "/api/solve-min-resources", {})
     assert status == 422
