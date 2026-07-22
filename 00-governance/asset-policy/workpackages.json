@@ -31,6 +31,13 @@
       "purpose": "垫丰武 TJ08 标调研分析总结"
     },
     {
+      "id": "2026-07-infrastructure-planning-validation-report",
+      "stage": "01-customer-validation",
+      "path": "01-customer-validation/2026年7月-基建策划版本验证汇报",
+      "status": "active",
+      "purpose": "2026年7月基建策划版本的AI施工策划与多方案比选验证汇报"
+    },
+    {
       "id": "jiangluyi-tj01",
       "stage": "01-customer-validation",
       "path": "01-customer-validation/江泸宜01标",

@@ -1,19 +1,23 @@
 {
   "id": "dianfengwu-tj03",
   "stage": "01-customer-validation",
-  "purpose": "保存垫丰武 TJ03 历史产品验证总结及完整性索引。",
-  "status": "historical",
-  "inputs": [],
+  "purpose": "统一保存垫丰武 TJ03 标的客户资料、历史验证总结和当前项目验证报告。",
+  "status": "active",
+  "inputs": [
+    "customer-materials/2026Q3-0721上午-垫丰武TJ03标-总工技术员及进度统计人员-会议录音文字记录-进度管理.docx",
+    "customer-materials/2026Q3-0721上午-垫丰武TJ03标-总工技术员及进度统计人员-会议录音文字记录-AI工地助手.docx"
+  ],
   "entrypoints": [],
   "results": [
+    "validation-results/2026Q3-0721上午-垫丰武TJ03标-总工技术员及进度统计人员-项目验证报告.docx",
     "validation-results/2026Q2-5月产品验证-垫丰武TJ03标-总工及项目副经理-验证总结.pdf",
     "validation-results/2026Q2-5月产品验证-垫丰武TJ03标-验证总结-20260507.pdf",
     "validation-results/2026Q2-5月产品验证-垫丰武TJ03标-验证总结-20260509.pdf",
     "validation-results/2026Q2-5月产品验证-垫丰武TJ03标-工程部-验证总结-20260513.pdf",
     "validation-results/来源与完整性索引.md"
   ],
-  "owner": "L01｜需求发现与验证闭环（历史客户验证）",
+  "owner": "L01｜需求发现与验证闭环（垫丰武 TJ03 标验证）",
   "tracking_policy": "tracked",
-  "retention_policy": "正式验证总结和完整性索引进入 Git；迁移来源名称映射保持 local-only；替换前核对 SHA-256。",
+  "retention_policy": "正式客户资料、验证总结、验证报告和完整性索引进入 Git；迁移来源名称映射保持 local-only；客户材料仅允许推送到私有远端。",
   "related_workpackages": ["dianfengwu-tj08"]
 }

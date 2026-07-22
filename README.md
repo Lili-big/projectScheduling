@@ -1,22 +1,5 @@
 # 桥梁施工排程产品全生命周期工作区
 
-本仓库不再只是 Demo 代码集合，而是覆盖前期需求调研、过程方案分析、需求文档设计、Demo 实现、客户验证和正式交付的产品全生命周期工作区。FastAPI、React 和 OR-Tools CP-SAT Demo 是其中的实现与验证环节。
-
-根目录按“阶段”表达业务所有权；每个可独立运行的专项再按工作包组织输入、脚本、成果与保留策略。项目仍适合产品验证、算法验证和研发交底；生产级用户权限、审计、项目隔离、正式数据接入与高可用不在当前实现范围。
-
-## 生命周期导航
-
-| 阶段 | 回答的问题 | 主要入口 |
-| --- | --- | --- |
-| [`00-governance`](./00-governance/README.md) | 仓库如何治理、归类、校验和回退？ | 架构、资产策略、治理工具、迁移历史 |
-| [`01-customer-validation`](./01-customer-validation/README.md) | 客户资料说明什么，产品判断是否成立？ | 客户资料、验证计划、验证结果 |
-| [`02-solution-analysis`](./02-solution-analysis/README.md) | 有哪些方案，为什么选择当前路径？ | 产品方向、融合方案、MVP、决策 |
-| [`03-requirements`](./03-requirements/README.md) | 已确认口径如何变成可验收需求？ | PRD、算法规则、Spec Kit 规格 |
-| [`04-demo`](./04-demo/README.md) | 如何实现并运行 Demo？ | 后端、前端、样例、独立展示工具 |
-| [`06-delivery`](./06-delivery/README.md) | 哪些成果可正式交付和传播？ | 交付物、案例总结、演示材料 |
-
-最短查找路径：先选阶段，再打开阶段 README；独立专项继续进入其 `workpackage.json` 和 README。全仓工作包索引见 [`workpackages.json`](./00-governance/asset-policy/workpackages.json)。
-
 ## 快速启动
 
 环境基线：Docker 使用 Python 3.12，Netlify 使用 Node 22。本地推荐 Python 3.12 与 Node 22。
@@ -48,6 +31,22 @@ npm.cmd run frontend:dev
 ```
 
 开发页面在 `http://127.0.0.1:5173/`；Vite 将 `/api` 代理到 `127.0.0.1:8000`。
+本仓库不再只是 Demo 代码集合，而是覆盖前期需求调研、过程方案分析、需求文档设计、Demo 实现、客户验证和正式交付的产品全生命周期工作区。FastAPI、React 和 OR-Tools CP-SAT Demo 是其中的实现与验证环节。
+
+根目录按“阶段”表达业务所有权；每个可独立运行的专项再按工作包组织输入、脚本、成果与保留策略。项目仍适合产品验证、算法验证和研发交底；生产级用户权限、审计、项目隔离、正式数据接入与高可用不在当前实现范围。
+
+## 生命周期导航
+
+| 阶段 | 回答的问题 | 主要入口 |
+| --- | --- | --- |
+| [`00-governance`](./00-governance/README.md) | 仓库如何治理、归类、校验和回退？ | 架构、资产策略、治理工具、迁移历史 |
+| [`01-customer-validation`](./01-customer-validation/README.md) | 客户资料说明什么，产品判断是否成立？ | 客户资料、验证计划、验证结果 |
+| [`02-solution-analysis`](./02-solution-analysis/README.md) | 有哪些方案，为什么选择当前路径？ | 产品方向、融合方案、MVP、决策 |
+| [`03-requirements`](./03-requirements/README.md) | 已确认口径如何变成可验收需求？ | PRD、算法规则、Spec Kit 规格 |
+| [`04-demo`](./04-demo/README.md) | 如何实现并运行 Demo？ | 后端、前端、样例、独立展示工具 |
+| [`06-delivery`](./06-delivery/README.md) | 哪些成果可正式交付和传播？ | 交付物、案例总结、演示材料 |
+
+最短查找路径：先选阶段，再打开阶段 README；独立专项继续进入其 `workpackage.json` 和 README。全仓工作包索引见 [`workpackages.json`](./00-governance/asset-policy/workpackages.json)。
 
 ## 当前能力
 

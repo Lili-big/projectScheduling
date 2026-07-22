@@ -25,7 +25,7 @@
 ## 工作包索引
 
 - `lifecycle-workspace-governance`：当前仓库生命周期重构，规格位于 `../03-requirements/specs/045-lifecycle-workspace-governance/`。
-- [全仓工作包注册表](asset-policy/workpackages.json)：列出 12 个独立工作包的阶段、路径、状态和用途。
+- [全仓工作包注册表](asset-policy/workpackages.json)：列出 13 个独立工作包的阶段、路径、状态和用途。
 
 ```text
 01-customer-validation -> 泸古1标 / 中铁23局集团及公司 / 垫丰武TJ03标 / 垫丰武TJ08标 / 江泸宜01标 / 沪渝垫长段三分部 / json-schedule-review / ai-assistants

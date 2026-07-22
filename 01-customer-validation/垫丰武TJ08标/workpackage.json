@@ -1,18 +1,23 @@
 {
   "id": "dianfengwu-tj08",
   "stage": "01-customer-validation",
-  "purpose": "保存垫丰武 TJ08 标五月集中调研分析总结。",
-  "status": "historical",
-  "inputs": [],
+  "purpose": "统一保存垫丰武 TJ08 标及延沧河大桥单位工程的客户资料、历史调研总结和当前验证报告。",
+  "status": "active",
+  "inputs": [
+    "customer-materials/2026Q3-0720上午-延沧河大桥-总工及工程部长-会议录音文字记录-1200.docx",
+    "customer-materials/2026Q3-0720上午-延沧河大桥-总工及工程部长-会议录音文字记录-1229.docx",
+    "customer-materials/2026Q3-0720上午-延沧河大桥-总工及工程部长-会议录音文字记录-1250.docx"
+  ],
   "entrypoints": [],
   "results": [
+    "validation-results/2026Q3-0720上午-延沧河大桥-总工及工程部长-项目验证报告.docx",
     "validation-results/2026Q2-5月集中调研-垫丰武TJ08标-项目总工-分析总结.pdf",
     "validation-results/2026Q2-5月集中调研-垫丰武TJ08标-延仓河大桥工区长-分析总结-20260525.pdf",
     "validation-results/2026Q2-5月集中调研-垫丰武TJ08标-延仓河大桥工程部长-分析总结-20260525.pdf",
     "validation-results/来源与完整性索引.md"
   ],
-  "owner": "L01｜需求发现与验证闭环（垫丰武 TJ08 标调研）",
+  "owner": "L01｜需求发现与验证闭环（垫丰武 TJ08 标及延沧河大桥验证）",
   "tracking_policy": "tracked",
-  "retention_policy": "正式分析总结和完整性索引进入 Git；迁移来源名称映射保持 local-only；替换前核对 SHA-256。",
+  "retention_policy": "正式客户资料、分析总结、验证报告和完整性索引进入 Git；迁移来源名称映射保持 local-only；客户材料仅允许推送到私有远端。",
   "related_workpackages": ["dianfengwu-tj03"]
 }
