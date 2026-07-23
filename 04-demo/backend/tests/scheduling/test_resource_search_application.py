@@ -57,8 +57,23 @@ def test_minimum_resource_search_can_recommend_below_current_quantity() -> None:
     diagnostics = solved.result.stats["resource_scope_diagnostics"]["groups"][0]
     assert solved.result.status in {"OPTIMAL", "FEASIBLE"}
     assert recommendation["recommended_quantity"] == 2
+    assert recommendation["current_quantity"] == 3
+    assert recommendation["scope_mode"] == "PROJECT_SHARED"
+    assert recommendation["eligible_workpoint_ids"] == [WORKPOINT_A, WORKPOINT_B]
+    assert solved.result.stats["candidate_makespan_days"] == 5
     assert diagnostics["current_quantity"] == 3
     assert diagnostics["recommended_quantity"] == 2
+    verification = solved.result.stats["minimum_resource_verification"]
+    assert solved.result.stats["global_search_call_count"] == 1
+    assert verification["candidate_found"] is True
+    assert verification["candidate_verified"] is True
+    assert verification["detail_solve_attempted"] is True
+    assert verification["detail_solver_call_count"] == 1
+    assert verification["retry_attempted"] is False
+    assert solved.result.stats["capacity_precheck_status"] == "not_run"
+    assert solved.result.stats["balanced_reoptimization_status"] == "not_run"
+    assert solved.result.stats["unbalanced_reoptimization_status"] == "not_run"
+    assert solved.result.stats["reoptimization_attempts"] == []
 
 
 def test_resource_cost_search_range_is_quantity_to_max_for_each_effective_pool() -> None:

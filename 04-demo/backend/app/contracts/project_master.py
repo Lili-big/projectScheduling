@@ -95,6 +95,42 @@ class ProjectMasterWorkpoint(BaseModel):
     source: SourceEvidence | None = None
 
 
+class TaskViewDisplayMapRequest(BaseModel):
+    workpoint_ids: list[str] = Field(default_factory=list, max_length=500)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_oversized_raw_request(cls, value: Any) -> Any:
+        if isinstance(value, dict) and isinstance(value.get("workpoint_ids"), list):
+            if len(value["workpoint_ids"]) > 500:
+                raise ValueError("任务视图显示映射一次最多请求 500 个工点。")
+        return value
+
+    @field_validator("workpoint_ids")
+    @classmethod
+    def normalize_workpoint_ids(cls, values: list[str]) -> list[str]:
+        return sorted({value.strip() for value in values if value.strip()})
+
+
+class TaskViewDisplayWorkSection(BaseModel):
+    work_section_id: str
+    work_section_name: str | None = None
+    side: StructureSide
+    sort_order: int = Field(default=0, ge=0)
+
+
+class TaskViewDisplayWorkpoint(BaseModel):
+    workpoint_id: str
+    workpoint_name: str
+    sort_order: int = Field(default=0, ge=0)
+    work_sections: list[TaskViewDisplayWorkSection] = Field(default_factory=list)
+
+
+class TaskViewDisplayMapResponse(BaseModel):
+    project_data_version_id: str
+    workpoints: list[TaskViewDisplayWorkpoint] = Field(default_factory=list)
+
+
 class ProjectMasterRoutePlacement(BaseModel):
     placement_id: str
     workpoint_id: str

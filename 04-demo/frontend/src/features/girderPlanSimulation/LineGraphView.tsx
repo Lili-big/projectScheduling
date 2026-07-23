@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { LandPlot, Route, Warehouse, Waypoints } from "lucide-react";
+import { LandPlot, Warehouse, Waypoints } from "lucide-react";
 import type { BeamYardPlan, LineGraphNode, LineGraphSnapshot, WorkpointDeliveryControl } from "../../contracts";
 import { diagnosticClass, diagnosticLabel, focusDiagnostic, yardNodeId } from "./adapter";
 
@@ -12,18 +12,27 @@ type SpatialGroupLayout = {
   widthPx: number;
 };
 
+type TrackDefinition = {
+  side: "left" | "right";
+  label: string;
+  prefix: "ZK" | "K";
+};
+
+type BranchRoute = {
+  prefix: string;
+  nodes: LineGraphNode[];
+};
+
 export function LineGraphView({
   graph,
   controls = [],
   yards = [],
-  onConfirmConnection,
 }: {
   graph: LineGraphSnapshot | null;
   controls?: WorkpointDeliveryControl[];
   yards?: BeamYardPlan[];
-  onConfirmConnection?: (fromNodeId: string, toNodeId: string) => void;
 }) {
-  const [connectionNodes, setConnectionNodes] = useState<string[]>([]);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const controlByNode = useMemo(() => new Map(controls.map((item) => [item.node_id, item])), [controls]);
   const layout = useMemo(() => {
     const grouped = new Map<string, { displayOrder: number; nodes: LineGraphNode[] }>();
@@ -58,13 +67,13 @@ export function LineGraphView({
     });
   }, [graph]);
   const trackStyle = useMemo(() => {
-    const widths = layout.map((group) => `minmax(34px, ${group.widthPx}fr)`);
+    const widths = layout.map((group) => `minmax(26px, ${group.widthPx}fr)`);
     return {
       gridTemplateColumns: widths.join(" "),
-      minWidth: `${layout.length * 34}px`,
+      minWidth: `${layout.length * 26}px`,
     };
   }, [layout]);
-  const tracks = [
+  const tracks: TrackDefinition[] = [
     { side: "left" as const, label: "左幅", prefix: "ZK" },
     { side: "right" as const, label: "右幅", prefix: "K" },
   ];
@@ -77,12 +86,9 @@ export function LineGraphView({
     }
     return grouped;
   }, [graph, yards]);
+  const selectedNode = graph?.nodes.find((node) => node.node_id === selectedNodeId) ?? null;
 
   if (!graph) return <div className="girder-sim-empty">请选择已确认项目主数据版本以生成线路图。</div>;
-
-  function toggleConnectionNode(nodeId: string) {
-    setConnectionNodes((current) => current.includes(nodeId) ? current.filter((item) => item !== nodeId) : [...current.slice(-1), nodeId]);
-  }
 
   return (
     <section className="girder-sim-card" aria-label="项目线路图">
@@ -100,10 +106,12 @@ export function LineGraphView({
       )}
       <div className="girder-sim-line-legend" aria-label="线路图图例">
         <LegendItem type="roadbed" label="路基" />
-        <LegendItem type="bridge" label="桥梁" />
+        <LegendItem type="bridge" label="待架桥梁（引桥段）" />
+        <span className="girder-sim-legend-item continuous"><span className="girder-sim-legend-line continuous" />连续结构（仅通行）</span>
         <LegendItem type="tunnel" label="隧道" />
         <LegendItem type="connection" label="互通/连接" />
         <LegendItem type="yard" label="梁场" />
+        {selectedNode && <span className="girder-sim-selected-summary" title={selectedNode.name}>已选：{workpointDisplayName(selectedNode)}｜{segmentRoleLabel(selectedNode)}</span>}
         <span className="girder-sim-scale-note">右幅 K 里程主轴｜路基压缩、桥隧增强显示</span>
       </div>
       {layout.length === 0 ? <div className="girder-sim-empty">当前版本没有可展示的分幅线路关系。</div> : (
@@ -128,70 +136,115 @@ export function LineGraphView({
               <strong><span>{track.label}</span><small>{track.prefix}</small></strong>
               <div className="girder-sim-line-track" style={trackStyle}>
                 {layout.map((group) => {
-                  const nodes = group.nodes.filter((node) => node.side === track.side);
-                  const deployedYards = nodes.flatMap((node) => yardsByNode.get(node.node_id) ?? []);
+                  const sideNodes = group.nodes.filter((node) => node.side === track.side);
+                  const mainlineNodes = sideNodes.filter((node) => isMainlineNode(node, track));
+                  const groupedBranches = branchRoutes(sideNodes, track);
+                  const deployedYards = sideNodes.flatMap((node) => yardsByNode.get(node.node_id) ?? []);
                   return (
-                    <div className="girder-sim-node-slot" key={`${track.side}-${group.spatialGroupId}`} data-spatial-group-id={group.spatialGroupId}>
+                    <div className={`girder-sim-node-slot ${mainlineNodes.some((node) => node.bridge_segment_kind != null) ? "has-segments" : ""}`} key={`${track.side}-${group.spatialGroupId}`} data-spatial-group-id={group.spatialGroupId}>
                       <div className="girder-sim-node-labels">
-                        {nodes.length === 0 ? <span className="girder-sim-slot-empty">该幅暂无工点</span> : nodes.map((node, nodeIndex) => {
+                        {mainlineNodes.map((node, nodeIndex) => {
                           const control = controlByNode.get(node.node_id);
-                          const position = nodePositionPercent(node, nodes);
-                          const lane = labelLane(group.displayOrder, nodeIndex);
+                          const position = nodePositionPercent(node, mainlineNodes);
+                          const lane = labelLane(group.displayOrder, nodeIndex, mainlineNodes.length);
                           return (
-                            <button
-                              type="button"
+                            <span
                               key={node.node_id}
                               data-entity-id={node.node_id}
-                              className={`girder-sim-node-label lane-${lane} ${node.node_type} ${node.bridge_segment_kind ?? "whole"} ${control?.risk_status ?? ""} ${connectionNodes.includes(node.node_id) ? "selected" : ""}`}
+                              className={`girder-sim-node-label lane-${lane} ${node.node_type} ${node.bridge_segment_kind ?? "whole"} ${control?.risk_status ?? ""} ${selectedNodeId === node.node_id ? "selected" : ""}`}
                               style={{ left: `${position.center}%` }}
-                              title={`${node.name}｜${node.node_id}｜${formatMileage(node)}`}
-                              onClick={() => toggleConnectionNode(node.node_id)}
+                              title={node.name}
                             >
-                              <span>{node.name}</span>
-                              <small><b>{node.alignment_code ?? "缺前缀"}</b> {formatMileageRange(node)}{control && `｜最晚 ${control.latest_delivery_date}`}</small>
-                              {control && <em>最晚 {control.latest_delivery_date}</em>}
-                            </button>
+                              <span>{workpointDisplayName(node)}</span>
+                            </span>
                           );
                         })}
                       </div>
                       <div className="girder-sim-track-node">
-                        {nodes.map((node) => {
-                          const position = nodePositionPercent(node, nodes);
-                          const className = `girder-sim-track-span ${node.node_type} ${node.bridge_segment_kind ?? "whole"} ${connectionNodes.includes(node.node_id) ? "selected" : ""}`;
-                          return isLineOnlyNode(node.node_type) ? (
+                        {mainlineNodes.map((node) => {
+                          const position = nodePositionPercent(node, mainlineNodes);
+                          return (
                             <button
                               type="button"
-                              aria-label={`${node.name} ${formatMileageRange(node)}`}
-                              className={className}
+                              aria-pressed={selectedNodeId === node.node_id}
+                              aria-label={`${node.name}，${segmentRoleLabel(node)}`}
+                              className={`girder-sim-track-span ${node.node_type} ${node.bridge_segment_kind ?? "whole"} ${selectedNodeId === node.node_id ? "selected" : ""}`}
                               data-entity-id={`${node.node_id}:segment`}
+                              data-segment-kind={node.bridge_segment_kind ?? undefined}
                               key={`span-${node.node_id}`}
                               style={{ left: `${position.left}%`, width: `${position.width}%` }}
-                              title={`${node.name}｜${formatMileageRange(node)}`}
-                              onClick={() => toggleConnectionNode(node.node_id)}
-                            />
-                          ) : (
-                            <span
-                              aria-hidden="true"
-                              className={className}
-                              key={`span-${node.node_id}`}
-                              style={{ left: `${position.left}%`, width: `${position.width}%` }}
+                              title={`${node.name}｜${formatMileageRange(node)}｜${segmentRoleLabel(node)}`}
+                              onClick={() => setSelectedNodeId((current) => current === node.node_id ? null : node.node_id)}
                             />
                           );
                         })}
-                        {nodes.filter((node) => !isLineOnlyNode(node.node_type)).map((node) => {
-                          const position = nodePositionPercent(node, nodes);
+                        {mainlineNodes.filter((node) => !isLineOnlyNode(node.node_type)).map((node) => {
+                          const position = nodePositionPercent(node, mainlineNodes);
                           return <span className={`girder-sim-track-marker ${node.node_type}`} key={node.node_id} style={{ left: `${position.center}%` }}><NodeTypeIcon type={node.node_type} /></span>;
                         })}
                       </div>
-                      <div className="girder-sim-yard-markers">
+                      {groupedBranches.length > 0 && (
+                        <div className="girder-sim-branch-layer" aria-label={`${track.label}互通支线`}>
+                          {groupedBranches.map((branch, branchIndex) => (
+                            <div className="girder-sim-branch-route" data-alignment-code={branch.prefix} key={`${track.side}-${group.spatialGroupId}-${branch.prefix}`}>
+                              <span className="girder-sim-branch-connector" aria-hidden="true" />
+                              <strong title={`${branch.prefix} 互通支线`}>{branch.prefix}</strong>
+                              <div className="girder-sim-branch-track">
+                                {branch.nodes.map((node, nodeIndex) => {
+                                  const control = controlByNode.get(node.node_id);
+                                  const position = nodePositionPercent(node, branch.nodes);
+                                  const lane = twoLane(branchIndex, nodeIndex);
+                                  return (
+                                    <span
+                                      className={`girder-sim-branch-label lane-${lane} ${control?.risk_status ?? ""}`}
+                                      data-entity-id={node.node_id}
+                                      key={`label-${node.node_id}`}
+                                      style={{ left: `${position.center}%` }}
+                                      title={node.name}
+                                    >{workpointDisplayName(node)}</span>
+                                  );
+                                })}
+                                {branch.nodes.map((node) => {
+                                  const position = nodePositionPercent(node, branch.nodes);
+                                  return (
+                                    <button
+                                      type="button"
+                                      aria-pressed={selectedNodeId === node.node_id}
+                                      aria-label={`${node.name}，${segmentRoleLabel(node)}`}
+                                      className={`girder-sim-track-span ${node.node_type} ${node.bridge_segment_kind ?? "whole"} ${selectedNodeId === node.node_id ? "selected" : ""}`}
+                                      data-entity-id={`${node.node_id}:branch-segment`}
+                                      data-segment-kind={node.bridge_segment_kind ?? undefined}
+                                      key={`branch-span-${node.node_id}`}
+                                      style={{ left: `${position.left}%`, width: `${position.width}%` }}
+                                      title={`${node.name}｜${formatMileageRange(node)}｜${segmentRoleLabel(node)}`}
+                                      onClick={() => setSelectedNodeId((current) => current === node.node_id ? null : node.node_id)}
+                                    />
+                                  );
+                                })}
+                                {branch.nodes.filter((node) => !isLineOnlyNode(node.node_type)).map((node) => {
+                                  const position = nodePositionPercent(node, branch.nodes);
+                                  return <span className={`girder-sim-track-marker ${node.node_type}`} key={`branch-marker-${node.node_id}`} style={{ left: `${position.center}%` }}><NodeTypeIcon type={node.node_type} /></span>;
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div
+                        className="girder-sim-yard-markers"
+                        style={{ minHeight: `${deployedYards.length === 0 ? 4 : Math.max(38, deployedYards.length * 28 + 10)}px` }}
+                      >
                         {deployedYards.map((yard, yardIndex) => {
-                          const node = nodes.find((item) => yardNodeId(yard, nodes) === item.node_id);
+                          const node = sideNodes.find((item) => yardNodeId(yard, sideNodes) === item.node_id);
+                          const positioningNodes = !node || isMainlineNode(node, track)
+                            ? mainlineNodes
+                            : groupedBranches.find((branch) => branch.nodes.includes(node))?.nodes ?? sideNodes;
                           return (
                             <span
                               className="girder-sim-yard-marker"
                               key={yard.beam_yard_id}
                               data-entity-id={yard.beam_yard_id}
-                              style={{ left: `${yardOffsetPercent(yard, node, nodes)}%`, top: `${6 + yardIndex * 28}px` }}
+                              style={{ left: `${yardOffsetPercent(yard, node, positioningNodes)}%`, top: `${6 + yardIndex * 28}px` }}
                               title={`${yard.name}｜${yard.alignment_code} ${formatMileageValue(yard.mileage_m)}`}
                             >
                               <Warehouse size={14} />
@@ -208,20 +261,6 @@ export function LineGraphView({
           ))}
         </div>
       )}
-      {onConfirmConnection && (
-        <div className="girder-sim-connection">
-          <span>人工连接确认：依次选择两个节点（已选 {connectionNodes.length}/2）</span>
-          <button
-            type="button"
-            disabled={connectionNodes.length !== 2}
-            onClick={() => {
-              if (connectionNodes.length !== 2) return;
-              onConfirmConnection(connectionNodes[0], connectionNodes[1]);
-              setConnectionNodes([]);
-            }}
-          >确认连接</button>
-        </div>
-      )}
     </section>
   );
 }
@@ -232,17 +271,21 @@ function LegendItem({ type, label }: { type: LineGraphNode["node_type"]; label: 
 
 function NodeTypeIcon({ type }: { type: LineGraphNode["node_type"] }) {
   const props = { size: 15, strokeWidth: 2 };
-  if (type === "roadbed") return <Route {...props} />;
   if (type === "yard") return <Warehouse {...props} />;
   if (type === "culvert") return <LandPlot {...props} />;
   return <Waypoints {...props} />;
 }
 
 function isLineOnlyNode(type: LineGraphNode["node_type"]): boolean {
-  return type === "bridge" || type === "tunnel";
+  return type === "roadbed" || type === "bridge" || type === "tunnel";
 }
 
-function labelLane(displayOrder: number, nodeIndex: number): 0 | 1 {
+function labelLane(displayOrder: number, nodeIndex: number, nodeCount: number): 0 | 1 | 2 {
+  if (nodeCount >= 3) return (nodeIndex % 3) as 0 | 1 | 2;
+  return twoLane(displayOrder, nodeIndex);
+}
+
+function twoLane(displayOrder: number, nodeIndex: number): 0 | 1 {
   return (displayOrder + nodeIndex) % 2 === 0 ? 0 : 1;
 }
 
@@ -251,6 +294,19 @@ function segmentOrder(kind: LineGraphNode["bridge_segment_kind"]): number {
   if (kind === "continuous") return 1;
   if (kind === "approach_large") return 2;
   return 0;
+}
+
+function workpointDisplayName(node: LineGraphNode): string {
+  const sideSuffix = node.side === "left" ? "·左幅" : "·右幅";
+  return node.name
+    .replace(sideSuffix, "")
+    .replace("·小里程引桥段", "·小引桥")
+    .replace("·连续结构段", "·连续结构")
+    .replace("·大里程引桥段", "·大引桥");
+}
+
+function segmentRoleLabel(node: LineGraphNode): string {
+  return node.requires_erection ? "待架目标" : "运梁通道";
 }
 
 function formatMileage(node: LineGraphNode): string {
@@ -272,6 +328,24 @@ function formatMileageValue(value: number): string {
 
 function normalizedPrefix(node: LineGraphNode): string {
   return (node.alignment_code ?? "").trim().toUpperCase();
+}
+
+function isMainlineNode(node: LineGraphNode, track: TrackDefinition): boolean {
+  const prefix = normalizedPrefix(node);
+  return node.side === track.side && (prefix === track.prefix || prefix === "");
+}
+
+function branchRoutes(nodes: LineGraphNode[], track: TrackDefinition): BranchRoute[] {
+  const grouped = new Map<string, LineGraphNode[]>();
+  for (const node of nodes) {
+    if (isMainlineNode(node, track)) continue;
+    const prefix = normalizedPrefix(node);
+    if (!prefix) continue;
+    grouped.set(prefix, [...(grouped.get(prefix) ?? []), node]);
+  }
+  return [...grouped.entries()]
+    .sort(([left], [right]) => left.localeCompare(right, "zh-CN", { numeric: true }))
+    .map(([prefix, branchNodes]) => ({ prefix, nodes: branchNodes }));
 }
 
 function mileageRange(nodes: LineGraphNode[]): { start: number; end: number } | null {
@@ -316,9 +390,9 @@ function visualGroupWidth(nodes: LineGraphNode[], kRange: { start: number; end: 
   )));
   const length = Math.max(1, kRange ? kRange.end - kRange.start : localLength);
   const settings: Record<LineGraphNode["node_type"], { base: number; factor: number; min: number; max: number }> = {
-    roadbed: { base: 70, factor: 1.3, min: 104, max: 180 },
-    bridge: { base: 110, factor: 2.8, min: 156, max: 280 },
-    tunnel: { base: 120, factor: 3.2, min: 176, max: 300 },
+    roadbed: { base: 40, factor: 0.5, min: 48, max: 88 },
+    bridge: { base: 96, factor: 2.2, min: 118, max: 220 },
+    tunnel: { base: 104, factor: 2.5, min: 128, max: 230 },
     yard: { base: 120, factor: 2.4, min: 150, max: 250 },
     culvert: { base: 95, factor: 2.0, min: 132, max: 220 },
     connection: { base: 105, factor: 2.2, min: 146, max: 240 },

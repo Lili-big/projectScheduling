@@ -579,23 +579,13 @@ def _bridge_route_segments(
                 refs=refs,
             )
         ]
-    route_length = float(projection.end_mileage_m) - float(projection.start_mileage_m)
     structure_length = sum(item[2] for item in ordered)
-    if abs(route_length - structure_length) > 1.0:
-        return None, [
-            _diagnostic(
-                "BRIDGE_SEGMENT_LENGTH_MISMATCH",
-                "blocking",
-                f"桥梁“{workpoint.workpoint_name}”{_side_label(projection.side)}结构累计长度 {structure_length:g}m 与线路落位长度 {route_length:g}m 相差超过 1m。",
-                "bridge_side",
-                subject_id,
-                "核对该幅结构长度和线路落位里程；系统不会按比例拉伸分段。",
-                refs=refs,
-            )
-        ]
     start = float(projection.start_mileage_m)
-    small_end = start + sum(item[2] for item in before)
-    continuous_end = small_end + sum(item[2] for item in continuous)
+    route_length = float(projection.end_mileage_m) - start
+    small_ratio = sum(item[2] for item in before) / structure_length
+    continuous_ratio = sum(item[2] for item in continuous) / structure_length
+    small_end = start + route_length * small_ratio
+    continuous_end = start + route_length * (small_ratio + continuous_ratio)
     return (
         BridgeRouteSegmentProjection("approach_small", start, small_end, tuple(item[0] for item in before)),
         BridgeRouteSegmentProjection("continuous", small_end, continuous_end, tuple(continuous_structures)),

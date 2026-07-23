@@ -109,6 +109,8 @@ export type ObjectiveContribution = {
 
 export type TargetStatus =
   | "met"
+  | "not_met"
+  | "infeasible"
   | "current_resources_target_failed"
   | "candidate_resources_target_met"
   | "candidate_resources_target_failed"
@@ -116,6 +118,30 @@ export type TargetStatus =
   | "physical_infeasible"
   | "unconfirmed"
   | string;
+
+export type MinimumResourceVerification = {
+  candidate_found: boolean;
+  candidate_verified: boolean;
+  detail_solve_attempted: boolean;
+  detail_solver_call_count: number;
+  detail_target_status?: TargetStatus | null;
+  detail_solver_status?: string | null;
+  retry_attempted: boolean;
+  retry_reason?: string | null;
+};
+
+export type UnifiedSolveMetadata = {
+  solve_mode?: string;
+  schedule_source?: string;
+  solver_call_count?: number;
+  global_search_call_count?: number;
+  resource_expansion_attempted?: boolean;
+  objective_priority?: string[];
+  global_objective_priority?: string[];
+  global_search_status?: string;
+  target_achievement?: TargetAchievement;
+  minimum_resource_verification?: MinimumResourceVerification;
+};
 
 export type TargetAchievement = {
   business_success: boolean;

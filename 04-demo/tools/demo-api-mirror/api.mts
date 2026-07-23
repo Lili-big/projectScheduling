@@ -525,7 +525,7 @@ export default async function handler(req: Request, context: Context) {
     if (endpoint === "solve-min-resources" && req.method === "POST") {
       const body = await req.json();
       const workpointId = new URL(req.url).searchParams.get("workpoint_id");
-      return json(solveScenario(body.scenario, true, workpointId));
+      return json(solveMinimumResourcesScenario(body.scenario, workpointId));
     }
     if (endpoint === "solve-resource-cost" && req.method === "POST") {
       const body = await req.json();
@@ -2843,6 +2843,22 @@ function expandResources(pools: ResourcePool[], useMaxResources: boolean): Resou
 function solveScenario(scenario: ScenarioInput, useMaxResources: boolean, workpointId: string | null = null) {
   const generated = generateScheduleInput(scenario, useMaxResources, workpointId);
   const result = schedule(generated, useMaxResources ? "max_resources" : "current_resources");
+  const unifiedMetadata = {
+    solve_mode: "unified_fixed_resource",
+    schedule_source: "simulation_fixed_resources",
+    recommended_schedule_source: "simulation_fixed_resources",
+    solver_call_count: 1,
+    global_search_call_count: 0,
+    resource_expansion_attempted: false,
+    objective_priority: ["max_target_delay_days", "makespan_days"],
+    performance_path: "unified_fixed_resource_single_stage",
+    capacity_precheck_status: "not_run",
+    balanced_reoptimization_status: "not_run",
+    unbalanced_reoptimization_status: "not_run",
+    reoptimization_attempts: [],
+  };
+  result.stats = { ...result.stats, ...unifiedMetadata };
+  result.objective_breakdown = { ...result.objective_breakdown, ...unifiedMetadata };
   const diagnostics = [
     ...generated.validation,
     { level: "info", message: "Netlify Functions 演示排程已完成。完整 CP-SAT 求解仍建议部署 FastAPI/OR-Tools 后端。" },
@@ -2865,7 +2881,68 @@ function solveScenario(scenario: ScenarioInput, useMaxResources: boolean, workpo
       hard_milestones_met: result.milestone_results.filter((item) => item.mode === "hard" && item.status === "met").length,
       hard_milestone_count: result.milestone_results.filter((item) => item.mode === "hard").length,
     },
+    alternative_results: [],
   };
+}
+
+function solveMinimumResourcesScenario(scenario: ScenarioInput, workpointId: string | null = null) {
+  const solved = solveScenario(scenario, false, workpointId);
+  const targetAchievement = {
+    business_success: false,
+    target_status: "unconfirmed",
+    solver_status: "UNKNOWN",
+    selected_schedule_solver_status: null,
+    target_present: true,
+    has_schedule: false,
+    optimality_proven: false,
+    hard_milestone_late_days: 0,
+    fixed_duration_overrun_days: 0,
+    max_target_delay_days: 0,
+    failure_reasons: ["global_minimum_resource_search_unavailable"],
+    time_budget_seconds: 0,
+    time_budget_exhausted: false,
+    evaluated_at_source: "minimum_resources_global_search",
+  };
+  const verification = {
+    candidate_found: false,
+    candidate_verified: false,
+    detail_solve_attempted: false,
+    detail_solver_call_count: 0,
+    detail_target_status: null,
+    detail_solver_status: null,
+    retry_attempted: false,
+    retry_reason: null,
+  };
+  const metadata = {
+    solve_mode: "min_resources_fixed_duration",
+    schedule_source: "minimum_resources_global_search",
+    recommended_schedule_source: "minimum_resources_global_search",
+    global_search_call_count: 1,
+    global_search_status: "UNKNOWN",
+    global_objective_priority: ["resource_count", "makespan_days"],
+    recommended_resource_counts: [],
+    resource_expansion_attempted: false,
+    capacity_precheck_status: "not_run",
+    balanced_reoptimization_status: "not_run",
+    unbalanced_reoptimization_status: "not_run",
+    reoptimization_attempts: [],
+    minimum_resource_verification: verification,
+    target_achievement: targetAchievement,
+    demo_capability: "global_minimum_resource_search_unavailable",
+  };
+  solved.result.status = "UNKNOWN";
+  solved.result.objective_days = null;
+  solved.result.plan_finish_date = null;
+  solved.result.tasks = [];
+  solved.result.resource_allocations = [];
+  solved.result.milestone_results = [];
+  solved.result.stats = { ...solved.result.stats, ...metadata };
+  solved.result.objective_breakdown = { ...solved.result.objective_breakdown, ...metadata };
+  solved.diagnostics.push({
+    level: "warning",
+    message: "Netlify 简化镜像未运行全局最少资源搜索，未形成候选，也未执行详细排程验证。",
+  });
+  return solved;
 }
 
 function solveResourceCostScenario(scenario: ScenarioInput, workpointId: string | null = null) {
@@ -3044,20 +3121,22 @@ function schedule(generated: GeneratedScheduleInput, evaluatedAtSource = "curren
 }
 
 function targetAchievementForDemo(milestoneResultsList: any[], evaluatedAtSource: string) {
+  const targetPresent = milestoneResultsList.some((item) => item.mode === "hard");
   const hardMilestoneLateDays = milestoneResultsList
     .filter((item) => item.mode === "hard")
     .reduce((sum, item) => sum + Number(item.lateness_days ?? 0), 0);
-  const failedStatus = evaluatedAtSource === "max_resources"
-    ? "max_resources_target_failed"
-    : "current_resources_target_failed";
-  const targetStatus = hardMilestoneLateDays > 0 ? failedStatus : "met";
+  const targetStatus = !targetPresent ? "unconfirmed" : hardMilestoneLateDays > 0 ? "unconfirmed" : "met";
   return {
     business_success: targetStatus === "met",
     target_status: targetStatus,
     solver_status: "FEASIBLE",
     hard_milestone_late_days: hardMilestoneLateDays,
     fixed_duration_overrun_days: 0,
-    failure_reasons: hardMilestoneLateDays > 0 ? ["hard_milestone_late"] : [],
+    max_target_delay_days: hardMilestoneLateDays,
+    target_present: targetPresent,
+    has_schedule: true,
+    optimality_proven: false,
+    failure_reasons: !targetPresent ? ["target_missing"] : hardMilestoneLateDays > 0 ? ["hard_milestone_late", "optimality_unproven"] : [],
     time_budget_seconds: 15,
     time_budget_exhausted: false,
     evaluated_at_source: evaluatedAtSource,

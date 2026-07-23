@@ -47,7 +47,7 @@ export function RouteSequenceEditor({
   return (
     <section className="girder-sim-card" aria-label="人工架梁顺序">
       <div className="girder-sim-card-heading">
-        <div><h3>人工架梁顺序</h3><p>只排列待架桥梁幅别；中间路桥隧通行节点由线路图自动补齐。</p></div>
+        <div><h3>人工架梁顺序</h3><p>只排列待架引桥段；连续结构段仅作为运梁通道自动补齐，不计入架梁任务。</p></div>
       </div>
       {yards.map((yard) => {
         const route = routes.find((item) => item.beam_yard_id === yard.beam_yard_id);

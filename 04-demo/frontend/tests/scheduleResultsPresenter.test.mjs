@@ -70,6 +70,95 @@ test("solve scope label distinguishes full project and single-workpoint trial", 
   );
 });
 
+test("unified fixed-resource presentation exposes two-level objective and no expansion", async () => {
+  const { unifiedSolvePresentation } = await loadPresenter();
+  const presentation = unifiedSolvePresentation({
+    status: "OPTIMAL",
+    tasks: [],
+    resource_allocations: [],
+    milestone_results: [],
+    validation: [],
+    stats: {
+      solve_mode: "unified_fixed_resource",
+      schedule_source: "simulation_fixed_resources",
+      solver_call_count: 1,
+      resource_expansion_attempted: false,
+      objective_priority: ["max_target_delay_days", "makespan_days"],
+      target_achievement: {
+        target_status: "not_met",
+        solver_status: "OPTIMAL",
+        max_target_delay_days: 3,
+      },
+    },
+    objective_breakdown: {},
+  });
+
+  assert.equal(presentation.mode, "fixed");
+  assert.match(presentation.objectiveText, /最大目标延期优先/);
+  assert.match(presentation.diagnosticText, /仅作求解后诊断/);
+  assert.equal(presentation.businessStatus, "已证明目标未满足");
+  assert.equal(presentation.solverCalls, "1 次");
+  assert.match(presentation.retryStatus, /未自动增配/);
+});
+
+test("minimum-resource presentation separates candidate detail and verification", async () => {
+  const { unifiedSolvePresentation } = await loadPresenter();
+  const presentation = unifiedSolvePresentation({
+    status: "FEASIBLE",
+    tasks: [],
+    resource_allocations: [],
+    milestone_results: [],
+    validation: [],
+    stats: {
+      solve_mode: "min_resources_fixed_duration",
+      schedule_source: "minimum_resources_unified_detail",
+      global_search_status: "OPTIMAL",
+      global_search_call_count: 1,
+      recommended_resource_counts: [
+        { resource_pool_id: "pool-a", label: "A 班组", recommended_quantity: 2 },
+      ],
+      minimum_resource_verification: {
+        candidate_found: true,
+        candidate_verified: false,
+        detail_solve_attempted: true,
+        detail_solver_call_count: 1,
+        detail_target_status: "unconfirmed",
+        detail_solver_status: "FEASIBLE",
+        retry_attempted: false,
+      },
+      target_achievement: {
+        target_status: "unconfirmed",
+        solver_status: "FEASIBLE",
+        max_target_delay_days: 1,
+      },
+    },
+    objective_breakdown: {},
+  });
+
+  assert.equal(presentation.mode, "minimum");
+  assert.equal(presentation.candidateSummary, "A 班组 2");
+  assert.equal(presentation.verificationStatus, "尚未通过详细排程确认");
+  assert.equal(presentation.solverCalls, "全局 1 次 / 详细 1 次");
+  assert.match(presentation.retryStatus, /未重试/);
+});
+
+test("legacy presentation keeps historical source explicit", async () => {
+  const { unifiedSolvePresentation } = await loadPresenter();
+  const presentation = unifiedSolvePresentation({
+    status: "FEASIBLE",
+    tasks: [],
+    resource_allocations: [],
+    milestone_results: [],
+    validation: [],
+    stats: { schedule_source: "minimum_resources_best_effort_refinement" },
+    objective_breakdown: {},
+  });
+
+  assert.equal(presentation.mode, "legacy");
+  assert.match(presentation.sourceNotice, /历史求解口径/);
+  assert.match(presentation.sourceNotice, /minimum_resources_best_effort_refinement/);
+});
+
 function generated() {
   return {
     source_summary: {},

@@ -7,6 +7,7 @@ const root = resolve(import.meta.dirname, "..");
 const fixture = JSON.parse(readFileSync(resolve(root, "tests/fixtures/architecture/frontend-baseline.json"), "utf8"));
 const schedulerContract = readFileSync(resolve(root, "src/contracts/scheduler.ts"), "utf8");
 const displayState = readFileSync(resolve(root, "src/features/taskView/projectMasterDisplayState.ts"), "utf8");
+const projectMasterContract = readFileSync(resolve(root, "src/contracts/projectMaster.ts"), "utf8");
 const resourceScopeOpenApi = readFileSync(
   resolve(root, "..", "..", "03-requirements/specs/048-workpoint-first-resource-allocation/contracts/workpoint-resource-allocation.openapi.yaml"),
   "utf8",
@@ -37,9 +38,11 @@ test("legacy scheduler types re-export all frozen contract names", () => {
     "AiWorkpointResourceInitializationResponse",
     "AiWorkpointResourceInitializationSummary",
     "AiWorkpointResourceRecommendation",
+    "MinimumResourceVerification",
     "ResourcePoolQuantityResult",
     "ResourceScopeMode",
     "ScopedResourceQuantityUpdate",
+    "UnifiedSolveMetadata",
     "WorkpointResourceOverride",
   ];
   assert.deepEqual(
@@ -62,6 +65,10 @@ test("task-view contracts keep both component types and open generated-source me
   assert.match(displayState, /status:\s*"loading"/);
   assert.match(displayState, /status:\s*"ready"/);
   assert.match(displayState, /status:\s*"error"/);
+  assert.match(projectMasterContract, /export type TaskViewDisplayMapResponse/);
+  assert.match(projectMasterContract, /project_data_version_id:\s*string/);
+  assert.match(projectMasterContract, /work_sections:\s*TaskViewDisplayWorkSection\[\]/);
+  assert.doesNotMatch(projectMasterContract.match(/export type TaskViewDisplayWorkpoint = \{[\s\S]*?\n\};/)?.[0] ?? "", /components|parameters|source/);
 });
 
 test("resource-scope types align with the incremental contract and keep legacy inputs", () => {
@@ -108,4 +115,15 @@ test("AI workpoint resource initialization types match the 059 scenario-only con
   assert.match(schedulerContract, /export type AiWorkpointResourceInitializationSummary = \{[\s\S]*?added_resource_count:\s*number/);
   const requestType = schedulerContract.match(/export type AiWorkpointResourceInitializationRequest = \{[\s\S]*?\n\};/)?.[0] ?? "";
   assert.doesNotMatch(requestType, /api.?key|endpoint|authorization/i);
+});
+
+test("unified solve metadata types expose four-state detail verification", () => {
+  assert.match(schedulerContract, /\|\s*"not_met"/);
+  assert.match(schedulerContract, /\|\s*"infeasible"/);
+  assert.match(schedulerContract, /export type MinimumResourceVerification = \{/);
+  assert.match(schedulerContract, /candidate_verified:\s*boolean/);
+  assert.match(schedulerContract, /detail_solver_call_count:\s*number/);
+  assert.match(schedulerContract, /retry_attempted:\s*boolean/);
+  assert.match(schedulerContract, /export type UnifiedSolveMetadata = \{/);
+  assert.match(schedulerContract, /global_search_call_count\?:\s*number/);
 });

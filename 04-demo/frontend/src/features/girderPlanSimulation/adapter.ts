@@ -3,7 +3,6 @@ import type {
   ErectionLinePlan,
   GirderPlanScenarioVersion,
   GirderPlanSimulationParameters,
-  LineGraphEdge,
   LineGraphNode,
   ManualRoutePlan,
   SimulationDiagnostic,
@@ -15,7 +14,6 @@ export type GirderPlanDraft = {
   beamYards: BeamYardPlan[];
   erectionLines: ErectionLinePlan[];
   routePlans: ManualRoutePlan[];
-  connectionOverrides: LineGraphEdge[];
   parameters: GirderPlanSimulationParameters;
 };
 
@@ -28,7 +26,6 @@ export function emptyGirderPlanDraft(): GirderPlanDraft {
     beamYards: [],
     erectionLines: [],
     routePlans: [],
-    connectionOverrides: [],
     parameters: {
       default_transfer_days: 1,
       bridge_readiness_buffer_days: 3,
@@ -49,7 +46,6 @@ export function draftFromScenario(scenario: GirderPlanScenarioVersion): GirderPl
     beamYards: scenario.beam_yards,
     erectionLines: scenario.erection_lines,
     routePlans: scenario.route_plans,
-    connectionOverrides: scenario.connection_overrides,
     parameters: scenario.parameters,
   };
 }

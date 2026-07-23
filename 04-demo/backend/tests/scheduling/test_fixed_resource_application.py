@@ -10,7 +10,8 @@ sys.path.insert(0, str(BACKEND_ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import app.scenario as legacy  # noqa: E402
-from app.contracts import ResourcePool, WorkpointResourceOverride  # noqa: E402
+import app.scheduling.application._scenario as scenario_module  # noqa: E402
+from app.contracts import ResourcePool, ScheduleResult, WorkpointResourceOverride  # noqa: E402
 from app.local_scenario_config import apply_local_scenario_config  # noqa: E402
 from app.scheduling.application import fixed_resource  # noqa: E402
 from app.scheduling.solver.engine import solve_shortest_duration_schedule  # noqa: E402
@@ -24,6 +25,44 @@ from workpoint_scope_test_support import (  # noqa: E402
 def test_fixed_resource_application_exports_the_legacy_use_cases() -> None:
     assert fixed_resource.solve_scenario is legacy.solve_scenario
     assert fixed_resource.solve_ai_strict_fixed_resource_scenario is legacy.solve_ai_strict_fixed_resource_scenario
+
+
+def test_simulation_and_ai_fixed_resource_entries_share_one_authoritative_solve(monkeypatch) -> None:
+    scenario = two_workpoint_scenario(
+        ResourcePool(
+            id="pool-cap",
+            type="cap_team",
+            label="承台班组",
+            quantity=2,
+            max_quantity=4,
+            authorized_workpoint_ids=[WORKPOINT_A, WORKPOINT_B],
+        ),
+        target_days=5,
+    )
+    calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def fake_solve(schedule_input, **kwargs):
+        calls.append((str(kwargs.get("optimization_stage")), tuple(resource.id for resource in schedule_input.resources)))
+        return ScheduleResult(
+            status="OPTIMAL",
+            objective_days=5,
+            plan_start_date=schedule_input.start_date,
+            milestone_results=[],
+        )
+
+    monkeypatch.setattr(scenario_module, "solve_control_priority_schedule_once", fake_solve)
+
+    simulation = scenario_module.solve_scenario(scenario)
+    ai = scenario_module.solve_ai_strict_fixed_resource_scenario(scenario)
+
+    assert len(calls) == 2
+    assert calls[0][0] == calls[1][0] == "unified_fixed_resource"
+    assert calls[0][1] == calls[1][1]
+    for solved in (simulation, ai):
+        assert solved.result.stats["solver_call_count"] == 1
+        assert solved.result.stats["resource_expansion_attempted"] is False
+        assert solved.result.stats["objective_priority"] == ["max_target_delay_days", "makespan_days"]
+        assert solved.alternative_results == []
 
 
 def test_fixed_resource_generation_uses_each_effective_pool_quantity() -> None:

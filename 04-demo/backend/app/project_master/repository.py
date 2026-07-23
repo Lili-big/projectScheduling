@@ -25,6 +25,9 @@ from ..contracts.project_master import (
     ProjectMasterWorkpoint,
     ProjectMasterWorkpointPage,
     SourceEvidence,
+    TaskViewDisplayMapResponse,
+    TaskViewDisplayWorkpoint,
+    TaskViewDisplayWorkSection,
 )
 from .schema import initialize_schema
 
@@ -582,11 +585,184 @@ class ProjectMasterRepository:
         return ProjectMasterWorkpointPage(page=page, page_size=page_size, total=total, items=items)
 
     def get_workpoint(self, version_id: str, workpoint_id: str) -> ProjectMasterWorkpoint:
-        snapshot = self.load_snapshot(version_id)
-        item = next((workpoint for workpoint in snapshot.workpoints if workpoint.workpoint_id == workpoint_id), None)
-        if item is None:
+        self.get_version_summary(version_id)
+        workpoints = self._load_workpoint_details(version_id, [workpoint_id])
+        if not workpoints:
             raise ProjectMasterNotFoundError(f"工点 {workpoint_id} 不存在。")
-        return item
+        return workpoints[0]
+
+    def get_task_view_display_map(
+        self,
+        version_id: str,
+        workpoint_ids: list[str],
+    ) -> TaskViewDisplayMapResponse:
+        self.get_version_summary(version_id)
+        normalized_ids = sorted({value.strip() for value in workpoint_ids if value.strip()})
+        if not normalized_ids:
+            return TaskViewDisplayMapResponse(project_data_version_id=version_id, workpoints=[])
+
+        placeholders = ",".join("?" for _ in normalized_ids)
+        with self.connection() as connection:
+            workpoint_rows = connection.execute(
+                f"""
+                SELECT workpoint_id, workpoint_name, sort_order
+                FROM workpoints
+                WHERE version_id=? AND workpoint_id IN ({placeholders})
+                ORDER BY sort_order, workpoint_id
+                """,
+                [version_id, *normalized_ids],
+            ).fetchall()
+            found_ids = {row["workpoint_id"] for row in workpoint_rows}
+            missing_ids = sorted(set(normalized_ids) - found_ids)
+            if missing_ids:
+                raise ProjectMasterNotFoundError(f"工点 {', '.join(missing_ids)} 不属于项目主数据版本 {version_id}。")
+            structure_rows = connection.execute(
+                f"""
+                SELECT workpoint_id, structure_id, section_code, section_name, side, sort_order
+                FROM structures
+                WHERE version_id=? AND workpoint_id IN ({placeholders})
+                  AND section_code IS NOT NULL AND TRIM(section_code) <> ''
+                ORDER BY workpoint_id, sort_order, structure_id
+                """,
+                [version_id, *normalized_ids],
+            ).fetchall()
+
+        sections_by_workpoint: dict[str, dict[str, TaskViewDisplayWorkSection]] = {}
+        for row in structure_rows:
+            side = row["side"] if row["side"] in {"left", "right"} else "none"
+            section_id = f"{row['section_code']}:{side}"
+            sections = sections_by_workpoint.setdefault(row["workpoint_id"], {})
+            if section_id in sections:
+                continue
+            sections[section_id] = TaskViewDisplayWorkSection(
+                work_section_id=section_id,
+                work_section_name=row["section_name"],
+                side=side,
+                sort_order=row["sort_order"],
+            )
+
+        return TaskViewDisplayMapResponse(
+            project_data_version_id=version_id,
+            workpoints=[
+                TaskViewDisplayWorkpoint(
+                    workpoint_id=row["workpoint_id"],
+                    workpoint_name=row["workpoint_name"],
+                    sort_order=row["sort_order"],
+                    work_sections=list(sections_by_workpoint.get(row["workpoint_id"], {}).values()),
+                )
+                for row in workpoint_rows
+            ],
+        )
+
+    def _load_workpoint_details(
+        self,
+        version_id: str,
+        workpoint_ids: list[str],
+    ) -> list[ProjectMasterWorkpoint]:
+        normalized_ids = sorted({value.strip() for value in workpoint_ids if value.strip()})
+        if not normalized_ids:
+            return []
+        placeholders = ",".join("?" for _ in normalized_ids)
+        with self.connection() as connection:
+            workpoint_rows = connection.execute(
+                f"SELECT * FROM workpoints WHERE version_id=? AND workpoint_id IN ({placeholders}) ORDER BY sort_order, workpoint_id",
+                [version_id, *normalized_ids],
+            ).fetchall()
+            structure_rows = connection.execute(
+                f"SELECT * FROM structures WHERE version_id=? AND workpoint_id IN ({placeholders}) ORDER BY workpoint_id, sort_order, structure_id",
+                [version_id, *normalized_ids],
+            ).fetchall()
+            structure_ids = [row["structure_id"] for row in structure_rows]
+            component_rows = []
+            structure_parameters = []
+            if structure_ids:
+                structure_placeholders = ",".join("?" for _ in structure_ids)
+                component_rows = connection.execute(
+                    f"SELECT * FROM components WHERE version_id=? AND structure_id IN ({structure_placeholders}) ORDER BY structure_id, sort_order, component_id",
+                    [version_id, *structure_ids],
+                ).fetchall()
+                structure_parameters = connection.execute(
+                    f"SELECT * FROM structure_parameters WHERE version_id=? AND structure_id IN ({structure_placeholders}) ORDER BY structure_id, sort_order, parameter_code",
+                    [version_id, *structure_ids],
+                ).fetchall()
+            component_ids = [row["component_id"] for row in component_rows]
+            component_parameters = []
+            if component_ids:
+                component_placeholders = ",".join("?" for _ in component_ids)
+                component_parameters = connection.execute(
+                    f"SELECT * FROM component_parameters WHERE version_id=? AND component_id IN ({component_placeholders}) ORDER BY component_id, sort_order, parameter_code",
+                    [version_id, *component_ids],
+                ).fetchall()
+            evidence_rows = []
+            evidence_ids = [*normalized_ids, *structure_ids, *component_ids]
+            for offset in range(0, len(evidence_ids), 500):
+                chunk = evidence_ids[offset:offset + 500]
+                evidence_placeholders = ",".join("?" for _ in chunk)
+                evidence_rows.extend(connection.execute(
+                    f"SELECT * FROM source_evidence WHERE version_id=? AND object_id IN ({evidence_placeholders})",
+                    [version_id, *chunk],
+                ).fetchall())
+
+        evidence = {(row["object_kind"], row["object_id"], row["parameter_code"]): row for row in evidence_rows}
+        component_params: dict[str, list[ParameterValue]] = {}
+        for row in component_parameters:
+            component_params.setdefault(row["component_id"], []).append(
+                self._parameter(row, evidence.get(("component_parameter", row["component_id"], row["parameter_code"])))
+            )
+        components: dict[str, list[ProjectMasterComponent]] = {}
+        for row in component_rows:
+            components.setdefault(row["structure_id"], []).append(ProjectMasterComponent(
+                component_id=row["component_id"],
+                structure_id=row["structure_id"],
+                component_name=row["component_name"],
+                component_type=row["component_type"],
+                quantity=row["quantity"],
+                unit=row["unit"],
+                enabled=bool(row["enabled"]),
+                sort_order=row["sort_order"],
+                remark=row["remark"],
+                parameters=component_params.get(row["component_id"], []),
+                source=self._source(evidence.get(("component", row["component_id"], None))),
+            ))
+        structure_params: dict[str, list[ParameterValue]] = {}
+        for row in structure_parameters:
+            structure_params.setdefault(row["structure_id"], []).append(
+                self._parameter(row, evidence.get(("structure_parameter", row["structure_id"], row["parameter_code"])))
+            )
+        structures: dict[str, list[ProjectMasterStructure]] = {}
+        for row in structure_rows:
+            structures.setdefault(row["workpoint_id"], []).append(ProjectMasterStructure(
+                structure_id=row["structure_id"],
+                workpoint_id=row["workpoint_id"],
+                structure_name=row["structure_name"],
+                structure_category=row["structure_category"],
+                structure_type=row["structure_type"],
+                side=row["side"],
+                section_code=row["section_code"],
+                section_name=row["section_name"],
+                control_level=row["control_level"],
+                sort_order=row["sort_order"],
+                remark=row["remark"],
+                parameters=structure_params.get(row["structure_id"], []),
+                components=components.get(row["structure_id"], []),
+                source=self._source(evidence.get(("structure", row["structure_id"], None))),
+            ))
+        return [
+            ProjectMasterWorkpoint(
+                workpoint_id=row["workpoint_id"],
+                workpoint_name=row["workpoint_name"],
+                workpoint_type=row["workpoint_type"],
+                alignment_code=row["alignment_code"],
+                start_mileage_m=row["start_mileage_m"],
+                end_mileage_m=row["end_mileage_m"],
+                sort_order=row["sort_order"],
+                schedule_support=row["schedule_support"],
+                remark=row["remark"],
+                structures=structures.get(row["workpoint_id"], []),
+                source=self._source(evidence.get(("workpoint", row["workpoint_id"], None))),
+            )
+            for row in workpoint_rows
+        ]
 
     def _insert_snapshot(
         self,

@@ -153,3 +153,14 @@ npm.cmd run verify
 typecheck/build：PASS/FAIL
 完整门禁：PASS/FAIL/既有无关失败
 ```
+
+## 2026-07-22 实施验收记录
+
+- OpenAPI YAML：`contract ok`。
+- US1 固定资源/目标/路由相关用例通过；包含 AI 助手全文件的组合命令为 `34 passed, 39 failed`，39 项与实施前基线一致，均属于并行 059 工点资源改造后的旧测试（缺少必填 `target_workpoint_id` 或仍构造旧资源池结构）。
+- US2 application、单工点、目标和路由组合：`18 passed`。
+- API、范围与契约组合：`28 passed`；新增统一结果路由/旧响应兼容用例另有 `2 passed`。
+- 前端 056 契约与展示：相关用例通过；组合文件为 `27 passed, 1 failed`，唯一失败是并行架梁 v2 镜像契约缺失，与 056 无关；另一个宽泛正则运行中的资源页面 CDP 用例因环境超时失败，与 056 无关。
+- `npm.cmd run typecheck`：通过。
+- `npm.cmd run build`：通过，仅保留既有 chunk 大小告警。
+- `npm.cmd run verify`：仅运行一次；类型检查通过，全量后端测试在约 72% 时已出现既有/并行失败，并于 120 秒超时退出。超时遗留的本次 pytest 进程已终止；未重复运行完整门禁。

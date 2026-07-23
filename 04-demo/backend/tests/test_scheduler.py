@@ -1748,32 +1748,23 @@ def test_fixed_resource_shortest_returns_resource_increment_recommendation_when_
     )
 
 
-def test_fixed_resource_recommendation_matches_direct_min_resource_solver() -> None:
+def test_fixed_resource_solve_does_not_invoke_or_embed_minimum_resource_recommendation() -> None:
     pytest.importorskip("ortools")
     scenario = _parallel_fixed_resource_scenario(target_days=5, current_resources=1, max_resources=3)
     direct_generated = generate_schedule_input_from_scenario(scenario, use_max_resources=True)
-    current_generated = generate_schedule_input_from_scenario(scenario)
-    minimum_counts = scenario_module._resource_minimum_counts(current_generated.schedule_input)
-    direct = solve_min_resources_schedule(
-        direct_generated.schedule_input,
-        minimum_resource_counts=minimum_counts,
-    )
+    direct = solve_min_resources_schedule(direct_generated.schedule_input)
     solved = solve_scenario(scenario)
 
     direct_recommended = {
         item["resource_pool_id"]: item["recommended_quantity"]
         for item in direct.stats["recommended_resource_counts"]
     }
-    fixed_recommended = {
-        item["resource_pool_id"]: item["recommended_quantity"]
-        for item in solved.result.objective_breakdown["recommended_resource_counts"]
-    }
-
     assert direct.status in {"OPTIMAL", "FEASIBLE"}
-    assert solved.result.objective_breakdown["resource_recommendation_status"] == "recommended_resources_verified"
-    assert fixed_recommended == direct_recommended
-    assert len(solved.alternative_results) == 1
-    assert len(solved.alternative_results[0].generated.schedule_input.resources) == sum(direct_recommended.values())
+    assert direct_recommended
+    assert solved.result.objective_breakdown["resource_recommendation_status"] == "not_applicable"
+    assert "recommended_resource_counts" not in solved.result.objective_breakdown
+    assert solved.result.stats["global_search_call_count"] == 0
+    assert solved.alternative_results == []
 
 
 def test_fixed_resource_minimum_candidate_reruns_refinement_before_display(
@@ -5395,7 +5386,7 @@ def test_min_resource_solver_uses_fallback_target_days() -> None:
     recommended = result.stats["recommended_resource_counts"][0]
     assert result.status in {"OPTIMAL", "FEASIBLE"}
     assert result.objective_days == 5
-    assert result.stats["schedule_source"] == "control_priority_balanced_reoptimization"
+    assert result.stats["schedule_source"] == "minimum_resources_unified_detail"
     assert result.objective_breakdown["solve_mode"] == "min_resources_fixed_duration"
     assert "control_priority_analysis" in result.stats
     assert "normal_balance_metrics" in result.stats
@@ -5440,7 +5431,7 @@ def test_min_resource_solver_direct_search_allows_zero_lower_bound() -> None:
         for item in result.stats["recommended_resource_counts"]
     }
     assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert result.stats["minimum_resource_counts"] == {}
+    assert result.stats["search_lower_bounds"] == {"pool-a": 0, "pool-b": 0}
     assert sum(quantities.values()) == 1
     assert 0 in quantities.values()
 
@@ -5481,7 +5472,7 @@ def test_min_resource_solver_reoptimizes_with_control_priority() -> None:
     by_task = {task.id: task for task in result.tasks}
     recommended = result.stats["recommended_resource_counts"][0]
     assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert result.stats["schedule_source"] == "control_priority_balanced_reoptimization"
+    assert result.stats["schedule_source"] == "minimum_resources_unified_detail"
     assert "resource_guarantee" not in result.objective_breakdown
     assert result.stats["control_priority_analysis"]["control_task_count"] == 1
     assert recommended["recommended_quantity"] == 1
@@ -5514,7 +5505,7 @@ def test_min_resource_reoptimization_candidates_copy_objective_configuration_wit
     assert "normal_balance" not in primary_strategy.objective_terms
 
 
-def test_min_resource_solver_falls_back_to_binary_search_when_global_optimization_times_out(
+def test_min_resource_solver_does_not_fall_back_when_global_optimization_times_out(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pytest.importorskip("ortools")
@@ -5545,15 +5536,15 @@ def test_min_resource_solver_falls_back_to_binary_search_when_global_optimizatio
 
     result = solve_min_resources_schedule(schedule_input, fallback_target_days=5)
 
-    assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert result.stats["global_capacity_model_status"] == "UNKNOWN"
-    assert result.stats["capacity_model_stats"]["fallback_search_used"] is True
-    assert result.stats["recommended_resource_counts"][0]["recommended_quantity"] == 2
-    assert any(call["phase"] == "global" for call in calls)
-    assert any(call["phase"] == "fixed" for call in calls)
+    assert result.status == "UNKNOWN"
+    assert result.stats["global_search_status"] == "UNKNOWN"
+    assert result.stats["global_search_call_count"] == 1
+    assert result.stats["recommended_resource_counts"] == []
+    assert calls == [{"phase": "global", "counts": None}]
+    assert result.stats["minimum_resource_verification"]["detail_solve_attempted"] is False
 
 
-def test_min_resource_solver_keeps_capacity_schedule_when_balanced_reoptimization_is_unknown(
+def test_min_resource_solver_keeps_single_detail_unknown_without_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pytest.importorskip("ortools")
@@ -5584,14 +5575,13 @@ def test_min_resource_solver_keeps_capacity_schedule_when_balanced_reoptimizatio
 
     result = solve_min_resources_schedule(schedule_input, fallback_target_days=5)
 
-    assert result.status in {"OPTIMAL", "FEASIBLE"}
-    assert result.stats["schedule_source"] == "capacity_model_verified_schedule"
-    assert result.stats["capacity_verification_status"] == "verified"
+    assert result.status == "UNKNOWN"
+    assert result.stats["schedule_source"] == "minimum_resources_unified_detail"
     assert result.stats["target_achievement"]["target_status"] == "unconfirmed"
     assert result.stats["target_achievement"]["time_budget_exhausted"] is True
-    assert [(balance, relaxed) for balance, relaxed, _ in calls] == [(False, True), (False, True)]
-    assert all(limit > 4.9 for _, _, limit in calls)
-    assert all((attempt["time_limit_seconds"] or 0) > 4.9 for attempt in result.stats["reoptimization_attempts"])
+    assert [(balance, relaxed) for balance, relaxed, _ in calls] == [(False, True)]
+    assert result.stats["reoptimization_attempts"] == []
+    assert result.stats["minimum_resource_verification"]["candidate_verified"] is False
 
 
 def test_min_resource_reoptimization_uses_single_control_priority_candidate(
@@ -5624,14 +5614,14 @@ def test_min_resource_reoptimization_uses_single_control_priority_candidate(
     result = solve_min_resources_schedule(schedule_input, fallback_target_days=5)
 
     assert result.status == "FEASIBLE"
-    assert result.stats["schedule_source"] == "control_priority_balanced_reoptimization"
-    assert result.stats["balanced_reoptimization_status"] == "FEASIBLE"
-    assert result.stats["unbalanced_reoptimization_status"] == "not_attempted"
+    assert result.stats["schedule_source"] == "minimum_resources_unified_detail"
+    assert result.stats["balanced_reoptimization_status"] == "not_run"
+    assert result.stats["unbalanced_reoptimization_status"] == "not_run"
     assert result.stats["parallel_reoptimization_used"] is False
     assert calls == [False]
 
 
-def test_min_resource_solver_returns_best_effort_when_reoptimization_misses_target(
+def test_min_resource_solver_returns_one_detail_result_when_target_is_missed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pytest.importorskip("ortools")
@@ -5671,15 +5661,15 @@ def test_min_resource_solver_returns_best_effort_when_reoptimization_misses_targ
 
     result = solve_min_resources_schedule(schedule_input, fallback_target_days=5)
 
-    assert calls == [True, True]
+    assert calls == [True]
     assert result.status == "FEASIBLE"
-    assert result.stats["schedule_source"] == "minimum_resources_best_effort_refinement"
-    assert result.stats["recommended_schedule_source"] == "minimum_resources_best_effort_refinement"
-    assert result.stats["target_achievement"]["target_status"] == "candidate_resources_target_failed"
-    best_effort = result.stats["best_effort_refinement"]
-    assert best_effort["strict_refinement_status"] == "FEASIBLE"
-    assert best_effort["fixed_duration_overrun_days"] == 1
-    assert best_effort["relaxed_constraints"][0]["type"] == "fixed_duration"
+    assert result.stats["schedule_source"] == "minimum_resources_unified_detail"
+    assert result.stats["recommended_schedule_source"] == "minimum_resources_unified_detail"
+    assert result.stats["target_achievement"]["target_status"] == "unconfirmed"
+    verification = result.stats["minimum_resource_verification"]
+    assert verification["candidate_verified"] is False
+    assert verification["retry_attempted"] is False
+    assert verification["detail_solver_call_count"] == 1
 
 
 def test_min_resource_solver_returns_infeasible_when_reoptimization_cannot_meet_target() -> None:
@@ -5715,10 +5705,10 @@ def test_min_resource_solver_returns_infeasible_when_reoptimization_cannot_meet_
     result = solve_min_resources_schedule(schedule_input, fallback_target_days=5)
 
     assert result.status == "INFEASIBLE"
-    assert result.stats["schedule_source"] == "max_resources_target_failed"
-    assert result.stats["target_achievement"]["target_status"] == "max_resources_target_failed"
-    assert "max_resources_target_failed" in result.stats["target_achievement"]["failure_reasons"]
-    assert result.stats["max_resource_precheck_mode"] == "hard_milestone_fast"
+    assert result.stats["schedule_source"] == "minimum_resources_global_search"
+    assert result.stats["target_achievement"]["target_status"] == "infeasible"
+    assert result.stats["global_search_call_count"] == 1
+    assert result.stats["minimum_resource_verification"]["detail_solve_attempted"] is False
 
 
 def test_min_resource_solver_requires_target_duration() -> None:
@@ -5751,9 +5741,9 @@ def test_min_resource_solver_reports_infeasible_when_max_resources_cannot_meet_t
     result = solve_min_resources_schedule(_min_resource_test_input(max_resources=1), fallback_target_days=5)
 
     assert result.status == "UNKNOWN"
-    assert result.stats["schedule_source"] == "target_unconfirmed"
+    assert result.stats["schedule_source"] == "minimum_resources_global_search"
     assert result.stats["target_achievement"]["target_status"] == "unconfirmed"
-    assert result.stats["max_resource_precheck_mode"] == "hard_milestone_fast"
+    assert result.stats["capacity_precheck_status"] == "not_run"
     assert capacity_model_calls == 1
     assert control_priority_calls == 0
 
@@ -5775,10 +5765,9 @@ def test_min_resource_solver_enforces_hard_milestone_target() -> None:
     result = solve_min_resources_schedule(schedule_input)
 
     assert result.status == "INFEASIBLE"
-    assert result.stats["schedule_source"] == "max_resources_target_failed"
-    assert result.stats["target_achievement"]["target_status"] == "max_resources_target_failed"
-    assert result.stats["target_achievement"]["hard_milestone_late_days"] > 0
-    assert result.stats["max_resource_precheck_mode"] == "hard_milestone_fast"
+    assert result.stats["schedule_source"] == "minimum_resources_global_search"
+    assert result.stats["target_achievement"]["target_status"] == "infeasible"
+    assert result.stats["capacity_precheck_status"] == "not_run"
 
 
 def test_resource_cost_solver_keeps_current_when_current_meets_fixed_duration() -> None:
@@ -5795,6 +5784,25 @@ def test_resource_cost_solver_keeps_current_when_current_meets_fixed_duration() 
     assert selected["added_quantity"] == 0
     assert result.objective_breakdown["resource_incremental_cost"] == 0
     assert result.objective_days == 10
+
+
+def test_resource_cost_solver_does_not_delegate_to_minimum_resource_solver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("ortools")
+
+    def fail_if_called(*_args: object, **_kwargs: object) -> ScheduleResult:
+        raise AssertionError("资源成本优化不得调用统一最少资源分支")
+
+    monkeypatch.setattr(solver_module, "solve_min_resources_schedule", fail_if_called)
+    result = solve_resource_cost_schedule(
+        _resource_cost_parallel_input(task_count=2, max_resources=2),
+        {"pool-team": _linear_cost("pool-team", "钻机", current=1, max_quantity=2, unit_cost=1000)},
+        fallback_target_days=10,
+    )
+
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    assert result.stats["solve_mode"] == "resource_cost_optimization"
 
 
 def test_resource_cost_solver_recommends_zero_for_unused_resource_pool() -> None:
@@ -6416,7 +6424,7 @@ def _min_resource_test_input(max_resources: int) -> ScheduleInput:
     )
 
 
-def test_ai_strict_full_objective_skips_baseline_and_keeps_objective_terms(monkeypatch) -> None:
+def test_unified_fixed_resource_skips_baseline_and_keeps_diagnostic_terms(monkeypatch) -> None:
     scenario = _parallel_fixed_resource_scenario(target_days=10, current_resources=1, max_resources=3)
     generated = generate_schedule_input_from_scenario(scenario)
     monkeypatch.setattr(
@@ -6434,7 +6442,8 @@ def test_ai_strict_full_objective_skips_baseline_and_keeps_objective_terms(monke
     assert result.status in {"OPTIMAL", "FEASIBLE"}
     assert result.stats["solver_call_count"] == 1
     assert result.stats["baseline_status"] == "not_evaluated"
-    assert result.stats["performance_path"] == "ai_strict_fixed_resource_one_pass"
+    assert result.stats["performance_path"] == "unified_fixed_resource_single_stage"
+    assert result.stats["objective_priority"] == ["max_target_delay_days", "makespan_days"]
     assert result.objective_breakdown["baseline_makespan_days"] is None
     assert {item["term_id"] for item in result.objective_breakdown["objective_contributions"]} == {
         "control_node_late",
@@ -6462,7 +6471,7 @@ def test_ai_single_stage_solver_uses_duration_objective_without_resource_idle_te
     assert primary.stats["objective_modeling_gates"]["resource_idle"]["modeling_enabled"] is False
     assert primary.objective_breakdown["resource_idle_penalty"] == 0
     assert primary.stats["max_target_delay_days"] is not None
-    assert primary.stats["performance_path"] == "ai_strict_fixed_resource_single_stage"
+    assert primary.stats["performance_path"] == "unified_fixed_resource_single_stage"
     assert primary.stats["solver_call_count"] == 1
 
 
@@ -6542,7 +6551,7 @@ def test_ai_single_stage_scenario_uses_full_budget_and_keeps_duration_proof(
     solved = scenario_module.solve_ai_strict_fixed_resource_scenario(scenario)
     stages = solved.result.stats["optimization_stages"]
 
-    assert [stage for stage, _, _ in calls] == ["primary"]
+    assert [stage for stage, _, _ in calls] == ["unified_fixed_resource"]
     assert calls[0][1] == time_limit_seconds
     assert calls[0][2] is None
     assert stages["total_budget_seconds"] == time_limit_seconds
@@ -6558,7 +6567,7 @@ def test_ai_single_stage_scenario_uses_full_budget_and_keeps_duration_proof(
     assert solved.result.stats["primary_continuity_penalty"] == 20
     assert solved.result.stats["target_achievement"]["optimality_proven"] is True
     assert solved.result.stats["solver_call_count"] == 1
-    assert solved.result.stats["performance_path"] == "ai_strict_fixed_resource_single_stage"
+    assert solved.result.stats["performance_path"] == "unified_fixed_resource_single_stage"
     assert solved.result.stats["resource_expansion_attempted"] is False
 
 
@@ -6571,7 +6580,7 @@ def test_ai_single_stage_never_retries_when_primary_idle_is_zero(monkeypatch) ->
     def fake_solve(schedule_input: ScheduleInput, **kwargs: Any) -> ScheduleResult:
         stage = str(kwargs.get("optimization_stage"))
         calls.append(stage)
-        assert stage == "primary"
+        assert stage == "unified_fixed_resource"
         resource = next(resource for resource in schedule_input.resources if resource.enabled)
         scheduled_tasks = [
             ScheduledTask(
@@ -6604,7 +6613,7 @@ def test_ai_single_stage_never_retries_when_primary_idle_is_zero(monkeypatch) ->
     solved = scenario_module.solve_ai_strict_fixed_resource_scenario(scenario)
     stages = solved.result.stats["optimization_stages"]
 
-    assert calls == ["primary"]
+    assert calls == ["unified_fixed_resource"]
     assert stages["selected_stage"] == "primary"
     assert stages["secondary"]["attempted"] is False
     assert stages["secondary"]["skipped_reason"] == "not_applicable"
@@ -6670,6 +6679,9 @@ def test_ai_strict_target_status_matrix() -> None:
     assert infeasible["target_status"] == "infeasible"
     assert infeasible["schedule_outcome_status"] == "no_feasible_schedule"
     assert infeasible["schedule_outcome_reason"] == "proven_infeasible"
+    model_invalid = classified("MODEL_INVALID", 0)
+    assert model_invalid["target_status"] == "infeasible"
+    assert model_invalid["business_success"] is False
     target_missing = classified("OPTIMAL", 0, with_target=False)
     assert target_missing["target_status"] == "unconfirmed"
     assert target_missing["schedule_outcome_status"] is None

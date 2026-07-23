@@ -64,6 +64,80 @@ export function objectiveBreakdownEntries(result: ScheduleResult | null): Array<
   return Object.entries(result?.objective_breakdown ?? {}).sort(([left], [right]) => left.localeCompare(right));
 }
 
+export type UnifiedSolvePresentation = {
+  mode: "fixed" | "minimum" | "legacy";
+  objectiveText: string;
+  diagnosticText: string;
+  businessStatus: string;
+  solverStatus: string;
+  maxTargetDelayDays: string;
+  solverCalls: string;
+  globalSearchStatus: string;
+  candidateSummary: string;
+  verificationStatus: string;
+  retryStatus: string;
+  sourceNotice: string;
+};
+
+const targetStatusLabels: Record<string, string> = {
+  met: "目标已满足",
+  not_met: "已证明目标未满足",
+  unconfirmed: "目标尚未确认",
+  infeasible: "物理不可行",
+};
+
+export function unifiedSolvePresentation(result: ScheduleResult | null): UnifiedSolvePresentation | null {
+  if (!result) return null;
+  const stats = asRecord(result.stats);
+  const breakdown = asRecord(result.objective_breakdown);
+  const solveMode = String(stats.solve_mode ?? breakdown.solve_mode ?? "");
+  const source = String(stats.schedule_source ?? breakdown.schedule_source ?? "");
+  const verification = asRecord(stats.minimum_resource_verification ?? breakdown.minimum_resource_verification);
+  const target = asRecord(stats.target_achievement ?? breakdown.target_achievement);
+  const isMinimum = solveMode === "min_resources_fixed_duration" || Object.keys(verification).length > 0;
+  const isUnified = solveMode === "unified_fixed_resource"
+    || Array.isArray(stats.objective_priority)
+    || isMinimum;
+  const targetStatus = String(target.target_status ?? "");
+  const recommendations = Array.isArray(stats.recommended_resource_counts)
+    ? stats.recommended_resource_counts.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    : [];
+  const candidateSummary = recommendations.length
+    ? recommendations.map((item) => `${String(item.label ?? item.resource_pool_id ?? "资源")} ${Number(item.recommended_quantity ?? 0)}`).join("；")
+    : "无全局候选";
+  const candidateFound = verification.candidate_found === true;
+  const candidateVerified = verification.candidate_verified === true;
+
+  return {
+    mode: isMinimum ? "minimum" : isUnified ? "fixed" : "legacy",
+    objectiveText: isMinimum
+      ? "全局搜索先最小化资源总数，同数时再最小化总工期；随后按候选资源执行一次详细排程。"
+      : "最大目标延期优先，总工期其次。",
+    diagnosticText: "资源空闲与连续性仅作求解后诊断，不参与固定资源或固定工期目标。",
+    businessStatus: targetStatusLabels[targetStatus] ?? (targetStatus || "未评估"),
+    solverStatus: formatScheduleStatus(target.solver_status ?? result.status),
+    maxTargetDelayDays: typeof target.max_target_delay_days === "number" ? `${target.max_target_delay_days} 天` : "未提供",
+    solverCalls: isMinimum
+      ? `全局 ${Number(stats.global_search_call_count ?? 0)} 次 / 详细 ${Number(verification.detail_solver_call_count ?? 0)} 次`
+      : `${Number(stats.solver_call_count ?? 0)} 次`,
+    globalSearchStatus: isMinimum ? formatScheduleStatus(stats.global_search_status ?? "未运行") : "不适用",
+    candidateSummary: isMinimum ? candidateSummary : "不适用",
+    verificationStatus: isMinimum
+      ? candidateVerified ? "详细排程已验证目标满足" : candidateFound ? "尚未通过详细排程确认" : "未形成候选"
+      : "不适用",
+    retryStatus: isUnified
+      ? (stats.resource_expansion_attempted === true || verification.retry_attempted === true ? "发生了资源调整" : "未自动增配、未重搜、未重试")
+      : "历史结果按原始字段展示",
+    sourceNotice: isUnified
+      ? `结果来源：${source || "统一求解"}`
+      : `历史求解口径：${source || "来源字段缺失"}；按原始事实兼容展示。`,
+  };
+}
+
+function asRecord(value: unknown): Record<string, any> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+}
+
 export function buildResourceScopeResult({
   generated,
   result,

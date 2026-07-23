@@ -6,9 +6,11 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "scheduling"))
 
 from app.api.routers import scheduling as scheduling_router  # noqa: E402
 from app.bootstrap import create_app  # noqa: E402
+from app.contracts import ResourcePool  # noqa: E402
 from app.contracts.project_master import ConfirmProjectMasterVersionRequest  # noqa: E402
 from app.main import app  # noqa: E402
 from app.project_master.repository import ProjectMasterRepository  # noqa: E402
@@ -17,6 +19,7 @@ from app.project_master.service import ProjectMasterService  # noqa: E402
 from app.services.process_library_service import default_scenario_with_process_library  # noqa: E402
 from asgi_client import json_request  # noqa: E402
 from project_master_fixture_helpers import valid_project_master_workbook  # noqa: E402
+from workpoint_scope_test_support import two_workpoint_scenario  # noqa: E402
 
 
 def test_scheduling_router_exposes_demo_and_task_generation() -> None:
@@ -91,6 +94,39 @@ def test_scheduling_router_keeps_validation_error_shape() -> None:
     status, response = json_request(app, "POST", "/api/solve-min-resources", {})
     assert status == 422
     assert "detail" in response
+
+
+def test_scheduling_routes_expose_unified_fixed_and_minimum_resource_outcomes() -> None:
+    scenario = two_workpoint_scenario(
+        ResourcePool(
+            id="pool-cap",
+            type="cap_team",
+            label="承台班组",
+            quantity=2,
+            max_quantity=4,
+        ),
+        target_days=5,
+    ).model_copy(update={"project_data_version_id": None, "time_limit_seconds": 2.0}).model_dump(mode="json")
+
+    fixed_status, fixed = json_request(app, "POST", "/api/solve-scenario", scenario)
+    minimum_status, minimum = json_request(
+        app,
+        "POST",
+        "/api/solve-min-resources",
+        {"scenario": scenario, "fallback_target_days": 365},
+    )
+
+    assert fixed_status == minimum_status == 200
+    assert fixed["result"]["stats"]["solve_mode"] == "unified_fixed_resource"
+    assert fixed["result"]["stats"]["solver_call_count"] == 1
+    assert fixed["result"]["stats"]["resource_expansion_attempted"] is False
+    assert fixed["alternative_results"] == []
+    minimum_stats = minimum["result"]["stats"]
+    assert minimum_stats["solve_mode"] == "min_resources_fixed_duration"
+    assert minimum_stats["global_search_call_count"] <= 1
+    assert minimum_stats["resource_expansion_attempted"] is False
+    assert minimum_stats["minimum_resource_verification"]["detail_solver_call_count"] <= 1
+    assert minimum_stats["minimum_resource_verification"]["retry_attempted"] is False
 
 
 def test_scheduling_router_keeps_compatibility_endpoints() -> None:

@@ -31,3 +31,11 @@ test("resource mutations use pool identity and retain scenario invalidation", ()
   assert.doesNotMatch(workspace, /function updateResourcePool\(index: number/);
   assert.match(controller, /invalidationHandlerRef\.current\(\)/);
 });
+
+test("simulation page describes fixed objectives as read-only and keeps cost tuning separate", () => {
+  assert.match(workspace, /固定资源与固定工期目标（只读）/);
+  assert.match(workspace, /最大目标延期/);
+  assert.match(workspace, /资源空闲与连续性仅作求解后诊断/);
+  assert.match(workspace, /资源成本优化高级倾向/);
+  assert.match(workspace, /统一求解结论/);
+});

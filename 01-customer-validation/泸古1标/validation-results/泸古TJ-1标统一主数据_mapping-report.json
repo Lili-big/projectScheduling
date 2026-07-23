@@ -2,12 +2,44 @@
   "outputPath": "D:\\codex_workspace\\排程算法\\01-customer-validation\\泸古1标\\validation-results/泸古TJ-1标统一工点及桥梁结构物导入数据.xlsx",
   "sourceFiles": {
     "workpoints": "D:\\codex_workspace\\排程算法\\01-customer-validation\\泸古1标\\customer-materials\\泸古1标架梁工点导入模板.xlsx",
+    "routeAlignment": "D:/00-1-03-生产产线-24年/02-产品需求/15-2026斑马基建版/03 项目验证/泸古1标/泸古1标工期计划表（架梁）4.27版(2).xlsx",
+    "routeAlignmentSheet": "架梁通道 (4片) (互通早)",
     "bridgeStructures": "D:/00-1-03-生产产线-24年/02-产品需求/15-2026斑马基建版/03 项目验证/泸古1标/泸古高速TJ-1标桥梁进度统计表4.27(1).xlsx"
+  },
+  "routeAlignment": {
+    "rule": "左右幅横向同行；结构物合并单元格覆盖的行区间视为同一空间对应组。",
+    "groups": [
+      "XLSX-R003-R011",
+      "XLSX-R012",
+      "XLSX-R013-R015",
+      "XLSX-R016",
+      "XLSX-R017-R019",
+      "XLSX-R020-R022",
+      "XLSX-R023-R025",
+      "XLSX-R026",
+      "XLSX-R027-R029",
+      "XLSX-R030",
+      "XLSX-R031-R033",
+      "XLSX-R034",
+      "XLSX-R035-R037",
+      "XLSX-R038-R040",
+      "XLSX-R041-R043",
+      "XLSX-R044",
+      "XLSX-R045-R047",
+      "XLSX-R048",
+      "XLSX-R049-R051",
+      "XLSX-R052",
+      "XLSX-R053-R055",
+      "XLSX-R056",
+      "XLSX-R057-R059",
+      "XLSX-R060",
+      "XLSX-R061-R063"
+    ]
   },
   "counts": {
     "workpoints": 31,
     "routePlacements": 55,
-    "spatialGroups": 26,
+    "spatialGroups": 25,
     "bridgeWorkpoints": 13,
     "roadbedWorkpoints": 16,
     "tunnelWorkpoints": 2,
@@ -24,7 +56,12 @@
       "施工工效与施工持续时间",
       "计划开始/完成时间",
       "完成进度及汇总表公式错误值"
-    ]
+    ],
+    "pierSections": {
+      "sourceRows": 501,
+      "diameterRows": 425,
+      "dimensionRows": 76
+    }
   },
-  "generatedAt": "2026-07-20T15:25:01.323Z"
+  "generatedAt": "2026-07-22T08:00:04.601Z"
 }

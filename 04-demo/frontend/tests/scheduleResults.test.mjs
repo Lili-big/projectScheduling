@@ -13,4 +13,6 @@ test("schedule results presenter owns status and summary formatting", () => {
   assert.match(presenter, /objective_days/);
   assert.match(presenter, /summarizeDiagnostics/);
   assert.match(presenter, /objectiveBreakdownEntries/);
+  assert.match(presenter, /export function unifiedSolvePresentation/);
+  assert.match(presenter, /未自动增配、未重搜、未重试/);
 });

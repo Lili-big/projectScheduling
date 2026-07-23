@@ -514,6 +514,9 @@ async function loadOracle() {
     json(`${apiUrl}/api/project-master/versions/${encodeURIComponent(current.version_id)}`),
     json(`${apiUrl}/api/projects/${encodeURIComponent(scenario.project.project_id)}/project-master/versions?page=1&page_size=50`),
   ]);
+  const workpointPage = await json(
+    `${apiUrl}/api/project-master/versions/${encodeURIComponent(current.version_id)}/workpoints?page=1&page_size=200`,
+  );
   const generated = await json(`${apiUrl}/api/generate-schedule-input`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -521,13 +524,16 @@ async function loadOracle() {
   });
   const tasks = generated.schedule_input.tasks;
   const workpointIds = [...new Set(tasks.map((task) => task.bridge_id).filter(Boolean))].sort();
-  const workpoints = [];
-  for (const workpointId of workpointIds) {
-    workpoints.push(await json(
-      `${apiUrl}/api/project-master/versions/${encodeURIComponent(current.version_id)}/workpoints/${encodeURIComponent(workpointId)}`,
-    ));
-  }
-  const structures = workpoints.flatMap((workpoint) => workpoint.structures);
+  const displayMap = await json(
+    `${apiUrl}/api/project-master/versions/${encodeURIComponent(current.version_id)}/task-view-display-map`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workpoint_ids: workpointIds }),
+    },
+  );
+  const workpoints = displayMap.workpoints;
+  const workSections = workpoints.flatMap((workpoint) => workpoint.work_sections);
   return {
     versionId: current.version_id,
     scenario: versionedScenario,
@@ -536,14 +542,15 @@ async function loadOracle() {
     versionPage,
     generated,
     workpoints,
+    versionWorkpoints: workpointPage.items,
     taskCount: tasks.length,
     taskNames: [...new Set(tasks.map((task) => task.name).filter(Boolean))],
     workpointNames: [...new Set(workpoints.map((workpoint) => workpoint.workpoint_name).filter(Boolean))],
-    sectionNames: [...new Set(structures.map((structure) => structure.section_name).filter(Boolean))],
+    sectionNames: [...new Set(workSections.map((section) => section.work_section_name).filter(Boolean))],
     rawTokenGroups: {
       bridgeId: workpointIds,
       workSectionId: [...new Set(tasks.map((task) => task.work_section_id).filter(Boolean))],
-      sectionCode: [...new Set(structures.map((structure) => structure.section_code).filter(Boolean))],
+      sectionCode: [...new Set(workSections.map((section) => section.work_section_id.split(":")[0]).filter(Boolean))],
       placeholder: ["-"],
     },
   };
@@ -611,12 +618,21 @@ function assertAuthoritativeRows(rows) {
   assert.deepEqual(invalid.slice(0, 5), [], "every ready row must use authoritative names");
 }
 
-function projectMasterDetailFromUrl(url) {
-  const match = new URL(url).pathname.match(/^\/api\/project-master\/versions\/([^/]+)\/workpoints\/([^/]+)$/);
+function projectMasterDisplayMapFromRequest(params) {
+  if (params.request.method !== "POST") return null;
+  const match = new URL(params.request.url).pathname.match(/^\/api\/project-master\/versions\/([^/]+)\/task-view-display-map$/);
   if (!match) return null;
+  const payload = JSON.parse(params.request.postData ?? "{}");
   return {
     versionId: decodeURIComponent(match[1]),
-    workpointId: decodeURIComponent(match[2]),
+    workpointIds: [...new Set((payload.workpoint_ids ?? []).filter(Boolean))].sort(),
+  };
+}
+
+function displayMapResponse(versionId, workpointIds, workpointById) {
+  return {
+    project_data_version_id: versionId,
+    workpoints: workpointIds.map((workpointId) => workpointById.get(workpointId)).filter(Boolean),
   };
 }
 
@@ -653,7 +669,7 @@ function variantOracle(generated, workpoints) {
     uniqueTaskNames: [...new Set(generated.schedule_input.tasks.map((task) => task.name))].sort(),
     workpointNames: selectedWorkpoints.map((workpoint) => workpoint.workpoint_name),
     sectionNames: [...new Set(selectedWorkpoints.flatMap((workpoint) => (
-      workpoint.structures.map((structure) => structure.section_name).filter(Boolean)
+      workpoint.work_sections.map((section) => section.work_section_name).filter(Boolean)
     )))],
   };
 }
@@ -686,6 +702,7 @@ function trackPageNetwork(page) {
   const pending = new Map();
   const failed = [];
   const recentResponses = [];
+  const completedResponses = [];
   const removeRequest = cdp.on("Network.requestWillBeSent", (params) => {
     pending.set(params.requestId, {
       requestId: params.requestId,
@@ -703,7 +720,9 @@ function trackPageNetwork(page) {
   const removeFinished = cdp.on("Network.loadingFinished", (params) => {
     const request = pending.get(params.requestId);
     if (!request) return;
-    recentResponses.push({ ...request, encodedDataLength: params.encodedDataLength });
+    const completed = { ...request, encodedDataLength: params.encodedDataLength };
+    recentResponses.push(completed);
+    completedResponses.push(completed);
     if (recentResponses.length > 30) recentResponses.shift();
     pending.delete(params.requestId);
   }, page.sessionId);
@@ -724,6 +743,7 @@ function trackPageNetwork(page) {
       failed: [...failed],
       recentResponses: [...recentResponses],
     }),
+    completed: () => [...completedResponses],
     dispose: () => {
       removeRequest();
       removeResponse();
@@ -861,34 +881,57 @@ test("T036 hard reload commits only an atomic authoritative task-name DOM", { ti
       remaining(),
     );
     const warmReadyAt = now();
-    phase = "measured-hard-reload";
-    const hardReloadAt = now();
-    await hardReload(fullPage);
-    phase = "measured-ready";
-    await waitForPage(
-      fullPage,
-      `document.querySelectorAll('.task-view-table tbody tr').length === ${oracle.taskCount}`,
-      "complete authoritative task view",
-      remaining(),
-    );
-    const readyAt = now();
-    await evaluate(fullPage, "window.__taskViewRuntime.capture()");
-
-    const records = await evaluate(fullPage, "window.__taskViewRuntime.records");
-    const rows = await currentTaskRows(fullPage);
-    const loadingIndex = records.findIndex((record) => record.state === "loading");
-    const readyIndex = records.findIndex((record) => record.rowCount > 0);
-    assert.ok(loadingIndex >= 0, "generic loading state must be observed");
-    assert.ok(readyIndex > loadingIndex, "authoritative rows must commit only after loading");
-    assert.equal(records.some((record) => record.state === "error"), false);
-    assert.equal(taskNameCommitCount(records), 1, "task names must commit atomically once");
-    assertAuthoritativeRows(rows);
-    const zeroHits = assertZeroHits(records);
+    const attempts = [];
+    let records = [];
+    let rows = [];
+    let zeroHits = null;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      phase = `measured-hard-reload-${attempt}`;
+      const responseOffset = tracker.completed().length;
+      const hardReloadAt = now();
+      const hardReloadStartedMs = Date.now();
+      await hardReload(fullPage);
+      phase = `measured-ready-${attempt}`;
+      await waitForPage(
+        fullPage,
+        `document.querySelectorAll('.task-view-table tbody tr').length === ${oracle.taskCount}`,
+        `complete authoritative task view attempt ${attempt}`,
+        remaining(),
+      );
+      const readyAt = now();
+      const elapsedMs = Date.now() - hardReloadStartedMs;
+      await evaluate(fullPage, "window.__taskViewRuntime.capture()");
+      records = await evaluate(fullPage, "window.__taskViewRuntime.records");
+      rows = await currentTaskRows(fullPage);
+      const loadingIndex = records.findIndex((record) => record.state === "loading");
+      const readyIndex = records.findIndex((record) => record.rowCount > 0);
+      assert.ok(loadingIndex >= 0, "generic loading state must be observed");
+      assert.ok(readyIndex > loadingIndex, "authoritative rows must commit only after loading");
+      assert.equal(records.some((record) => record.state === "error"), false);
+      assert.equal(taskNameCommitCount(records), 1, "task names must commit atomically once");
+      assertAuthoritativeRows(rows);
+      zeroHits = assertZeroHits(records);
+      const displayResponses = tracker.completed().slice(responseOffset).filter((response) => (
+        response.url.includes("/task-view-display-map")
+      ));
+      assert.equal(displayResponses.length, 1, "each hard reload must use one display-map request");
+      assert.ok(displayResponses[0].encodedDataLength <= 442_000, "display-map response must stay below 442 KB");
+      assert.ok(elapsedMs <= 5_000, `hard reload attempt ${attempt} must become ready within 5 seconds`);
+      attempts.push({
+        attempt,
+        hardReloadAt,
+        readyAt,
+        elapsedMs,
+        requestCount: displayResponses.length,
+        encodedDataLength: displayResponses[0].encodedDataLength,
+        taskNameCommits: taskNameCommitCount(records),
+        zeroHits,
+      });
+    }
 
     const summary = {
       warmReadyAt,
-      hardReloadAt,
-      readyAt,
+      attempts,
       overlapPrevention: "warm ready barrier before measured hard reload",
       transitions: transitionSummary(records),
       taskNameCommits: taskNameCommitCount(records),
@@ -908,14 +951,14 @@ test("T036 hard reload commits only an atomic authoritative task-name DOM", { ti
   }
 });
 
-test("T037 one failed workpoint request shows generic error, then real retry commits atomically", { timeout: timeoutMs }, async (t) => {
+test("T037 one failed display-map request shows generic error, then real retry commits atomically", { timeout: timeoutMs }, async (t) => {
   assert.ok(fullPage, "T036 must establish the full application page first");
-  let failNextWorkpointRequest = true;
+  let failNextDisplayMapRequest = true;
   let failedRequestUrl = null;
   let pausedRequestCount = 0;
   const removeListener = cdp.on("Fetch.requestPaused", async (params) => {
     pausedRequestCount += 1;
-    if (failNextWorkpointRequest && !failedRequestUrl) {
+    if (failNextDisplayMapRequest && !failedRequestUrl) {
       failedRequestUrl = params.request.url;
       await cdp.send("Fetch.failRequest", { requestId: params.requestId, errorReason: "Failed" }, fullPage.sessionId);
       return;
@@ -924,19 +967,20 @@ test("T037 one failed workpoint request shows generic error, then real retry com
   }, fullPage.sessionId);
 
   await cdp.send("Fetch.enable", {
-    patterns: [{ urlPattern: "*/api/project-master/versions/*/workpoints/*", requestStage: "Request" }],
+    patterns: [{ urlPattern: "*/api/project-master/versions/*/task-view-display-map", requestStage: "Request" }],
   }, fullPage.sessionId);
   await hardReload(fullPage);
   await waitForPage(fullPage, "Boolean(document.querySelector('.task-view-empty[role=\"alert\"]'))", "generic project-master error");
   await evaluate(fullPage, "window.__taskViewRuntime.capture()");
   const beforeRetry = await evaluate(fullPage, "window.__taskViewRuntime.records");
-  assert.ok(failedRequestUrl, "one real workpoint request must be failed by the browser");
+  assert.ok(failedRequestUrl, "one real display-map request must be failed by the browser");
+  assert.equal(pausedRequestCount, 1, "the failed identity must issue one batch request");
   assert.ok(beforeRetry.some((record) => record.state === "loading"));
   assert.equal(beforeRetry.at(-1).state, "error");
   assert.equal(beforeRetry.some((record) => record.rowCount > 0), false, "error path must never commit partial rows");
   assertZeroHits(beforeRetry);
 
-  failNextWorkpointRequest = false;
+  failNextDisplayMapRequest = false;
   await cdp.send("Fetch.disable", {}, fullPage.sessionId);
   removeListener();
   const clicked = await evaluate(fullPage, `(() => {
@@ -1012,7 +1056,7 @@ test("T038 same-version production identity switch ignores late workpoint respon
   assert.deepEqual(expectedC.workpointIds.filter((id) => [...expectedA.workpointIds, ...expectedB.workpointIds].includes(id)), [], "the cross-version old identity must bypass the production ready cache");
 
   const generateRequests = [];
-  const detailRequests = [];
+  const displayMapRequests = [];
   const paused = new Map();
   let phase = "capture-generates";
   const workbookPath = findWorkbookFixture();
@@ -1108,19 +1152,24 @@ test("T038 same-version production identity switch ignores late workpoint respon
       return;
     }
 
-    const detail = projectMasterDetailFromUrl(params.request.url);
-    if (detail) {
-      detailRequests.push({ ...detail, url: params.request.url, requestId: params.requestId, phase });
-      progress.detailRequestCount = detailRequests.length;
+    const displayMap = projectMasterDisplayMapFromRequest(params);
+    if (displayMap) {
+      displayMapRequests.push({ ...displayMap, url: params.request.url, requestId: params.requestId, phase });
+      progress.displayMapRequestCount = displayMapRequests.length;
       progress.lastRequestUrl = params.request.url;
-      if (phase === "identity-a" && expectedA.workpointIds.includes(detail.workpointId)) return;
-      if (phase === "identity-b" && expectedB.workpointIds.includes(detail.workpointId)) {
+      if (phase === "identity-a"
+        && JSON.stringify(displayMap.workpointIds) === JSON.stringify(expectedA.workpointIds)) return;
+      if (phase === "identity-b"
+        && JSON.stringify(displayMap.workpointIds) === JSON.stringify(expectedB.workpointIds)) {
         await continuePaused(params);
         return;
       }
-      if (phase === "cross-version-old" && expectedC.workpointIds.includes(detail.workpointId)) return;
-      if (phase === "cross-version-current" && detail.versionId === cross.newVersionId && expectedB.workpointIds.includes(detail.workpointId)) {
-        await fulfillPaused(params, workpointById.get(detail.workpointId));
+      if (phase === "cross-version-old"
+        && JSON.stringify(displayMap.workpointIds) === JSON.stringify(expectedC.workpointIds)) return;
+      if (phase === "cross-version-current"
+        && displayMap.versionId === cross.newVersionId
+        && JSON.stringify(displayMap.workpointIds) === JSON.stringify(expectedB.workpointIds)) {
+        await fulfillPaused(params, displayMapResponse(cross.newVersionId, displayMap.workpointIds, workpointById));
         return;
       }
     }
@@ -1151,9 +1200,9 @@ test("T038 same-version production identity switch ignores late workpoint respon
     if (params.request.method === "GET" && requestUrl.pathname === `${newVersionPath}/workpoints`) {
       await fulfillPaused(params, {
         page: 1,
-        page_size: oracle.workpoints.length,
-        total: oracle.workpoints.length,
-        items: oracle.workpoints,
+        page_size: oracle.versionWorkpoints.length,
+        total: oracle.versionWorkpoints.length,
+        items: oracle.versionWorkpoints,
       });
       return;
     }
@@ -1191,30 +1240,29 @@ test("T038 same-version production identity switch ignores late workpoint respon
 
     phase = "identity-a";
     await fulfillPaused(generateRequests[0], variantA);
-    markStage("identity-a-details");
+    markStage("identity-a-display-map");
     await waitUntil(
-      () => detailRequests.filter((request) => request.phase === "identity-a").length === expectedA.workpointIds.length,
-      "identity A project-master detail requests",
+      () => displayMapRequests.filter((request) => request.phase === "identity-a").length === 1,
+      "identity A project-master display-map request",
     );
-    const requestsA = detailRequests.filter((request) => request.phase === "identity-a");
-    assert.deepEqual(requestsA.map((request) => request.workpointId).sort(), expectedA.workpointIds, "identity A URLs are the independent workpoint oracle");
-    await continuePaused(paused.get(requestsA[0].requestId));
+    const requestsA = displayMapRequests.filter((request) => request.phase === "identity-a");
+    assert.deepEqual(requestsA[0].workpointIds, expectedA.workpointIds, "identity A request body is the independent workpoint oracle");
     await sleep(250);
     assert.equal(
       await evaluate(page, "document.querySelectorAll('.task-view-table tbody tr').length"),
       0,
-      "one completed A detail must never expose partial task rows",
+      "a paused A batch must never expose partial task rows",
     );
 
     phase = "identity-b";
     await fulfillPaused(generateRequests[1], variantB);
-    markStage("identity-b-details");
+    markStage("identity-b-display-map");
     await waitUntil(
-      () => detailRequests.filter((request) => request.phase === "identity-b").length === expectedB.workpointIds.length,
-      "identity B project-master detail requests",
+      () => displayMapRequests.filter((request) => request.phase === "identity-b").length === 1,
+      "identity B project-master display-map request",
     );
-    const requestsB = detailRequests.filter((request) => request.phase === "identity-b");
-    assert.deepEqual(requestsB.map((request) => request.workpointId).sort(), expectedB.workpointIds, "identity B URLs are the independent workpoint oracle");
+    const requestsB = displayMapRequests.filter((request) => request.phase === "identity-b");
+    assert.deepEqual(requestsB[0].workpointIds, expectedB.workpointIds, "identity B request body is the independent workpoint oracle");
     markStage("identity-b-ready-dom");
     await waitForPage(
       page,
@@ -1222,7 +1270,7 @@ test("T038 same-version production identity switch ignores late workpoint respon
       "identity B authoritative production DOM",
     );
 
-    const heldA = requestsA.slice(1).map((request) => paused.get(request.requestId)).filter(Boolean);
+    const heldA = requestsA.map((request) => paused.get(request.requestId)).filter(Boolean);
     for (const request of heldA) await continuePaused(request);
     await sleep(750);
     await evaluate(page, "window.__taskViewRuntime.capture()");
@@ -1242,8 +1290,8 @@ test("T038 same-version production identity switch ignores late workpoint respon
     assert.equal(validReadyRecords.length, readyRecords.length, "every ready mutation must match identity B");
     assert.equal(taskNameCommitCount(switchRecords), 1, "only identity B may commit task names after the identity switch begins");
     const zeroHits = assertZeroHits(records);
-    const urlVersionConsistency = detailRequests.every((request) => request.versionId === oracle.versionId);
-    assert.equal(urlVersionConsistency, true, "every workpoint URL must match the controlled source-summary version");
+    const urlVersionConsistency = displayMapRequests.every((request) => request.versionId === oracle.versionId);
+    assert.equal(urlVersionConsistency, true, "every display-map URL must match the controlled source-summary version");
 
     const crossVersionGenerated = generatedVariant(oracle.generated, cross.newVersionId, expectedB.workpointIds);
     const crossVersionExpected = variantOracle(crossVersionGenerated, oracle.workpoints);
@@ -1268,14 +1316,14 @@ test("T038 same-version production identity switch ignores late workpoint respon
       "cross-version old identity loading gate",
       30_000,
     );
-    markStage("cross-old-detail-requests");
+    markStage("cross-old-display-map-request");
     await waitUntil(
-      () => detailRequests.filter((request) => request.phase === "cross-version-old").length === expectedC.workpointIds.length,
-      "old-version workpoint requests before production unmount",
+      () => displayMapRequests.filter((request) => request.phase === "cross-version-old").length === 1,
+      "old-version display-map request before production unmount",
       30_000,
     );
-    const oldVersionDetails = detailRequests.filter((request) => request.phase === "cross-version-old");
-    assert.deepEqual(oldVersionDetails.map((request) => request.workpointId).sort(), expectedC.workpointIds);
+    const oldVersionDisplayMaps = displayMapRequests.filter((request) => request.phase === "cross-version-old");
+    assert.deepEqual(oldVersionDisplayMaps[0].workpointIds, expectedC.workpointIds);
     assert.equal(await evaluate(page, "document.querySelectorAll('.task-view-table tbody tr').length"), 0);
 
     phase = "project-master-confirmation";
@@ -1332,14 +1380,14 @@ test("T038 same-version production identity switch ignores late workpoint respon
     const currentVersionPost = JSON.parse(generateRequests[3].request.postData).project_data_version_id;
     assert.equal(currentVersionPost, cross.newVersionId, "the remounted production task view must generate from the confirmed version");
     await fulfillPaused(generateRequests[3], crossVersionGenerated);
-    markStage("cross-current-detail-requests");
+    markStage("cross-current-display-map-request");
     await waitUntil(
-      () => detailRequests.filter((request) => request.phase === "cross-version-current").length === crossVersionExpected.workpointIds.length,
-      "current-version workpoint requests after production remount",
+      () => displayMapRequests.filter((request) => request.phase === "cross-version-current").length === 1,
+      "current-version display-map request after production remount",
     );
-    const currentVersionDetails = detailRequests.filter((request) => request.phase === "cross-version-current");
-    assert.deepEqual(currentVersionDetails.map((request) => request.workpointId).sort(), crossVersionExpected.workpointIds);
-    assert.equal(currentVersionDetails.every((request) => request.versionId === cross.newVersionId), true);
+    const currentVersionDisplayMaps = displayMapRequests.filter((request) => request.phase === "cross-version-current");
+    assert.deepEqual(currentVersionDisplayMaps[0].workpointIds, crossVersionExpected.workpointIds);
+    assert.equal(currentVersionDisplayMaps.every((request) => request.versionId === cross.newVersionId), true);
     markStage("cross-current-ready-dom");
     await waitForPage(
       page,
@@ -1347,7 +1395,7 @@ test("T038 same-version production identity switch ignores late workpoint respon
       "current-version authoritative DOM after production remount",
     );
 
-    for (const request of oldVersionDetails.map((item) => paused.get(item.requestId)).filter(Boolean)) {
+    for (const request of oldVersionDisplayMaps.map((item) => paused.get(item.requestId)).filter(Boolean)) {
       await continuePaused(request);
     }
     await sleep(750);
@@ -1378,8 +1426,8 @@ test("T038 same-version production identity switch ignores late workpoint respon
         old: { sourceVersion: expectedC.versionId, workpointIds: expectedC.workpointIds },
         current: { sourceVersion: crossVersionExpected.versionId, workpointIds: crossVersionExpected.workpointIds },
       },
-      oldDetailUrls: oldVersionDetails.map((request) => request.url),
-      currentDetailUrls: currentVersionDetails.map((request) => request.url),
+      oldDisplayMapUrls: oldVersionDisplayMaps.map((request) => request.url),
+      currentDisplayMapUrls: currentVersionDisplayMaps.map((request) => request.url),
       partialMappingCommits: crossSwitchRecords.filter((record) => record.rowCount > 0 && record.rowCount !== crossVersionExpected.taskCount).length,
       lateIdentityOverwrites: crossReadyRecords.length - validCrossReadyRecords.length,
       readyIdentityConsistency: crossReadyRecords.length === 0 ? 0 : validCrossReadyRecords.length / crossReadyRecords.length,
@@ -1398,7 +1446,12 @@ test("T038 same-version production identity switch ignores late workpoint respon
         identityA: { sourceVersion: expectedA.versionId, workpointIds: expectedA.workpointIds, taskCount: expectedA.taskCount },
         identityB: { sourceVersion: expectedB.versionId, workpointIds: expectedB.workpointIds, taskCount: expectedB.taskCount },
       },
-      detailRequestUrls: detailRequests.map((request) => request.url),
+      displayMapRequests: displayMapRequests.map((request) => ({
+        url: request.url,
+        versionId: request.versionId,
+        workpointIds: request.workpointIds,
+        phase: request.phase,
+      })),
       baselineReadyRowCount: records[0]?.rowCount ?? 0,
       partialMappingCommits: switchRecords.filter((record) => record.rowCount > 0 && record.rowCount !== expectedB.taskCount).length,
       lateIdentityOverwrites: readyRecords.length - validReadyRecords.length,
@@ -1431,8 +1484,13 @@ test("T038 same-version production identity switch ignores late workpoint respon
       error: error instanceof Error ? error.message : String(error),
       phase,
       generateRequestCount: generateRequests.length,
-      detailRequestCount: detailRequests.length,
-      detailRequests: detailRequests.map((request) => ({ phase: request.phase, versionId: request.versionId, workpointId: request.workpointId, url: request.url })),
+      displayMapRequestCount: displayMapRequests.length,
+      displayMapRequests: displayMapRequests.map((request) => ({
+        phase: request.phase,
+        versionId: request.versionId,
+        workpointIds: request.workpointIds,
+        url: request.url,
+      })),
       pausedRequestUrls: [...paused.values()].map((request) => request.request.url),
       pageState,
     });

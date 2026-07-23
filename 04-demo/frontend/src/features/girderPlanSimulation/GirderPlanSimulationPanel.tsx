@@ -13,7 +13,6 @@ import type {
   GirderPlanReadiness,
   GirderPlanScenarioVersion,
   GirderPlanSimulationRun,
-  LineGraphEdge,
   LineGraphSnapshot,
   ProjectMasterVersionSummary,
 } from "../../contracts";
@@ -116,26 +115,6 @@ export function GirderPlanSimulationPanel({ projectId }: { projectId: string }) 
     }
   }
 
-  function confirmConnection(fromNodeId: string, toNodeId: string) {
-    const edge: LineGraphEdge = {
-      edge_id: `user-${fromNodeId}-${toNodeId}-${Date.now()}`,
-      from_node_id: fromNodeId,
-      to_node_id: toNodeId,
-      direction: "bidirectional",
-      source: "manual_connection",
-      transfer_days: draft.parameters.default_transfer_days,
-      confirmation: {
-        reason: "计划工程师确认该节点间可通行",
-        confirmed_by: "本地计划工程师",
-        confirmed_at: new Date().toISOString(),
-      },
-    };
-    setDraft((current) => ({ ...current, connectionOverrides: [...current.connectionOverrides, edge] }));
-    setScenario(null);
-    setReadiness(null);
-    setRun(null);
-  }
-
   async function saveScenario() {
     if (!graph || !projectVersionId) return;
     setBusy("saving");
@@ -150,7 +129,7 @@ export function GirderPlanSimulationPanel({ projectId }: { projectId: string }) 
         beam_yards: draft.beamYards,
         erection_lines: draft.erectionLines,
         route_plans: draft.routePlans,
-        connection_overrides: draft.connectionOverrides,
+        connection_overrides: [],
         parameters: draft.parameters,
         created_by: "本地计划工程师",
       });
@@ -230,8 +209,7 @@ export function GirderPlanSimulationPanel({ projectId }: { projectId: string }) 
       {error && <div className="girder-sim-notice error">{error}<button type="button" onClick={() => setReloadToken((value) => value + 1)}>重试</button></div>}
       {selectedVersion && <div className="girder-sim-version-note">当前项目版本：{selectedVersion.version_id}｜内容指纹 {selectedVersion.content_fingerprint}</div>}
       {scenario?.status === "stale" && <div className="girder-sim-notice warning">方案已失效：{scenario.stale_reason ?? "项目版本或方案输入已经变化"}。请基于当前输入保存新版本并重新计算。</div>}
-      <LineGraphView graph={graph} controls={run?.workpoint_controls} yards={draft.beamYards} onConfirmConnection={confirmConnection} />
-      {draft.connectionOverrides.length > 0 && <div className="girder-sim-note">已维护 {draft.connectionOverrides.length} 条方案级人工连接，保存方案后由后端重新生成线路图指纹。</div>}
+      <LineGraphView graph={graph} controls={run?.workpoint_controls} yards={draft.beamYards} />
       <YardPlanEditor graph={graph} yards={draft.beamYards} lines={draft.erectionLines} onYardsChange={(beamYards) => setDraft((current) => ({ ...current, beamYards }))} onLinesChange={(erectionLines) => setDraft((current) => ({ ...current, erectionLines }))} />
       <RouteSequenceEditor graph={graph} yards={draft.beamYards} lines={draft.erectionLines} routes={draft.routePlans} readiness={readiness} onChange={(routePlans) => setDraft((current) => ({ ...current, routePlans }))} />
       <section className="girder-sim-card">

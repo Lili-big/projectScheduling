@@ -35,6 +35,31 @@ def test_scenario_defaults_and_schedule_json_stay_snake_case() -> None:
     assert "details" in common.ValidationMessage.model_json_schema()["properties"]
 
 
+def test_schedule_result_keeps_unified_metadata_additive_and_old_results_readable() -> None:
+    unified = scheduling.ScheduleResult(
+        status="OPTIMAL",
+        plan_start_date=date(2026, 1, 1),
+        stats={
+            "solve_mode": "min_resources_fixed_duration",
+            "global_search_status": "OPTIMAL",
+            "minimum_resource_verification": {
+                "candidate_found": True,
+                "candidate_verified": False,
+                "detail_solve_attempted": True,
+                "detail_solver_call_count": 1,
+                "detail_target_status": "not_met",
+                "retry_attempted": False,
+            },
+        },
+    )
+    legacy_result = scheduling.ScheduleResult(status="FEASIBLE", plan_start_date=date(2026, 1, 1))
+
+    dumped = unified.model_dump(mode="json")
+    assert dumped["stats"]["minimum_resource_verification"]["detail_target_status"] == "not_met"
+    assert dumped["stats"]["minimum_resource_verification"]["retry_attempted"] is False
+    assert legacy_result.stats == {}
+
+
 def test_unlimited_resource_pool_and_projection_metadata_are_open_contracts() -> None:
     pool = ResourcePool(
         id="pool-any",

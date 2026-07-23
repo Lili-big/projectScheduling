@@ -2158,7 +2158,7 @@ def _metric_row(
 
 
 def _target_met(metrics: ResourceAssistantCoreMetrics) -> bool:
-    return metrics.target_status in {"met", "candidate_resources_target_met"}
+    return metrics.target_status == "met"
 
 
 def _plan_result_target_met(plan_result: ResourceAssistantPlanResult) -> bool:

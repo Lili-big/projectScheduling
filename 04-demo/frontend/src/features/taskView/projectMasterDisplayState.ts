@@ -1,4 +1,4 @@
-import type { ProjectMasterWorkpoint } from "../../contracts";
+import type { TaskViewDisplayMapResponse, TaskViewDisplayWorkpoint } from "../../contracts";
 
 export type ProjectMasterDisplayIdentity = {
   projectDataVersionId: string;
@@ -17,7 +17,7 @@ export type ProjectMasterDisplayLoadingState = ProjectMasterDisplayStateBase & {
 
 export type ProjectMasterDisplayReadyState = ProjectMasterDisplayStateBase & {
   status: "ready";
-  workpoints: ProjectMasterWorkpoint[];
+  workpoints: TaskViewDisplayWorkpoint[];
 };
 
 export type ProjectMasterDisplayErrorState = ProjectMasterDisplayStateBase & {
@@ -32,8 +32,8 @@ export type ProjectMasterDisplayState =
 
 export type ProjectMasterWorkpointLoader = (
   projectDataVersionId: string,
-  workpointId: string,
-) => Promise<ProjectMasterWorkpoint>;
+  workpointIds: string[],
+) => Promise<TaskViewDisplayMapResponse>;
 
 export type ProjectMasterDisplayCoordinator = {
   getState: () => ProjectMasterDisplayState | null;
@@ -50,7 +50,10 @@ export function createProjectMasterDisplayIdentity(
   workpointIds: string[],
 ): ProjectMasterDisplayIdentity {
   const normalizedIds = Array.from(new Set(
-    workpointIds.filter((workpointId) => typeof workpointId === "string" && workpointId.length > 0),
+    workpointIds
+      .filter((workpointId): workpointId is string => typeof workpointId === "string")
+      .map((workpointId) => workpointId.trim())
+      .filter((workpointId) => workpointId.length > 0),
   )).sort();
   return {
     projectDataVersionId,
@@ -59,11 +62,25 @@ export function createProjectMasterDisplayIdentity(
   };
 }
 
+function isCompleteResponse(
+  identity: ProjectMasterDisplayIdentity,
+  response: TaskViewDisplayMapResponse,
+): boolean {
+  if (!response || response.project_data_version_id !== identity.projectDataVersionId) return false;
+  if (!Array.isArray(response.workpoints)) return false;
+  const returnedIds = response.workpoints.map((workpoint) => workpoint?.workpoint_id);
+  if (returnedIds.some((workpointId) => typeof workpointId !== "string" || !workpointId)) return false;
+  if (returnedIds.length !== identity.workpointIds.length) return false;
+  const normalizedReturnedIds = [...new Set(returnedIds)].sort();
+  return normalizedReturnedIds.length === identity.workpointIds.length
+    && normalizedReturnedIds.every((workpointId, index) => workpointId === identity.workpointIds[index]);
+}
+
 export function createProjectMasterDisplayCoordinator(
-  loadWorkpoint: ProjectMasterWorkpointLoader,
+  loadWorkpoints: ProjectMasterWorkpointLoader,
 ): ProjectMasterDisplayCoordinator {
   const listeners = new Set<(state: ProjectMasterDisplayState) => void>();
-  const readyCache = new Map<string, ProjectMasterWorkpoint[]>();
+  const readyCache = new Map<string, TaskViewDisplayWorkpoint[]>();
   let currentIdentity: ProjectMasterDisplayIdentity | null = null;
   let currentState: ProjectMasterDisplayState | null = null;
   let currentToken: string | null = null;
@@ -83,6 +100,16 @@ export function createProjectMasterDisplayCoordinator(
       && currentToken === token;
   }
 
+  function publishError(identity: ProjectMasterDisplayIdentity, token: string, requestGeneration: number): void {
+    if (!isCurrent(identity, token)) return;
+    publish({
+      status: "error",
+      identity,
+      generation: requestGeneration,
+      message: genericLoadErrorMessage,
+    });
+  }
+
   function start(identity: ProjectMasterDisplayIdentity): Promise<void> {
     generation += 1;
     const requestGeneration = generation;
@@ -90,11 +117,13 @@ export function createProjectMasterDisplayCoordinator(
     currentToken = token;
     publish({ status: "loading", identity, generation: requestGeneration });
 
-    const request = Promise.all(
-      identity.workpointIds.map((workpointId) => loadWorkpoint(identity.projectDataVersionId, workpointId)),
-    ).then(
-      (workpoints) => {
-        const completeWorkpoints = [...workpoints];
+    const request = loadWorkpoints(identity.projectDataVersionId, identity.workpointIds).then(
+      (response) => {
+        if (!isCompleteResponse(identity, response)) {
+          publishError(identity, token, requestGeneration);
+          return;
+        }
+        const completeWorkpoints = [...response.workpoints];
         readyCache.set(identity.requestKey, completeWorkpoints);
         if (!isCurrent(identity, token)) return;
         publish({
@@ -104,15 +133,7 @@ export function createProjectMasterDisplayCoordinator(
           workpoints: completeWorkpoints,
         });
       },
-      () => {
-        if (!isCurrent(identity, token)) return;
-        publish({
-          status: "error",
-          identity,
-          generation: requestGeneration,
-          message: genericLoadErrorMessage,
-        });
-      },
+      () => publishError(identity, token, requestGeneration),
     );
     activePromise = request;
     return request;

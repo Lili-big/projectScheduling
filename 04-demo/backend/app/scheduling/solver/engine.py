@@ -28,6 +28,7 @@ from ...contracts import (
 )
 from ..domain.resource_scope import RESOURCE_SCOPE_RULE_VERSION
 from ..domain.milestone_scope import task_ids_for_milestone as _task_ids_for_milestone
+from .results import apply_unified_target_achievement
 
 CONTINUITY_PRIMARY_WEIGHT = 1_000_000
 CONTROL_NODE_LATE_WEIGHT = DEFAULT_OBJECTIVE_TERM_WEIGHTS["control_node_late"]
@@ -2481,7 +2482,7 @@ def solve_control_priority_schedule_once(
     enforce_hard_milestones: bool = False,
     max_makespan_days: int | None = None,
     relax_target_constraints: bool = False,
-    optimization_stage: str = "legacy",
+    optimization_stage: str = "unified_fixed_resource",
     warm_start_result: ScheduleResult | None = None,
 ) -> ScheduleResult:
     """Run the full control-priority objective once without a baseline CP-SAT solve."""
@@ -2494,29 +2495,30 @@ def solve_control_priority_schedule_once(
         _optimization_stage=optimization_stage,
         _use_baseline=False,
     )
+    performance_path = (
+        "unified_fixed_resource_single_stage"
+        if optimization_stage in {"primary", "unified_fixed_resource"}
+        else "control_priority_one_pass"
+    )
+    metadata = {
+        "solve_mode": "unified_fixed_resource",
+        "solver_call_count": 1,
+        "baseline_status": "not_evaluated",
+        "performance_path": performance_path,
+        "resource_expansion_attempted": False,
+        "objective_priority": ["max_target_delay_days", "makespan_days"],
+    }
     result.stats.update(
         {
-            "solver_call_count": 1,
-            "baseline_status": "not_evaluated",
-            "performance_path": (
-                "ai_strict_fixed_resource_single_stage"
-                if optimization_stage == "primary"
-                else "ai_strict_fixed_resource_one_pass"
-            ),
-            "resource_expansion_attempted": False,
+            **metadata,
         }
     )
-    result.objective_breakdown.update(
-        {
-            "solver_call_count": 1,
-            "baseline_status": "not_evaluated",
-            "performance_path": (
-                "ai_strict_fixed_resource_single_stage"
-                if optimization_stage == "primary"
-                else "ai_strict_fixed_resource_one_pass"
-            ),
-            "resource_expansion_attempted": False,
-        }
+    result.objective_breakdown.update(metadata)
+    apply_unified_target_achievement(
+        result,
+        schedule_input,
+        evaluated_at_source="unified_fixed_resource",
+        fixed_duration_target=max_makespan_days,
     )
     analysis = result.stats.get("control_priority_analysis")
     if isinstance(analysis, dict):
@@ -2615,7 +2617,7 @@ def solve_control_priority_schedule(
     config = schedule_input.schedule_strategy
     objective_weights = _objective_weights_for_config(config)
     objective_terms_used_payload = _objective_terms_used_for_config(config, objective_weights)
-    ai_primary_stage = _optimization_stage == "primary"
+    ai_primary_stage = _optimization_stage in {"primary", "unified_fixed_resource"}
     control_node_late_enabled = (
         False if ai_primary_stage else _objective_term_enabled(objective_weights, "control_node_late")
     )
@@ -5232,6 +5234,239 @@ def solve_capacity_shortest_schedule(schedule_input: ScheduleInput) -> ScheduleR
 
 
 def solve_min_resources_schedule(
+    schedule_input: ScheduleInput,
+    fallback_target_days: int | None = None,
+    minimum_resource_counts: dict[str, int] | None = None,
+    verify_with_full_objective: bool = True,
+) -> ScheduleResult:
+    """Run one global quantity search and, when found, one unified detail solve."""
+    del verify_with_full_objective  # retained only for request compatibility
+    enabled_resources = [resource for resource in schedule_input.resources if resource.enabled]
+    resource_candidates = _resource_candidates_by_task(schedule_input.tasks, enabled_resources)
+    validation = _validate_resource_coverage(schedule_input.tasks, resource_candidates, enabled_resources)
+    if any(message.level == "error" for message in validation):
+        result = ScheduleResult(
+            status="INFEASIBLE",
+            plan_start_date=schedule_input.start_date,
+            validation=validation,
+            stats={"reason": "missing_compatible_resource"},
+        )
+        apply_unified_target_achievement(
+            result,
+            schedule_input,
+            evaluated_at_source="minimum_resources_global_search",
+            fixed_duration_target=fallback_target_days,
+        )
+        metadata = _minimum_resource_unified_metadata(
+            global_status="not_run",
+            fixed_counts={},
+            recommended=[],
+            candidate_found=False,
+            detail_result=None,
+            target_days=fallback_target_days,
+            search_lower_bounds={},
+        )
+        result.stats.update(metadata)
+        result.objective_breakdown.update(metadata)
+        return result
+
+    hard_match_count = _matched_hard_milestone_count(schedule_input)
+    target_days = _min_resource_target_days(schedule_input, fallback_target_days)
+    groups = _resource_groups(enabled_resources)
+    lower_bounds = _normalized_minimum_resource_counts(groups, minimum_resource_counts)
+    search_lower_bounds = {group["key"]: int(lower_bounds.get(group["key"], 0)) for group in groups}
+    if hard_match_count == 0 and target_days is None:
+        result = ScheduleResult(
+            status="MODEL_INVALID",
+            plan_start_date=schedule_input.start_date,
+            validation=validation + [
+                ValidationMessage(
+                    level="error",
+                    message="固定工期推算最少资源需要至少一个可匹配的强制里程碑目标，或同范围固定资源工期目标。",
+                )
+            ],
+            stats={"reason": "missing_target_duration"},
+        )
+        apply_unified_target_achievement(
+            result,
+            schedule_input,
+            evaluated_at_source="minimum_resources_global_search",
+            fixed_duration_target=None,
+        )
+        metadata = _minimum_resource_unified_metadata(
+            global_status="not_run",
+            fixed_counts={},
+            recommended=[],
+            candidate_found=False,
+            detail_result=None,
+            target_days=None,
+            search_lower_bounds=search_lower_bounds,
+        )
+        result.stats.update(metadata)
+        result.objective_breakdown.update(metadata)
+        return result
+
+    try:
+        from ortools.sat.python import cp_model
+    except ImportError:
+        result = ScheduleResult(
+            status="MODEL_INVALID",
+            plan_start_date=schedule_input.start_date,
+            validation=[ValidationMessage(level="error", message="未安装 OR-Tools，请先安装后端依赖再执行求解。")],
+            stats={"reason": "ortools_missing"},
+        )
+        apply_unified_target_achievement(
+            result,
+            schedule_input,
+            evaluated_at_source="minimum_resources_global_search",
+            fixed_duration_target=target_days if hard_match_count == 0 else None,
+        )
+        metadata = _minimum_resource_unified_metadata(
+            global_status="MODEL_INVALID",
+            fixed_counts={},
+            recommended=[],
+            candidate_found=False,
+            detail_result=None,
+            target_days=target_days,
+            search_lower_bounds=search_lower_bounds,
+        )
+        result.stats.update(metadata)
+        result.objective_breakdown.update(metadata)
+        return result
+
+    global_search = _solve_capacity_model(
+        schedule_input,
+        cp_model=cp_model,
+        groups=groups,
+        counts=None,
+        minimum_resource_counts=lower_bounds,
+        fallback_target_days=target_days if hard_match_count == 0 else None,
+        enforce_fixed_duration=True,
+        minimize_resource_count=True,
+    )
+    global_status = str(global_search["status"])
+    if global_status not in {"OPTIMAL", "FEASIBLE"}:
+        result = ScheduleResult(
+            status=global_status,
+            plan_start_date=schedule_input.start_date,
+            milestone_results=_not_evaluated_milestones(schedule_input.milestones),
+            validation=validation + list(global_search.get("validation", [])),
+            stats={
+                **global_search.get("stats", {}),
+                "reason": "resource_count_optimization_failed",
+            },
+        )
+        apply_unified_target_achievement(
+            result,
+            schedule_input,
+            evaluated_at_source="minimum_resources_global_search",
+            fixed_duration_target=target_days if hard_match_count == 0 else None,
+        )
+        metadata = _minimum_resource_unified_metadata(
+            global_status=global_status,
+            fixed_counts={},
+            recommended=[],
+            candidate_found=False,
+            detail_result=None,
+            target_days=target_days,
+            search_lower_bounds=search_lower_bounds,
+        )
+        result.stats.update(metadata)
+        result.objective_breakdown.update(metadata)
+        return result
+
+    fixed_counts = {key: int(value) for key, value in global_search["group_counts"].items()}
+    recommended = _recommended_resource_counts(groups, fixed_counts)
+    candidate_makespan_days = int(global_search["solver"].Value(global_search["makespan"]))
+    detail_input = schedule_input.model_copy(
+        update={"resources": _apply_resource_limits(schedule_input.resources, fixed_counts)}
+    )
+    result = solve_control_priority_schedule_once(
+        detail_input,
+        enforce_hard_milestones=True,
+        max_makespan_days=target_days if hard_match_count == 0 else None,
+        relax_target_constraints=True,
+        optimization_stage="unified_fixed_resource",
+    )
+    result.validation = validation + list(global_search.get("validation", [])) + list(result.validation)
+    target = result.stats.get("target_achievement")
+    candidate_verified = isinstance(target, dict) and target.get("target_status") == "met"
+    if not candidate_verified:
+        result.validation.append(
+            ValidationMessage(
+                level="warning",
+                message="已保留全局最少资源候选和详细排程真实状态；本次未增加资源、未重搜、未重试。",
+            )
+        )
+    metadata = _minimum_resource_unified_metadata(
+        global_status=global_status,
+        fixed_counts=fixed_counts,
+        recommended=recommended,
+        candidate_found=True,
+        detail_result=result,
+        target_days=target_days,
+        search_lower_bounds=search_lower_bounds,
+        candidate_makespan_days=candidate_makespan_days,
+    )
+    result.stats.update(metadata)
+    result.objective_breakdown.update(metadata)
+    return result
+
+
+def _minimum_resource_unified_metadata(
+    *,
+    global_status: str,
+    fixed_counts: dict[str, int],
+    recommended: list[dict[str, Any]],
+    candidate_found: bool,
+    detail_result: ScheduleResult | None,
+    target_days: int | None,
+    search_lower_bounds: dict[str, int],
+    candidate_makespan_days: int | None = None,
+) -> dict[str, Any]:
+    target = detail_result.stats.get("target_achievement") if detail_result is not None else None
+    detail_target_status = target.get("target_status") if isinstance(target, dict) else None
+    candidate_verified = candidate_found and detail_target_status == "met"
+    detail_attempted = detail_result is not None
+    return {
+        "solve_mode": "min_resources_fixed_duration",
+        "schedule_source": "minimum_resources_unified_detail" if detail_attempted else "minimum_resources_global_search",
+        "recommended_schedule_source": "minimum_resources_unified_detail" if detail_attempted else "minimum_resources_global_search",
+        "performance_path": "global_minimum_then_unified_fixed_resource",
+        "target_days": target_days,
+        "global_search_call_count": 1 if global_status != "not_run" else 0,
+        "global_search_status": global_status,
+        "global_objective_priority": ["resource_count", "makespan_days"],
+        "search_lower_bounds": search_lower_bounds,
+        "minimum_resource_counts": search_lower_bounds,
+        "recommended_resource_counts": recommended,
+        "capacity_model_group_counts": fixed_counts,
+        "candidate_total_quantity": sum(fixed_counts.values()),
+        "candidate_makespan_days": candidate_makespan_days,
+        "resource_count_optimality": (
+            "optimal" if global_status == "OPTIMAL" else "feasible" if global_status == "FEASIBLE" else "unconfirmed" if global_status == "UNKNOWN" else "infeasible"
+        ),
+        "resource_expansion_attempted": False,
+        "capacity_precheck_status": "not_run",
+        "balanced_reoptimization_status": "not_run",
+        "unbalanced_reoptimization_status": "not_run",
+        "reoptimization_attempts": [],
+        "parallel_reoptimization_used": False,
+        "minimum_resource_verification": {
+            "candidate_found": candidate_found,
+            "candidate_verified": candidate_verified,
+            "detail_solve_attempted": detail_attempted,
+            "detail_solver_call_count": 1 if detail_attempted else 0,
+            "detail_target_status": detail_target_status,
+            "detail_solver_status": detail_result.status if detail_result is not None else None,
+            "retry_attempted": False,
+            "retry_reason": None,
+        },
+        "resource_recommendation_status": "verified" if candidate_verified else detail_target_status or global_status.lower(),
+    }
+
+
+def _solve_min_resources_schedule_legacy(
     schedule_input: ScheduleInput,
     fallback_target_days: int | None = None,
     minimum_resource_counts: dict[str, int] | None = None,

@@ -47,6 +47,7 @@ from ..solver.engine import (
     solve_min_resources_schedule,
     solve_resource_cost_schedule,
 )
+from ..solver.results import apply_unified_target_achievement
 from ...wbs import build_precedence_links, calculate_duration
 from ..domain.resource_scope import (
     RESOURCE_SCOPE_RULE_VERSION,
@@ -332,15 +333,36 @@ def solve_scenario(scenario: ScenarioInput, *, workpoint_id: str | None = None) 
             status="MODEL_INVALID",
             plan_start_date=scenario.project.start_date,
             validation=generated.validation,
-            stats={"reason": "scenario_generation_error", **alternative_output},
-            objective_breakdown=alternative_output,
+            stats={
+                "reason": "scenario_generation_error",
+                "solve_mode": "unified_fixed_resource",
+                "schedule_source": "simulation_fixed_resources",
+                "solver_call_count": 0,
+                "resource_expansion_attempted": False,
+                "objective_priority": ["max_target_delay_days", "makespan_days"],
+                **alternative_output,
+            },
+            objective_breakdown={
+                "solve_mode": "unified_fixed_resource",
+                "schedule_source": "simulation_fixed_resources",
+                "solver_call_count": 0,
+                "resource_expansion_attempted": False,
+                "objective_priority": ["max_target_delay_days", "makespan_days"],
+                **alternative_output,
+            },
             milestone_results=[],
         )
     else:
-        result, alternative_results = _solve_fixed_resources_shortest_scenario(
-            scenario,
+        result = _solve_unified_fixed_resource(
             generated,
-            workpoint_id=workpoint_id,
+            schedule_source="simulation_fixed_resources",
+        )
+
+    if "target_achievement" not in result.stats:
+        apply_unified_target_achievement(
+            result,
+            generated.schedule_input,
+            evaluated_at_source="simulation_fixed_resources",
         )
 
     _apply_resource_scope_diagnostics(result, scenario, generated)
@@ -362,7 +384,122 @@ def solve_scenario(scenario: ScenarioInput, *, workpoint_id: str | None = None) 
     )
 
 
+def _solve_unified_fixed_resource(
+    generated: GeneratedScheduleInput,
+    *,
+    schedule_source: str,
+    max_makespan_days: int | None = None,
+) -> ScheduleResult:
+    schedule_input = generated.schedule_input
+    started_at = time.perf_counter()
+    result = solve_control_priority_schedule_once(
+        schedule_input,
+        enforce_hard_milestones=True,
+        max_makespan_days=max_makespan_days,
+        relax_target_constraints=True,
+        optimization_stage="unified_fixed_resource",
+    )
+    target = apply_unified_target_achievement(
+        result,
+        schedule_input,
+        evaluated_at_source=schedule_source,
+        fixed_duration_target=max_makespan_days,
+    )
+    elapsed_seconds = max(0.0, time.perf_counter() - started_at)
+    primary_idle_days = _ai_result_resource_idle_days(result)
+    primary_continuity_penalty = _ai_result_continuity_penalty(result)
+    optimization_stages = {
+        "primary": {
+            "attempted": True,
+            "solver_status": result.status,
+            "max_target_delay_days": result.stats.get("max_target_delay_days"),
+            "makespan_days": result.objective_days,
+            "optimality_proven": result.status == "OPTIMAL",
+            "elapsed_seconds": elapsed_seconds,
+            "configured_budget_seconds": schedule_input.time_limit_seconds,
+        },
+        "secondary": {
+            "attempted": False,
+            "solver_status": None,
+            "optimality_proven": False,
+            "elapsed_seconds": 0.0,
+            "configured_budget_seconds": 0.0,
+            "skipped_reason": "not_applicable",
+        },
+        "selected_stage": "primary",
+        "fallback_reason": None,
+        "total_budget_seconds": schedule_input.time_limit_seconds,
+        "total_elapsed_seconds": elapsed_seconds,
+    }
+    metadata = {
+        "solve_mode": "unified_fixed_resource",
+        "schedule_source": schedule_source,
+        "recommended_schedule_source": schedule_source,
+        "solver_call_count": 1,
+        "global_search_call_count": 0,
+        "resource_expansion_attempted": False,
+        "objective_priority": ["max_target_delay_days", "makespan_days"],
+        "performance_path": "unified_fixed_resource_single_stage",
+        "optimization_stages": optimization_stages,
+        "primary_solver_status": result.status,
+        "primary_max_target_delay_days": target["max_target_delay_days"],
+        "primary_makespan_days": result.objective_days,
+        "primary_resource_idle_days": primary_idle_days,
+        "primary_continuity_penalty": primary_continuity_penalty,
+        "capacity_precheck_status": "not_run",
+        "balanced_reoptimization_status": "not_run",
+        "unbalanced_reoptimization_status": "not_run",
+        "reoptimization_attempts": [],
+        "resource_recommendation_status": "not_applicable",
+        "resource_recommendation_message": "严格按当前资源求解，不自动增加资源。",
+        **_alternative_output_not_applicable(
+            "unified_fixed_resource",
+            "统一固定资源求解不输出新增资源方案。",
+        ),
+    }
+    result.stats.update(metadata)
+    result.objective_breakdown.update(metadata)
+    if target.get("target_status") == "not_met":
+        result.validation.append(
+            ValidationMessage(level="warning", message="当前固定资源的已证明最优排程仍未满足目标，不自动增加资源。")
+        )
+    elif target.get("target_status") == "unconfirmed":
+        result.validation.append(
+            ValidationMessage(level="warning", message="当前结果尚未确认目标满足情况，不自动增加资源或重试。")
+        )
+    return result
+
+
 def solve_ai_strict_fixed_resource_scenario(scenario: ScenarioInput) -> ScenarioSolveResult:
+    """Solve one AI plan through the same fixed-resource kernel as simulation."""
+    started_at = time.perf_counter()
+    generated = generate_schedule_input_from_scenario(scenario)
+    generation_errors = [message.message for message in generated.validation if message.level == "error"]
+    if generation_errors:
+        raise ValueError("；".join(generation_errors))
+    result = _solve_unified_fixed_resource(
+        generated,
+        schedule_source="ai_strict_fixed_resources",
+    )
+    if result.status == "MODEL_INVALID":
+        detail = next((message.message for message in result.validation if message.level == "error"), "模型构建失败。")
+        raise RuntimeError(detail)
+    _apply_resource_scope_diagnostics(result, scenario, generated)
+    _apply_request_timing(result, started_at)
+    diagnostics = _build_diagnostics(generated.validation, result)
+    return ScenarioSolveResult(
+        scenario_id=scenario.scenario_id,
+        scenario_name=scenario.scenario_name,
+        generated=generated,
+        result=result,
+        milestone_results=result.milestone_results,
+        diagnostics=diagnostics,
+        metrics=_scenario_metrics(generated, result),
+        alternative_results=[],
+    )
+
+
+def _solve_ai_strict_fixed_resource_scenario_legacy(scenario: ScenarioInput) -> ScenarioSolveResult:
     """Solve one AI plan once with exact named resources and no expansion branch."""
     started_at = time.perf_counter()
     generated = generate_schedule_input_from_scenario(scenario)
@@ -517,98 +654,40 @@ def _ai_result_continuity_penalty(result: ScheduleResult) -> int:
 
 
 def _apply_ai_strict_target_achievement(result: ScheduleResult, schedule_input: ScheduleInput) -> dict[str, Any]:
-    hard_milestone_lateness = [
-        max(0, int(milestone.lateness_days or 0))
-        for milestone in result.milestone_results
-        if milestone.mode == "hard"
-    ]
-    hard_milestone_late_days = sum(hard_milestone_lateness)
-    fixed_duration_overrun_days = _fixed_duration_overrun_days(result)
-    max_target_delay_days = max([fixed_duration_overrun_days, *hard_milestone_lateness], default=0)
-    target_present = any(milestone.mode == "hard" for milestone in schedule_input.milestones)
-    has_schedule = bool(result.tasks)
-    primary_solver_status = str(result.stats.get("primary_solver_status") or result.status)
-    optimality_proven = primary_solver_status == "OPTIMAL"
-
-    if primary_solver_status == "INFEASIBLE":
-        plan_status = "infeasible"
-    elif primary_solver_status == "UNKNOWN":
-        plan_status = "unconfirmed"
-    elif primary_solver_status not in {"OPTIMAL", "FEASIBLE"}:
-        plan_status = "infeasible"
-    elif not target_present:
-        plan_status = "unconfirmed"
-    elif hard_milestone_late_days == 0 and fixed_duration_overrun_days == 0:
-        plan_status = "met"
-    elif optimality_proven:
-        plan_status = "not_met"
-    else:
-        plan_status = "unconfirmed"
-
+    payload = apply_unified_target_achievement(
+        result,
+        schedule_input,
+        evaluated_at_source="ai_strict_fixed_resources",
+    )
     schedule_outcome_status, schedule_outcome_reason = _ai_strict_schedule_outcome(
         result,
-        target_present=target_present,
-        has_schedule=has_schedule,
-        max_target_delay_days=max_target_delay_days,
-        solver_status=primary_solver_status,
+        target_present=bool(payload["target_present"]),
+        has_schedule=bool(payload["has_schedule"]),
+        max_target_delay_days=int(payload["max_target_delay_days"]),
+        solver_status=str(payload["solver_status"]),
+    )
+    payload.update(
+        {
+            "schedule_outcome_status": schedule_outcome_status,
+            "schedule_outcome_reason": schedule_outcome_reason,
+        }
     )
 
-    failure_reasons: list[str] = []
-    if hard_milestone_late_days > 0:
-        failure_reasons.append("hard_milestone_late")
-    if fixed_duration_overrun_days > 0:
-        failure_reasons.append("fixed_duration_overrun")
-    if not target_present and primary_solver_status in {"OPTIMAL", "FEASIBLE"}:
-        failure_reasons.append("target_missing")
-    if plan_status == "unconfirmed" and primary_solver_status == "FEASIBLE" and hard_milestone_late_days > 0:
-        failure_reasons.append("optimality_unproven")
-    if primary_solver_status == "UNKNOWN":
-        failure_reasons.extend(["unconfirmed", "time_budget_exhausted"])
-    if plan_status == "infeasible":
-        failure_reasons.append(str(result.stats.get("reason") or "physical_infeasible"))
-
-    payload = {
-        "business_success": plan_status == "met",
-        "target_status": plan_status,
-        "schedule_outcome_status": schedule_outcome_status,
-        "schedule_outcome_reason": schedule_outcome_reason,
-        "solver_status": primary_solver_status,
-        "selected_schedule_solver_status": result.status,
-        "target_present": target_present,
-        "has_schedule": has_schedule,
-        "optimality_proven": optimality_proven,
-        "hard_milestone_late_days": hard_milestone_late_days,
-        "fixed_duration_overrun_days": fixed_duration_overrun_days,
-        "max_target_delay_days": max_target_delay_days,
-        "failure_reasons": list(dict.fromkeys(failure_reasons)),
-        "time_budget_seconds": schedule_input.time_limit_seconds,
-        "time_budget_exhausted": primary_solver_status in {"FEASIBLE", "UNKNOWN"},
-        "evaluated_at_source": "ai_strict_fixed_resources",
-    }
-    result.stats["target_achievement"] = payload
-    result.objective_breakdown["target_achievement"] = payload
-    result.stats["hard_milestone_late_days"] = hard_milestone_late_days
-    result.stats["fixed_duration_overrun_days"] = fixed_duration_overrun_days
-    result.stats["max_target_delay_days"] = max_target_delay_days
-    result.objective_breakdown["hard_milestone_late_days"] = hard_milestone_late_days
-    result.objective_breakdown["fixed_duration_overrun_days"] = fixed_duration_overrun_days
-    result.objective_breakdown["max_target_delay_days"] = max_target_delay_days
-
-    if plan_status == "not_met":
+    if payload["target_status"] == "not_met":
         result.validation.append(
             ValidationMessage(
                 level="warning",
-                message=f"当前固定资源的已证明最优排程仍延期 {hard_milestone_late_days + fixed_duration_overrun_days} 天，不自动增加资源。",
+                message=f"当前固定资源的已证明最优排程仍延期 {payload['max_target_delay_days']} 天，不自动增加资源。",
             )
         )
-    elif plan_status == "unconfirmed" and primary_solver_status == "FEASIBLE":
+    elif payload["target_status"] == "unconfirmed" and payload["solver_status"] == "FEASIBLE":
         result.validation.append(
             ValidationMessage(
                 level="warning",
                 message="当前限时内已有可行排程但尚未证明最优，不据此断言资源不足。",
             )
         )
-    elif plan_status == "unconfirmed" and not target_present:
+    elif payload["target_status"] == "unconfirmed" and not payload["target_present"]:
         result.validation.append(ValidationMessage(level="warning", message="当前方案缺少可评估的强制目标，无法判断目标是否满足。"))
     return payload
 
@@ -2009,11 +2088,47 @@ def solve_min_resources_scenario(
             status="MODEL_INVALID",
             plan_start_date=scenario.project.start_date,
             validation=generated.validation,
-            stats={"reason": "scenario_generation_error", "solve_mode": "min_resources_fixed_duration"},
+            stats={
+                "reason": "scenario_generation_error",
+                "solve_mode": "min_resources_fixed_duration",
+                "global_search_call_count": 0,
+                "resource_expansion_attempted": False,
+                "minimum_resource_verification": {
+                    "candidate_found": False,
+                    "candidate_verified": False,
+                    "detail_solve_attempted": False,
+                    "detail_solver_call_count": 0,
+                    "detail_target_status": "infeasible",
+                    "detail_solver_status": None,
+                    "retry_attempted": False,
+                    "retry_reason": None,
+                },
+            },
             milestone_results=[],
         )
     else:
         result = solve_min_resources_schedule(generated.schedule_input, fallback_target_days=request.fallback_target_days)
+        fixed_counts = {
+            str(item.get("resource_pool_id")): int(item.get("recommended_quantity") or 0)
+            for item in result.stats.get("recommended_resource_counts", [])
+            if isinstance(item, dict) and item.get("resource_pool_id")
+        }
+        if fixed_counts:
+            generated = generated.model_copy(
+                update={
+                    "schedule_input": generated.schedule_input.model_copy(
+                        update={"resources": _apply_resource_limits(generated.schedule_input.resources, fixed_counts)}
+                    )
+                }
+            )
+
+    if "target_achievement" not in result.stats:
+        apply_unified_target_achievement(
+            result,
+            generated.schedule_input,
+            evaluated_at_source="minimum_resources_global_search",
+            fixed_duration_target=request.fallback_target_days,
+        )
 
     _apply_resource_scope_diagnostics(result, scenario, generated)
     _apply_request_timing(result, started_at)
@@ -2470,6 +2585,30 @@ def _apply_resource_scope_diagnostics(
         or result.objective_breakdown.get("recommended_resource_counts")
         or []
     )
+    pool_by_id = {pool.effective_pool_id: pool for pool in resolution.pools}
+    enriched_recommendations = []
+    for raw_item in raw_recommendations:
+        if not isinstance(raw_item, dict):
+            continue
+        item = dict(raw_item)
+        pool_id = str(item.get("resource_pool_id") or "")
+        pool = pool_by_id.get(pool_id)
+        if pool is not None:
+            item.update(
+                {
+                    "source_pool_id": pool.source_pool_id,
+                    "scope_mode": pool.scope_mode,
+                    "workpoint_id": pool.workpoint_id,
+                    "eligible_workpoint_ids": list(pool.eligible_workpoint_ids),
+                    "current_quantity": pool.quantity,
+                    "max_quantity": pool.max_quantity,
+                }
+            )
+        enriched_recommendations.append(item)
+    if enriched_recommendations:
+        result.stats["recommended_resource_counts"] = enriched_recommendations
+        result.objective_breakdown["recommended_resource_counts"] = enriched_recommendations
+        raw_recommendations = enriched_recommendations
     recommended_by_pool = {
         str(item.get("resource_pool_id")): int(item.get("recommended_quantity") or 0)
         for item in raw_recommendations

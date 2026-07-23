@@ -19,6 +19,7 @@ from .api.routers.project_master import (
     get_project_master_import_endpoint,
     get_project_master_version_endpoint,
     get_project_master_workpoint_endpoint,
+    get_task_view_display_map_endpoint,
     import_project_master_endpoint,
     list_project_master_versions_endpoint,
     list_project_master_girder_workpoints_endpoint,

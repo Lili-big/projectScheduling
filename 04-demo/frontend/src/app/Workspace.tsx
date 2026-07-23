@@ -26,7 +26,7 @@ import {
 } from "../api/scenarioApi";
 import {
   getCurrentProjectMasterVersion,
-  getProjectMasterWorkpoint,
+  getProjectMasterTaskViewDisplayMap,
   listProjectMasterWorkpoints,
 } from "../api/projectMasterApi";
 import {
@@ -210,6 +210,7 @@ import {
   formatScheduleStatus,
   ScheduleResultsWorkspace,
   solveScopeLabel,
+  unifiedSolvePresentation,
 } from "../features/scheduleResults";
 import {
   generateScheduleWorkflow,
@@ -291,6 +292,10 @@ const controlLevelLabels: Record<ControlLevel, string> = {
 };
 
 const scheduleSourceLabels: Record<string, string> = {
+  simulation_fixed_resources: "统一固定资源排程",
+  ai_strict_fixed_resources: "AI 方案统一固定资源排程",
+  minimum_resources_unified_detail: "全局候选详细排程",
+  minimum_resources_global_search: "全局最少资源搜索",
   current_resources_control_priority_balanced: "当前资源目标函数排程",
   current_resources_target_failed: "当前资源目标未满足",
   current_resources_best_effort_refinement: "当前资源目标函数排程",
@@ -1195,7 +1200,7 @@ function TaskViewTab({
   const predecessorHoverCloseTimerRef = useRef<number | null>(null);
   const generatedForDetails = solveResult?.generated ?? generated;
   const projectMasterDisplayCoordinator = useMemo(
-    () => createProjectMasterDisplayCoordinator(getProjectMasterWorkpoint),
+    () => createProjectMasterDisplayCoordinator(getProjectMasterTaskViewDisplayMap),
     [],
   );
   const projectMasterWorkpointIds = useMemo(() => {
@@ -1671,6 +1676,7 @@ function ResultsTab({
   const refinementSummary = refinementSummaryFromResult(result);
   const controlPriorityAnalysis = controlPriorityAnalysisFromResult(result);
   const resourceOrganization = resourceOrganizationFromResult(result);
+  const unifiedSolveOutcome = useMemo(() => unifiedSolvePresentation(result), [result]);
   const continuousBeamTeamSpanSummary = continuousBeamTeamSpanSummaryFromResult(result);
   const strategyConfig = withDefaultScheduleStrategy(scenario?.schedule_strategy);
   const objectiveTerms = strategyConfig.objective_terms ?? defaultObjectiveTermsConfig();
@@ -1892,38 +1898,34 @@ function ResultsTab({
           <div className="objective-config">
               <div className="objective-config-header">
                 <div>
-                  <h3>算法倾向选择</h3>
-                  <span>已选择 {enabledObjectiveCount}/{objectiveTermDefinitions.length} 个排程倾向</span>
+                  <h3>固定资源与固定工期目标（只读）</h3>
+                  <span>两个入口使用统一的确定性目标顺序，不读取下方资源成本高级倾向。</span>
                 </div>
               </div>
               <div className="objective-choice-grid">
-                {objectiveTermDefinitions.map((term) => {
-                  const termConfig = objectiveTerms[term.id];
-                  const keepOneEnabled = termConfig.enabled && enabledObjectiveCount <= 1;
-                  return (
-                    <label
-                      className={`objective-choice${termConfig.enabled ? " selected" : ""}${keepOneEnabled ? " locked" : ""}`}
-                      key={term.id}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={termConfig.enabled}
-                        disabled={keepOneEnabled}
-                        aria-label={`选择${term.label}`}
-                        onChange={(event) => updateObjectiveTerm(term.id, { enabled: event.target.checked })}
-                      />
-                      <span className="objective-choice-copy">
-                        <strong>{term.label}</strong>
-                        <span>{term.group}</span>
-                      </span>
-                    </label>
-                  );
-                })}
+                <div className="objective-choice selected">
+                  <span className="objective-choice-copy">
+                    <strong>1. 最大目标延期最小</strong>
+                    <span>先压缩所有可评估目标中的最大延期</span>
+                  </span>
+                </div>
+                <div className="objective-choice selected">
+                  <span className="objective-choice-copy">
+                    <strong>2. 总工期最短</strong>
+                    <span>最大延期相同时，再选择总工期更短的排程</span>
+                  </span>
+                </div>
+                <div className="objective-choice">
+                  <span className="objective-choice-copy">
+                    <strong>资源组织诊断</strong>
+                    <span>资源空闲与连续性仅作求解后诊断，不参与目标</span>
+                  </span>
+                </div>
               </div>
               <details className="objective-advanced">
-                <summary>高级设置</summary>
+                <summary>资源成本优化高级倾向</summary>
                 <div className="objective-advanced-toolbar">
-                  <span>查看说明、调整权重或恢复默认倾向。</span>
+                  <span>以下开关和权重仅供“资源成本优化排程”入口沿用。</span>
                   <button className="secondary objective-reset-button" type="button" onClick={restoreDefaultObjectiveTerms}>
                     <RotateCcw size={15} />
                     恢复默认
@@ -1933,6 +1935,7 @@ function ResultsTab({
                   <table className="objective-table">
                     <thead>
                       <tr>
+                        <th>启用</th>
                         <th>倾向</th>
                         <th>说明</th>
                         <th>当前权重</th>
@@ -1943,6 +1946,15 @@ function ResultsTab({
                         const termConfig = objectiveTerms[term.id];
                         return (
                           <tr className={termConfig.enabled ? undefined : "objective-row-disabled"} key={term.id}>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={termConfig.enabled}
+                                disabled={termConfig.enabled && enabledObjectiveCount <= 1}
+                                aria-label={`资源成本优化选择${term.label}`}
+                                onChange={(event) => updateObjectiveTerm(term.id, { enabled: event.target.checked })}
+                              />
+                            </td>
                             <td>
                               <strong>{term.label}</strong>
                               <span>{term.group}</span>
@@ -1980,6 +1992,34 @@ function ResultsTab({
         <Metric label="求解耗时" value={summary.elapsed} tone="neutral" icon={<Timer size={18} />} />
         <Metric label="资源 / 里程碑" value={summary.resourcesAndMilestones} tone="neutral" icon={<Flag size={18} />} />
       </section>
+
+      {unifiedSolveOutcome && (
+        <section className={`business-conclusion ${unifiedSolveOutcome.businessStatus.includes("满足") && !unifiedSolveOutcome.businessStatus.includes("未满足") ? "ok" : "neutral"}`}>
+          <div className="business-conclusion-heading">
+            <div className="business-conclusion-icon"><Workflow size={22} /></div>
+            <div>
+              <span>{unifiedSolveOutcome.mode === "legacy" ? "历史结果" : "当前算法"}</span>
+              <h2>统一求解结论</h2>
+            </div>
+          </div>
+          <div className="business-conclusion-grid">
+            <div><span>业务状态</span><strong>{unifiedSolveOutcome.businessStatus}</strong></div>
+            <div><span>Solver 状态</span><strong>{unifiedSolveOutcome.solverStatus}</strong></div>
+            <div><span>最大目标延期</span><strong>{unifiedSolveOutcome.maxTargetDelayDays}</strong></div>
+            <div><span>调用次数</span><strong>{unifiedSolveOutcome.solverCalls}</strong></div>
+            {unifiedSolveOutcome.mode === "minimum" && (
+              <>
+                <div><span>全局搜索状态</span><strong>{unifiedSolveOutcome.globalSearchStatus}</strong></div>
+                <div><span>候选验证</span><strong>{unifiedSolveOutcome.verificationStatus}</strong></div>
+              </>
+            )}
+          </div>
+          <p>{unifiedSolveOutcome.objectiveText}</p>
+          <p>{unifiedSolveOutcome.diagnosticText}</p>
+          {unifiedSolveOutcome.mode === "minimum" && <p>候选资源：{unifiedSolveOutcome.candidateSummary}</p>}
+          <p>{unifiedSolveOutcome.retryStatus}。{unifiedSolveOutcome.sourceNotice}</p>
+        </section>
+      )}
 
       <section className="panel full resource-scope-result-panel">
         <PanelTitle title="资源作用域结果" subtitle="展示求解输入中的显式作用域、权威分配工点和数量口径" />
@@ -4051,6 +4091,7 @@ function targetAchievementFromResult(result: ScheduleResult | null): TargetAchie
     solver_status: stringFromUnknown(raw.solver_status) || result?.status || "",
     hard_milestone_late_days: Number(raw.hard_milestone_late_days ?? 0),
     fixed_duration_overrun_days: Number(raw.fixed_duration_overrun_days ?? 0),
+    max_target_delay_days: numberFromUnknown(raw.max_target_delay_days) ?? undefined,
     failure_reasons: Array.isArray(raw.failure_reasons) ? raw.failure_reasons.map(String) : [],
     time_budget_seconds: numberFromUnknown(raw.time_budget_seconds) ?? undefined,
     time_budget_exhausted: typeof raw.time_budget_exhausted === "boolean" ? raw.time_budget_exhausted : undefined,
@@ -4112,6 +4153,8 @@ function targetStatusLabel(target: TargetAchievement | null, resourceRecommendat
   }
   const labels: Record<string, string> = {
     met: "业务目标已达成",
+    not_met: "已证明业务目标未满足",
+    infeasible: "物理无可行排程",
     current_resources_target_failed: "当前资源目标未满足",
     candidate_resources_target_met: "候选资源目标已达成",
     candidate_resources_target_failed: "候选资源目标未满足",
@@ -4149,13 +4192,16 @@ function refinementTargetDescription(
   if (target.target_status === "current_resources_target_failed") {
     return `系统已生成可查看排程，但${issue}。`;
   }
+  if (target.target_status === "not_met") {
+    return `系统已保留可查看排程，但${issue}；未自动增加资源。`;
+  }
   if (target.target_status === "candidate_resources_target_failed") {
     return `候选资源已完成复排，但${issue}。`;
   }
   if (target.target_status === "max_resources_target_failed") {
     return `最大资源已完成预检，但${issue}。`;
   }
-  if (target.target_status === "physical_infeasible") {
+  if (target.target_status === "physical_infeasible" || target.target_status === "infeasible") {
     return "当前资源在业务规则下没有可用排程。";
   }
   if (target.target_status === "unconfirmed") {

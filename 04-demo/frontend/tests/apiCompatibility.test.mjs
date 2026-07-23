@@ -60,3 +60,16 @@ test("demo API mirror exposes the v2 dual-carriageway girder contract", () => {
   assert.match(mirror, /yard\.deployment_node_id/);
   assert.doesNotMatch(mirror, /R0:unknown|T1:unknown/);
 });
+
+test("demo API mirror keeps unified fixed and minimum-resource metadata honest", () => {
+  const mirror = readFileSync(resolve(root, "..", "tools", "demo-api-mirror", "api.mts"), "utf8");
+  assert.match(mirror, /function solveMinimumResourcesScenario/);
+  assert.match(mirror, /unified_fixed_resource_single_stage/);
+  assert.match(mirror, /global_minimum_resource_search_unavailable/);
+  assert.match(mirror, /function solveMinimumResourcesScenario[\s\S]*target_status:\s*"unconfirmed"/);
+  assert.match(mirror, /solved\.result\.status = "UNKNOWN"/);
+  assert.match(mirror, /candidate_verified:\s*false/);
+  assert.match(mirror, /retry_attempted:\s*false/);
+  assert.match(mirror, /alternative_results:\s*\[\]/);
+  assert.doesNotMatch(mirror, /recommended_resources_verified/);
+});

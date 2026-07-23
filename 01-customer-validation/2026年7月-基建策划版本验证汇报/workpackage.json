@@ -1,19 +1,30 @@
 {
   "id": "2026-07-infrastructure-planning-validation-report",
   "stage": "01-customer-validation",
-  "purpose": "汇总2026年7月基建策划版本的AI施工策划与多方案比选验证结论。",
+  "purpose": "汇总截至2026年7月全部客户项目调研报告，形成斑马基建产品场景及AI施工策划与多方案比选验证结论。",
   "status": "active",
   "inputs": [],
   "entrypoints": [],
   "results": [
-    "validation-results/2026年7月-基建策划版本验证汇报.md"
+    "validation-results/2026年7月-基建策划版本验证汇报.md",
+    "validation-results/2026年7月-AI施工策划与多方案比选专项验证汇报.md",
+    "validation-results/2026年7月-斑马基建产品机会验证与立项建议.md",
+    "validation-results/2026年7月-斑马基建版本核心价值场景立项分析矩阵.xlsx",
+    "validation-results/2026年7月-斑马基建版本核心价值场景立项分析矩阵_付费者价值版.xlsx",
+    "validation-results/2026年7月-斑马基建版本核心价值场景立项分析矩阵_领导决策精简版.xlsx",
+    "validation-results/2026年7月-斑马基建产品立项领导汇报稿.md",
+    "validation-results/2026年7月-斑马基建产品立项评审纪要.md",
+    "validation-results/2026年7月-斑马基建商业验证与计划管理推进策略.md"
   ],
   "owner": "L01｜需求发现与验证闭环（2026年7月验证汇报）",
   "tracking_policy": "tracked",
   "retention_policy": "只维护跨项目综合判断；项目事实和原始证据由各项目工作包保存，综合报告仅引用不复制。",
   "related_workpackages": [
+    "zhongtie23ju-organization",
     "lugu",
     "dianfengwu-tj08",
-    "dianfengwu-tj03"
+    "dianfengwu-tj03",
+    "jiangluyi-tj01",
+    "huyu-dianchangduan-3fenbu"
   ]
 }

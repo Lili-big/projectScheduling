@@ -7,6 +7,8 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const resultDir = path.resolve(scriptDir, "..");
 const outputDir = path.resolve(scriptDir, "../../../../.local-data/archive/rebuildable/customer-validation/lugu/project-master");
 const bridgePath = "D:/00-1-03-生产产线-24年/02-产品需求/15-2026斑马基建版/03 项目验证/泸古1标/泸古高速TJ-1标桥梁进度统计表4.27(1).xlsx";
+const routeAlignmentPath = "D:/00-1-03-生产产线-24年/02-产品需求/15-2026斑马基建版/03 项目验证/泸古1标/泸古1标工期计划表（架梁）4.27版(2).xlsx";
+const routeAlignmentSheet = "架梁通道 (4片) (互通早)";
 const workpointPath = path.resolve(scriptDir, "../../customer-materials/泸古1标架梁工点导入模板.xlsx");
 const outputPath = `${resultDir}/泸古TJ-1标统一工点及桥梁结构物导入数据.xlsx`;
 
@@ -65,6 +67,7 @@ const COMPONENT_COLUMNS = [
   ["sort_order", "排序号"],
   ["remark", "备注"],
   ["param.diameter_m", "直径(m)"],
+  ["param.dimensions_m", "截面尺寸(m)"],
   ["param.length_m", "长度(m)"],
   ["param.height_m", "高度(m)"],
   ["param.form", "结构形式"],
@@ -89,6 +92,37 @@ const BRIDGES = [
 const bridgeByCanonicalName = new Map(BRIDGES.map((item) => [item.canonicalName, item]));
 const ERROR_TOKENS = new Set(["#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#N/A", "#NUM!", "#NULL!"]);
 
+// 空间对应组以架梁工期计划表中左右幅横向同行为准；合并单元格覆盖的行区间视为同一组。
+const ROUTE_ROW_ALIGNMENT = new Map([
+  ["P001", [3, 11]],
+  ["P002", [3, 11]],
+  ["P003", [3, 11]],
+  ["P004:WP-BR-LHC01", [12, 12]],
+  ["P004", [13, 15]],
+  ["P005", [16, 16]],
+  ["P006", [17, 19]],
+  ["P007", [20, 22]],
+  ["P008", [23, 25]],
+  ["P009", [26, 26]],
+  ["P010", [27, 29]],
+  ["P011", [30, 30]],
+  ["P012", [31, 33]],
+  ["P013", [34, 34]],
+  ["P014", [35, 37]],
+  ["P015", [38, 40]],
+  ["P016", [41, 43]],
+  ["P017", [44, 44]],
+  ["P018", [45, 47]],
+  ["P019", [48, 48]],
+  ["P020", [49, 51]],
+  ["P021", [52, 52]],
+  ["P022", [53, 55]],
+  ["P023", [56, 56]],
+  ["P024", [57, 59]],
+  ["P025", [60, 60]],
+  ["P026", [61, 63]],
+]);
+
 function clean(value) {
   if (value === null || value === undefined) return null;
   const text = String(value).replace(/\r/g, "").trim();
@@ -104,6 +138,30 @@ function numeric(value) {
   const normalized = text.replace(/,/g, "").replace(/^φ/i, "");
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function pierSection(value) {
+  const text = clean(value);
+  if (!text) return { sourcePresent: false, diameter: null, dimensions: null, error: null };
+  const diameter = numeric(text);
+  if (diameter !== null && diameter > 0) {
+    return { sourcePresent: true, diameter, dimensions: null, error: null };
+  }
+  const expression = text
+    .replace(/^φ\s*/i, "")
+    .replace(/\s*m\s*$/i, "")
+    .trim();
+  if (/^(?:\d+(?:\.\d+)?(?:\s*\/\s*\d+(?:\.\d+)?)*)(?:\s*[*xX×]\s*(?:\d+(?:\.\d+)?(?:\s*\/\s*\d+(?:\.\d+)?)*))+$/.test(expression)) {
+    return {
+      sourcePresent: true,
+      diameter: null,
+      dimensions: expression
+        .replace(/\s*[*xX×]\s*/g, "×")
+        .replace(/\s*\/\s*/g, "/"),
+      error: null,
+    };
+  }
+  return { sourcePresent: true, diameter: null, dimensions: null, error: `无法识别墩柱截面“${text}”` };
 }
 
 function round(value, digits = 3) {
@@ -290,9 +348,26 @@ function createWorkpoints(workpointSheet) {
   return ordered;
 }
 
+function routeRowAlignment(workpoint) {
+  const specialKey = `${workpoint.parallel}:${workpoint.workpointId}`;
+  const rowRange = ROUTE_ROW_ALIGNMENT.get(specialKey) ?? ROUTE_ROW_ALIGNMENT.get(workpoint.parallel);
+  if (!rowRange) throw new Error(`工点 ${workpoint.workpointName} 缺少架梁工期计划表横向同行映射。`);
+  const [rowStart, rowEnd] = rowRange;
+  const rowToken = rowStart === rowEnd
+    ? `R${String(rowStart).padStart(3, "0")}`
+    : `R${String(rowStart).padStart(3, "0")}-R${String(rowEnd).padStart(3, "0")}`;
+  return {
+    spatialGroupId: `XLSX-${rowToken}`,
+    displayOrder: rowStart,
+    rowStart,
+    rowEnd,
+  };
+}
+
 function createRoutePlacements(workpoints, quality) {
   const placements = [];
   for (const workpoint of workpoints) {
+    const rowAlignment = routeRowAlignment(workpoint);
     for (const side of workpoint.expectedSides) {
       const sourceRows = workpoint.sourceRows.filter((row) => row.side === side);
       const starts = sourceRows.map((row) => mileageToMeters(row.startMileage)).filter((value) => value !== null);
@@ -315,8 +390,8 @@ function createRoutePlacements(workpoints, quality) {
         mileage_prefix: prefixes[0],
         start_mileage_m: Math.min(...starts),
         end_mileage_m: Math.max(...ends),
-        spatial_group_id: workpoint.parallel,
-        display_order: parallelNumber(workpoint.parallel),
+        spatial_group_id: rowAlignment.spatialGroupId,
+        display_order: rowAlignment.displayOrder,
       });
     }
   }
@@ -342,7 +417,7 @@ function supportToken(name) {
 
 function addAggregatedComponent(map, kind, values) {
   if (!values.quantity || values.quantity <= 0) return;
-  const key = [kind, values.diameter ?? "", values.length ?? "", values.height ?? "", values.form ?? ""].join("|");
+  const key = [kind, values.diameter ?? "", values.dimensions ?? "", values.length ?? "", values.height ?? "", values.form ?? ""].join("|");
   const existing = map.get(key);
   if (existing) {
     existing.quantity = round(existing.quantity + values.quantity, 3);
@@ -510,7 +585,24 @@ function parseBridge(config, sheet, workpoint, specialDefinitions, structureObje
         if (pileNo) addAggregatedComponent(aggregated, "pile", { quantity: 1, diameter: numeric(row[indices.pile + 1]), length: numeric(row[indices.pile + 2]), height: null, form: null });
         if (indices.cap >= 0 && clean(row[indices.cap])) addAggregatedComponent(aggregated, "cap", { quantity: numeric(row[indices.cap + 1]) ?? 1, diameter: null, length: null, height: null, form: clean(row[indices.cap]) });
         if (indices.baseTie >= 0 && clean(row[indices.baseTie])) addAggregatedComponent(aggregated, "baseTie", { quantity: numeric(row[indices.baseTie + 1]) ?? 1, diameter: null, length: null, height: null, form: clean(row[indices.baseTie]) });
-        if (indices.pier >= 0 && (numeric(row[indices.pier]) !== null || numeric(row[indices.pier + 2]) !== null)) addAggregatedComponent(aggregated, "pier", { quantity: numeric(row[indices.pier + 3]) ?? 1, diameter: numeric(row[indices.pier]), length: null, height: numeric(row[indices.pier + 2]), form: clean(row[indices.pier + 1]) });
+        if (indices.pier >= 0) {
+          const section = pierSection(row[indices.pier]);
+          if (section.sourcePresent) quality.pierSections.sourceRows += 1;
+          if (section.diameter !== null) quality.pierSections.diameterRows += 1;
+          if (section.dimensions !== null) quality.pierSections.dimensionRows += 1;
+          if (section.error) quality.errors.push(`${sheet.name}第${entry.sourceRow}行${section.error}。`);
+          const pierHeight = numeric(row[indices.pier + 2]);
+          if (section.sourcePresent || pierHeight !== null) {
+            addAggregatedComponent(aggregated, "pier", {
+              quantity: numeric(row[indices.pier + 3]) ?? 1,
+              diameter: section.diameter,
+              dimensions: section.dimensions,
+              length: null,
+              height: pierHeight,
+              form: clean(row[indices.pier + 1]),
+            });
+          }
+        }
         if (indices.columnTie >= 0 && clean(row[indices.columnTie])) addAggregatedComponent(aggregated, "columnTie", { quantity: numeric(row[indices.columnTie + 1]) ?? 1, diameter: null, length: null, height: null, form: clean(row[indices.columnTie]) });
         if (indices.spacer >= 0 && numeric(row[indices.spacer])) addAggregatedComponent(aggregated, "spacer", { quantity: numeric(row[indices.spacer]), diameter: null, length: null, height: null, form: "隔板" });
         if (indices.capBeam >= 0 && clean(row[indices.capBeam])) addAggregatedComponent(aggregated, "capBeam", { quantity: numeric(row[indices.capBeam + 1]) ?? 1, diameter: null, length: null, height: null, form: clean(row[indices.capBeam]) });
@@ -540,6 +632,7 @@ function parseBridge(config, sheet, workpoint, specialDefinitions, structureObje
           sort_order: componentOrder,
           remark: `来源：桥梁进度表“${sheet.name}”${sideName(side)}${support.displayName}。`,
           "param.diameter_m": component.diameter,
+          "param.dimensions_m": component.dimensions,
           "param.length_m": component.length,
           "param.height_m": component.height,
           "param.form": component.form,
@@ -760,12 +853,22 @@ function writeDataSheet(sheet, columns, objects, widths, validations) {
 }
 
 await fs.mkdir(outputDir, { recursive: true });
-const [bridgeSheets, workpointSheets] = await Promise.all([extractWorkbook(bridgePath), extractWorkbook(workpointPath)]);
+const [bridgeSheets, workpointSheets, routeAlignmentSheets] = await Promise.all([
+  extractWorkbook(bridgePath),
+  extractWorkbook(workpointPath),
+  extractWorkbook(routeAlignmentPath),
+]);
 const workpointSource = workpointSheets.get("工点");
 if (!workpointSource) throw new Error("未找到工点工作表。 ");
+if (!routeAlignmentSheets.has(routeAlignmentSheet)) throw new Error(`未找到线路对应工作表：${routeAlignmentSheet}。`);
 const workpointGroups = createWorkpoints(workpointSource);
 const workpointByBridgeName = new Map(workpointGroups.filter((item) => item.kind === "bridge").map((item) => [item.workpointName, item]));
-const quality = { errors: [], notes: [], exclusions: ["钻机/模板/塔吊/电梯等资源字段", "施工工效与施工持续时间", "计划开始/完成时间", "完成进度及汇总表公式错误值"] };
+const quality = {
+  errors: [],
+  notes: [],
+  exclusions: ["钻机/模板/塔吊/电梯等资源字段", "施工工效与施工持续时间", "计划开始/完成时间", "完成进度及汇总表公式错误值"],
+  pierSections: { sourceRows: 0, diameterRows: 0, dimensionRows: 0 },
+};
 const structureObjects = [];
 const componentObjects = [];
 
@@ -862,7 +965,7 @@ writeDataSheet(
   componentSheet,
   COMPONENT_COLUMNS,
   componentObjects,
-  [34, 28, 36, 30, 12, 10, 12, 10, 64, 12, 12, 12, 30],
+  [34, 28, 36, 30, 12, 10, 12, 10, 64, 12, 22, 12, 12, 30],
   [
     { column: "D", values: ["pile", "cap", "tie_beam", "pier_body", "abutment_body", "cap_beam", "precast_beam", "cast_in_place_box_beam", "cast_in_place_continuous_beam", "other"] },
     { column: "G", values: ["是", "否"] },
@@ -876,7 +979,7 @@ guide.getRange("A1:B6").values = [
   ["definition_version", "project-master/v1"],
   ["导入语义", "当前项目完整主数据快照；线路关系保存左右幅归属、分幅里程和空间对应组。"],
   ["桥梁口径", "一座物理桥梁只维护一个工点；左右幅作为结构物 side 属性。"],
-  ["来源文件", "工点及P001～P026平行对应组来自《泸古1标架梁工点导入模板》；桥梁结构来自《泸古高速TJ-1标桥梁进度统计表4.27(1)》。"],
+  ["来源文件", "工点来自《泸古1标架梁工点导入模板》；左右幅空间对应组来自《泸古1标工期计划表（架梁）4.27版(2)》“架梁通道 (4片) (互通早)”横向同行；桥梁结构来自《泸古高速TJ-1标桥梁进度统计表4.27(1)》。"],
   ["排除字段", quality.exclusions.join("；")],
 ];
 guide.getRange("A8:D8").merge();
@@ -901,7 +1004,8 @@ const notes = [
   "3. 两河口大桥连续刚构节段数16、永宁河特大桥连续刚构节段数22，均取自“特殊结构物施工工艺”表。",
   "4. 夏蓉高速2号桥前5跨依据桥梁表识别为两联现浇箱梁，后3跨为25m预制T梁。",
   "5. 所有原始资源、工效、计划时间、进度及错误公式均未写入本主数据文件。",
-  "6. 线路关系按P001～P026平行对应组落位；同组允许一对多，例如P003保留左幅B1匝道路基与右幅3座夏蓉高速桥的对应关系。",
+  "6. 线路关系按架梁工期计划表横向同行落位，共25个空间对应组；第3～11行合并为渠坝互通一对多组，第12行联合村1号大桥独立，第13～15行左右幅路基对应。",
+  "7. 墩柱截面保留原表“直径（m）”列语义：单一数值写入直径，矩形及变截面尺寸写入截面尺寸，乘号统一为×。",
 ];
 guide.getRange(`A17:D${16 + notes.length}`).values = notes.map((note) => [note, null, null, null]);
 for (let index = 17; index <= 16 + notes.length; index += 1) guide.getRange(`A${index}:D${index}`).merge();
@@ -928,7 +1032,8 @@ structureSheet.getRange(`L3:L${structureObjects.length + 2}`).format.numberForma
 structureSheet.getRange(`M3:M${structureObjects.length + 2}`).format.numberFormat = "0.000";
 componentSheet.getRange(`E3:E${componentObjects.length + 2}`).format.numberFormat = "0.###";
 componentSheet.getRange(`H3:H${componentObjects.length + 2}`).format.numberFormat = "0";
-componentSheet.getRange(`J3:L${componentObjects.length + 2}`).format.numberFormat = "0.000";
+componentSheet.getRange(`J3:J${componentObjects.length + 2}`).format.numberFormat = "0.000";
+componentSheet.getRange(`L3:M${componentObjects.length + 2}`).format.numberFormat = "0.000";
 
 const inspectionParts = [];
 for (const request of [
@@ -936,7 +1041,7 @@ for (const request of [
   { kind: "region", sheetId: "工点信息", range: `A1:H${Math.min(workpointObjects.length + 2, 20)}` },
   { kind: "region", sheetId: "线路关系", range: `A1:H${Math.min(routePlacementObjects.length + 2, 20)}` },
   { kind: "region", sheetId: "结构物信息", range: `A1:S${Math.min(structureObjects.length + 2, 20)}` },
-  { kind: "region", sheetId: "构件参数", range: `A1:M${Math.min(componentObjects.length + 2, 20)}` },
+  { kind: "region", sheetId: "构件参数", range: `A1:N${Math.min(componentObjects.length + 2, 20)}` },
   { kind: "formula", sheetId: "填写说明", range: "A1:D22" },
 ]) {
   const inspection = await workbook.inspect({ ...request, maxChars: 12000, tableMaxRows: 20, tableMaxCols: 20 });
@@ -949,7 +1054,7 @@ const previewRanges = {
   "工点信息": `A1:H${Math.min(workpointObjects.length + 2, 42)}`,
   "线路关系": `A1:H${Math.min(routePlacementObjects.length + 2, 58)}`,
   "结构物信息": `A1:S${Math.min(structureObjects.length + 2, 42)}`,
-  "构件参数": `A1:M${Math.min(componentObjects.length + 2, 42)}`,
+  "构件参数": `A1:N${Math.min(componentObjects.length + 2, 42)}`,
 };
 for (const [sheetName, range] of Object.entries(previewRanges)) {
   const preview = await workbook.render({ sheetName, range, scale: 0.8, format: "png" });
@@ -960,7 +1065,16 @@ const output = await SpreadsheetFile.exportXlsx(workbook);
 await output.save(outputPath);
 const report = {
   outputPath,
-  sourceFiles: { workpoints: workpointPath, bridgeStructures: bridgePath },
+  sourceFiles: {
+    workpoints: workpointPath,
+    routeAlignment: routeAlignmentPath,
+    routeAlignmentSheet,
+    bridgeStructures: bridgePath,
+  },
+  routeAlignment: {
+    rule: "左右幅横向同行；结构物合并单元格覆盖的行区间视为同一空间对应组。",
+    groups: [...new Set(routePlacementObjects.map((item) => item.spatial_group_id))],
+  },
   counts: {
     workpoints: workpointObjects.length,
     routePlacements: routePlacementObjects.length,

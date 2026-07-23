@@ -182,3 +182,57 @@ def test_v3_segmented_graph_does_not_reuse_legacy_whole_bridge_target(tmp_path) 
 
     assert readiness.status == "blocking"
     assert any(item.code == "ROUTE_TARGET_INVALID" and item.object_id == "B1:left" for item in readiness.diagnostics)
+
+
+def test_length_difference_keeps_segmented_api_journey_ready_and_graph_changes_stale(tmp_path) -> None:
+    snapshot = continuous_route_snapshot()
+    bridge = next(item for item in snapshot.workpoints if item.workpoint_id == "B1")
+    right_large = max((item for item in bridge.structures if item.side == "right"), key=lambda item: item.sort_order)
+    next(item for item in right_large.parameters if item.parameter_code == "span_length_m").value = 42
+    request = _request(tmp_path, snapshot)
+
+    graph = get_line_graph_endpoint("PMV1", request)
+
+    assert graph.status == "ready"
+    assert not any(item.code == "BRIDGE_SEGMENT_LENGTH_MISMATCH" for item in graph.diagnostics)
+    assert sum(item.bridge_segment_kind is not None for item in graph.nodes) == 6
+
+    payload = scenario_request(graph)
+    payload.route_plans[0].target_node_ids = [
+        "B1:left:approach_small",
+        "B1:left:approach_large",
+        "B2:left",
+    ]
+    payload.route_plans[1].target_node_ids = [
+        "B1:right:approach_small",
+        "B1:right:approach_large",
+        "B2:right",
+    ]
+    scenario = create_scenario_endpoint(payload, request)
+    readiness = validate_scenario_endpoint(
+        scenario.scenario_version_id,
+        ExpectedFingerprintRequest(expected_input_fingerprint=scenario.input_fingerprint),
+        request,
+    )
+
+    assert readiness.status == "ready"
+    run = create_run_endpoint(
+        CreateSimulationRunRequest(
+            scenario_version_id=scenario.scenario_version_id,
+            expected_input_fingerprint=scenario.input_fingerprint,
+        ),
+        request,
+    )
+    assert run.status == "calculated"
+    assert any(item.target_node_id == "B1:left:approach_small" for item in run.bridge_schedules)
+
+    simulation_service = request.app.state.girder_plan_simulation_service
+    changed = next(
+        item
+        for item in simulation_service.project_master_service.repository.snapshot.route_placements
+        if item.workpoint_id == "B1" and item.side == "left"
+    )
+    changed.spatial_group_id = "SG-UPDATED"
+    refreshed = simulation_service.get_scenario(scenario.scenario_version_id)
+    assert refreshed.status == "stale"
+    assert "线路图" in (refreshed.stale_reason or "")

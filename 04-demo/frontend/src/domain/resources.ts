@@ -332,6 +332,11 @@ type NormalizedSummaryParameter = {
   unit: string;
 };
 
+type NormalizedMetricDimensionExpression = {
+  signatureValue: string;
+  displayValue: string;
+};
+
 function methodIdsFromParameters(parameters: ProjectMasterParameter[]): string[] {
   const methodIds: string[] = [];
   for (const parameter of parameters) {
@@ -379,21 +384,73 @@ function summaryParameterDisplayValues(value: unknown): string[] {
   return normalized ? [normalized] : [];
 }
 
+function normalizedMetricDimensionExpression(value: unknown): NormalizedMetricDimensionExpression | null {
+  if (typeof value !== "string") return null;
+  const match = value.trim().match(
+    /^((?:\d+(?:\.\d+)?(?:\s*\/\s*\d+(?:\.\d+)?)*)(?:\s*[*xX×]\s*(?:\d+(?:\.\d+)?(?:\s*\/\s*\d+(?:\.\d+)?)*))+)(?:\s*m)?(.*)$/i,
+  );
+  if (!match) return null;
+  const suffix = match[2].trim();
+  if (suffix && !/^[（(].*[）)]$/.test(suffix)) return null;
+  const expression = match[1]
+    .replace(/\s*[*xX×]\s*/g, "×")
+    .replace(/\s*\/\s*/g, "/");
+  const normalizedSuffix = suffix.replace(/\s+/g, "");
+  return {
+    signatureValue: `${expression}m${normalizedSuffix}`,
+    displayValue: `${expression}m${suffix}`,
+  };
+}
+
 function normalizedSummaryParameters(parameters: ProjectMasterParameter[]): NormalizedSummaryParameter[] {
   return parameters
     .filter((parameter) => !processMethodParameterCodes.has(parameter.parameter_code))
-    .map((parameter) => ({
-      code: parameter.parameter_code,
-      signatureValue: stableSummaryParameterValue(parameter.value),
-      displayValues: summaryParameterDisplayValues(parameter.value),
-      unit: parameter.unit?.trim() || (parameter.parameter_code.endsWith("_m") ? "m" : ""),
-    }))
+    .map((parameter) => {
+      const metricDimension = ["dimensions_m", "form"].includes(parameter.parameter_code)
+        ? normalizedMetricDimensionExpression(parameter.value)
+        : null;
+      return {
+        code: parameter.parameter_code,
+        signatureValue: metricDimension?.signatureValue ?? stableSummaryParameterValue(parameter.value),
+        displayValues: metricDimension ? [metricDimension.displayValue] : summaryParameterDisplayValues(parameter.value),
+        unit: metricDimension ? "" : parameter.unit?.trim() || (parameter.parameter_code.endsWith("_m") ? "m" : ""),
+      };
+    })
     .filter((parameter) => parameter.signatureValue)
     .sort((left, right) => (
       left.code.localeCompare(right.code)
       || left.signatureValue.localeCompare(right.signatureValue)
       || left.unit.localeCompare(right.unit)
     ));
+}
+
+function summaryDiagnosticParameter(code: string, signatureValue: string, displayValue: string): NormalizedSummaryParameter {
+  return { code, signatureValue, displayValues: [displayValue], unit: "" };
+}
+
+function summaryParametersForComponent(
+  componentType: WorkpointStructureSummaryComponentType,
+  parameters: NormalizedSummaryParameter[],
+): NormalizedSummaryParameter[] {
+  if (componentType === "pile") {
+    const diameters = parameters.filter((parameter) => parameter.code === "diameter_m");
+    return diameters.length > 0
+      ? diameters
+      : [summaryDiagnosticParameter("__pile_diameter_missing", "missing", "桩径未提供")];
+  }
+  if (componentType !== "pier_body") return parameters;
+
+  const diameters = parameters.filter((parameter) => parameter.code === "diameter_m");
+  const dimensions = parameters.filter((parameter) => parameter.code === "dimensions_m");
+  if (diameters.length > 0 && dimensions.length > 0) {
+    const conflictIdentity = JSON.stringify(
+      [...diameters, ...dimensions].map((parameter) => [parameter.code, parameter.signatureValue, parameter.unit]),
+    );
+    return [summaryDiagnosticParameter("__pier_section_conflict", conflictIdentity, "截面尺寸冲突")];
+  }
+  if (diameters.length > 0) return diameters;
+  if (dimensions.length > 0) return dimensions;
+  return [summaryDiagnosticParameter("__pier_section_missing", "missing", "截面尺寸未提供")];
 }
 
 function summaryParameterSegments(
@@ -408,7 +465,7 @@ function summaryParameterSegments(
     ))
     .flatMap((parameter) => parameter.displayValues.map((value) => ({
       text: parameter.code === "diameter_m" ? `φ${value}` : value,
-      unit: parameter.code === "diameter_m" && parameter.unit === "m" ? "" : parameter.unit,
+      unit: parameter.unit,
     })));
   const segments: string[] = [];
   if (physical.length > 0) {
@@ -544,7 +601,10 @@ export function workpointStructureSummaryProjection(
       const componentType = workpointStructureSummaryComponentType(component.component_type);
       const quantity = Number(component.quantity);
       if (!componentType || !component.enabled || !Number.isFinite(quantity) || quantity <= 0) continue;
-      const normalizedParameters = normalizedSummaryParameters(component.parameters);
+      const normalizedParameters = summaryParametersForComponent(
+        componentType,
+        normalizedSummaryParameters(component.parameters),
+      );
       const process = resolveStructureProcess(componentType, component.parameters, structure.parameters, processes);
       const unit = component.unit.trim();
       const signature = JSON.stringify([

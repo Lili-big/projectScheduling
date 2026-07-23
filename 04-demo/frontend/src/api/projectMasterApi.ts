@@ -6,6 +6,7 @@ import type {
   ProjectMasterVersionSummary,
   ProjectMasterWorkpoint,
   ProjectMasterWorkpointPage,
+  TaskViewDisplayMapResponse,
 } from "../contracts/projectMaster";
 import type { GirderWorkPoint } from "../contracts";
 
@@ -82,6 +83,16 @@ export function listProjectMasterWorkpoints(
 export function getProjectMasterWorkpoint(versionId: string, workpointId: string): Promise<ProjectMasterWorkpoint> {
   return apiGet(
     `/api/project-master/versions/${encodeURIComponent(versionId)}/workpoints/${encodeURIComponent(workpointId)}`,
+  );
+}
+
+export function getProjectMasterTaskViewDisplayMap(
+  versionId: string,
+  workpointIds: string[],
+): Promise<TaskViewDisplayMapResponse> {
+  return apiPost(
+    `/api/project-master/versions/${encodeURIComponent(versionId)}/task-view-display-map`,
+    { workpoint_ids: workpointIds },
   );
 }
 

@@ -16,6 +16,8 @@ from ...contracts.project_master import (
     ProjectMasterVersionSummary,
     ProjectMasterWorkpoint,
     ProjectMasterWorkpointPage,
+    TaskViewDisplayMapRequest,
+    TaskViewDisplayMapResponse,
 )
 from ...project_master.repository import ProjectMasterRepositoryError
 from ...project_master.service import ProjectMasterService, ProjectMasterServiceError, default_project_master_service
@@ -174,6 +176,21 @@ def get_project_master_workpoint_endpoint(
 ) -> ProjectMasterWorkpoint:
     try:
         return _service(request).repository.get_workpoint(version_id, workpoint_id)
+    except (ProjectMasterRepositoryError, ProjectMasterServiceError) as exc:
+        raise project_master_http_error(exc) from exc
+
+
+@router.post(
+    "/api/project-master/versions/{version_id}/task-view-display-map",
+    response_model=TaskViewDisplayMapResponse,
+)
+def get_task_view_display_map_endpoint(
+    version_id: str,
+    payload: TaskViewDisplayMapRequest,
+    request: Request,
+) -> TaskViewDisplayMapResponse:
+    try:
+        return _service(request).repository.get_task_view_display_map(version_id, payload.workpoint_ids)
     except (ProjectMasterRepositoryError, ProjectMasterServiceError) as exc:
         raise project_master_http_error(exc) from exc
 

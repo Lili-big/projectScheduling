@@ -1192,6 +1192,14 @@ def test_recommendation_never_falls_back_to_late_feasible_results() -> None:
     assert "工期目标已满足" in recommendation.rule_reason
 
 
+def test_recommendation_gate_accepts_only_unified_met_status() -> None:
+    assert assistant_module._target_met(ResourceAssistantCoreMetrics(target_status="met")) is True
+    assert assistant_module._target_met(ResourceAssistantCoreMetrics(target_status="not_met")) is False
+    assert assistant_module._target_met(ResourceAssistantCoreMetrics(target_status="unconfirmed")) is False
+    assert assistant_module._target_met(ResourceAssistantCoreMetrics(target_status="infeasible")) is False
+    assert assistant_module._target_met(ResourceAssistantCoreMetrics(target_status="candidate_resources_target_met")) is False
+
+
 def test_recommendation_uses_new_three_state_and_supports_legacy_met() -> None:
     plans, results = _recommendation_fixture(
         economy=(120, 900_000, "met"),

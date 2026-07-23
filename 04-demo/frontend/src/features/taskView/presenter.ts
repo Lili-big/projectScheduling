@@ -1,4 +1,4 @@
-import type { ProjectMasterWorkpoint, TaskViewFilters, TaskViewRow, WorkSectionSide } from "../../contracts";
+import type { TaskViewDisplayWorkpoint, TaskViewFilters, TaskViewRow, WorkSectionSide } from "../../contracts";
 import { componentLabels, sideLabels } from "../../domain/labels";
 
 export type TaskViewProjectMasterMaps = {
@@ -8,7 +8,7 @@ export type TaskViewProjectMasterMaps = {
 
 export const taskViewNameUnavailable = "名称不可用";
 
-export function buildProjectMasterTaskViewMaps(workpoints: ProjectMasterWorkpoint[]): TaskViewProjectMasterMaps {
+export function buildProjectMasterTaskViewMaps(workpoints: TaskViewDisplayWorkpoint[]): TaskViewProjectMasterMaps {
   const bridges = new Map<string, { name: string; order: number }>();
   const sections = new Map<string, { name: string; order: number; sideLabel: string }>();
 
@@ -17,18 +17,15 @@ export function buildProjectMasterTaskViewMaps(workpoints: ProjectMasterWorkpoin
       name: workpoint.workpoint_name.trim() || taskViewNameUnavailable,
       order: workpoint.sort_order,
     });
-    for (const structure of workpoint.structures) {
-      if (!structure.section_code) continue;
-      // Keep the display lookup aligned with project_master/scheduling_adapter.py.
-      const side: WorkSectionSide = structure.side === "left" || structure.side === "right"
-        ? structure.side
+    for (const section of workpoint.work_sections) {
+      const side: WorkSectionSide = section.side === "left" || section.side === "right"
+        ? section.side
         : "none";
-      const sectionId = `${structure.section_code}:${side}`;
-      const current = sections.get(sectionId);
-      if (current && current.order <= structure.sort_order) continue;
-      sections.set(sectionId, {
-        name: structure.section_name?.trim() || taskViewNameUnavailable,
-        order: structure.sort_order,
+      const current = sections.get(section.work_section_id);
+      if (current && current.order <= section.sort_order) continue;
+      sections.set(section.work_section_id, {
+        name: section.work_section_name?.trim() || taskViewNameUnavailable,
+        order: section.sort_order,
         sideLabel: sideLabels[side],
       });
     }

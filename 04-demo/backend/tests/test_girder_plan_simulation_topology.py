@@ -186,16 +186,29 @@ def test_duplicate_explicit_side_is_blocking_and_keeps_first_node_stable() -> No
 
 
 def test_continuous_bridge_projects_three_segment_nodes_per_side_with_scoped_demands() -> None:
-    graph = _graph(continuous_route_snapshot())
+    snapshot = continuous_route_snapshot()
+    bridge = next(item for item in snapshot.workpoints if item.workpoint_id == "B1")
+    left = sorted((item for item in bridge.structures if item.side == "left"), key=lambda item: item.sort_order)
+    right = sorted((item for item in bridge.structures if item.side == "right"), key=lambda item: item.sort_order)
+    for structure, length in zip(left, (22, 33, 55)):
+        _replace_parameter(structure, "span_length_m", length, "number")
+    for structure, length in zip(right, (25, 35, 42)):
+        _replace_parameter(structure, "span_length_m", length, "number")
+
+    graph = _graph(snapshot)
     nodes = {item.node_id: item for item in graph.nodes}
 
     assert graph.status == "ready"
     assert graph.projection_version == "girder-plan-line-graph/v3"
-    for side, boundaries in (("left", (100, 120, 150, 200)), ("right", (100, 125, 160, 200))):
+    assert not any(item.code == "BRIDGE_SEGMENT_LENGTH_MISMATCH" for item in graph.diagnostics)
+    for side, boundaries in (
+        ("left", (100, 120, 150, 200)),
+        ("right", (100, 100 + 2500 / 102, 100 + 6000 / 102, 200)),
+    ):
         small = nodes[f"B1:{side}:approach_small"]
         continuous = nodes[f"B1:{side}:continuous"]
         large = nodes[f"B1:{side}:approach_large"]
-        assert [small.start_mileage_m, small.end_mileage_m, continuous.end_mileage_m, large.end_mileage_m] == list(boundaries)
+        assert [small.start_mileage_m, small.end_mileage_m, continuous.end_mileage_m, large.end_mileage_m] == pytest.approx(boundaries)
         assert small.bridge_segment_kind == "approach_small"
         assert continuous.bridge_segment_kind == "continuous"
         assert large.bridge_segment_kind == "approach_large"
@@ -205,6 +218,9 @@ def test_continuous_bridge_projects_three_segment_nodes_per_side_with_scoped_dem
         assert [(item.beam_type_id, item.beam_count) for item in large.beam_demands] == [("T40", 6)]
         assert continuous.beam_demands == []
         assert continuous.current_plan_finish_date.isoformat() == "2026-08-01"
+        assert small.source_refs == [f"B1-{side}-S1"]
+        assert continuous.source_refs == [f"B1-{side}-S2"]
+        assert large.source_refs == [f"B1-{side}-S3"]
         assert resolve_path(graph, small.node_id, large.node_id).node_ids == [small.node_id, continuous.node_id, large.node_id]
     assert "B1:left" not in nodes and "B1:right" not in nodes
     assert nodes["B2:left"].bridge_segment_kind is None
@@ -216,7 +232,6 @@ def test_continuous_bridge_projects_three_segment_nodes_per_side_with_scoped_dem
         ("missing_length", "BRIDGE_SEGMENT_STRUCTURE_DATA_MISSING"),
         ("ambiguous_blocks", "BRIDGE_SEGMENT_CONTINUOUS_BLOCK_AMBIGUOUS"),
         ("missing_approach", "BRIDGE_SEGMENT_APPROACH_MISSING"),
-        ("length_mismatch", "BRIDGE_SEGMENT_LENGTH_MISMATCH"),
         ("precast_conflict", "BRIDGE_SEGMENT_PRECAST_CONFLICT"),
     ],
 )
@@ -242,8 +257,6 @@ def test_continuous_bridge_segmentation_failures_are_object_level_blocking(case:
         bridge.structures.extend([second_continuous, final_simple])
     elif case == "missing_approach":
         bridge.structures.remove(right[0])
-    elif case == "length_mismatch":
-        _replace_parameter(right[2], "span_length_m", 42, "number")
     elif case == "precast_conflict":
         right[1].components = [right[0].components[0].model_copy(deep=True)]
 

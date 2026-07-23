@@ -9,7 +9,12 @@ sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.bootstrap import create_app  # noqa: E402
 from app.contracts import ScenarioInput  # noqa: E402
-from app.contracts.project_master import ProjectMasterRoutePlacement, ProjectMasterSnapshot  # noqa: E402
+from app.contracts.project_master import (  # noqa: E402
+    ProjectMasterRoutePlacement,
+    ProjectMasterSnapshot,
+    TaskViewDisplayMapRequest,
+    TaskViewDisplayMapResponse,
+)
 from app.project_master.definitions import COMPONENT_TYPES  # noqa: E402
 from app.project_master.validation import validate_snapshot  # noqa: E402
 from project_master_fixture_helpers import abutment_projection_snapshot  # noqa: E402
@@ -28,6 +33,7 @@ def test_openapi_exposes_project_master_contract_and_keeps_shared_field_names() 
         "/api/project-master/versions/{version_id}/confirm",
         "/api/project-master/versions/{version_id}/workpoints",
         "/api/project-master/versions/{version_id}/workpoints/{workpoint_id}",
+        "/api/project-master/versions/{version_id}/task-view-display-map",
         "/api/project-master/versions/{version_id}/export",
     }
     assert expected <= set(paths)
@@ -46,6 +52,15 @@ def test_openapi_exposes_project_master_contract_and_keeps_shared_field_names() 
         "spatial_group_id",
         "display_order",
     }
+    request_schema = TaskViewDisplayMapRequest.model_json_schema()
+    assert request_schema["properties"]["workpoint_ids"]["maxItems"] == 500
+    response_schema = TaskViewDisplayMapResponse.model_json_schema()
+    assert set(response_schema["properties"]) == {"project_data_version_id", "workpoints"}
+    operation = paths["/api/project-master/versions/{version_id}/task-view-display-map"]["post"]
+    assert operation["requestBody"]["required"] is True
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/TaskViewDisplayMapResponse"
+    )
 
 
 def test_legacy_import_endpoints_are_visible_but_deprecated() -> None:

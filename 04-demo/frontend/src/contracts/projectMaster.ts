@@ -82,6 +82,25 @@ export type ProjectMasterWorkpoint = {
   source?: ProjectMasterSource | null;
 };
 
+export type TaskViewDisplayWorkSection = {
+  work_section_id: string;
+  work_section_name?: string | null;
+  side: ProjectMasterSide;
+  sort_order: number;
+};
+
+export type TaskViewDisplayWorkpoint = {
+  workpoint_id: string;
+  workpoint_name: string;
+  sort_order: number;
+  work_sections: TaskViewDisplayWorkSection[];
+};
+
+export type TaskViewDisplayMapResponse = {
+  project_data_version_id: string;
+  workpoints: TaskViewDisplayWorkpoint[];
+};
+
 export type ProjectMasterRoutePlacement = {
   placement_id: string;
   workpoint_id: string;

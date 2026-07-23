@@ -19,3 +19,11 @@ test("Netlify remains a Node 22 static frontend deployment with SPA fallback", (
   assert.match(config, /from = "\/\*"[\s\S]*to = "\/index\.html"[\s\S]*status = 200/);
   assert.doesNotMatch(config, /functions\s*=/);
 });
+
+test("deployment mirror preserves all three scheduling endpoints", () => {
+  const mirror = readFileSync(resolve(root, "04-demo/tools/demo-api-mirror/api.mts"), "utf8");
+  assert.match(mirror, /endpoint === "solve-scenario"/);
+  assert.match(mirror, /endpoint === "solve-min-resources"/);
+  assert.match(mirror, /endpoint === "solve-resource-cost"/);
+  assert.match(mirror, /minimum_resource_verification/);
+});

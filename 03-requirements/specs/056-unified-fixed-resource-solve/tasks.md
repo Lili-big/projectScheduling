@@ -22,7 +22,7 @@ description: "统一固定资源与最少资源求解实施任务清单"
 
 **目标**：在当前存在并行未提交改动的工作树上建立 056 的最小修改边界，不覆盖其他工作项。
 
-- [ ] T001 检查并记录 `04-demo/backend/app/scheduling/application/_scenario.py`、`04-demo/backend/app/scheduling/solver/engine.py`、`04-demo/backend/app/services/ai_resource_scheduling_assistant.py`、`04-demo/frontend/src/app/Workspace.tsx` 和相邻测试的现有 diff；实施时只编辑 056 对应符号并保留无关改动
+- [x] T001 检查并记录 `04-demo/backend/app/scheduling/application/_scenario.py`、`04-demo/backend/app/scheduling/solver/engine.py`、`04-demo/backend/app/services/ai_resource_scheduling_assistant.py`、`04-demo/frontend/src/app/Workspace.tsx` 和相邻测试的现有 diff；实施时只编辑 056 对应符号并保留无关改动
 
 **检查点**：已确认可安全编辑的函数/测试块及现有基线失败；没有还原、格式化或覆盖无关文件。
 
@@ -36,20 +36,20 @@ description: "统一固定资源与最少资源求解实施任务清单"
 
 ### 用户故事 1 的测试（先写）
 
-- [ ] T002 [P] [US1] 在 `04-demo/backend/tests/scheduling/test_fixed_resource_application.py` 增加 simulation/AI 共用内核、严格资源数量、单次调用、空 `alternative_results` 和无扩资源的失败测试
-- [ ] T003 [P] [US1] 在 `04-demo/backend/tests/scheduling/test_solver_objectives.py` 增加“最大目标延期 -> 总工期”的目标顺序、资源空闲/连续性 modeling gate 关闭但诊断保留、施工硬约束不变的失败测试
-- [ ] T004 [P] [US1] 在 `04-demo/backend/tests/test_scheduler.py` 增加 `OPTIMAL/FEASIBLE/UNKNOWN/INFEASIBLE/MODEL_INVALID`、目标存在/缺失、延期/不延期的四态矩阵及有排程不丢失测试
-- [ ] T005 [P] [US1] 在 `04-demo/backend/tests/test_ai_resource_scheduling_assistant.py` 增加 AI 单方案输入资源快照、`met` 推荐门禁、非 `met` 不推荐和共享来源/调用次数字段测试
+- [x] T002 [P] [US1] 在 `04-demo/backend/tests/scheduling/test_fixed_resource_application.py` 增加 simulation/AI 共用内核、严格资源数量、单次调用、空 `alternative_results` 和无扩资源的失败测试
+- [x] T003 [P] [US1] 在 `04-demo/backend/tests/scheduling/test_solver_objectives.py` 增加“最大目标延期 -> 总工期”的目标顺序、资源空闲/连续性 modeling gate 关闭但诊断保留、施工硬约束不变的失败测试
+- [x] T004 [P] [US1] 在 `04-demo/backend/tests/test_scheduler.py` 增加 `OPTIMAL/FEASIBLE/UNKNOWN/INFEASIBLE/MODEL_INVALID`、目标存在/缺失、延期/不延期的四态矩阵及有排程不丢失测试
+- [x] T005 [P] [US1] 在 `04-demo/backend/tests/test_ai_resource_scheduling_assistant.py` 增加 AI 单方案输入资源快照、`met` 推荐门禁、非 `met` 不推荐和共享来源/调用次数字段测试
 
 ### 用户故事 1 的实现
 
-- [ ] T006 [US1] 在 `04-demo/backend/app/scheduling/solver/engine.py` 将现有 `solve_control_priority_schedule_once` 收敛为入口无关的权威固定资源一阶段函数：一次 CP-SAT 调用、目标顺序固定、资源组织目标禁用、通用调用/来源元数据完整
-- [ ] T007 [US1] 在 `04-demo/backend/app/scheduling/solver/results.py` 与 `04-demo/backend/app/scheduling/solver/engine.py` 统一四态 `target_achievement` 分类、最大目标延期计算和兼容字段，使固定资源与后续最少资源详细排程复用同一纯结果规则
-- [ ] T008 [US1] 在 `04-demo/backend/app/scheduling/application/_scenario.py` 建立 simulation/AI 共用的 `GeneratedScheduleInput` 包装，统一预算、范围诊断、场景结果组装和入口来源，且不得再次调用 solver
-- [ ] T009 [US1] 在 `04-demo/backend/app/scheduling/application/_scenario.py` 与 `04-demo/backend/app/scheduling/application/fixed_resource.py` 将 `solve_scenario` 改接共享包装，停止运行 `_solve_fixed_resources_shortest_scenario`、最少资源/压力搜索、自动增配和方案 2，并保持 `alternative_results=[]` 兼容
-- [ ] T010 [US1] 在 `04-demo/backend/app/scheduling/application/_scenario.py` 与 `04-demo/backend/app/services/ai_resource_scheduling_assistant.py` 将 `solve_ai_strict_fixed_resource_scenario` 改接同一包装，只保留 AI 资源方案、plan status 和推荐门禁职责，删除重复目标判定与入口专属 solver 元数据
-- [ ] T011 [US1] 在 `04-demo/backend/tests/test_scheduling_routes.py` 和 `04-demo/backend/tests/test_contracts_scheduling.py` 增加 `/api/solve-scenario` 路径、顶层响应、旧扩展字段读取及新结果 `not_run/not_applicable` 兼容测试
-- [ ] T012 [US1] 运行 `python -m pytest 04-demo/backend/tests/scheduling/test_fixed_resource_application.py 04-demo/backend/tests/scheduling/test_solver_objectives.py 04-demo/backend/tests/test_ai_resource_scheduling_assistant.py 04-demo/backend/tests/test_scheduling_routes.py -q`，修复 056 相关失败并记录 US1 独立通过证据
+- [x] T006 [US1] 在 `04-demo/backend/app/scheduling/solver/engine.py` 将现有 `solve_control_priority_schedule_once` 收敛为入口无关的权威固定资源一阶段函数：一次 CP-SAT 调用、目标顺序固定、资源组织目标禁用、通用调用/来源元数据完整
+- [x] T007 [US1] 在 `04-demo/backend/app/scheduling/solver/results.py` 与 `04-demo/backend/app/scheduling/solver/engine.py` 统一四态 `target_achievement` 分类、最大目标延期计算和兼容字段，使固定资源与后续最少资源详细排程复用同一纯结果规则
+- [x] T008 [US1] 在 `04-demo/backend/app/scheduling/application/_scenario.py` 建立 simulation/AI 共用的 `GeneratedScheduleInput` 包装，统一预算、范围诊断、场景结果组装和入口来源，且不得再次调用 solver
+- [x] T009 [US1] 在 `04-demo/backend/app/scheduling/application/_scenario.py` 与 `04-demo/backend/app/scheduling/application/fixed_resource.py` 将 `solve_scenario` 改接共享包装，停止运行 `_solve_fixed_resources_shortest_scenario`、最少资源/压力搜索、自动增配和方案 2，并保持 `alternative_results=[]` 兼容
+- [x] T010 [US1] 在 `04-demo/backend/app/scheduling/application/_scenario.py` 与 `04-demo/backend/app/services/ai_resource_scheduling_assistant.py` 将 `solve_ai_strict_fixed_resource_scenario` 改接同一包装，只保留 AI 资源方案、plan status 和推荐门禁职责，删除重复目标判定与入口专属 solver 元数据
+- [x] T011 [US1] 在 `04-demo/backend/tests/test_scheduling_routes.py` 和 `04-demo/backend/tests/test_contracts_scheduling.py` 增加 `/api/solve-scenario` 路径、顶层响应、旧扩展字段读取及新结果 `not_run/not_applicable` 兼容测试
+- [x] T012 [US1] 运行 `python -m pytest 04-demo/backend/tests/scheduling/test_fixed_resource_application.py 04-demo/backend/tests/scheduling/test_solver_objectives.py 04-demo/backend/tests/test_ai_resource_scheduling_assistant.py 04-demo/backend/tests/test_scheduling_routes.py -q`，修复 056 相关失败并记录 US1 独立通过证据
 
 **检查点**：US1 可独立交付；两个入口共享一阶段函数且每请求仅一次求解，目标/状态一致，硬约束和诊断保留，无资源建议分支。
 
@@ -63,19 +63,19 @@ description: "统一固定资源与最少资源求解实施任务清单"
 
 ### 用户故事 2 的测试（先写）
 
-- [ ] T013 [P] [US2] 在 `04-demo/backend/tests/scheduling/test_solver_objectives.py` 增加全局数量模型词典序目标测试：资源总数最少为第一目标、同数下总工期更短为第二目标，资源成本/空闲不参与
-- [ ] T014 [P] [US2] 在 `04-demo/backend/tests/test_scheduler.py` 增加默认下限 0、推荐低于当前 `quantity`、池数量 0 不展开资源、稳定池身份/作用域和无合法候选阻断测试
-- [ ] T015 [P] [US2] 在 `04-demo/backend/tests/scheduling/test_resource_search_application.py` 增加“1 次全局搜索 + 0/1 次详细求解”、候选四态验证、候选保留及所有预检/二分/压力/复排/重试为 0 的失败测试
-- [ ] T016 [P] [US2] 在 `04-demo/backend/tests/scheduling/test_single_workpoint_solve.py` 增加 ALL/WORKPOINT 全局搜索隔离、同范围 fallback 目标和跨范围结果不复用测试
+- [x] T013 [P] [US2] 在 `04-demo/backend/tests/scheduling/test_solver_objectives.py` 增加全局数量模型词典序目标测试：资源总数最少为第一目标、同数下总工期更短为第二目标，资源成本/空闲不参与
+- [x] T014 [P] [US2] 在 `04-demo/backend/tests/test_scheduler.py` 增加默认下限 0、推荐低于当前 `quantity`、池数量 0 不展开资源、稳定池身份/作用域和无合法候选阻断测试
+- [x] T015 [P] [US2] 在 `04-demo/backend/tests/scheduling/test_resource_search_application.py` 增加“1 次全局搜索 + 0/1 次详细求解”、候选四态验证、候选保留及所有预检/二分/压力/复排/重试为 0 的失败测试
+- [x] T016 [P] [US2] 在 `04-demo/backend/tests/scheduling/test_single_workpoint_solve.py` 增加 ALL/WORKPOINT 全局搜索隔离、同范围 fallback 目标和跨范围结果不复用测试
 
 ### 用户故事 2 的实现
 
-- [ ] T017 [US2] 在 `04-demo/backend/app/scheduling/solver/engine.py` 调整 `_solve_capacity_model(..., minimize_resource_count=True)`：每池默认下限 0、上限 `max_quantity`，严格保持池身份/作用域/兼容/硬约束，并实现资源总数与总工期的两级裁决
-- [ ] T018 [US2] 在 `04-demo/backend/app/scheduling/solver/engine.py` 简化 `solve_min_resources_schedule`：删除最大资源独立预检、独占下限提前结论、逐池二分、balanced/unbalanced/best-effort 复排和压力回退，只保留一次全局搜索的终态处理
-- [ ] T019 [US2] 在 `04-demo/backend/app/scheduling/solver/engine.py` 按全局候选数量展开稳定命名资源并恰好调用一次 US1 权威固定资源函数；只在详细 `met` 时写入 `candidate_verified=true`，其他状态保留候选与详细排程并停止
-- [ ] T020 [US2] 在 `04-demo/backend/app/scheduling/application/_scenario.py` 与 `04-demo/backend/app/scheduling/application/resource_search.py` 保持强制里程碑优先、同范围 `fallback_target_days` 次之的目标来源，补齐全局/详细来源、调用次数、验证和无重试元数据
-- [ ] T021 [US2] 在 `04-demo/backend/tests/test_scheduling_routes.py` 与 `04-demo/backend/tests/test_contracts_scheduling.py` 增加 `/api/solve-min-resources` 候选、详细状态、验证状态和旧响应外壳兼容测试，不新增 API 路径或请求字段
-- [ ] T022 [US2] 运行 `python -m pytest 04-demo/backend/tests/scheduling/test_resource_search_application.py 04-demo/backend/tests/scheduling/test_single_workpoint_solve.py 04-demo/backend/tests/scheduling/test_solver_objectives.py 04-demo/backend/tests/test_scheduling_routes.py -q`，修复 056 相关失败并记录 US2 独立通过证据
+- [x] T017 [US2] 在 `04-demo/backend/app/scheduling/solver/engine.py` 调整 `_solve_capacity_model(..., minimize_resource_count=True)`：每池默认下限 0、上限 `max_quantity`，严格保持池身份/作用域/兼容/硬约束，并实现资源总数与总工期的两级裁决
+- [x] T018 [US2] 在 `04-demo/backend/app/scheduling/solver/engine.py` 简化 `solve_min_resources_schedule`：删除最大资源独立预检、独占下限提前结论、逐池二分、balanced/unbalanced/best-effort 复排和压力回退，只保留一次全局搜索的终态处理
+- [x] T019 [US2] 在 `04-demo/backend/app/scheduling/solver/engine.py` 按全局候选数量展开稳定命名资源并恰好调用一次 US1 权威固定资源函数；只在详细 `met` 时写入 `candidate_verified=true`，其他状态保留候选与详细排程并停止
+- [x] T020 [US2] 在 `04-demo/backend/app/scheduling/application/_scenario.py` 与 `04-demo/backend/app/scheduling/application/resource_search.py` 保持强制里程碑优先、同范围 `fallback_target_days` 次之的目标来源，补齐全局/详细来源、调用次数、验证和无重试元数据
+- [x] T021 [US2] 在 `04-demo/backend/tests/test_scheduling_routes.py` 与 `04-demo/backend/tests/test_contracts_scheduling.py` 增加 `/api/solve-min-resources` 候选、详细状态、验证状态和旧响应外壳兼容测试，不新增 API 路径或请求字段
+- [x] T022 [US2] 运行 `python -m pytest 04-demo/backend/tests/scheduling/test_resource_search_application.py 04-demo/backend/tests/scheduling/test_single_workpoint_solve.py 04-demo/backend/tests/scheduling/test_solver_objectives.py 04-demo/backend/tests/test_scheduling_routes.py -q`，修复 056 相关失败并记录 US2 独立通过证据
 
 **检查点**：US2 可独立交付；全局终态不会触发回退，有候选时只跑一次同算法详细排程，候选验证与详细业务状态一致。
 
@@ -89,16 +89,16 @@ description: "统一固定资源与最少资源求解实施任务清单"
 
 ### 用户故事 3 的测试（先写）
 
-- [ ] T023 [P] [US3] 在 `04-demo/frontend/tests/workspaceController.test.mjs` 与 `04-demo/frontend/tests/scheduleResults.test.mjs` 增加只读目标顺序、无资源空闲优化控件、四态/solver 状态和“未自动增配”展示测试
-- [ ] T024 [P] [US3] 在 `04-demo/frontend/tests/scheduleResultsPresenter.test.mjs` 增加最少资源候选、详细状态、`candidate_verified` 和旧多阶段来源的派生展示测试
-- [ ] T025 [P] [US3] 在 `04-demo/frontend/tests/apiCompatibility.test.mjs`、`04-demo/frontend/tests/contractsCompatibility.test.mjs` 与 `04-demo/frontend/tests/deploymentContract.test.mjs` 增加三个接口、共享元数据和 Demo 镜像一致性测试
+- [x] T023 [P] [US3] 在 `04-demo/frontend/tests/workspaceController.test.mjs` 与 `04-demo/frontend/tests/scheduleResults.test.mjs` 增加只读目标顺序、无资源空闲优化控件、四态/solver 状态和“未自动增配”展示测试
+- [x] T024 [P] [US3] 在 `04-demo/frontend/tests/scheduleResultsPresenter.test.mjs` 增加最少资源候选、详细状态、`candidate_verified` 和旧多阶段来源的派生展示测试
+- [x] T025 [P] [US3] 在 `04-demo/frontend/tests/apiCompatibility.test.mjs`、`04-demo/frontend/tests/contractsCompatibility.test.mjs` 与 `04-demo/frontend/tests/deploymentContract.test.mjs` 增加三个接口、共享元数据和 Demo 镜像一致性测试
 
 ### 用户故事 3 的实现
 
-- [ ] T026 [US3] 在 `04-demo/frontend/src/app/Workspace.tsx` 将固定资源/固定工期的“算法倾向选择”和权重编辑改为只读两级目标说明，并把资源空闲、连续性明确移入求解后诊断语义；资源成本优化入口保持原行为
-- [ ] T027 [US3] 在 `04-demo/frontend/src/contracts/scheduler.ts`、`04-demo/frontend/src/features/scheduleResults/presenter.ts` 与 `04-demo/frontend/src/app/Workspace.tsx` 解析并展示业务四态、solver 状态、最大延期、调用次数、全局候选、详细验证和历史来源，保持缺字段旧结果可读
-- [ ] T028 [US3] 在 `04-demo/tools/demo-api-mirror/api.mts` 同步新结果来源、调用次数、四态和候选验证语义，确保镜像不再模拟增配/方案 2 或用容量候选冒充详细成功
-- [ ] T029 [US3] 运行 `npm.cmd --workspace 04-demo/frontend test -- --test-name-pattern="solve|objective|resource"`、`npm.cmd run typecheck` 和 `npm.cmd run build`，修复 056 相关失败并记录 US3 独立通过证据
+- [x] T026 [US3] 在 `04-demo/frontend/src/app/Workspace.tsx` 将固定资源/固定工期的“算法倾向选择”和权重编辑改为只读两级目标说明，并把资源空闲、连续性明确移入求解后诊断语义；资源成本优化入口保持原行为
+- [x] T027 [US3] 在 `04-demo/frontend/src/contracts/scheduler.ts`、`04-demo/frontend/src/features/scheduleResults/presenter.ts` 与 `04-demo/frontend/src/app/Workspace.tsx` 解析并展示业务四态、solver 状态、最大延期、调用次数、全局候选、详细验证和历史来源，保持缺字段旧结果可读
+- [x] T028 [US3] 在 `04-demo/tools/demo-api-mirror/api.mts` 同步新结果来源、调用次数、四态和候选验证语义，确保镜像不再模拟增配/方案 2 或用容量候选冒充详细成功
+- [x] T029 [US3] 运行 `npm.cmd --workspace 04-demo/frontend test -- --test-name-pattern="solve|objective|resource"`、`npm.cmd run typecheck` 和 `npm.cmd run build`，修复 056 相关失败并记录 US3 独立通过证据
 
 **检查点**：US3 可独立交付；页面文案与实际算法一致，新旧结果均可解释，工点范围/指纹/保存/比较门禁不回归。
 
@@ -108,10 +108,10 @@ description: "统一固定资源与最少资源求解实施任务清单"
 
 **目标**：确认 056 没有改变明确排除的业务边界，并通过一次完整门禁。
 
-- [ ] T030 [P] 在 `04-demo/backend/tests/test_ai_resource_scheduling_assistant.py` 与 `04-demo/backend/tests/test_ai_workpoint_resource_comparison.py` 补齐仅 `met` 推荐、LLM 资源生成/人工调整不变及计划历史读取兼容验证
-- [ ] T031 [P] 在 `04-demo/backend/tests/test_scheduler.py` 增加资源成本优化路径不调用统一最少资源简化分支、项目主数据/架梁专项入口不受影响的回归断言
-- [ ] T032 对 `04-demo/backend/app/scheduling/application/_scenario.py`、`04-demo/backend/app/scheduling/solver/engine.py` 和相关导出执行 056 范围内死代码/未使用导入清理；只删除已由测试证明不再可达的固定资源增配、最少资源回退辅助代码，不触碰资源成本与其他工作项
-- [ ] T033 按 `03-requirements/specs/056-unified-fixed-resource-solve/quickstart.md` 运行最终定向样例，并仅运行一次 `npm.cmd run verify` 完整门禁；记录通过结果或有证据的既有无关失败，不重复执行完整门禁
+- [x] T030 [P] 在 `04-demo/backend/tests/test_ai_resource_scheduling_assistant.py` 与 `04-demo/backend/tests/test_ai_workpoint_resource_comparison.py` 补齐仅 `met` 推荐、LLM 资源生成/人工调整不变及计划历史读取兼容验证
+- [x] T031 [P] 在 `04-demo/backend/tests/test_scheduler.py` 增加资源成本优化路径不调用统一最少资源简化分支、项目主数据/架梁专项入口不受影响的回归断言
+- [x] T032 对 `04-demo/backend/app/scheduling/application/_scenario.py`、`04-demo/backend/app/scheduling/solver/engine.py` 和相关导出执行 056 范围内死代码/未使用导入清理；只删除已由测试证明不再可达的固定资源增配、最少资源回退辅助代码，不触碰资源成本与其他工作项
+- [x] T033 按 `03-requirements/specs/056-unified-fixed-resource-solve/quickstart.md` 运行最终定向样例，并仅运行一次 `npm.cmd run verify` 完整门禁；记录通过结果或有证据的既有无关失败，不重复执行完整门禁
 
 **完成检查点**：FR-001～FR-025、SC-001～SC-010 均有实现和测试证据；相关验证通过；无未解释的共享契约、历史兼容或范围风险。
 

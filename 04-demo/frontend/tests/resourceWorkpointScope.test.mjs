@@ -104,6 +104,7 @@ const processLibrary = [
   process("cap_standard", "cap", "cap_team", { processName: "承台施工" }),
   process("middle_tie_standard", "middle_tie_beam", "tie_beam_team", { processName: "柱系梁施工" }),
   process("pier_body_standard", "pier_body", "pier_body_team", { processName: "墩身施工" }),
+  process("pier_body_climbing_form", "pier_body", "pier_body_team", { methodId: "climbing_form", isDefault: false, processName: "爬模施工" }),
   process("ground_tie_standard", "ground_tie_beam", "tie_beam_team", { processName: "桩系梁施工" }),
   process("cap_beam_standard", "cap_beam", "cap_beam_team", { processName: "盖梁施工" }),
   process("continuous_default", "cast_in_place_continuous_beam", "cast_in_place_continuous_beam_team", { processName: "连续梁施工" }),
@@ -410,12 +411,89 @@ test("workpoint structure summaries group six lower-structure types by parameter
   assert.deepEqual(actual.map((group) => group.sortOrder), [1, 2, 3, 4, 5, 6]);
   assert.equal(actual[0].items.length, 2);
   assert.equal(actual[0].items.find((item) => item.processLabel === "旋挖钻")?.quantity, 5);
-  assert.equal(actual[0].items.find((item) => item.processLabel === "旋挖钻")?.displayText, "旋挖钻-φ1.8×5根");
+  assert.equal(actual[0].items.find((item) => item.processLabel === "旋挖钻")?.displayText, "旋挖钻-φ1.8m×5根");
   assert.match(actual[1].items[0].displayText, /3×4×12m×2个$/);
   assert.deepEqual(
     workpointStructureSummaryProjection(workpoint([...structures].reverse()), [...processLibrary].reverse()),
     actual,
   );
+});
+
+test("pile summaries aggregate by process diameter and unit while ignoring pile length", async () => {
+  const { workpointStructureSummaryProjection } = await loadResources();
+  const pileParameters = (diameter, length, unit = "m") => [
+    parameter("diameter_m", diameter, { unit }),
+    parameter("length_m", length, { unit: "m", sortOrder: 2 }),
+    parameter("form", "摩擦桩", { sortOrder: 3 }),
+  ];
+  const input = workpoint([
+    structure("pile-summary", "bridge_pier", [
+      component("pile-25", "pile", { methodId: "rotary_drill", quantity: 8, unit: "根", parameters: pileParameters(1.5, 25) }),
+      component("pile-30", "pile", { methodId: "rotary_drill", quantity: 7, unit: "根", parameters: pileParameters(1.5, 30) }),
+      component("pile-35", "pile", { methodId: "rotary_drill", quantity: 5, unit: "根", parameters: pileParameters(1.5, 35) }),
+      component("pile-diameter", "pile", { methodId: "rotary_drill", quantity: 4, unit: "根", parameters: pileParameters(1.8, 25) }),
+      component("pile-process", "pile", { methodId: "impact_drill", quantity: 3, unit: "根", parameters: pileParameters(1.5, 25) }),
+      component("pile-unit", "pile", { methodId: "rotary_drill", quantity: 2, unit: "根", parameters: pileParameters("150", 25, "cm") }),
+      component("pile-disabled", "pile", { enabled: false, methodId: "rotary_drill", quantity: 99, unit: "根", parameters: pileParameters(1.5, 40) }),
+      component("pile-zero", "pile", { methodId: "rotary_drill", quantity: 0, unit: "根", parameters: pileParameters(1.5, 45) }),
+      component("pile-missing", "pile", { methodId: "rotary_drill", quantity: 2, unit: "根", parameters: [parameter("length_m", 18, { unit: "m" })] }),
+    ]),
+  ]);
+
+  const pileItems = workpointStructureSummaryProjection(input, processLibrary)[0].items;
+  assert.equal(pileItems.find((item) => item.displayText === "旋挖钻-φ1.5m×20根")?.quantity, 20);
+  assert.ok(pileItems.some((item) => item.displayText === "旋挖钻-φ1.8m×4根"));
+  assert.ok(pileItems.some((item) => item.displayText === "冲击钻-φ1.5m×3根"));
+  assert.ok(pileItems.some((item) => item.displayText === "旋挖钻-φ150cm×2根"));
+  assert.ok(pileItems.some((item) => item.displayText === "旋挖钻-桩径未提供×2根"));
+  assert.ok(pileItems.every((item) => !/25m|30m|35m|40m|45m|摩擦桩/.test(item.displayText)));
+  assert.deepEqual(
+    workpointStructureSummaryProjection({ ...input, structures: [...input.structures].reverse() }, [...processLibrary].reverse()),
+    workpointStructureSummaryProjection(input, processLibrary),
+  );
+});
+
+test("cap and pier summaries preserve metric dimensions and aggregate piers by section only", async () => {
+  const { workpointStructureSummaryProjection } = await loadResources();
+  const circular = (height, form) => [
+    parameter("diameter_m", 1.5),
+    parameter("height_m", height),
+    parameter("form", form),
+  ];
+  const rectangular = (dimensions, height, form) => [
+    parameter("dimensions_m", dimensions),
+    parameter("height_m", height),
+    parameter("form", form),
+  ];
+  const input = workpoint([
+    structure("cap-and-pier", "bridge_pier", [
+      component("cap-a", "cap", { quantity: 1, unit: "个", parameters: [parameter("form", "16.5*16.5*6.0")] }),
+      component("cap-b", "cap", { quantity: 2, unit: "个", parameters: [parameter("form", "16.5×16.5×6.0")] }),
+      component("cap-c", "cap", { quantity: 3, unit: "个", parameters: [parameter("form", "16.5 x 16.5 X 6.0")] }),
+      component("pier-circular-inner", "pier_body", { methodId: "climbing_form", quantity: 4, unit: "根", parameters: circular(12.5, "内柱") }),
+      component("pier-circular-outer", "pier_body", { methodId: "climbing_form", quantity: 6, unit: "根", parameters: circular(28.75, "外柱") }),
+      component("pier-rectangle-left", "pier_body", { methodId: "climbing_form", quantity: 2, unit: "根", parameters: rectangular("2.0*1.5", 18, "左柱") }),
+      component("pier-rectangle-right", "pier_body", { methodId: "climbing_form", quantity: 3, unit: "根", parameters: rectangular("2.0 × 1.5", 26, "右柱") }),
+      component("pier-rectangle-different", "pier_body", { methodId: "climbing_form", quantity: 1, unit: "根", parameters: rectangular("2.0*1.8", 26, "右柱") }),
+      component("pier-variable", "pier_body", { methodId: "climbing_form", quantity: 2, unit: "根", parameters: rectangular("8.0*6.0/4.0", 80, "独墩") }),
+      component("pier-variable-first-axis", "pier_body", { methodId: "climbing_form", quantity: 2, unit: "根", parameters: rectangular("9.2/7.0*10.6", 80, "独墩") }),
+      component("pier-missing", "pier_body", { methodId: "climbing_form", quantity: 2, unit: "根", parameters: [parameter("height_m", 15), parameter("form", "内柱")] }),
+      component("pier-conflict", "pier_body", { methodId: "climbing_form", quantity: 1, unit: "根", parameters: [parameter("diameter_m", 1.8), parameter("dimensions_m", "2.0*1.5")] }),
+    ]),
+  ]);
+
+  const actual = workpointStructureSummaryProjection(input, processLibrary);
+  const capItems = actual.find((group) => group.componentType === "cap").items;
+  const pierItems = actual.find((group) => group.componentType === "pier_body").items;
+  assert.deepEqual(capItems.map((item) => item.displayText), ["承台施工-16.5×16.5×6.0m×6个"]);
+  assert.ok(pierItems.some((item) => item.displayText === "爬模施工-φ1.5m×10根"));
+  assert.ok(pierItems.some((item) => item.displayText === "爬模施工-2.0×1.5m×5根"));
+  assert.ok(pierItems.some((item) => item.displayText === "爬模施工-2.0×1.8m×1根"));
+  assert.ok(pierItems.some((item) => item.displayText === "爬模施工-8.0×6.0/4.0m×2根"));
+  assert.ok(pierItems.some((item) => item.displayText === "爬模施工-9.2/7.0×10.6m×2根"));
+  assert.ok(pierItems.some((item) => item.displayText === "爬模施工-截面尺寸未提供×2根"));
+  assert.ok(pierItems.some((item) => item.displayText === "爬模施工-截面尺寸冲突×1根"));
+  assert.ok(pierItems.every((item) => !/12\.5|28\.75|18m|26m|80m|内柱|外柱|左柱|右柱|独墩|m²/.test(item.displayText)));
 });
 
 test("workpoint structure summaries keep different units and unknown or missing process information diagnosable", async () => {
