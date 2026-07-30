@@ -1,9 +1,25 @@
 {
   "id": "2026-07-infrastructure-planning-validation-report",
   "stage": "01-customer-validation",
-  "purpose": "汇总截至2026年7月全部客户项目调研报告，形成斑马基建产品场景及AI施工策划与多方案比选验证结论。",
+  "purpose": "汇总截至2026年7月全部客户项目调研报告，形成斑马基建产品场景及AI施工策划与多方案比选验证结论，并维护汇报后的项目级解决方案商业验证计划。",
   "status": "active",
-  "inputs": [],
+  "inputs": [
+    "validation-plans/基建项目级解决方案商业验证执行方案_20260730_v0.1.md",
+    "validation-plans/基建项目级解决方案项目制交付方案_20260730_v0.2.md",
+    "validation-plans/基建项目级解决方案项目制交付方案_20260730_v0.3.md",
+    "validation-plans/assets/product-screenshots/01-route-configuration.png",
+    "validation-plans/assets/product-screenshots/02-bridge-parameter-model.png",
+    "validation-plans/assets/product-screenshots/03-linear-project-overview.png",
+    "validation-plans/assets/product-screenshots/04-tunnel-progress-detail.png",
+    "validation-plans/assets/product-screenshots/05-bridge-3d-progress.png",
+    "validation-plans/assets/product-screenshots/06-tl-slope-diagram.png",
+    "validation-plans/assets/product-screenshots/07-construction-plan.png",
+    "validation-plans/assets/product-screenshots/08-progress-tracking.png",
+    "validation-plans/assets/product-screenshots/09-efficiency-configuration.png",
+    "validation-plans/assets/product-screenshots/10-resource-configuration.png",
+    "validation-plans/assets/product-screenshots/11-process-logic.png",
+    "validation-plans/assets/product-screenshots/12-milestone-configuration.png"
+  ],
   "entrypoints": [],
   "results": [
     "validation-results/2026年7月-基建策划版本验证汇报.md",

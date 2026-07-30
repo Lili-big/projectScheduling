@@ -785,6 +785,7 @@ function renderQuadrantCollaboration(d: Details) {
 }
 
 function renderEngineeringCasePillars(d: Details) {
+  const claimLabel = d.claim_label === undefined ? "真实案例" : String(d.claim_label);
   return `<div class="eng-pillar-grid">
     ${array<Details>(d.pillars)
       .map(
@@ -799,7 +800,7 @@ function renderEngineeringCasePillars(d: Details) {
       )
       .join("")}
   </div>
-  <div class="eng-case-claim layout-item fit-check"><b>真实案例</b>${esc(d.claim)}</div>`;
+  <div class="eng-case-claim layout-item fit-check">${claimLabel ? `<b>${esc(claimLabel)}</b>` : ""}${esc(d.claim)}</div>`;
 }
 
 function renderEngineeringCaseRules(d: Details) {
@@ -905,6 +906,81 @@ function renderEngineeringCaseAccumulation(d: Details) {
         )
         .join("")}
     </div>
+  </div>`;
+}
+
+function renderInfrastructureCover(d: Details, slide: Slide) {
+  return `<div class="infra-cover-layout">
+    <div class="infra-cover-copy">
+      <span class="infra-cover-kicker fit-check">${esc(d.kicker)}</span>
+      <h1 class="fit-check">${esc(slide.title)}</h1>
+      <p class="fit-check">${esc(slide.message)}</p>
+      <div class="infra-cover-tags">
+        ${array(slide.points).map((item) => `<span class="fit-check">${esc(item)}</span>`).join("")}
+      </div>
+      <div class="infra-cover-meta fit-check">${esc(d.meta)}</div>
+    </div>
+    <div class="infra-cover-visual">
+      <div class="infra-route-line" aria-hidden="true"></div>
+      ${array<Details>(d.chain)
+        .map(
+          (item, index) => `<div class="infra-cover-node ${index >= 3 ? "validation" : "current"} layout-item">
+            <span>${String(index + 1).padStart(2, "0")}</span>
+            <strong class="fit-check">${esc(item.title)}</strong>
+            <small class="fit-check">${esc(item.text)}</small>
+          </div>`
+        )
+        .join("")}
+      <div class="infra-cover-loop fit-check">${esc(d.loop)}</div>
+    </div>
+  </div>`;
+}
+
+function renderInfrastructureCapability(d: Details) {
+  const assets = array<Details>(d.assets);
+  const metrics = array<Details>(d.metrics);
+  return `<div class="infra-capability-layout">
+    <div class="infra-capability-copy">
+      ${array<Details>(d.sections)
+        .map(
+          (section, index) => `<div class="infra-capability-section tone-${index + 1} layout-item">
+            <strong class="fit-check">${esc(section.title)}</strong>
+            <ul>${array(section.items).map((item) => `<li class="fit-check">${esc(item)}</li>`).join("")}</ul>
+          </div>`
+        )
+        .join("")}
+    </div>
+    <div class="infra-capability-evidence">
+      ${assets.length ? `<div class="infra-capability-images count-${assets.length}">
+        ${assets
+          .map(
+            (item) => `<figure class="layout-item">
+              <img src="${assetDataUri(String(item.asset))}" alt="${esc(item.alt)}" />
+              <figcaption class="fit-check">${esc(item.caption)}</figcaption>
+            </figure>`
+          )
+          .join("")}
+      </div>` : ""}
+      ${d.equation ? `<div class="infra-equation layout-item fit-check">${esc(d.equation)}</div>` : ""}
+      ${array(d.flow).length ? `<div class="infra-capability-flow">
+        ${array(d.flow)
+          .map(
+            (item, index, items) => `<span class="layout-item fit-check">${esc(item)}</span>${index < items.length - 1 ? '<i aria-hidden="true">→</i>' : ""}`
+          )
+          .join("")}
+      </div>` : ""}
+      ${metrics.length ? `<div class="infra-capability-metrics">
+        ${metrics
+          .map(
+            (item) => `<div class="layout-item"><strong class="fit-check">${esc(item.title)}</strong><span class="fit-check">${esc(item.text)}</span></div>`
+          )
+          .join("")}
+      </div>` : ""}
+    </div>
+  </div>
+  <div class="infra-capability-boundary layout-item fit-check">
+    <b>${esc(d.status)}</b>
+    <span>${esc(d.boundary)}</span>
   </div>`;
 }
 
@@ -1386,6 +1462,10 @@ function renderBody(slide: Slide) {
       return renderEngineeringCaseArtifacts(d);
     case "engineering-case-accumulation":
       return renderEngineeringCaseAccumulation(d);
+    case "infrastructure-cover":
+      return renderInfrastructureCover(d, slide);
+    case "infrastructure-capability":
+      return renderInfrastructureCapability(d);
     case "workspace-comparison":
       return renderWorkspaceComparison(d);
     case "snake-flow-product":
@@ -1419,7 +1499,7 @@ function renderBody(slide: Slide) {
 
 const slides = spec.slides
   .map((slide, index) => {
-    const isCover = slide.layout === "cover-dual-engine";
+    const isCover = slide.layout === "cover-dual-engine" || slide.layout === "infrastructure-cover";
     const isChapter = slide.layout === "application-section";
     const isImageFocus = slide.layout === "engineering-case-image-focus";
     const isClosing = slide.layout === "completion-standard";
@@ -4347,6 +4427,335 @@ const html = `<!doctype html>
     }
     .quadrant-conclusion strong { color: var(--ink); font-size: 14px; white-space: nowrap; }
     .quadrant-conclusion small { color: #81909c; font-size: 9px; white-space: nowrap; }
+
+    /* Infrastructure solution handoff */
+    .infra-cover-layout {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 52% 48%;
+      min-height: 720px;
+      padding: 76px 72px 58px;
+      color: #fff;
+      background:
+        radial-gradient(circle at 82% 20%, rgba(45,103,213,.28), transparent 33%),
+        linear-gradient(135deg, #071827 0%, #0d273b 54%, #102f52 100%);
+    }
+    .infra-cover-copy { padding-top: 34px; }
+    .infra-cover-kicker {
+      display: inline-block;
+      margin-bottom: 22px;
+      color: #72ded0;
+      font-size: 13px;
+      font-weight: 850;
+      letter-spacing: .12em;
+    }
+    .infra-cover-copy h1 {
+      max-width: 620px;
+      margin: 0;
+      color: #fff;
+      font-size: 54px;
+      line-height: 1.08;
+      letter-spacing: -.03em;
+    }
+    .infra-cover-copy > p {
+      max-width: 610px;
+      margin: 22px 0 28px;
+      color: #c6d5e2;
+      font-size: 24px;
+      line-height: 1.4;
+      font-weight: 650;
+    }
+    .infra-cover-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      max-width: 600px;
+    }
+    .infra-cover-tags span {
+      padding: 9px 14px;
+      border: 1px solid rgba(114,222,208,.32);
+      border-radius: 999px;
+      color: #dce8f0;
+      background: rgba(255,255,255,.06);
+      font-size: 14px;
+      font-weight: 750;
+    }
+    .infra-cover-meta {
+      position: absolute;
+      left: 72px;
+      bottom: 54px;
+      color: #8fa4b8;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .infra-cover-visual {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-content: center;
+      gap: 22px 20px;
+      padding: 50px 0 56px 34px;
+    }
+    .infra-route-line {
+      position: absolute;
+      left: 48%;
+      top: 94px;
+      bottom: 118px;
+      width: 3px;
+      border-radius: 3px;
+      background: linear-gradient(#21b9a8, #2d67d5 52%, #f0a13b);
+      opacity: .75;
+      transform: rotate(7deg);
+    }
+    .infra-cover-node {
+      position: relative;
+      min-height: 112px;
+      padding: 18px 16px 14px 52px;
+      border: 1px solid rgba(255,255,255,.13);
+      background: rgba(255,255,255,.07);
+      backdrop-filter: blur(6px);
+    }
+    .infra-cover-node:nth-of-type(odd) { transform: translateY(16px); }
+    .infra-cover-node > span {
+      position: absolute;
+      left: 15px;
+      top: 18px;
+      color: #72ded0;
+      font-size: 12px;
+      font-weight: 900;
+    }
+    .infra-cover-node.validation > span { color: #ffc56f; }
+    .infra-cover-node strong {
+      display: block;
+      margin-bottom: 7px;
+      color: #fff;
+      font-size: 18px;
+    }
+    .infra-cover-node small {
+      display: block;
+      color: #aebfce;
+      font-size: 12px;
+      line-height: 1.4;
+      font-weight: 650;
+    }
+    .infra-cover-loop {
+      grid-column: 1 / -1;
+      margin-top: 6px;
+      padding: 12px 16px;
+      border-left: 4px solid var(--shared);
+      color: #dce8f0;
+      background: rgba(240,161,59,.09);
+      font-size: 13px;
+      line-height: 1.45;
+      font-weight: 700;
+    }
+    .infra-capability-layout {
+      display: grid;
+      grid-template-columns: 39% 61%;
+      gap: 18px;
+      height: 388px;
+    }
+    .infra-capability-copy {
+      display: grid;
+      grid-template-rows: repeat(4, minmax(0, 1fr));
+      gap: 9px;
+      min-width: 0;
+    }
+    .infra-capability-section {
+      min-width: 0;
+      padding: 10px 14px 9px;
+      border-left: 4px solid var(--product);
+      background: rgba(255,255,255,.94);
+      box-shadow: 0 4px 14px rgba(16,42,67,.05);
+    }
+    .infra-capability-section.tone-2 { border-left-color: var(--engineering); }
+    .infra-capability-section.tone-3 { border-left-color: var(--shared); }
+    .infra-capability-section.tone-4 { border-left-color: #7559d9; }
+    .infra-capability-section strong {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 900;
+    }
+    .infra-capability-section ul {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 12px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .infra-capability-section li {
+      position: relative;
+      padding-left: 10px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.35;
+      font-weight: 700;
+    }
+    .infra-capability-section li::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 6px;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .infra-capability-evidence {
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      min-width: 0;
+    }
+    .infra-capability-images {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 9px;
+      flex: 1;
+      min-height: 0;
+    }
+    .infra-capability-images.count-1 { grid-template-columns: 1fr; }
+    .infra-capability-images figure {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      margin: 0;
+      padding: 7px;
+      border: 1px solid var(--line);
+      background: #fff;
+      overflow: hidden;
+    }
+    .infra-capability-images img {
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      object-fit: contain;
+      background: #eef3f7;
+    }
+    .infra-capability-images figcaption {
+      padding: 6px 3px 0;
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .infra-equation {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 170px;
+      padding: 20px 24px;
+      border: 1px solid rgba(45,103,213,.22);
+      color: var(--ink);
+      background: linear-gradient(135deg, #fff, var(--product-soft));
+      font-size: 25px;
+      line-height: 1.45;
+      font-weight: 850;
+      text-align: center;
+    }
+    .infra-capability-flow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 56px;
+    }
+    .infra-capability-flow span {
+      flex: 1;
+      min-width: 0;
+      padding: 10px 7px;
+      border: 1px solid rgba(13,147,134,.22);
+      color: #245b55;
+      background: var(--engineering-soft);
+      font-size: 10px;
+      font-weight: 850;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .infra-capability-flow i { color: #8ca0b0; font-style: normal; font-weight: 900; }
+    .infra-capability-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      min-height: 62px;
+    }
+    .infra-capability-metrics > div {
+      padding: 10px 10px 8px;
+      border-top: 3px solid var(--product);
+      background: #fff;
+    }
+    .infra-capability-metrics strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--ink);
+      font-size: 12px;
+    }
+    .infra-capability-metrics span {
+      display: block;
+      color: var(--muted);
+      font-size: 9px;
+      line-height: 1.3;
+      font-weight: 700;
+    }
+    .infra-capability-boundary {
+      display: flex;
+      align-items: center;
+      min-height: 52px;
+      margin-top: 12px;
+      padding: 11px 16px;
+      border-left: 5px solid var(--shared);
+      background: var(--shared-soft);
+      color: #73542c;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .infra-capability-boundary b {
+      flex: 0 0 auto;
+      margin-right: 16px;
+      color: #a46517;
+      font-size: 13px;
+    }
+
+    /* Infrastructure product-evidence pages: enlarge screenshots without changing other capability layouts. */
+    .slide:is([data-page="6"], [data-page="7"], [data-page="8"], [data-page="9"]) .infra-capability-layout {
+      grid-template-columns: 28% 72%;
+      gap: 14px;
+    }
+    .slide:is([data-page="6"], [data-page="7"], [data-page="8"], [data-page="9"]) .infra-capability-section {
+      padding: 9px 11px 8px;
+    }
+    .slide:is([data-page="6"], [data-page="7"], [data-page="8"], [data-page="9"]) .infra-capability-section ul {
+      gap: 3px 8px;
+    }
+    .slide:is([data-page="6"], [data-page="7"], [data-page="8"], [data-page="9"]) .infra-capability-section li {
+      font-size: 10.5px;
+    }
+    .slide:is([data-page="6"], [data-page="7"], [data-page="8"], [data-page="9"]) .infra-capability-evidence,
+    .slide:is([data-page="6"], [data-page="7"], [data-page="8"], [data-page="9"]) .infra-capability-images {
+      gap: 6px;
+    }
+    .slide:is([data-page="6"], [data-page="7"], [data-page="8"], [data-page="9"]) .infra-capability-images figure {
+      padding: 5px;
+    }
+    .slide:is([data-page="6"], [data-page="7"], [data-page="8"], [data-page="9"]) .infra-capability-images figcaption {
+      padding-top: 4px;
+      font-size: 8.5px;
+    }
+    .slide:is([data-page="6"], [data-page="7"], [data-page="8"], [data-page="9"]) .infra-capability-flow {
+      min-height: 50px;
+      gap: 6px;
+    }
+    .slide:is([data-page="6"], [data-page="7"], [data-page="8"], [data-page="9"]) .infra-capability-metrics {
+      min-height: 54px;
+      gap: 6px;
+    }
+    .slide:is([data-page="6"], [data-page="7"], [data-page="8"], [data-page="9"]) .infra-capability-metrics > div {
+      padding: 8px 8px 6px;
+    }
 
     /* Inserted engineering practice chapter */
     .eng-pillar-grid {
