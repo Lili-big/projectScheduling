@@ -92,6 +92,13 @@
       "path": "06-delivery/presentations/ai-ppt-system",
       "status": "active",
       "purpose": "企业级演示材料结构化生成与稳定渲染"
+    },
+    {
+      "id": "product-agent-practice-kit",
+      "stage": "06-delivery",
+      "path": "06-delivery/workpackages/product-agent-practice-kit",
+      "status": "active",
+      "purpose": "可直接转发并通过初始化 Prompt 启动的产品 Agent 项目工具包"
     }
   ]
 }

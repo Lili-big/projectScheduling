@@ -1,0 +1,4 @@
+interface:
+  display_name: "管理项目 Spec Kit Skill"
+  short_description: "初始化、比较或升级项目本地 Spec Kit Skill"
+  default_prompt: "使用 $manage-speckit-project-skills 检查并安全初始化或升级当前项目的 Spec Kit Skill 副本。"

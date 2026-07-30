@@ -1,0 +1,13 @@
+{
+  "template_version": "1.0.0",
+  "captured_from": "项目本地 .agents/skills，经工具包中文化整理",
+  "captured_on": "2026-07-22",
+  "skills": [
+    "speckit-checklist",
+    "speckit-constitution",
+    "speckit-specify",
+    "speckit-plan",
+    "speckit-tasks",
+    "speckit-implement"
+  ]
+}

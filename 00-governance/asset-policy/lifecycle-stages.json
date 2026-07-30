@@ -52,8 +52,8 @@
       "purpose": "维护正式交付物、案例总结、演示材料和历史版本",
       "entry_criteria": ["成果已达到对外或正式留档标准"],
       "exit_criteria": ["来源、版本、哈希、生成关系和维护状态已登记"],
-      "authoritative_asset_types": ["formal-deliverable", "case-study", "presentation", "release-material"],
-      "workpackages": ["ai-case-summary", "ai-ppt-system"],
+      "authoritative_asset_types": ["formal-deliverable", "case-study", "presentation", "release-material", "reusable-practice-kit"],
+      "workpackages": ["ai-case-summary", "ai-ppt-system", "product-agent-practice-kit"],
       "next_stages": ["01-customer-validation", "02-solution-analysis"]
     }
   ]

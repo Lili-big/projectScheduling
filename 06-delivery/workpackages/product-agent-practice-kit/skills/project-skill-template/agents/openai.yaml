@@ -1,0 +1,7 @@
+interface:
+  display_name: "创建项目本地 Skill"
+  short_description: "将项目专有流程沉淀为本地 Skill"
+  default_prompt: "使用 $project-skill-template 将这些重复的项目规则和验证要求整理为聚焦的项目本地 Skill。"
+
+policy:
+  allow_implicit_invocation: true

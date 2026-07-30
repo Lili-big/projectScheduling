@@ -1,0 +1,28 @@
+{
+  "id": "product-agent-starter-kit",
+  "version": "1.0.0",
+  "display_name": "产品 Agent 项目启动工具包",
+  "purpose": "将新项目或已有产品 Demo 初始化为可进行需求分析、方案设计、Demo 验证和 PRD 交接的产品 AI Coding 工作区。",
+  "entrypoint": "README.md",
+  "bootstrap_prompt": "INIT_PROMPT.md",
+  "initialization_contract": "INITIALIZATION_CONTRACT.md",
+  "initializer": "scripts/init-product-agent-project.ps1",
+  "release_folder": "product-agent-starter-kit",
+  "release_include": [
+    "README.md",
+    "INIT_PROMPT.md",
+    "INITIALIZATION_CONTRACT.md",
+    "toolkit-manifest.json",
+    "references",
+    "templates",
+    "skills",
+    "scripts/init-product-agent-project.ps1"
+  ],
+  "excluded_from_release": [
+    "PPT与汇报设计资产",
+    "案例复盘",
+    "仓库工作包元数据",
+    "仓库治理文件",
+    "发布构建脚本"
+  ]
+}

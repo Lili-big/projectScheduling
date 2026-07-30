@@ -7,6 +7,9 @@ const __dirname = path.dirname(__filename);
 
 export const PROJECT_ROOT = path.resolve(__dirname, "..");
 export const REPOSITORY_ROOT = path.resolve(PROJECT_ROOT, "..", "..", "..");
+export const SPEC_PATH = process.env.AI_PPT_SPEC_PATH
+  ? path.resolve(PROJECT_ROOT, process.env.AI_PPT_SPEC_PATH)
+  : path.join(PROJECT_ROOT, "specs", "slide_spec.json");
 export const OUTPUT_ROOT = process.env.AI_PPT_OUTPUT_DIR
   ? path.resolve(PROJECT_ROOT, process.env.AI_PPT_OUTPUT_DIR)
   : path.join(REPOSITORY_ROOT, ".local-data", "archive", "rebuildable", "ai-ppt-system", "output");
@@ -45,6 +48,9 @@ export interface SlideSpec {
   points: string[];
   visual: string;
   speaker_note: string;
+  layout?: string;
+  evidence?: string;
+  details?: Record<string, any>;
 }
 
 export interface DeckSpec {
@@ -85,7 +91,9 @@ export function writeText(parts: string[], content: string) {
 }
 
 export function readSpec(): DeckSpec {
-  return JSON.parse(readText("specs", "slide_spec.json")) as DeckSpec;
+  const content = fs.readFileSync(SPEC_PATH, "utf8");
+  const normalized = content.charCodeAt(0) === 0xfeff ? content.slice(1) : content;
+  return JSON.parse(normalized) as DeckSpec;
 }
 
 export function normalizeDeckTemplate(template: unknown): DeckTemplate | undefined {

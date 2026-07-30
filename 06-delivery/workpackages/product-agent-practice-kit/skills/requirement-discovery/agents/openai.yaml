@@ -1,0 +1,7 @@
+interface:
+  display_name: "需求发现"
+  short_description: "还原、分级并收敛产品需求"
+  default_prompt: "使用 $requirement-discovery 还原当前需求、判断复杂度、只澄清高影响缺口、比较真实方案，并形成适合下一阶段的交付。"
+
+policy:
+  allow_implicit_invocation: true

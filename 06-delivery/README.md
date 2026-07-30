@@ -24,6 +24,7 @@
 
 - [`ai-case-summary`](workpackages/ai-case-summary/)：AI 案例总结及历史版本。
 - [`ai-ppt-system`](presentations/ai-ppt-system/)：企业级演示材料生成系统。
+- [`product-agent-practice-kit`](workpackages/product-agent-practice-kit/)：可直接转发并通过初始化 Prompt 启动的产品 Agent 项目 ZIP。
 
 ## 相邻阶段
 

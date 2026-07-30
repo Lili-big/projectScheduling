@@ -1,0 +1,7 @@
+interface:
+  display_name: "[中文显示名称]"
+  short_description: "[25至64个字符的中文说明]"
+  default_prompt: "使用 $[skill-name] [完成代表性的项目任务]。"
+
+policy:
+  allow_implicit_invocation: true

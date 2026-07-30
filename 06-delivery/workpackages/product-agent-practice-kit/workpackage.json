@@ -1,0 +1,31 @@
+{
+  "id": "product-agent-practice-kit",
+  "stage": "06-delivery",
+  "purpose": "构建可直接转发的产品 Agent 项目启动 ZIP；使用者复制工具包并粘贴初始化 Prompt 后即可建立产品 AI Coding 工作区。",
+  "status": "active",
+  "inputs": [
+    "skills/requirement-discovery",
+    "skills/write-prd",
+    "skills/manage-speckit-project-skills"
+  ],
+  "entrypoints": [
+    "README.md",
+    "INIT_PROMPT.md",
+    "toolkit-manifest.json",
+    "scripts/init-product-agent-project.ps1"
+  ],
+  "results": [
+    "releases/product-agent-starter-kit-v1.0.0.zip",
+    "templates",
+    "skills",
+    "references",
+    "INITIALIZATION_CONTRACT.md"
+  ],
+  "owner": "产品 Agent 实践沉淀",
+  "tracking_policy": "tracked",
+  "retention_policy": "发布 ZIP、初始化协议、模板、中文 Skill 和来源清单作为正式交付长期跟踪；案例、PPT、用户输入、客户资料、密钥、日志和缓存不得进入发布 ZIP。",
+  "related_workpackages": [
+    "ai-case-summary",
+    "ai-ppt-system"
+  ]
+}

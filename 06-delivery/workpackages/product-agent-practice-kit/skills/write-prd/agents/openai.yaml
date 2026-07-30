@@ -1,0 +1,4 @@
+interface:
+  display_name: "编写 PRD"
+  short_description: "输出产品PRD，或在明确要求时输出算法/规则交底"
+  default_prompt: "使用 $write-prd 根据说明、截图、文档或代码输出研发可执行的 PRD；若我明确要求算法/规则交底，请切换到算法/规则文档模式。"

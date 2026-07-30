@@ -18,6 +18,7 @@ EXPECTED = {
     "ai-assistants",
     "ai-case-summary",
     "ai-ppt-system",
+    "product-agent-practice-kit",
 }
 REQUIRED_README_TEXT = ["目的", "输入", "运行", "成果", "跟踪与保留"]
 
@@ -59,3 +60,10 @@ def test_workpackage_tracking_and_retention_are_explicit() -> None:
     for package_id, (_, data) in workpackages().items():
         assert data["tracking_policy"] in {"tracked", "ignored", "local-only"}
         assert data["retention_policy"].strip(), package_id
+
+
+def test_product_agent_practice_kit_has_reproducible_initializer() -> None:
+    directory, data = workpackages()["product-agent-practice-kit"]
+    initializer = "scripts/init-product-agent-project.ps1"
+    assert initializer in data["entrypoints"]
+    assert (directory / initializer).is_file()
