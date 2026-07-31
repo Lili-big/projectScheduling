@@ -789,10 +789,11 @@ function renderEngineeringCasePillars(d: Details) {
   return `<div class="eng-pillar-grid">
     ${array<Details>(d.pillars)
       .map(
-        (pillar, index) => `<div class="eng-pillar-card tone-${index + 1} layout-item">
-          <span class="fit-check">${esc(pillar.layer)}</span>
-          <strong class="fit-check">${esc(pillar.title)}</strong>
-          <p class="fit-check">${esc(pillar.question)}</p>
+        (pillar, index) => `<div class="eng-pillar-card tone-${index + 1}${pillar.question_first ? " question-first" : ""} layout-item">
+          ${pillar.layer ? `<span class="fit-check">${esc(pillar.layer)}</span>` : ""}
+          ${pillar.question_first
+            ? `<p class="fit-check">${esc(pillar.question)}</p><strong class="fit-check">${esc(pillar.title)}</strong>`
+            : `<strong class="fit-check">${esc(pillar.title)}</strong><p class="fit-check">${esc(pillar.question)}</p>`}
           <ul>
             ${array(pillar.items).map((item) => `<li class="fit-check">${esc(item)}</li>`).join("")}
           </ul>
@@ -4722,17 +4723,20 @@ const html = `<!doctype html>
 
     /* Infrastructure product-evidence pages: enlarge screenshots without changing other capability layouts. */
     .slide:is([data-page="6"], [data-page="7"], [data-page="8"], [data-page="9"]) .infra-capability-layout {
-      grid-template-columns: 28% 72%;
-      gap: 14px;
+      grid-template-columns: 22% 78%;
+      gap: 12px;
     }
     .slide:is([data-page="6"], [data-page="7"], [data-page="8"], [data-page="9"]) .infra-capability-section {
-      padding: 9px 11px 8px;
+      padding: 8px 9px 7px;
+    }
+    .slide:is([data-page="6"], [data-page="7"], [data-page="8"], [data-page="9"]) .infra-capability-section strong {
+      font-size: 12px;
     }
     .slide:is([data-page="6"], [data-page="7"], [data-page="8"], [data-page="9"]) .infra-capability-section ul {
       gap: 3px 8px;
     }
     .slide:is([data-page="6"], [data-page="7"], [data-page="8"], [data-page="9"]) .infra-capability-section li {
-      font-size: 10.5px;
+      font-size: 10px;
     }
     .slide:is([data-page="6"], [data-page="7"], [data-page="8"], [data-page="9"]) .infra-capability-evidence,
     .slide:is([data-page="6"], [data-page="7"], [data-page="8"], [data-page="9"]) .infra-capability-images {
@@ -4787,6 +4791,8 @@ const html = `<!doctype html>
     .eng-pillar-card.tone-3 > span { color: var(--future); }
     .eng-pillar-card > strong { display: block; color: var(--ink); font-size: 23px; white-space: nowrap; }
     .eng-pillar-card > p { margin: 9px 0 15px; color: var(--muted); font-size: 15px; font-weight: 750; white-space: nowrap; }
+    .eng-pillar-card.question-first > p { margin: 0 0 8px; }
+    .eng-pillar-card.question-first > strong { margin-bottom: 14px; }
     .eng-pillar-card ul { margin: 0; padding: 0; list-style: none; }
     .eng-pillar-card li {
       position: relative;
