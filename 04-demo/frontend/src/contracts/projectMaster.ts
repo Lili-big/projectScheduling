@@ -1,4 +1,24 @@
+export type PavementTemplateLayer = {
+  name: string;
+  process_type: "granular_base" | "cement_stabilized_base" | "asphalt_course";
+  thickness_m: number;
+};
+
+export type CreatePavementLayerDraftRequest = {
+  section_ids: string[];
+  layers: PavementTemplateLayer[];
+  created_by: string;
+};
+
+export type PavementLayerEdit = Omit<PavementTemplateLayer, "thickness_m"> & {
+  component_id: string | null;
+  thickness_m: number | null;
+  density_t_m3?: number | null;
+  enabled: boolean;
+};
+
 export type ProjectMasterWorkpointType =
+  | "pavement"
   | "bridge"
   | "roadbed"
   | "tunnel"
@@ -76,7 +96,7 @@ export type ProjectMasterWorkpoint = {
   start_mileage_m?: number | null;
   end_mileage_m?: number | null;
   sort_order: number;
-  schedule_support: "bridge_supported" | "not_supported";
+  schedule_support: "bridge_supported" | "pavement_supported" | "not_supported";
   remark?: string | null;
   structures: ProjectMasterStructure[];
   source?: ProjectMasterSource | null;
@@ -195,3 +215,7 @@ export type ProjectMasterVersionDetail = ProjectMasterVersionSummary & {
 
 export type ProjectMasterVersionPage = { page: number; page_size: number; total: number; items: ProjectMasterVersionSummary[] };
 export type ProjectMasterWorkpointPage = { page: number; page_size: number; total: number; items: ProjectMasterWorkpoint[] };
+export type SavePavementHandoverRequest = {
+  status: import("./pavement").PavementHandoverStatus;
+  available_date: string | null; note: string; created_by: string;
+};

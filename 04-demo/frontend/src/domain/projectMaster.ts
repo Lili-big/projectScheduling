@@ -7,6 +7,7 @@ import type {
 } from "../contracts/projectMaster";
 
 export const projectMasterWorkpointTypeLabels: Record<ProjectMasterWorkpointType, string> = {
+  pavement: "路面",
   bridge: "桥梁",
   roadbed: "路基",
   tunnel: "隧道",

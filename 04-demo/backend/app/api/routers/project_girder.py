@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import Depends, APIRouter, HTTPException, Request
 
 from ..errors import plan_control_http_error
 from ..multipart import parse_multipart_request
@@ -30,7 +30,9 @@ from ...importing.bridge import import_local_bridge_params, import_uploaded_brid
 from ...plan_control.repository import PlanControlRepositoryError, default_plan_control_repository
 
 
-router = APIRouter()
+from ..errors import reject_pavement_feature_request
+
+router = APIRouter(dependencies=[Depends(reject_pavement_feature_request)])
 
 
 @router.post("/api/project-data-versions", response_model=ProjectDataVersion, status_code=201)

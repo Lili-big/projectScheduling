@@ -53,6 +53,78 @@ export function scheduleResultSummary(result: ScheduleResult | null) {
     : { status: "-", days: null, tasks: 0 };
 }
 
+function pavementDateRanges(tasks: ScheduleResult["tasks"]) {
+  const constructionTasks = tasks.filter(task => task.pavement_context?.task_kind !== "preparation");
+  const processType = (task: ScheduleResult["tasks"][number]) => task.pavement_context?.process_type ?? task.component_type;
+  return [
+    { key: "overall", label: "整体排程", tasks },
+    { key: "lower", label: "下面层（碎石＋水稳）", tasks: constructionTasks.filter(task => ["granular_base", "cement_stabilized_base"].includes(processType(task))) },
+    { key: "upper", label: "上面层（沥青）", tasks: constructionTasks.filter(task => processType(task) === "asphalt_course") },
+  ].map(group => {
+    let startDate: string | null = null;
+    let finishDate: string | null = null;
+    // Result dates are ISO calendar dates; finish_date is the inclusive last workday.
+    for (const task of group.tasks) {
+      if (task.start_date && (startDate === null || task.start_date < startDate)) startDate = task.start_date;
+      if (task.finish_date && (finishDate === null || task.finish_date > finishDate)) finishDate = task.finish_date;
+    }
+    return { key: group.key, label: group.label, taskCount: group.tasks.length, startDate, finishDate };
+  });
+}
+
+export function pavementResultPresentation(result: ScheduleResult, liveStatus?: import("../../contracts").PavementLiveStatus) {
+  const hasPlan = (result.status === "OPTIMAL" || result.status === "FEASIBLE") && !!result.pavement_summary;
+  const summary = hasPlan ? result.pavement_summary : null;
+  const legacy = !!summary && !["earliest_construction_finish", "min_idle_with_makespan_cap"].includes(String(result.objective_breakdown?.objective));
+  const handoverScope = result.stats?.pavement_handover as import("../../contracts/pavement").PavementHandoverScope | undefined;
+  const conditional = handoverScope?.pending_policy === "strict_last" || handoverScope?.pending_policy === "per_fleet_last";
+  const pendingSections = (conditional ? handoverScope.pending_sections ?? [] : []).map(section => {
+    const dates = summary?.pending_section_dates?.find(d => d.structure_id === section.structure_id);
+    return {...section, required_handover_date: dates?.required_handover_date ?? null,
+      estimated_finish_date: dates?.estimated_finish_date ?? null};
+  });
+  const optimization = result.pavement_optimization;
+  const idle = result.pavement_idle_optimization;
+  let optimizationText = hasPlan && optimization?.final_days != null
+    ? `AI 推演排程方案 · ${optimization.initial_days != null ? `初步 ${optimization.initial_days} 天 → ` : ""}${liveStatus === "running" || liveStatus === "interrupted" ? "当前最好" : "推演后"} ${optimization.final_days} 天${optimization.improvement_days != null ? ` · 缩短 ${optimization.improvement_days} 天` : ""}${optimization.selected_source === "greedy" ? " · 保留初步计划" : ""}`
+    : null;
+  let optimizationNotice = liveStatus === "running" ? "AI 正在推演，持续保留当前最好方案；尚未证明最优。"
+    : liveStatus === "interrupted" ? "本次 AI 推演未完成，以下为最后收到的方案，仅供查看。"
+    : optimization?.outcome === "inconsistent" ? "初步计划与优化模型不一致，请查看诊断。"
+    : hasPlan && optimization?.outcome === "initial_retained"
+      ? optimization.optimizer_status === "OPTIMAL" ? "初步计划的工期已证明最优。"
+        : optimization.optimizer_not_run_reason === "budget_exhausted" ? "计算预算已用完，采用初步计划。"
+        : "限时内未获得更好方案，采用初步计划。"
+      : liveStatus === "complete" && hasPlan ? result.status === "OPTIMAL" ? "本次 AI 推演结束，工期已证明最优。" : "本次 AI 推演结束，保留当前最好方案，尚未证明最优。" : null;
+  if (hasPlan && idle) {
+    optimizationText = `AI 推演排程方案 · 工期上限 ${idle.makespan_cap_days} 天 · 当前工期 ${result.objective_days} 天 · 窝工 ${idle.baseline_idle_days} → ${idle.final_idle_days} 机组·天 · 减少 ${idle.improvement_idle_days} 机组·天`;
+    optimizationNotice = liveStatus === "running" ? "正在保持工期上限、减少资源窝工，持续保留最好方案。"
+      : liveStatus === "interrupted" ? "本次窝工优化未完成，保留最后合法方案。"
+      : idle.proved_optimal ? `在 ${idle.makespan_cap_days} 天工期上限及现有约束下，窝工已最小；此结论不表示工期最短。`
+      : `${idle.outcome === "baseline_retained" ? "限时内未获得窝工改善，保留原方案。" : "本次窝工优化结束，保留当前最好方案。"}尚未证明窝工最小。`;
+  }
+  return {
+    optimizationText,
+    optimizationNotice,
+    handoverNotice: !hasPlan ? "本次未获得可行计划，需移交日期与预计施工完成日期尚未计算。"
+      : `${handoverScope?.pending_policy === "per_fleet_last" ? "各机组完成自身正常段任务后，再施工待移交段。" : handoverScope?.pending_policy === "strict_last" ? "历史方案按正常段全部完成后安排待移交段，重新求解后应用按机组后置规则。" : ""}按当前方案，须在所列日期当天开工前完成移交；实际移交仍待确认。`,
+    summaryText: [optimizationNotice, handoverScope && `纳入 ${handoverScope.included_section_count} 段 / ${handoverScope.included_layer_count} 道工序 · ${conditional ? `${pendingSections.length} 段移交日期未定` : `${handoverScope.blocked_sections.length} 段受阻未排程`}`].filter(Boolean).join(" · "),
+    hasPlan,
+    dateRanges: hasPlan ? pavementDateRanges(result.tasks ?? []) : [],
+    pendingSections,
+    legacy,
+    handoverScope,
+    finishLabel: pendingSections.length ? "施工完成日期（含待移交假设）" : handoverScope?.blocked_sections.length ? "本次纳入范围施工完成日期" : "施工完成日期",
+    noSchedulableSection: result.validation?.some(d => d.code === "PAVEMENT_NO_SCHEDULABLE_SECTION") ?? false,
+    status: formatScheduleStatus(result.status),
+    source: summary?.input_kind === "demo" ? "演示数据（非客户确认数据）" : "客户主数据",
+    constructionFinish: summary?.construction_finish_date ?? "—",
+    readyDate: summary?.ready_date ?? "—",
+    elapsedDays: (legacy ? summary?.ready_offset : summary?.construction_finish_offset) ?? null,
+    boundaryNote: "施工末日为作业区间的最后一天；后续可用日期为等待结束的边界。零等待不增加耗时。",
+  };
+}
+
 export function summarizeDiagnostics(diagnostics: ValidationMessage[]) {
   return diagnostics.reduce(
     (summary, item) => ({ ...summary, [item.level]: summary[item.level] + 1 }),

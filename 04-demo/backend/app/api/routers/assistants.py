@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import Depends, APIRouter, HTTPException, Request
 
 from ..multipart import parse_multipart_request
 from ...contracts import (
@@ -40,7 +40,9 @@ from ...services.ai_workpoint_resource_initializer import initialize_workpoint_r
 from .scheduling import _materialize_project_master
 
 
-router = APIRouter()
+from ..errors import reject_pavement_feature_request
+
+router = APIRouter(dependencies=[Depends(reject_pavement_feature_request)])
 
 
 @router.post(

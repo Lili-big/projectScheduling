@@ -30,3 +30,36 @@ export async function generateScheduleWorkflow(
     fingerprint: scenarioFingerprintForSolve(normalizedScenario, workpointId),
   };
 }
+
+export type PavementPreviewState = {
+  status: "idle" | "loading" | "ready" | "error";
+  fingerprint: string | null;
+  generation: GeneratedScheduleInput | null;
+  error: string | null;
+};
+export const emptyPavementPreview = (): PavementPreviewState => ({ status: "idle", fingerprint: null, generation: null, error: null });
+
+// No persistence or solve dependencies: automatic preparation has read-only side effects.
+export function createPavementPreviewController(generate: (scenario: ScenarioInput, scope: null) => Promise<GeneratedScheduleInput>) {
+  let sequence = 0;
+  let state = emptyPavementPreview();
+  return {
+    invalidate() { sequence++; if (state.status === "loading") state = emptyPavementPreview(); },
+    async request(scenario: ScenarioInput, publish: (value: PavementPreviewState) => void, retry = false) {
+      const fingerprint = scenarioFingerprintForSolve(scenario);
+      if (!retry && state.fingerprint === fingerprint && state.status !== "idle") { publish(state); return; }
+      const requestId = ++sequence;
+      state = { status: "loading", fingerprint, generation: null, error: null };
+      publish(state);
+      try {
+        const generation = await generate(scenario, null);
+        if (sequence !== requestId) return;
+        state = { status: "ready", fingerprint, generation, error: null };
+      } catch (reason) {
+        if (sequence !== requestId) return;
+        state = { status: "error", fingerprint, generation: null, error: reason instanceof Error ? reason.message : String(reason) };
+      }
+      publish(state);
+    },
+  };
+}

@@ -1,6 +1,15 @@
-import { apiGet, apiGetBlob, apiPost, apiPostFormData } from "./client";
+import { withPavementMaster } from "../domain/pavement";
+import type { SavePavementHandoverRequest } from "../contracts/projectMaster";
+
+export function savePavementHandover(versionId: string, sectionId: string, values: SavePavementHandoverRequest): Promise<ProjectMasterVersionDetail> {
+  return apiPut(`/api/project-master/versions/${encodeURIComponent(versionId)}/pavement-sections/${encodeURIComponent(sectionId)}/handover`, values);
+}
+import type { ScenarioInput } from "../contracts";
+import { apiGet, apiGetBlob, apiPost, apiPostFormData, apiPut } from "./client";
 import type {
   ProjectMasterImportBatch,
+  CreatePavementLayerDraftRequest,
+  PavementLayerEdit,
   ProjectMasterVersionDetail,
   ProjectMasterVersionPage,
   ProjectMasterVersionSummary,
@@ -10,8 +19,8 @@ import type {
 } from "../contracts/projectMaster";
 import type { GirderWorkPoint } from "../contracts";
 
-export function downloadProjectMasterTemplate(): Promise<Blob> {
-  return apiGetBlob("/api/project-master/template");
+export function downloadProjectMasterTemplate(engineeringDomain: "bridge" | "pavement" = "bridge"): Promise<Blob> {
+  return apiGetBlob(`/api/project-master/template?engineering_domain=${engineeringDomain}`);
 }
 
 export function importProjectMasterWorkbook(
@@ -52,6 +61,18 @@ export function getCurrentProjectMasterVersion(projectId: string): Promise<Proje
 
 export function getProjectMasterVersion(versionId: string): Promise<ProjectMasterVersionDetail> {
   return apiGet(`/api/project-master/versions/${encodeURIComponent(versionId)}`);
+}
+
+export function createPavementLayerDraft(versionId: string, payload: CreatePavementLayerDraftRequest): Promise<ProjectMasterImportBatch> {
+  return apiPost(`/api/project-master/versions/${encodeURIComponent(versionId)}/pavement-layer-drafts`, payload);
+}
+
+export function initializePavementLayers(versionId: string): Promise<ProjectMasterVersionDetail> {
+  return apiPost(`/api/project-master/versions/${encodeURIComponent(versionId)}/pavement-layers/initialize`, { created_by: "本地计划工程师" });
+}
+
+export function savePavementSectionLayers(versionId: string, sectionId: string, layers: PavementLayerEdit[]): Promise<ProjectMasterVersionDetail> {
+  return apiPut(`/api/project-master/versions/${encodeURIComponent(versionId)}/pavement-sections/${encodeURIComponent(sectionId)}/layers`, { layers, created_by: "本地计划工程师" });
 }
 
 export function confirmProjectMasterVersion(
@@ -124,4 +145,16 @@ export function saveBlob(blob: Blob, fileName: string): void {
   link.download = fileName;
   link.click();
   URL.revokeObjectURL(href);
+}
+
+
+export async function getPavementProject(input: ScenarioInput, versionId: string): Promise<ScenarioInput> {
+  const workpoints: ProjectMasterWorkpoint[] = [];
+  for (let page = 1; ; page++) {
+    const data = await listProjectMasterWorkpoints(versionId, { page, pageSize: 200 });
+    if (data.items.some(w => w.workpoint_type !== "pavement")) throw new Error("当前版本包含非路面工点，请使用纯路面主数据范围。");
+    workpoints.push(...await Promise.all(data.items.map(w => getProjectMasterWorkpoint(versionId, w.workpoint_id))));
+    if (workpoints.length >= data.total) break;
+  }
+  return withPavementMaster(input, workpoints, versionId);
 }

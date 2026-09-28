@@ -13,6 +13,13 @@ def is_lower_or_cast_in_place_beam_task(task: Task) -> bool:
 
 
 def task_ids_for_milestone(milestone: MilestoneConstraint, tasks: list[Task]) -> list[str]:
+    if tasks and all(task.pavement_context for task in tasks):
+        return sorted(task.id for task in tasks if task.structure_id in milestone.related_structure_ids
+            or milestone.scope_type == "project"
+            or milestone.scope_type == "bridge" and task.bridge_id == milestone.scope_id
+            or milestone.scope_type == "work_section" and task.work_section_id == milestone.scope_id
+            or milestone.scope_type == "structure" and task.structure_id == milestone.scope_id
+            or milestone.scope_type == "component" and milestone.scope_id in {task.id, task.component_id, task.component_type})
     related_ids = {
         task.id
         for task in tasks

@@ -2,6 +2,15 @@
   overflow: hidden;
 }
 
+.pavement-fleets fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.pavement-fleet-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 8px 0; font-size: 12px; }
+.pavement-fleets th { white-space: nowrap; }
+.pavement-fleets .pavement-fleet-name { width: 180px; max-width: 100%; }
+.pavement-fleet-processes { display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.pavement-fleet-processes label { display: inline-flex; flex-direction: row; align-items: center; gap: 4px; white-space: nowrap; }
+.pavement-fleet-processes input[type="checkbox"] { width: auto; margin: 0; }
+.pavement-fleet-errors { color: #b42318; font-size: 12px; margin: 8px 0; }
+
 .resource-workpoint-section,
 .resource-shared-section {
   margin: 0 14px 16px;

@@ -52,5 +52,17 @@
 | `051-girder-plan-simulation` | completed | 47/47 |
 | `054-single-workpoint-solve` | active_partial | 26/27 |
 | `056-unified-fixed-resource-solve` | active_partial | 0/33 |
+| [`063-road-pavement-adaptation`](./063-road-pavement-adaptation/spec.md) | active_partial | 28/29，首版与自动样例验证完成；待客户数据 |
+| [`064-pavement-roadbed-handover`](./064-pavement-roadbed-handover/spec.md) | completed | 10/10，路床三态已落地；原21段84任务排程口径已由067更新，历史证据保留 |
+| [`065-pavement-shared-fleets`](./065-pavement-shared-fleets/spec.md) | completed | 10/10，共享机组配置与求解验证通过；客户已设共享1套 |
+| [`066-pavement-task-preview`](./066-pavement-task-preview/spec.md) | completed | 10/10，任务自动准备与统一工序链已验证；层间FS+N、排除末尾养生 |
+| [`067-pavement-pending-last`](./067-pavement-pending-last/spec.md) | completed | 11/11；25段100任务纳入，4段严格后置及条件日期已验证；客户15秒仍UNKNOWN |
+| [`068-pavement-greedy-cpsat`](./068-pavement-greedy-cpsat/spec.md) | completed | 13/13；贪心初解＋CP-SAT限时优化规划完成，已完成实施 |
+| [`069-pavement-live-optimization`](./069-pavement-live-optimization/spec.md) | completed | 14/14；8worker＋内置LNS、15秒预算与实时最好方案已接入；100任务实测324→310天，未证明最优，详见实施证据 |
+| [`070-pavement-results-visualization`](./070-pavement-results-visualization/spec.md) | completed | 15/15；持续求解提示、两级表格横道与机组里程轴已接入，21项定向测试及宽窄屏验收通过，既有仓库检查问题见任务证据 |
+| [`071-pavement-resource-timeline`](./071-pavement-resource-timeline/spec.md) | active_partial | 8/9；按米厚度约束修订及资源时间图完成，87项后端/21项前端测试、构建与宽窄屏验收通过；资源行含作业/转场/空闲及最长空闲定位，当前19段76任务；仅底部精简T005b暂缓，既有依赖审批/9处历史引用问题留证 |
+| [`072-pavement-crew-tl-flow`](./072-pavement-crew-tl-flow/spec.md) | completed | 8/8；双幅共享固定里程轴、镜像实际日期、全程箭线及局部高亮/缩放/导航已接入；27项测试、构建和真实76工序宽窄屏验证通过，100工序投影/双机渲染及浏览器限制见任务证据 |
+| [`073-pavement-fleet-pending-last`](./073-pavement-fleet-pending-last/spec.md) | completed | 8/8；初解、CP-SAT 与校验统一按实际机组后置，144 项后端及 21 项前端用例通过；既有架构/治理差异详见 tasks.md |
+| [`074-pavement-idle-optimization`](./074-pavement-idle-optimization/spec.md) | completed | 11/11；独立窝工优化、固定工期上限与实时保底已接入，144项后端/47项前端验收及构建通过；既有架构/治理差异见tasks.md |
 
 使用规则：先读目标目录的 `spec.md`、`plan.md` 和 `tasks.md`。`completed` 只表示该规格任务清单已勾选，不替代当前代码验证；`active_partial` 中未完成项不得在 README/agent 中写成已实现。

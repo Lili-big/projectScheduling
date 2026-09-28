@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import threading
 from pathlib import Path
 from typing import Callable
 from zipfile import BadZipFile
+from uuid import uuid4
 
 from openpyxl.utils.exceptions import InvalidFileException
 
@@ -16,15 +18,21 @@ from ..config.environment import (
 from ..contracts.project_master import (
     CancelProjectMasterImportRequest,
     ConfirmProjectMasterVersionRequest,
+    CreatePavementLayerDraftRequest,
+    SavePavementSectionLayersRequest,
+    SavePavementHandoverRequest,
+    ParameterValue,
+    ProjectMasterComponent,
+    SourceEvidence,
     ProjectMasterCounts,
     ProjectMasterImportBatch,
     ProjectMasterSnapshot,
     ProjectMasterVersionDetail,
 )
 from .diff import diff_snapshots
-from .repository import ProjectMasterConflictError, ProjectMasterRepository
+from .repository import ProjectMasterConflictError, ProjectMasterNotFoundError, ProjectMasterRepository
 from .validation import validate_snapshot
-from .workbook import create_template_bytes, export_snapshot, parse_workbook
+from .workbook import content_fingerprint, create_template_bytes, export_snapshot, parse_workbook
 
 
 class ProjectMasterServiceError(RuntimeError):
@@ -60,8 +68,8 @@ class ProjectMasterService:
         self.reference_conflict_checker = reference_conflict_checker
         self.version_invalidation_handler = version_invalidation_handler
 
-    def template_bytes(self) -> bytes:
-        return create_template_bytes()
+    def template_bytes(self, engineering_domain: str = "bridge") -> bytes:
+        return create_template_bytes(engineering_domain)
 
     def import_workbook(
         self,
@@ -131,6 +139,205 @@ class ProjectMasterService:
             except Exception:
                 pass
             raise
+
+    def create_pavement_layer_draft(
+        self, version_id: str, request: CreatePavementLayerDraftRequest,
+    ) -> ProjectMasterImportBatch:
+        base = self.repository.get_version_summary(version_id)
+        current = self.repository.get_current_version(base.project_id)
+        if current is None or current.version_id != version_id:
+            exc = ProjectMasterConflictError("当前主数据版本已变化，请重新加载后应用模板。")
+            exc.code = "CURRENT_VERSION_CHANGED"
+            raise exc
+        original = self.repository.load_snapshot(version_id)
+        snapshot = original.model_copy(deep=True)
+        sections = {
+            section.structure_id: section
+            for workpoint in snapshot.workpoints if workpoint.workpoint_type == "pavement"
+            for section in workpoint.structures if section.structure_type == "pavement_section"
+        }
+        unknown = set(request.section_ids) - sections.keys()
+        if unknown:
+            raise ProjectMasterImportBlockedError("施工段不属于当前路面版本：" + "、".join(sorted(unknown)))
+        for section_id in request.section_ids:
+            section = sections[section_id]
+            if section.components:
+                exc = ProjectMasterConflictError(f"{section.structure_name} 已有结构层，请勿重复应用模板。")
+                exc.code = "PAVEMENT_LAYERS_EXIST"
+                raise exc
+            values = {p.parameter_code: p.value for p in section.parameters}
+            length = values.get("construction_length_m")
+            if (isinstance(length, bool) or not isinstance(length, (int, float))
+                    or not math.isfinite(length) or length <= 0
+                    or values.get("quantity_basis_confirmed") is not True):
+                raise ProjectMasterImportBlockedError(f"{section.structure_name} 缺少已确认的有效施工长度。")
+            section.components = [ProjectMasterComponent(
+                component_id=f"{section_id}-L{index:02d}", structure_id=section_id,
+                component_name=layer.name, component_type=layer.process_type,
+                quantity=length, unit="m", sort_order=index,
+                parameters=[
+                    ParameterValue(parameter_code="thickness_m", value_type="number", value=layer.thickness_m, unit="m"),
+                    ParameterValue(parameter_code="quantity_basis", value_type="text", value="entered"),
+                ],
+                source=SourceEvidence(sheet_name="单段结构层模板", row_no=index),
+            ) for index, layer in enumerate(request.layers, 1)]
+        issues = validate_snapshot(snapshot)
+        if any(issue.severity == "error" for issue in issues):
+            raise ProjectMasterImportBlockedError("；".join(issue.message for issue in issues if issue.severity == "error"))
+        fingerprint = content_fingerprint(snapshot)
+        duplicate = self.repository.find_version_by_fingerprint(base.project_id, fingerprint)
+        if duplicate:
+            return self.repository.get_import_batch(duplicate.source_batch_id)
+        batch = self.repository.create_import_batch(
+            project_id=base.project_id, file_name="单段结构层模板", file_sha256=fingerprint,
+            expected_current_version_id=version_id, created_by=request.created_by,
+        )
+        try:
+            draft = self.repository.create_draft_version(
+                batch_id=batch.batch_id, project_id=base.project_id, content_fingerprint=fingerprint,
+                snapshot=snapshot, issues=issues, diff_entries=diff_snapshots(original, snapshot),
+                created_by=request.created_by, base_version_id=version_id,
+            )
+            return self.repository.get_import_batch(draft.source_batch_id)
+        except Exception as exc:
+            self.repository.fail_batch(batch.batch_id, str(exc))
+            raise
+
+    def _current_pavement_snapshot(self, version_id: str):
+        base = self.repository.get_version_summary(version_id)
+        current = self.repository.get_current_version(base.project_id)
+        if current is None or current.version_id != version_id:
+            exc = ProjectMasterConflictError("主数据已更新，请重新加载当前版本后再编辑。")
+            exc.code = "CURRENT_VERSION_CHANGED"
+            raise exc
+        original = self.repository.load_snapshot(version_id)
+        return base, original, original.model_copy(deep=True)
+
+    @staticmethod
+    def _new_pavement_layer(section, name: str, process_type: str, component_id: str, order: int):
+        values = {p.parameter_code: p.value for p in section.parameters}
+        length = values.get("construction_length_m")
+        if (isinstance(length, bool) or not isinstance(length, (int, float))
+                or not math.isfinite(length) or length <= 0 or values.get("quantity_basis_confirmed") is not True):
+            raise ProjectMasterImportBlockedError(f"{section.structure_name} 缺少已确认的有效施工长度。")
+        return ProjectMasterComponent(
+            component_id=component_id, structure_id=section.structure_id, component_name=name,
+            component_type=process_type, quantity=length, unit="m", sort_order=order,
+            parameters=[ParameterValue(parameter_code="quantity_basis", value_type="text", value="entered")],
+            source=SourceEvidence(sheet_name="施工段结构层编辑", row_no=order),
+        )
+
+    def initialize_pavement_layers(self, version_id: str, created_by: str) -> ProjectMasterVersionDetail:
+        base, original, snapshot = self._current_pavement_snapshot(version_id)
+        defaults = [
+            ("碎石垫层", "granular_base"), ("水稳底基层", "cement_stabilized_base"),
+            ("水稳下基层", "cement_stabilized_base"), ("水稳上基层", "cement_stabilized_base"),
+            ("沥青面层", "asphalt_course"),
+        ]
+        for workpoint in snapshot.workpoints:
+            if workpoint.workpoint_type != "pavement":
+                continue
+            for section in workpoint.structures:
+                if section.structure_type != "pavement_section" or section.components:
+                    continue
+                section.components = [self._new_pavement_layer(
+                    section, name, process, f"{section.structure_id}-L{index:02d}", index,
+                ) for index, (name, process) in enumerate(defaults, 1)]
+        return self._save_pavement_snapshot(base, original, snapshot, created_by, "施工段默认结构层")
+
+    def save_pavement_section_layers(
+        self, version_id: str, section_id: str, request: SavePavementSectionLayersRequest,
+    ) -> ProjectMasterVersionDetail:
+        base, original, snapshot = self._current_pavement_snapshot(version_id)
+        section = next((s for w in snapshot.workpoints if w.workpoint_type == "pavement"
+                        for s in w.structures if s.structure_id == section_id and s.structure_type == "pavement_section"), None)
+        if section is None:
+            raise ProjectMasterNotFoundError("当前版本不存在该路面施工段。")
+        existing = {c.component_id: c for c in section.components}
+        updated = []
+        for order, layer in enumerate(request.layers, 1):
+            if layer.component_id is not None:
+                if layer.component_id not in existing:
+                    raise ProjectMasterImportBlockedError("结构层不属于当前施工段，请重新加载后编辑。")
+                component = existing[layer.component_id]
+            else:
+                component = self._new_pavement_layer(section, layer.name, layer.process_type, f"{section_id}-L{uuid4().hex[:12]}", order)
+            component.component_name = layer.name
+            component.component_type = layer.process_type
+            component.sort_order = order
+            component.enabled = layer.enabled
+            thickness = next((p for p in component.parameters if p.parameter_code == "thickness_m"), None)
+            if layer.thickness_m is None:
+                component.parameters = [p for p in component.parameters if p.parameter_code != "thickness_m"]
+            elif thickness is None or thickness.value != layer.thickness_m:
+                component.parameters = [p for p in component.parameters if p.parameter_code != "thickness_m"]
+                component.parameters.append(ParameterValue(
+                    parameter_code="thickness_m", value_type="number", value=layer.thickness_m, unit="m",
+                    source=SourceEvidence(sheet_name="施工段结构层编辑", row_no=order, column_name="实际层厚"),
+                ))
+            if "density_t_m3" in layer.model_fields_set:
+                density = next((p for p in component.parameters if p.parameter_code == "density_t_m3"), None)
+                if layer.density_t_m3 is None:
+                    component.parameters = [p for p in component.parameters if p.parameter_code != "density_t_m3"]
+                elif density is None or density.value != layer.density_t_m3:
+                    component.parameters = [p for p in component.parameters if p.parameter_code != "density_t_m3"]
+                    component.parameters.append(ParameterValue(
+                        parameter_code="density_t_m3", value_type="number", value=layer.density_t_m3, unit="t/m3",
+                        source=SourceEvidence(sheet_name="施工段结构层编辑", row_no=order, column_name="密度"),
+                    ))
+            updated.append(component)
+        section.components = updated
+        return self._save_pavement_snapshot(base, original, snapshot, request.created_by, f"编辑结构层：{section.structure_name}")
+
+    def save_pavement_handover(self, version_id: str, section_id: str, request: SavePavementHandoverRequest):
+        base, original, snapshot = self._current_pavement_snapshot(version_id)
+        section = next((s for w in snapshot.workpoints if w.workpoint_type == "pavement"
+                        for s in w.structures if s.structure_id == section_id and s.structure_type == "pavement_section"), None)
+        if section is None:
+            raise ProjectMasterNotFoundError("当前版本不存在该路面施工段。")
+        values = {"roadbed_handover_status": request.status,
+                  "roadbed_available_date": request.available_date.isoformat() if request.available_date else None,
+                  "roadbed_handover_note": request.note.strip()}
+        for code, value in values.items():
+            old = next((p for p in section.parameters if p.parameter_code == code), None)
+            if old and old.value == value: continue
+            section.parameters = [p for p in section.parameters if p.parameter_code != code]
+            if value is not None:
+                section.parameters.append(ParameterValue(parameter_code=code, value_type="date" if code.endswith("_date") else "text", value=value))
+        return self._save_pavement_snapshot(base, original, snapshot, request.created_by, f"路床移交：{section.structure_name}")
+
+    def _save_pavement_snapshot(self, base, original, snapshot, created_by: str, label: str) -> ProjectMasterVersionDetail:
+        content = content_fingerprint(snapshot)
+        if content == content_fingerprint(original):
+            return self.repository.get_version_detail(base.version_id)
+        issues = validate_snapshot(snapshot)
+        if any(issue.severity == "error" for issue in issues):
+            raise ProjectMasterImportBlockedError("；".join(i.message for i in issues if i.severity == "error"))
+        # Scope edit identity to its baseline so reverting an earlier value remains a new version.
+        fingerprint = hashlib.sha256(f"pavement-edit/v1\n{base.version_id}\n{content}".encode()).hexdigest()
+        duplicate = self.repository.find_version_by_fingerprint(base.project_id, fingerprint)
+        if duplicate:
+            draft = self.repository.get_version_detail(duplicate.version_id)
+        else:
+            batch = self.repository.create_import_batch(
+                project_id=base.project_id, file_name=label, file_sha256=content,
+                expected_current_version_id=base.version_id, created_by=created_by,
+            )
+            try:
+                version = self.repository.create_draft_version(
+                    batch_id=batch.batch_id, project_id=base.project_id, content_fingerprint=fingerprint,
+                    snapshot=snapshot, issues=issues, diff_entries=diff_snapshots(original, snapshot),
+                    created_by=created_by, base_version_id=base.version_id,
+                )
+                draft = self.repository.get_version_detail(version.version_id)
+            except Exception as exc:
+                self.repository.fail_batch(batch.batch_id, str(exc))
+                raise
+        # Saving incomplete master data is allowed; scheduling still checks completeness.
+        return self.confirm_version(draft.version_id, ConfirmProjectMasterVersionRequest(
+            confirmed_by=created_by, expected_current_version_id=base.version_id,
+            acknowledge_warning_codes=draft.warning_codes,
+        ))
 
     def confirm_version(
         self,

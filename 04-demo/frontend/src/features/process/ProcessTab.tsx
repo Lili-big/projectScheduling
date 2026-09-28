@@ -1,3 +1,4 @@
+import { pavementUnits } from "../../domain/pavement";
 import { Loader2, Save } from "lucide-react";
 import { PanelTitle } from "../../components/common/PanelTitle";
 import { componentLabels, componentSortIndex, durationMethodLabels, quantitySourceLabels } from "../../domain/labels";
@@ -110,7 +111,7 @@ export function ProcessTab({
     <section className="panel full process-library-panel">
       <PanelTitle
         title="施工工艺及工效库"
-        subtitle="工艺模板按构件类型和适用工艺维护，关键资源由工艺规则自动匹配"
+        subtitle={scenario.engineering_domain === "pavement" ? "每套机组的综合日工效；参考值需按项目核实，施工天数向上取整" : "工艺模板按构件类型和适用工艺维护，关键资源由工艺规则自动匹配"}
         action={
           <button
             className="secondary"
@@ -165,7 +166,11 @@ export function ProcessTab({
                               onChange={(event) => patchProductivityOption(processIndex, option.id, { productivity_value: Number(event.target.value) })}
                               aria-label="工效值"
                             />
-                            {process.component_type === "pile" ? (
+                            {scenario.engineering_domain === "pavement" ? (
+                              <select aria-label="路面工效单位" value={option.productivity_unit} onChange={event => patchProductivityOption(processIndex, option.id, { productivity_unit: event.target.value })}>
+                                {pavementUnits.map(unit => <option key={unit}>{unit}</option>)}
+                              </select>
+                            ) : process.component_type === "pile" ? (
                               <select
                                 className="productivity-unit-control"
                                 value={option.productivity_unit}
@@ -206,7 +211,11 @@ export function ProcessTab({
                               )}
                             </span>
                             <span className="text-pill productivity-method-pill">{durationMethodLabels[option.duration_method] ?? option.duration_method}</span>
-                            <span className="text-pill productivity-source-pill">{quantitySourceLabels[option.quantity_source] ?? option.quantity_source}</span>
+                            <span className="text-pill productivity-source-pill">
+                              {scenario.engineering_domain === "pavement" && option.quantity_source === "quantity" && option.productivity_unit === "m/天"
+                                ? "按施工长度（m）计量"
+                                : quantitySourceLabels[option.quantity_source] ?? option.quantity_source}
+                            </span>
                             {option.is_default ? (
                               <span className="default-badge">默认分组</span>
                             ) : (

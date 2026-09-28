@@ -3,6 +3,13 @@
   "ownership_model": "lifecycle-stage -> customer-or-project-workpackage -> asset-category -> asset",
   "packages": [
     {
+      "id": "road-pavement-customer-validation",
+      "stage": "01-customer-validation",
+      "path": "01-customer-validation/公路路面工程",
+      "status": "active",
+      "purpose": "公路路面工程客户需求还原、调研纪要及排程效果验证"
+    },
+    {
       "id": "lugu",
       "stage": "01-customer-validation",
       "path": "01-customer-validation/泸古1标",

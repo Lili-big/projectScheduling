@@ -2473,6 +2473,9 @@ def solve_shortest_duration_schedule(
 
 
 def solve_schedule(schedule_input: ScheduleInput, *, enforce_hard_milestones: bool = False) -> ScheduleResult:
+    if schedule_input.engineering_domain == "pavement":
+        from .strategies.pavement import solve_pavement_schedule
+        return solve_pavement_schedule(schedule_input)
     return solve_control_priority_schedule(schedule_input, enforce_hard_milestones=enforce_hard_milestones)
 
 

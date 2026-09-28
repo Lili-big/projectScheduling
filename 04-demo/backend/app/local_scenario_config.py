@@ -22,7 +22,7 @@ PROJECT_ROOT = REPOSITORY_ROOT
 LOCAL_DATA_DIR = LOCAL_DATA_ROOT
 LOCAL_SCENARIO_CONFIG_PATH = state_path("scheduler-config.json")
 BUNDLED_SCENARIO_CONFIG_PATH = Path(__file__).resolve().with_name("default_scenario_config.json")
-SCHEMA_VERSION = "local-scheduler-config/v4"
+SCHEMA_VERSION = "local-scheduler-config/v5"
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
@@ -54,6 +54,25 @@ def apply_scenario_config(
     persist_resource_cleanup: bool = False,
 ) -> ScenarioInput:
     config = _read_config(path)
+    if scenario.engineering_domain == "pavement":
+        profiles = config.get("pavement_profiles", {})
+        if not isinstance(profiles, dict): raise LocalScenarioConfigError("路面项目配置必须是对象。")
+        profile = profiles.get(scenario.project.project_id)
+        if profile is None: return scenario
+        if not isinstance(profile, dict): raise LocalScenarioConfigError("路面配置内容无效。")
+        try:
+            restored = ScenarioInput.model_validate({**scenario.model_dump(mode="json"), **profile})
+            if profile.get("project_start_date"):
+                from datetime import date
+                restored.project.start_date = date.fromisoformat(profile["project_start_date"])
+            validate_pavement_library(restored.process_library)
+            from .scheduling.domain.resource_scope import normalize_pavement_resource_pools
+            restored.resource_pools, errors = normalize_pavement_resource_pools(restored.resource_pools, restored.process_library, legacy=True, require_transfer=False)
+            if errors:
+                raise ValueError("；".join(e.message for e in errors))
+            return restored
+        except (ValueError, TypeError) as exc:
+            raise LocalScenarioConfigError(f"路面配置校验失败：{exc}") from exc
     if not config:
         return scenario
 
@@ -355,3 +374,39 @@ def _ensure_unique_local_resource_keys(items: list[ResourcePool]) -> None:
 
 def _migration_blocked(pool_id: str, reason: str) -> LocalScenarioConfigError:
     return LocalScenarioConfigError(f"RESOURCE_POOL_MIGRATION_BLOCKED [{pool_id}]：{reason}")
+
+
+def validate_pavement_library(processes):
+    import math
+    from .process_library_defaults import PAVEMENT_PROCESSES
+    if {p.component_type for p in processes} != set(PAVEMENT_PROCESSES):
+        raise ValueError("路面工效库必须包含碎石、水稳、沥青三类工艺。")
+    if len({p.id for p in processes}) != len(processes):
+        raise ValueError("工艺ID重复。")
+    for process in processes:
+        if process.resource_type != PAVEMENT_PROCESSES[process.component_type][1]:
+            raise ValueError("工艺与机组类别不匹配。")
+        if len({o.id for o in process.productivity_options}) != len(process.productivity_options):
+            raise ValueError("工效方案ID重复。")
+        for option in process.productivity_options:
+            if not math.isfinite(option.productivity_value):
+                raise ValueError("工效必须是有限正数。")
+            if option.productivity_unit not in {"m/天", "m2/天", "m3/天", "t/天"} or option.duration_method != "units_per_day" or option.quantity_source != "quantity":
+                raise ValueError("路面工效必须为每套机组的 m/m2/m3/t 每天。")
+
+
+def save_pavement_profile(scenario: ScenarioInput, *, path: Path = LOCAL_SCENARIO_CONFIG_PATH):
+    validate_pavement_library(scenario.process_library)
+    from .scheduling.domain.resource_scope import normalize_pavement_resource_pools
+    pools, errors = normalize_pavement_resource_pools(scenario.resource_pools, scenario.process_library)
+    if errors:
+        raise ValueError("；".join(e.message for e in errors))
+    scenario = scenario.model_copy(update={"resource_pools": pools})
+    config = _read_config(path)
+    profiles = config.setdefault("pavement_profiles", {})
+    if not isinstance(profiles, dict): raise LocalScenarioConfigError("路面项目配置必须是对象。")
+    profiles[scenario.project.project_id] = scenario.model_dump(mode="json", include={
+        "process_library", "task_overrides", "resource_pools", "pavement_settings", "project_data_version_id"})
+    profiles[scenario.project.project_id]["project_start_date"] = scenario.project.start_date.isoformat()
+    _write_config(config, path)
+    return scenario

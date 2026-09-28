@@ -1,12 +1,27 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, date
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+from .pavement import PavementHandoverStatus
+
+
+class SavePavementHandoverRequest(BaseModel):
+    status: PavementHandoverStatus
+    available_date: date | None = None
+    note: str = Field(default="", max_length=1000)
+    created_by: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_handover(self):
+        if (self.status == "dated") != (self.available_date is not None):
+            raise ValueError("指定日期必须填写移交日期；已移交和待定不填写日期。")
+        return self
 
 
 WorkpointType = Literal[
+    "pavement",
     "bridge",
     "roadbed",
     "tunnel",
@@ -89,7 +104,7 @@ class ProjectMasterWorkpoint(BaseModel):
     start_mileage_m: float | None = None
     end_mileage_m: float | None = None
     sort_order: int = Field(default=0, ge=0)
-    schedule_support: Literal["bridge_supported", "not_supported"] = "not_supported"
+    schedule_support: Literal["bridge_supported", "pavement_supported", "not_supported"] = "not_supported"
     remark: str | None = None
     structures: list[ProjectMasterStructure] = Field(default_factory=list)
     source: SourceEvidence | None = None
@@ -174,6 +189,54 @@ class ProjectMasterRoutePlacement(BaseModel):
 class ProjectMasterSnapshot(BaseModel):
     workpoints: list[ProjectMasterWorkpoint] = Field(default_factory=list)
     route_placements: list[ProjectMasterRoutePlacement] = Field(default_factory=list)
+
+
+class PavementTemplateLayer(BaseModel):
+    model_config = {"extra": "forbid", "str_strip_whitespace": True}
+    name: str = Field(min_length=1, max_length=100)
+    process_type: Literal["granular_base", "cement_stabilized_base", "asphalt_course"]
+    thickness_m: float = Field(gt=0, allow_inf_nan=False)
+
+
+class CreatePavementLayerDraftRequest(BaseModel):
+    model_config = {"extra": "forbid", "str_strip_whitespace": True}
+    section_ids: list[str] = Field(min_length=1, max_length=500)
+    layers: list[PavementTemplateLayer] = Field(min_length=1, max_length=30)
+    created_by: str = Field(min_length=1, max_length=100)
+
+    @field_validator("section_ids")
+    @classmethod
+    def validate_sections(cls, values: list[str]) -> list[str]:
+        if any(not value for value in values) or len(set(values)) != len(values):
+            raise ValueError("施工段标识不能为空或重复。")
+        return values
+
+
+class PavementLayerEdit(BaseModel):
+    model_config = {"extra": "forbid", "str_strip_whitespace": True}
+    component_id: str | None = Field(default=None, min_length=1)
+    name: str = Field(min_length=1, max_length=100)
+    process_type: Literal["granular_base", "cement_stabilized_base", "asphalt_course"]
+    thickness_m: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    density_t_m3: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    enabled: bool = True
+
+
+class InitializePavementLayersRequest(BaseModel):
+    model_config = {"extra": "forbid", "str_strip_whitespace": True}
+    created_by: str = Field(min_length=1, max_length=100)
+
+
+class SavePavementSectionLayersRequest(InitializePavementLayersRequest):
+    layers: list[PavementLayerEdit] = Field(min_length=1, max_length=30)
+
+    @field_validator("layers")
+    @classmethod
+    def unique_layer_ids(cls, layers: list[PavementLayerEdit]) -> list[PavementLayerEdit]:
+        ids = [layer.component_id for layer in layers if layer.component_id is not None]
+        if len(set(ids)) != len(ids):
+            raise ValueError("同一结构层不能重复填写。")
+        return layers
 
 
 class ProjectMasterCounts(BaseModel):

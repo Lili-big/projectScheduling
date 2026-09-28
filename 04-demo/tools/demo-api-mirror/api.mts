@@ -468,6 +468,13 @@ const girderPlanScenarioCache = new Map<string, any>();
 const girderPlanRunCache = new Map<string, any>();
 
 export default async function handler(req: Request, context: Context) {
+  const containsPavement = (value: any): boolean => value != null && typeof value === "object" && (
+    value.engineering_domain === "pavement" || value.pavement_context != null || value.workpoint_type === "pavement"
+    || Object.values(value).some(containsPavement));
+  const roadBody = req.headers.get("content-type")?.includes("application/json") ? await req.clone().json().catch(() => null) : null;
+  if (new URL(req.url).pathname.endsWith("/solve-scenario/idle/stream") || new URL(req.url).pathname.endsWith("/solve-scenario/stream") || /\/pavement-(layer-drafts|layers|sections)(\/|$)/.test(new URL(req.url).pathname) || new URL(req.url).searchParams.get("engineering_domain") === "pavement" || containsPavement(roadBody)) {
+    return new Response(JSON.stringify({ detail: { code: "PAVEMENT_FEATURE_NOT_SUPPORTED", message: "演示镜像不支持路面排程，请使用本地服务。" } }), { status: 422, headers: { "content-type": "application/json" } });
+  }
   try {
     const endpoint = apiEndpointFromRequest(req, context);
     if (endpoint === "health" && req.method === "GET") {

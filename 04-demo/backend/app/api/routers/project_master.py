@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from urllib.parse import quote
+from ...contracts.pavement import EngineeringDomain
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, Response
@@ -10,6 +11,10 @@ from ..multipart import parse_multipart_request
 from ...contracts.project_master import (
     CancelProjectMasterImportRequest,
     ConfirmProjectMasterVersionRequest,
+    CreatePavementLayerDraftRequest,
+    InitializePavementLayersRequest,
+    SavePavementSectionLayersRequest,
+    SavePavementHandoverRequest,
     ProjectMasterImportBatch,
     ProjectMasterVersionDetail,
     ProjectMasterVersionPage,
@@ -34,9 +39,9 @@ def _service(request: Request) -> ProjectMasterService:
 
 
 @router.get("/api/project-master/template")
-def download_project_master_template_endpoint(request: Request) -> Response:
+def download_project_master_template_endpoint(request: Request, engineering_domain: EngineeringDomain = "bridge") -> Response:
     try:
-        content = _service(request).template_bytes()
+        content = _service(request).template_bytes() if engineering_domain == "bridge" else _service(request).template_bytes(engineering_domain)
     except (ProjectMasterRepositoryError, ProjectMasterServiceError) as exc:
         raise project_master_http_error(exc) from exc
     return _xlsx_response(content, "项目主数据导入模板.xlsx")
@@ -137,6 +142,40 @@ def confirm_project_master_version_endpoint(
 ) -> ProjectMasterVersionDetail:
     try:
         return _service(request).confirm_version(version_id, payload)
+    except (ProjectMasterRepositoryError, ProjectMasterServiceError) as exc:
+        raise project_master_http_error(exc) from exc
+
+
+@router.post("/api/project-master/versions/{version_id}/pavement-layer-drafts", response_model=ProjectMasterImportBatch)
+def create_pavement_layer_draft_endpoint(
+    version_id: str, payload: CreatePavementLayerDraftRequest, request: Request,
+) -> ProjectMasterImportBatch:
+    try:
+        return _service(request).create_pavement_layer_draft(version_id, payload)
+    except (ProjectMasterRepositoryError, ProjectMasterServiceError) as exc:
+        raise project_master_http_error(exc) from exc
+
+
+@router.post("/api/project-master/versions/{version_id}/pavement-layers/initialize", response_model=ProjectMasterVersionDetail)
+def initialize_pavement_layers_endpoint(version_id: str, payload: InitializePavementLayersRequest, request: Request):
+    try:
+        return _service(request).initialize_pavement_layers(version_id, payload.created_by)
+    except (ProjectMasterRepositoryError, ProjectMasterServiceError) as exc:
+        raise project_master_http_error(exc) from exc
+
+
+@router.put("/api/project-master/versions/{version_id}/pavement-sections/{section_id}/handover", response_model=ProjectMasterVersionDetail)
+def save_pavement_handover_endpoint(version_id: str, section_id: str, payload: SavePavementHandoverRequest, request: Request):
+    try:
+        return _service(request).save_pavement_handover(version_id, section_id, payload)
+    except (ProjectMasterRepositoryError, ProjectMasterServiceError) as exc:
+        raise project_master_http_error(exc) from exc
+
+
+@router.put("/api/project-master/versions/{version_id}/pavement-sections/{section_id}/layers", response_model=ProjectMasterVersionDetail)
+def save_pavement_section_layers_endpoint(version_id: str, section_id: str, payload: SavePavementSectionLayersRequest, request: Request):
+    try:
+        return _service(request).save_pavement_section_layers(version_id, section_id, payload)
     except (ProjectMasterRepositoryError, ProjectMasterServiceError) as exc:
         raise project_master_http_error(exc) from exc
 

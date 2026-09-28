@@ -23,6 +23,18 @@ from .process_library_defaults import historical_default_process_library
 from .sample_data import default_bridge
 
 
+def pavement_scenario(project_id: str = "pavement-project") -> ScenarioInput:
+    from .contracts import PavementSettings
+    from .process_library_defaults import pavement_process_library, PAVEMENT_PROCESSES
+    return ScenarioInput(engineering_domain="pavement", scenario_id=f"{project_id}-scenario", scenario_name="路面施工计划",
+        project=ProjectModel(project_id=project_id, project_name="公路路面工程", start_date=date.today()),
+        process_library=pavement_process_library(), logic_rules=[], pavement_settings=PavementSettings(),
+        resource_calendars=[ResourceCalendar(id="continuous", name="连续日历天")],
+        resource_pools=[ResourcePool(id=f"pavement-{kind}-pool", type=resource, label=f"{name}机组",
+            quantity=0, resource_mode="LIMITED", transfer_days=None, compatible_process_ids=[f"pavement-{kind}"])
+            for kind, (name, resource, _) in PAVEMENT_PROCESSES.items()])
+
+
 SCHEDULE_LOGIC_ONTOLOGY_PATH = Path(__file__).resolve().parent / "ontology" / "bridge_schedule_logic_ontology.v1.json"
 CONTINUOUS_BEAM_STRUCTURE_CODE = "castInPlaceContinuousBoxGirder"
 CAST_IN_PLACE_BOX_BEAM_STRUCTURE_CODE = "castInPlaceBoxGirder"

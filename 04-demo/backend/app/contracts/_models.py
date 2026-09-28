@@ -7,8 +7,11 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-StructureType = Literal["pier", "abutment", "upper_structure", "continuous_beam"]
+from .pavement import EngineeringDomain, PavementSettings, PavementTaskContext, PavementReadinessCondition, PavementSummary, PavementHandoverScope, PavementOptimization, PavementIdleOptimization
+
+StructureType = Literal["pier", "abutment", "upper_structure", "continuous_beam", "pavement_section"]
 ComponentType = Literal[
+    "granular_base", "cement_stabilized_base", "asphalt_course", "pavement_preparation",
     "pile",
     "cap",
     "spread_foundation",
@@ -24,7 +27,7 @@ ComponentType = Literal[
     "steel_box_beam",
     "bridge_deck_system",
 ]
-WorkPointType = Literal["road", "bridge", "tunnel"]
+WorkPointType = Literal["road", "bridge", "tunnel", "pavement"]
 WorkSectionSide = Literal["left", "right", "none"]
 DurationMethod = Literal["units_per_day", "days_per_unit", "fixed_days"]
 _PILE_PRODUCTIVITY_UNIT_RULES: dict[str, tuple[DurationMethod, str]] = {
@@ -434,6 +437,8 @@ class WorkpointResourceOverride(BaseModel):
 
 
 class Resource(BaseModel):
+    compatible_process_ids: list[str] | None = Field(default=None, exclude_if=lambda value: value is None)
+    transfer_days: int | None = Field(default=None, ge=0, exclude_if=lambda value: value is None)
     id: str
     name: str
     type: str
@@ -467,6 +472,7 @@ class Resource(BaseModel):
 
 
 class Task(BaseModel):
+    pavement_context: PavementTaskContext | None = Field(default=None, exclude_if=lambda value: value is None)
     id: str
     name: str
     bridge_id: str | None = None
@@ -523,6 +529,7 @@ class ComponentModel(BaseModel):
 
 
 class StructureModel(BaseModel):
+    properties: dict[str, Any] = Field(default_factory=dict, exclude_if=lambda value: not value)
     id: str
     name: str
     structure_type: StructureType
@@ -652,6 +659,7 @@ class ResourceCalendar(BaseModel):
 
 
 class ResourcePool(BaseModel):
+    transfer_days: int | None = Field(default=None, ge=0, exclude_if=lambda value: value is None)
     model_config = ConfigDict(extra="allow")
 
     id: str
@@ -746,6 +754,8 @@ class TaskOverride(BaseModel):
 
 
 class ScenarioInput(BaseModel):
+    pavement_settings: PavementSettings | None = Field(default=None, exclude_if=lambda value: value is None)
+    engineering_domain: EngineeringDomain = Field(default="bridge", exclude_if=lambda value: value == "bridge")
     scenario_id: str
     scenario_name: str
     project_data_version_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
@@ -763,6 +773,8 @@ class ScenarioInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_resource_pool_identities(self) -> "ScenarioInput":
+        if self.engineering_domain == "bridge" and (self.pavement_settings is not None or any(w.workpoint_type == "pavement" for w in self.project.bridges)):
+            raise ValueError("路面场景必须显式指定 engineering_domain=pavement。")
         pool_ids = [pool.id for pool in self.resource_pools]
         duplicate_pool_ids = sorted({pool_id for pool_id in pool_ids if pool_ids.count(pool_id) > 1})
         if duplicate_pool_ids:
@@ -928,18 +940,41 @@ class ProcessNlResponse(BaseModel):
 
 
 class ProcessLibrarySaveRequest(BaseModel):
+    engineering_domain: EngineeringDomain = Field(default="bridge", exclude_if=lambda value: value == "bridge")
+    project_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
     process_library: list[ProcessTemplate] = Field(min_length=1)
 
 
 class LocalScenarioConfigSaveRequest(BaseModel):
+    project_start_date: date | None = Field(default=None, exclude_if=lambda value: value is None)
+    pavement_settings: PavementSettings | None = Field(default=None, exclude_if=lambda value: value is None)
+    task_overrides: dict[str, TaskOverride] = Field(default_factory=dict, exclude_if=lambda value: not value)
+    project_data_version_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    engineering_domain: EngineeringDomain = Field(default="bridge", exclude_if=lambda value: value == "bridge")
+    project_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
     process_library: list[ProcessTemplate] = Field(min_length=1)
-    logic_rules: list[LogicRule] = Field(min_length=1)
+    logic_rules: list[LogicRule]
     upper_structure_logic_rules: list[UpperStructureLogicRule] = Field(default_factory=list)
     resource_pools: list[ResourcePool]
     milestones: list[MilestoneConstraint] = Field(default_factory=list)
 
 
+    @model_validator(mode="after")
+    def validate_domain_config(self):
+        if self.engineering_domain == "bridge" and not self.logic_rules:
+            raise ValueError("工艺逻辑保存内容不能为空。")
+        if self.engineering_domain == "pavement" and (not self.project_id or self.pavement_settings is None):
+            raise ValueError("路面保存须提供项目ID和路面设置。")
+        return self
+
+
 class LocalScenarioConfigResponse(BaseModel):
+    project_start_date: date | None = Field(default=None, exclude_if=lambda value: value is None)
+    pavement_settings: PavementSettings | None = Field(default=None, exclude_if=lambda value: value is None)
+    task_overrides: dict[str, TaskOverride] = Field(default_factory=dict, exclude_if=lambda value: not value)
+    project_data_version_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    engineering_domain: EngineeringDomain = Field(default="bridge", exclude_if=lambda value: value == "bridge")
+    project_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
     process_library: list[ProcessTemplate]
     logic_rules: list[LogicRule]
     upper_structure_logic_rules: list[UpperStructureLogicRule]
@@ -1001,6 +1036,10 @@ class TaskExecutionConstraint(BaseModel):
 
 
 class ScheduleInput(BaseModel):
+    readiness_conditions: list[PavementReadinessCondition] = Field(default_factory=list, exclude_if=lambda value: not value)
+    pavement_handover_scope: PavementHandoverScope | None = Field(default=None, exclude_if=lambda value: value is None)
+    project_data_version_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    engineering_domain: EngineeringDomain = Field(default="bridge", exclude_if=lambda value: value == "bridge")
     project_name: str
     start_date: date
     tasks: list[Task]
@@ -1065,6 +1104,9 @@ class ResourceAllocation(BaseModel):
 
 
 class ScheduleResult(BaseModel):
+    pavement_idle_optimization: PavementIdleOptimization | None = Field(default=None, exclude_if=lambda value: value is None)
+    pavement_optimization: PavementOptimization | None = Field(default=None, exclude_if=lambda value: value is None)
+    pavement_summary: PavementSummary | None = Field(default=None, exclude_if=lambda value: value is None)
     status: Literal["OPTIMAL", "FEASIBLE", "INFEASIBLE", "UNKNOWN", "MODEL_INVALID"]
     objective_days: int | None = None
     plan_start_date: date
@@ -1136,6 +1178,11 @@ class MinResourcesSolveRequest(BaseModel):
 class ResourceCostSolveRequest(BaseModel):
     scenario: ScenarioInput
     fallback_target_days: int | None = Field(default=None, ge=1)
+
+
+class PavementIdleOptimizeRequest(BaseModel):
+    scenario: ScenarioInput
+    baseline: ScenarioSolveResult
 
 
 class ScenarioCompareResponse(BaseModel):

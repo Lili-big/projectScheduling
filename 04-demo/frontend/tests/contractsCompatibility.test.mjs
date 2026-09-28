@@ -4,6 +4,14 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 const root = resolve(import.meta.dirname, "..");
+test("live pavement contracts remain optional and discriminate complete payloads", () => {
+  const meta = readFileSync(resolve(root, "src/contracts/pavement.ts"), "utf8");
+  const events = readFileSync(resolve(root, "src/contracts/pavementStream.ts"), "utf8");
+  assert.match(meta, /search_workers\?: number \| null/);
+  assert.match(meta, /improvement_count\?: number \| null/);
+  assert.match(events, /type: "complete"; solved: ScenarioSolveResult/);
+  assert.match(events, /type: "solution"; solution_kind: "initial" \| "improvement"/);
+});
 const fixture = JSON.parse(readFileSync(resolve(root, "tests/fixtures/architecture/frontend-baseline.json"), "utf8"));
 const schedulerContract = readFileSync(resolve(root, "src/contracts/scheduler.ts"), "utf8");
 const displayState = readFileSync(resolve(root, "src/features/taskView/projectMasterDisplayState.ts"), "utf8");
@@ -31,6 +39,14 @@ function names(path, seen = new Set()) {
   return [...result].sort();
 }
 
+test("hybrid result metadata is optional and distinguishes absent plans", () => {
+  assert.ok(names(resolve(root, "src/contracts/index.ts")).includes("PavementOptimization"));
+  assert.match(schedulerContract, /pavement_optimization\?: PavementOptimization \| null/);
+  const pavement = readFileSync(resolve(root, "src/contracts/pavement.ts"), "utf8");
+  assert.match(pavement, /initial_days: number \| null/);
+  assert.match(pavement, /optimizer_not_run_reason: "budget_exhausted" \| null/);
+});
+
 test("legacy scheduler types re-export all frozen contract names", () => {
   const resourceScopeAdditions = [
     "AiResourceQuantityRecommendation",
@@ -55,6 +71,13 @@ test("domain contract entrypoints exist and reference the canonical module", () 
   for (const file of ["core.ts", "project.ts", "scheduling.ts", "assistants.ts", "planControl.ts", "girder.ts"]) {
     assert.match(readFileSync(resolve(root, "src/contracts", file), "utf8"), /from\s+["']\.\/scheduler["']/);
   }
+});
+
+test("shared pavement capabilities are optional in legacy instance contracts", () => {
+  const resource = schedulerContract.match(/export type Resource = \{([\s\S]*?)\n\};/)[1];
+  assert.match(resource, /compatible_process_ids\?: string\[\] \| null/);
+  const pavement = readFileSync(resolve(root, "src/contracts/pavement.ts"), "utf8");
+  assert.match(pavement, /process_id\?: string \| null/);
 });
 
 test("task-view contracts keep both component types and open generated-source metadata", () => {
@@ -126,4 +149,24 @@ test("unified solve metadata types expose four-state detail verification", () =>
   assert.match(schedulerContract, /retry_attempted:\s*boolean/);
   assert.match(schedulerContract, /export type UnifiedSolveMetadata = \{/);
   assert.match(schedulerContract, /global_search_call_count\?:\s*number/);
+});
+
+test("pavement contracts keep domain and conditions explicit", () => {
+  const pavement = readFileSync(resolve(root, "src/contracts/pavement.ts"), "utf8");
+  assert.match(schedulerContract, /engineering_domain\?: EngineeringDomain/);
+  assert.match(schedulerContract, /transfer_days\?: number \| null/);
+  assert.match(pavement, /wait_days: number/);
+  assert.match(pavement, /task_kind: "construction" \| "preparation"/);
+  assert.match(projectMasterContract, /"pavement_supported"/);
+  assert.match(schedulerContract, /pavement_handover_scope\?:/);
+  assert.match(pavement, /PavementHandoverStatus = "dated" \| "handed_over" \| "pending"/);
+  assert.match(pavement, /blocked_sections: PavementBlockedSection\[\]/);
+  assert.match(projectMasterContract, /SavePavementHandoverRequest/);
+});
+
+test("conditional pavement handover fields are optional for historical payloads", () => {
+  const pavement = readFileSync(resolve(root, "src/contracts/pavement.ts"), "utf8");
+  assert.match(pavement, /pending_policy\?: "strict_last" \| null/);
+  assert.match(pavement, /pending_sections\?: PavementPendingSection\[\] \| null/);
+  assert.match(pavement, /pending_section_dates\?: PavementPendingSectionDates\[\] \| null/);
 });

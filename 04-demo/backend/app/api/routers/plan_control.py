@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import Depends, APIRouter, Request
 
 from ..errors import plan_control_http_error
 from ...contracts import (
@@ -28,7 +28,9 @@ from ...plan_control.forecasting import (
 from .scheduling import _materialize_project_master
 
 
-router = APIRouter()
+from ..errors import reject_pavement_feature_request
+
+router = APIRouter(dependencies=[Depends(reject_pavement_feature_request)])
 
 
 @router.post("/api/plan-control/baselines", response_model=PlanVersion)

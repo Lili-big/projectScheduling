@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "build": "npm --workspace 04-demo/frontend run build",
-    "frontend:dev": "npm --workspace 04-demo/frontend run dev",
+    "frontend:dev": "npm --workspace 04-demo/frontend run dev --",
     "frontend:preview": "npm --workspace 04-demo/frontend run preview",
     "typecheck": "npm --workspace 04-demo/frontend run typecheck",
     "test": "python -m pytest 04-demo/backend/tests -q && npm --workspace 04-demo/frontend test",

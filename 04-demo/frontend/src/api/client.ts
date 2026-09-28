@@ -17,6 +17,54 @@ export async function apiPost<T>(path: string, payload: unknown): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export async function readNdjsonStream(body: ReadableStream<Uint8Array>, onValue: (value: unknown) => void): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let pending = "";
+  const line = (value: string) => { if (value.trim()) onValue(JSON.parse(value)); };
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      pending += done ? decoder.decode() : decoder.decode(value, { stream: true });
+      let end: number;
+      while ((end = pending.indexOf("\n")) >= 0) {
+        line(pending.slice(0, end));
+        pending = pending.slice(end + 1);
+      }
+      if (done) { line(pending); break; }
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+
+export async function apiPostStream(path: string, payload: unknown, onValue: (value: unknown) => void,
+  signal: AbortSignal, timeoutMs: number): Promise<void> {
+  ensureApiBaseConfiguredForNetlify();
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal.reason);
+  let timedOut = false;
+  signal.addEventListener("abort", abort, { once: true });
+  if (signal.aborted) abort();
+  const timer = window.setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  try {
+    const response = await fetch(`${apiBase}${path}`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload), signal: controller.signal });
+    if (!response.ok) throw new Error(await responseErrorText(response));
+    if (!response.body || !response.headers.get("content-type")?.includes("application/x-ndjson")) {
+      throw new Error("后端未返回实时求解数据，请检查服务版本。");
+    }
+    await readNdjsonStream(response.body, onValue);
+  } catch (error) {
+    if (timedOut) throw new Error("实时求解连接超时，本次优化未完成；保留最后收到的方案。");
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+    signal.removeEventListener("abort", abort);
+  }
+}
+
 export async function apiPut<T>(path: string, payload: unknown): Promise<T> {
   const response = await apiFetch(path, {
     method: "PUT",

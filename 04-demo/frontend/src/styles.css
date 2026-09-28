@@ -10,3 +10,19 @@
 @import "./components/common/dateRange.css";
 @import "./features/scheduleResults/styles.css";
 @import "./features/resourceAssistant/styles.css";
+
+.pavement-workspace .workspace-tabs h2 { margin: 10px 16px; font-size: 20px; }
+.pavement-workspace .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 8px 14px; }
+.pavement-workspace .toolbar > label { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; line-height: 1.5; }
+.pavement-workspace .toolbar input,
+.pavement-workspace .toolbar select { height: 30px; padding: 2px 10px; line-height: 1.5; }
+.pavement-workspace .toolbar button { min-height: 30px; padding: 4px 10px; }
+.pavement-workspace .toolbar select { min-width: 260px; padding-right: 28px; }
+.pavement-workspace .panel > p, .pavement-workspace .panel > h2, .pavement-workspace .panel > h3, .pavement-workspace .panel > ul, .pavement-workspace .panel > details { margin: 14px 18px; }
+.pavement-workspace form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; }
+.pavement-workspace form label { display: flex; gap: 6px; align-items: center; }
+.pavement-workspace form input[type="number"], .pavement-workspace td input[type="number"] { width: 88px; }
+.pavement-workspace .panel > form { margin: 12px 18px; }
+.pavement-workspace td label { display: inline-flex; gap: 6px; align-items: center; margin: 4px; }
+.pavement-workspace input, .pavement-workspace select { border: 1px solid #cbd5e1; border-radius: 5px; padding: 6px 8px; }
+.pavement-workspace .panel > ul { line-height: 1.9; }

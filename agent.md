@@ -4,7 +4,17 @@
 
 ## 1. 项目事实
 
-本项目是桥梁施工排程产品全生命周期工作区：`01-customer-validation` 统一客户调研与验证、`02-solution-analysis` 方案、`03-requirements` 需求、`04-demo` 实现、`06-delivery` 交付，仓库规则由 `00-governance` 维护。主 Demo 是 `FastAPI + React + OR-Tools CP-SAT` 模块化单体；前端维护 `ScenarioInput`，后端生成任务图和 `ScheduleInput`，求解器返回 `ScheduleResult`/`ScenarioSolveResult`。
+本项目是基建施工排程产品全生命周期工作区。`codex/road-pavement-engineering` 分支已实现路面首版，页面默认进入路面，`?engineering_domain=bridge` 保留桥梁入口。`01-customer-validation` 统一客户调研与验证、`02-solution-analysis` 方案、`03-requirements` 需求、`04-demo` 实现、`06-delivery` 交付，仓库规则由 `00-governance` 维护。主 Demo 是 `FastAPI + React + OR-Tools CP-SAT` 模块化单体；前端维护 `ScenarioInput`，后端生成任务图和 `ScheduleInput`，求解器返回 `ScheduleResult`/`ScenarioSolveResult`。
+
+路面基础能力见 [`063-road-pavement-adaptation`](./03-requirements/specs/063-road-pavement-adaptation/spec.md)，当前支持段/幅/层主数据、三类工效、共享或独立机组、FS/SS/FF/SF及层间间歇、配套工序和实际相邻转场。仅支持固定机组、最早施工完成目标，连续日历天，不计末尾养生；配套及养生资源按充足考虑，未建模天气/温度和交通限制。按[`067-pavement-pending-last`](./03-requirements/specs/067-pavement-pending-last/spec.md)，待移交段纳入任务，在正常段所有任务完成后附条件排程；可行结果显示需移交日和预计施工完成日，不回写实际移交事实。当前客户25段100层已接入，结果日期仅来自通过硬约束校验的可行计划。
+
+[068贪心初步计划](./03-requirements/specs/068-pavement-greedy-cpsat/spec.md)与[069限时并行优化及实时最好方案](./03-requirements/specs/069-pavement-live-optimization/spec.md)已接入：三种确定性贪心构造并校验完整初解，原模型以提示及工期上界继续搜索，最多8worker、seed0、内置LNS；CPU不足时降低worker。time_limit_seconds覆盖校验、构造、建模和优化，缺省15秒；已有合法方案时正常终态保留最好者，未证明最优则FEASIBLE，无方案才可能UNKNOWN。页面通过POST NDJSON先展示初解，再更新严格改善与最终状态；旧同步API仍可用。真实100任务15秒实测324→310天、缩短14天、计算15.051秒；独立HTTP验收首解0.341秒收到、最终311天，页面验收310天。并行结果存在波动，未接入专项下界、不承诺最优。
+
+路面实时求解在输入/范围改变或组件卸载后取消旧连接，旧结果仅作历史查看；断连请求停止本次求解并释放线程，不创建持久作业或自动重算。未修改客户主数据、资源、工效和保存配置。
+
+[070路面结果可视化](./03-requirements/specs/070-pavement-results-visualization/spec.md)已接入：运行时显示活动与本地已等待时间，施工段/工序两级表格对应横道和真实逻辑箭线，工艺等待可点击查看；机组里程轴按工点/桩号系列/幅别分区，以到访序号表达实际施工先后，连续同段合并、返回保留。跨桩号系列段单独显示无法定位，未推算地理距离。待移交显示“本方案最晚需移交日”，仍是该段最早开工前的移交要求。全部使用同次结果快照，算法及共享接口保持069行为。21项定向测试、构建和100任务宽窄屏检查通过；实际证据与限制见对应tasks。
+
+[071单机资源时间图](./03-requirements/specs/071-pavement-resource-timeline/spec.md)已接入计划横道图与机组施工顺序之间：每套实际机组一行，日期横轴，可筛选、查看作业/转场/期间空闲详情及定位最长空闲。作业率分母为该机组首次开工至末次完工，期外不计空闲；缺失转场或异常数据降级提示，不自动归因窝工。21项前端测试、构建与宽窄屏核验通过；底部精简仍单独待办。历史按米厚度校验已移除，87项后端回归通过。用户之后停用全部19条沥青，当前19段76任务，6段匝道/连接线保持停用；FS+7、沥青转场1天与1000m/天保留，数量和启停由用户维护。m2/m3/t沿用原厚度规则，实际证据及规格完成状态见071任务记录。
 
 ```text
 ScenarioInput
@@ -12,7 +22,9 @@ ScenarioInput
   -> ScheduleResult / ScenarioSolveResult
 ```
 
-当前扩展能力包括：
+[072机组流转图](./03-requirements/specs/072-pavement-crew-tl-flow/spec.md)已交付后按用户新批注简化为施工段分格的顺序示意图：各幅施工段按里程排序、等宽展示，全部到访编号及工序简名可见，同段回访向外分层，箭线严格连接实际相邻到访。取消日期刻度和时间作业条，位置/间距为示意，实际日期保留详情；全程/局部、高亮、节点间距及键盘导航可用。沿用既有顺序数据及异常处理，保留071资源时间图，不改求解或配置。验证及历史限制见072任务记录。
+
+桥梁工作区保留的扩展能力包括：
 
 - 桥梁结构参数 Excel 导入和本体映射。
 - 固定资源最短工期、固定工期最少资源、资源成本优化。
@@ -39,6 +51,7 @@ ScenarioInput
 | 共享请求/响应契约 | `contracts/`；`models.py` 完整重导出 | schema/dump 与旧导入兼容测试 |
 | 场景、任务生成、资源搜索、比较 | `scheduling/generation/`、`scheduling/application/`；`scenario.py` 兼容 | `test_scheduler.py`、行为基线 |
 | CP-SAT 约束、目标、策略、结果 | `scheduling/solver/`；`solver.py` 兼容 | 求解器回归、固定等价、性能 |
+| 路面主数据、生成及固定机组求解 | `contracts/pavement.py`、`project_master/`、`scheduling/generation/pavement.py`、`scheduling/application/pavement.py`、`scheduling/solver/constraints/pavement.py`、`scheduling/solver/strategies/pavement.py` | `test_pavement_*.py` |
 | 桥梁导入 | `importing/bridge.py`；旧 bridge/service 兼容 | `test_bridge_import.py` |
 | AI 参数助手 | `assistants/parameter/`；旧 service 兼容 | `test_ai_parameter_*` |
 | AI 资源助手 | `assistants/resource/`；旧 service 兼容 | `test_ai_resource_scheduling_assistant.py` |
@@ -52,7 +65,7 @@ ScenarioInput
 | --- | --- | --- |
 | 应用装配和跨 feature 状态 | `app/App.tsx`、`Workspace.tsx`、`app/workflows/`、`useWorkspaceController.ts` | Node 工作流、类型检查、构建 |
 | 共享类型 | `contracts/`；`types/scheduler.ts` 完整重导出 | contracts 兼容测试 |
-| API | `api/*Api.ts`；`schedulerApi.ts` 保留 40 个函数重导出 | API 兼容测试 |
+| API | `api/*Api.ts`；`schedulerApi.ts` 保留既有函数重导出 | API 兼容测试 |
 | 工艺/逻辑/资源/里程碑 | 对应 `features/` 目录和 `domain/` 纯函数 | 构建、领域测试、页面冒烟 |
 | AI 助手 | `features/assistant`、`features/resourceAssistant` | Node 测试、页面流程 |
 | 架梁/计划管控 | `features/girderPlanning`、`features/planControl` | 对应 Node 测试和后端契约 |
@@ -126,11 +139,12 @@ ScenarioInput -> initialize -> 三套资源计划
 
 ## 5. 契约与兼容边界
 
-- FastAPI 当前有 57 个 `/api` 操作；042 冻结的原有 45 个方法、schema、状态码和错误 `detail` 保持兼容，后续新增操作由当前架构基线继续冻结。
+- FastAPI 的当前接口清单以 `04-demo/backend/tests/fixtures/architecture/backend-baseline.json` 和运行服务的 `/openapi.json` 为准；042 冻结的原有方法、schema、状态码和错误 `detail` 保持兼容，后续新增操作由当前架构基线继续冻结。
 - `uvicorn app.main:app --app-dir 04-demo/backend` 和 `app.main:app` 保持有效。
 - `04-demo/backend/app/main.py`、`04-demo/backend/app/models.py`、`04-demo/backend/app/scenario.py`、`04-demo/backend/app/solver.py` 是受测试保护的短兼容入口；`app.models`、`app.scenario`、`app.solver` 旧公开导入保持有效。
-- 前端 `src/App.tsx` 默认导出、`types/scheduler.ts` 导出和 `schedulerApi.ts` 40 个函数保持。
+- 前端 `src/App.tsx` 默认导出、`types/scheduler.ts` 导出和 `schedulerApi.ts` 既有函数保持。
 - 配置合并顺序保持：代码默认 → `default_scenario_config.json` → `.local-data/state/scheduler-config.json`（兼容旧路径读取）。
+- 路面领域显式分派，本地 v5 配置使用 `pavement_profiles[project_id]`，含计划开始日期、版本引用、工效选择、工序及机组；桥梁顶层配置保留。旧请求省略领域仍按桥梁处理。
 - `.local-data/state/project-structure-params.json`、`.local-data/state/plan-control-store.json` 的 schema 与兼容语义保持。
 - `stable_id`、`stable_fingerprint`、场景指纹和旧结果失效语义保持。
 - CP-SAT seed、worker、时间预算、warm start、阶段路由和资源搜索顺序不因纯重构变化。

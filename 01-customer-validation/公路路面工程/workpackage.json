@@ -1,0 +1,14 @@
+{
+  "id": "road-pavement-customer-validation",
+  "stage": "01-customer-validation",
+  "purpose": "公路路面施工排程客户调研纪要、需求还原与后续效果验证。",
+  "status": "active",
+  "inputs": [],
+  "entrypoints": [],
+  "results": [
+    "validation-results/2026-09-23-公路路面工程客户调研纪要.md"
+  ],
+  "owner": "客户调研与验证（公路路面工程）",
+  "tracking_policy": "tracked",
+  "retention_policy": "纪要及正式验证结果进入项目文档；源逐字稿保留桌面原位，由README及统一资料索引引用，不另建副本；临时校验材料进入.local-data。"
+}

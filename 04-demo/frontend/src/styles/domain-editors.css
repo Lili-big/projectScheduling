@@ -108,6 +108,15 @@
   min-width: 86px;
 }
 
+.pavement-workspace .productivity-group {
+  grid-template-columns: 108px 64px 82px 104px 118px max-content 78px 52px 58px;
+}
+
+.pavement-workspace .productivity-source-pill {
+  width: auto;
+  white-space: nowrap;
+}
+
 .section-height-field {
   width: 104px;
   min-width: 104px;
@@ -199,6 +208,41 @@
   flex-direction: column;
   min-height: 0;
 }
+
+.pavement-logic-panel { min-width: 0; }
+.table-wrap.pavement-process-table-wrap { max-height: none; margin: 0; border: 0; }
+.pavement-process-table { width: 100%; min-width: 1080px; table-layout: fixed; border-collapse: collapse; }
+.pavement-process-table th,
+.pavement-process-table td { padding: 13px 16px; text-align: left; vertical-align: top; white-space: normal; line-height: 1.7; font-size: 13px; border-bottom: 1px solid #e8edf3; }
+.pavement-process-table thead th { color: #475569; background: #f4f7fb; font-weight: 600; }
+.pavement-process-table thead th:nth-child(1) { width: 60px; }
+.pavement-process-table thead th:nth-child(2) { width: 172px; }
+.pavement-process-table thead th:nth-child(3) { width: 27%; }
+.pavement-process-table thead th:nth-child(4) { width: 22%; }
+.pavement-process-table tbody th { font-weight: 600; }
+.pavement-process-table tbody tr:nth-child(even) { background: #fafbfd; }
+.pavement-process-order { color: #64748b; font-variant-numeric: tabular-nums; }
+.pavement-process-name { display: block; padding-left: 10px; border-left: 3px solid #94a3b8; color: #334155; }
+.pavement-process-name.gravel { border-color: #a78b58; }
+.pavement-process-name.water { border-color: #3b82f6; }
+.pavement-process-name.asphalt { border-color: #475569; }
+.pavement-workspace .panel > .pavement-logic-configuration { margin: 0; }
+.pavement-logic-configuration > summary { padding: 14px 20px; cursor: pointer; color: #475569; font-size: 13px; font-weight: 600; }
+.pavement-logic-empty { margin: 0; padding: 0 20px 18px; color: #64748b; font-size: 13px; }
+.pavement-logic-config-content { padding: 4px 20px 20px; border-top: 1px solid #e2e8f0; }
+.pavement-logic-config-content > header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.pavement-logic-config-content > h3 { margin: 20px 0 8px; }
+.pavement-logic-config-content > p { color: #64748b; font-size: 13px; }
+.pavement-workspace .pavement-logic-config-content form { gap: 10px 12px; }
+.pavement-workspace .pavement-logic-config-content label { min-width: 0; max-width: 100%; white-space: nowrap; }
+.pavement-workspace .pavement-logic-config-content input,
+.pavement-workspace .pavement-logic-config-content select {
+  height: 34px;
+  padding: 4px 8px;
+  line-height: 1.5;
+  max-width: 100%;
+}
+.pavement-workspace .pavement-fixed-sequence-form input[name="ids"] { flex: 1 1 320px; min-width: 0; max-width: 540px; }
 
 .logic-content {
   min-height: 0;
@@ -442,3 +486,41 @@
   white-space: nowrap;
 }
 
+.pavement-bulk-conditions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.pavement-bulk-conditions > span { color: #64748b; font-size: 13px; }
+.pavement-bulk-conditions input, .pavement-bulk-conditions select {
+  height: auto;
+  min-height: 36px;
+  padding: 6px 10px;
+  line-height: 1.5;
+  box-sizing: border-box;
+}
+.pavement-bulk-conditions { padding: 12px 0; }
+
+.pavement-relation-scope { padding: 8px 16px; }
+.pavement-relation-scope label { display: flex; align-items: center; gap: 8px; }
+.pavement-workspace .pavement-relation-scope select { min-width: 280px; max-width: 100%; height: 36px; padding: 4px 10px; line-height: 1.5; box-sizing: border-box; }
+.pavement-relation-table { width: 100%; }
+.pavement-relation-table th, .pavement-relation-table td { padding: 6px 12px; white-space: nowrap; }
+.pavement-workspace .pavement-relation-table select, .pavement-workspace .pavement-relation-table input { height: 30px; padding: 3px 8px; line-height: 1.5; }
+.pavement-relation-expression { font-weight: 600; font-variant-numeric: tabular-nums; color: #0f766e; }
+.pavement-relation-note { color: #64748b; font-size: 13px; }
+.pavement-unmatched-relations { margin: 12px 16px; color: #9a3412; }
+.pavement-unmatched-relations button { margin-left: 8px; }
+
+.pavement-relation-date { margin-top: 4px; font-size: 12px; font-weight: 400; }
+.pavement-relation-date summary { cursor: pointer; color: #64748b; }
+.pavement-relation-date input { margin-top: 4px; }
+
+/* The existing narrow navigation stacks above the workspace; it must not consume the viewport. */
+@media (max-width: 980px) {
+  .pavement-workspace .app-body { grid-template-rows: auto minmax(0, 1fr); }
+  .pavement-workspace .side-nav { height: auto; max-height: 40vh; }
+  .pavement-workspace .workspace { height: auto; min-height: 0; overflow: hidden; }
+  .pavement-workspace .workspace-content { min-height: 0; overflow: auto; }
+}

@@ -33,6 +33,7 @@ export function applyRequiredResourceTypesToTasks(tasks: Task[], resourcePools: 
 }
 
 export function requiredResourceTypesForTask(task: Task, poolsByType: Map<string, ResourcePool[]>): string[] {
+  if (task.pavement_context) return task.compatible_resource_types;
   const resourceType = defaultResourceTypeForTask(task);
   if (!resourceType) return [];
   const pools = poolsByType.get(resourceType) ?? [];
@@ -785,6 +786,7 @@ export function normalizeLimitedResourcePool(pool: ResourcePool): ResourcePool {
 }
 
 export function normalizeScenarioResourcePools(scenario: ScenarioInput): ScenarioInput {
+  if (scenario.engineering_domain === "pavement") return scenario;
   return {
     ...scenario,
     resource_pools: scenario.resource_pools

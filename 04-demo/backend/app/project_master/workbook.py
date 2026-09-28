@@ -27,8 +27,8 @@ from ..contracts.project_master import (
 from .definitions import DEFINITION_VERSION, schedule_support_for
 
 
-TEMPLATE_VERSION = "1.1"
-SUPPORTED_TEMPLATE_VERSIONS = {"1.0", TEMPLATE_VERSION}
+TEMPLATE_VERSION = "1.2"
+SUPPORTED_TEMPLATE_VERSIONS = {"1.0", "1.1", TEMPLATE_VERSION}
 REQUIRED_SHEETS = ("填写说明", "工点信息", "结构物信息", "构件参数")
 SHEETS = (*REQUIRED_SHEETS, "线路关系")
 _SPREADSHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -92,7 +92,19 @@ COMPONENT_COLUMNS = (
 )
 
 
-def create_template_bytes() -> bytes:
+PAVEMENT_STRUCTURE_COLUMNS = tuple(("param." + code, label) for code, label in [
+    ("start_chainage", "起点桩号（原文）"), ("end_chainage", "终点桩号（原文）"),
+    ("construction_length_m", "确认净施工长度(m)"), ("width_m", "宽度(m)"),
+    ("water_stable_thickness_m", "水稳厚度(m)"), ("water_stable_density_t_m3", "水稳密度(t/m³)"),
+    ("roadbed_available_date", "路床最早可用日期"), ("quantity_basis_confirmed", "净量依据已确认（是/否）"),
+    ("roadbed_handover_status", "路床移交状态（dated/handed_over/pending）"), ("roadbed_handover_note", "路床移交说明"),
+    ("quantity_basis_note", "净量来源与扣除说明")])
+PAVEMENT_COMPONENT_COLUMNS = (("param.thickness_m", "厚度(m；也可填20cm)"), ("param.density_t_m3", "密度(t/m³)"), ("param.quantity_basis", "数量依据 entered/geometric"), ("param.quantity_basis_note", "数量说明"))
+STRUCTURE_COLUMNS += PAVEMENT_STRUCTURE_COLUMNS
+COMPONENT_COLUMNS += PAVEMENT_COMPONENT_COLUMNS
+
+
+def create_template_bytes(engineering_domain: str = "bridge") -> bytes:
     workbook = Workbook()
     guide = workbook.active
     guide.title = "填写说明"
@@ -103,6 +115,12 @@ def create_template_bytes() -> bytes:
     guide.append(["幅别", "left=左幅，right=右幅，shared=共用，none=不适用（桥梁正式结构慎用）。"])
     guide.append(["参数列", "类型特有参数使用 param.<parameter_code>，不得写 JSON。"])
     guide.append(["线路关系", "可选；每个工点每个幅别一行，同一空间对应组仅表示左右平行对齐，不自动形成通行连接。"])
+    if engineering_domain == "pavement":
+        guide.append(["路面填写", "工点类型 pavement；结构类别 pavement，结构类型 pavement_section；每段每幅独立ID。"])
+        guide.append(["结构层", "granular_base=碎石；cement_stabilized_base=水稳；asphalt_course=沥青；sort_order 填实际由下至上层序。"])
+        guide.append(["示例（非客户数据）", "K0+000～K0+800，扣除桥涵后净长760m；水稳20cm填写0.2m；数量依据 entered，净量确认是并说明来源。"])
+        guide.append(["必填排程条件", "净长度、宽度、路床最早可用日期、净量确认与说明；每层厚度、数量、单位与依据。吨数必须明确提供。"])
+        guide.append(["模板数据", "数据页留空，请填入本项目确认数据。养生和转场在场景页面单独确认。"])
     _style_sheet(guide)
     _append_data_sheet(workbook, "工点信息", WORKPOINT_COLUMNS)
     _append_data_sheet(workbook, "结构物信息", STRUCTURE_COLUMNS)
@@ -630,6 +648,10 @@ def _parameters(row: dict[str, Any], sheet_name: str, row_no: int) -> list[Param
             continue
         code = key[6:]
         value_type, value = _typed_value(raw)
+        if code == "quantity_basis_confirmed":
+            value_type, value = "boolean", _boolean(raw, False)
+        elif code == "thickness_m" and isinstance(raw, str) and raw.strip().lower().endswith("cm"):
+            value_type, value = "number", float(raw.strip()[:-2]) / 100
         result.append(
             ParameterValue.model_construct(
                 parameter_code=code,

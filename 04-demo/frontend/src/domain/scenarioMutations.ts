@@ -3,6 +3,7 @@ import type { ScenarioInput, Task, TaskOverride } from "../contracts";
 
 export function scenarioWithTaskProcessPatch(scenario: ScenarioInput, task: Task, patch: TaskOverride): ScenarioInput {
   const componentId = task.component_id ?? task.id;
+  if (scenario.engineering_domain === "pavement") return scenarioWithTaskOverridePatch(scenario, componentId, patch);
   if (findComponent(scenario.project, componentId)) {
     return scenarioWithComponentPatch(scenario, componentId, patch);
   }

@@ -107,6 +107,7 @@
       "PassageOverride",
       "PassageReleaseResult",
       "PathGroupDiagnostic",
+      "PavementIdleOptimizeRequest",
       "PlanControlProjectSummary",
       "PlanVersion",
       "PlanVersionStatus",
@@ -243,6 +244,7 @@
       "initializeAiWorkpointResources",
       "listPlanningScenarioVersions",
       "listProjectDataVersions",
+      "optimizePavementIdleStream",
       "parseAiParameterAssistant",
       "previewGirderPlanning",
       "saveLocalScenarioConfig",
@@ -252,13 +254,14 @@
       "solveAiResourceAssistantPlan",
       "solveIntegratedSchedule",
       "solveMinResources",
+      "solvePavementScenarioStream",
       "solveResourceCost",
       "solveScenario",
       "updateAiResourceAssistantPlan",
       "uploadBridgeParams",
       "validateGirderPlanning"
     ],
-    "scheduler_api_function_count": 41,
+    "scheduler_api_function_count": 43,
     "root_app_default_export": true
   },
   "module_lines": {

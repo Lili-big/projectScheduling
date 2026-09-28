@@ -1,5 +1,20 @@
 from __future__ import annotations
 
+PAVEMENT_PROCESSES = {
+    "granular_base": ("碎石垫层", "granular_paving_crew", 800),
+    "cement_stabilized_base": ("水稳摊铺", "water_stable_paving_crew", 700),
+    "asphalt_course": ("沥青摊铺", "asphalt_paving_crew", 1000),
+}
+
+
+def pavement_process_library():
+    from .contracts import ProcessTemplate
+    return [ProcessTemplate(id=f"pavement-{kind}", component_type=kind, process_name=name,
+        duration_method="units_per_day", quantity_source="quantity", productivity_value=rate,
+        productivity_unit="m/天", resource_type=resource, is_default=True,
+        applicability={"basis": "演示参考工效，请按项目确认；每套机组"})
+        for kind, (name, resource, rate) in PAVEMENT_PROCESSES.items()]
+
 import math
 
 from .contracts import ProcessTemplate, ProductivityOption

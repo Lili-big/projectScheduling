@@ -5,6 +5,7 @@ import { PanelTitle } from "../../components/common/PanelTitle";
 import type { MilestoneConstraint, ProjectBridge, ScenarioInput, WorkPointType } from "../../contracts";
 
 const workPointTypeLabels: Record<WorkPointType, string> = {
+  pavement: "路面工点",
   bridge: "桥梁工点",
   road: "路基工点",
   tunnel: "隧道工点",

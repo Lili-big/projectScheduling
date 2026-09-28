@@ -1,6 +1,7 @@
 import type { ComponentType, MilestoneResult, ResourceCostType, ResourceMode, ScheduleResult, ValidationMessage, WorkSectionSide } from "../contracts";
 
 export const componentLabels: Record<ComponentType, string> = {
+  granular_base: "碎石垫层", cement_stabilized_base: "水稳层", asphalt_course: "沥青层", pavement_preparation: "层间配套",
   pile: "桩基",
   cap: "承台",
   spread_foundation: "扩大基础",
@@ -24,6 +25,7 @@ export const durationMethodLabels: Record<string, string> = {
 };
 
 export const quantitySourceLabels: Record<string, string> = {
+  quantity: "确认工程量",
   pile_length_m: "桩长",
   pier_height_m: "墩高",
   deck_length_m: "桥面长度",
@@ -31,6 +33,7 @@ export const quantitySourceLabels: Record<string, string> = {
 };
 
 export const componentColors: Record<ComponentType, string> = {
+  granular_base: "#8b7355", cement_stabilized_base: "#0f766e", asphalt_course: "#334155", pavement_preparation: "#7c3aed",
   pile: "#2563eb",
   cap: "#0f766e",
   spread_foundation: "#0d9488",
@@ -48,6 +51,7 @@ export const componentColors: Record<ComponentType, string> = {
 };
 
 export const componentOrder: ComponentType[] = [
+  "granular_base", "cement_stabilized_base", "asphalt_course", "pavement_preparation",
   "pile",
   "cap",
   "spread_foundation",

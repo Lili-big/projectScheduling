@@ -68,12 +68,14 @@ export function SideNavigation({
   onOpen,
   collapsed,
   onToggleCollapsed,
+  engineeringDomain = "bridge",
 }: {
   activeTab: TabKey | null;
   openTabs: TabKey[];
   onOpen: (tabKey: TabKey) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  engineeringDomain?: "bridge" | "pavement";
 }) {
   const [expandedGroups, setExpandedGroups] = useState<Record<NavigationGroup["key"], boolean>>({
     projectParameters: true,
@@ -81,8 +83,16 @@ export function SideNavigation({
     planExecution: true,
   });
   const visibleGroups = useMemo(
-    () => navigationGroups.map((group) => ({ ...group, expanded: expandedGroups[group.key] })),
-    [expandedGroups],
+    () => navigationGroups
+      .map((group) => ({
+        ...group,
+        expanded: expandedGroups[group.key],
+        items: engineeringDomain === "pavement"
+          ? group.items.filter((tab) => ["projectFiles", "process", "logic", "resources", "tasks", "results"].includes(tab.key))
+          : group.items,
+      }))
+      .filter((group) => group.items.length > 0),
+    [engineeringDomain, expandedGroups],
   );
 
   function toggleGroup(groupKey: NavigationGroup["key"]) {
@@ -92,6 +102,7 @@ export function SideNavigation({
   return (
     <aside className={`side-nav ${collapsed ? "collapsed" : ""}`}>
       <div className="side-nav-section">
+        {!collapsed && <p><a href="?engineering_domain=pavement">路面工程</a> · <a href="?engineering_domain=bridge">桥梁工程</a></p>}
         <div className="side-nav-header">
           {!collapsed && <div className="side-nav-heading">功能导航</div>}
           <button

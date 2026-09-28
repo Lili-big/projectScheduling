@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from ...bridge_import import BridgeImportConfigError, BridgeImportError
 from ...local_scenario_config import LocalScenarioConfigError
@@ -30,6 +30,7 @@ from ...services.process_library_service import (
     persist_process_library,
 )
 from ...wbs import generate_wbs
+from ...contracts.pavement import EngineeringDomain
 
 
 router = APIRouter()
@@ -57,17 +58,21 @@ def demo() -> DemoPayload:
 
 
 @router.get("/api/demo-scenario", response_model=ScenarioInput)
-def demo_scenario() -> ScenarioInput:
+def demo_scenario(engineering_domain: EngineeringDomain = "bridge", project_id: str | None = None) -> ScenarioInput:
     try:
-        return default_scenario_with_process_library()
+        return default_scenario_with_process_library(engineering_domain, project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except LocalScenarioConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/api/process-library", response_model=list[ProcessTemplate])
-def get_process_library_endpoint() -> list[ProcessTemplate]:
+def get_process_library_endpoint(engineering_domain: EngineeringDomain = "bridge", project_id: str | None = None) -> list[ProcessTemplate]:
     try:
-        return get_process_library()
+        return get_process_library(engineering_domain, project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except LocalScenarioConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -75,21 +80,30 @@ def get_process_library_endpoint() -> list[ProcessTemplate]:
 @router.put("/api/process-library", response_model=list[ProcessTemplate])
 def save_process_library_endpoint(request: ProcessLibrarySaveRequest) -> list[ProcessTemplate]:
     try:
-        return persist_process_library(request.process_library)
+        return persist_process_library(request.process_library, request.engineering_domain, request.project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except LocalScenarioConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.put("/api/local-scenario-config", response_model=LocalScenarioConfigResponse)
-def save_local_scenario_config_endpoint(request: LocalScenarioConfigSaveRequest) -> dict[str, list[object]]:
+def save_local_scenario_config_endpoint(request: LocalScenarioConfigSaveRequest, http_request: Request = None) -> dict[str, list[object]]:
     try:
+        if request.engineering_domain == "pavement" and request.project_data_version_id:
+            _validate_pavement_config_version(request, http_request)
         return persist_local_scenario_config(
             process_library=request.process_library,
             logic_rules=request.logic_rules,
             upper_structure_logic_rules=request.upper_structure_logic_rules,
             resource_pools=request.resource_pools,
             milestones=request.milestones,
+            **({"engineering_domain": request.engineering_domain, "project_id": request.project_id,
+                "pavement_settings": request.pavement_settings, "task_overrides": request.task_overrides,
+                "project_data_version_id": request.project_data_version_id, "project_start_date": request.project_start_date} if request.engineering_domain == "pavement" else {}),
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except LocalScenarioConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -120,3 +134,18 @@ def apply_project_structure_params_endpoint(request: ProjectStructureParamsApply
         scenario=apply_project_structure_params(request.scenario, request.project),
         source="request",
     )
+
+
+def _validate_pavement_config_version(payload, request):
+    from ...project_master.service import default_project_master_service
+    from ...project_master.repository import ProjectMasterRepositoryError
+    from ..errors import project_master_http_error
+    service = getattr(request.app.state, "project_master_service", None) if request else None
+    service = service or default_project_master_service()
+    try:
+        version = service.repository.get_version_summary(payload.project_data_version_id)
+        current = service.repository.get_current_version(payload.project_id)
+        if version.project_id != payload.project_id or version.status != "confirmed" or current is None or current.version_id != version.version_id:
+            raise HTTPException(status_code=409, detail={"code":"PAVEMENT_REFERENCE_INVALID","message":"配置引用的主数据不是本项目当前确认版本。"})
+    except ProjectMasterRepositoryError as exc:
+        raise project_master_http_error(exc) from exc

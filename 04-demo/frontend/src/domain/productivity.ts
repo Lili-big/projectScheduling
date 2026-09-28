@@ -1,3 +1,4 @@
+import { pavementProcessTypes } from "./pavement";
 import type { ProcessTemplate, ProductivityOption } from "../contracts";
 
 export const pileProductivityUnitOptions = [
@@ -34,6 +35,7 @@ export function sectionHeightForOption(option: ProductivityOption): number | und
 }
 
 export function normalizeProductivityOptionForProcess(process: ProcessTemplate, option: ProductivityOption): ProductivityOption {
+  if (pavementProcessTypes.some(t => t === process.component_type)) return { ...option, duration_method: "units_per_day", quantity_source: "quantity" };
   if (process.component_type === "pile") {
     const unitRule = pileProductivityUnitOptions.find((item) => item.unit === option.productivity_unit);
     if (unitRule) {

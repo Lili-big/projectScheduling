@@ -4,6 +4,8 @@
 
 ## 启动示例
 
+以下命令在仓库根目录执行，依赖安装见根 README。脚本隐藏后台窗口并保存日志；可在同一终端依次启动两个服务。
+
 后端：
 
 ```powershell
@@ -19,10 +21,19 @@
 .\04-demo\runtime\start_logged_process.ps1 `
   -Name frontend `
   -FilePath npm.cmd `
-  -ArgumentList @('--workspace', '04-demo/frontend', 'run', 'dev')
+  -ArgumentList @('run', 'frontend:dev', '--', '--port', '5174', '--strictPort')
 ```
 
-脚本返回进程 PID、stdout 和 stderr 路径。停止服务时只处理返回的 PID；不要按进程名批量终止无关服务。
+脚本返回进程 PID、stdout 和 stderr 路径。返回 PID 仅代表进程已创建，还需检查接口确认启动成功：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/api/health
+Invoke-RestMethod http://127.0.0.1:5174/api/health
+```
+
+页面为 `http://127.0.0.1:5174/`。失败时查看返回的 stderr/stdout 日志。8000或5174已被占用时，先确认是否能复用已有服务。
+
+停止服务时只处理本次返回的 PID 及其子进程；npm 会启动命令行和 Node 子进程，不能只停止父进程后就认为端口已释放。不要按进程名批量终止无关服务。
 
 ## 维护规则
 

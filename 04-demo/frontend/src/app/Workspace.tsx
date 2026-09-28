@@ -1,3 +1,9 @@
+import { createPavementPreviewController, emptyPavementPreview } from "./workflows/scenarioWorkflow";
+import { PavementResources } from "../features/resources/ResourcesTab";
+import { PavementTaskView } from "../features/taskView/TaskViewWorkspace";
+import { PavementScheduleResults } from "../features/scheduleResults/ScheduleResultsWorkspace";
+import { PavementSolveProgress } from "../features/scheduleResults/PavementSolveProgress";
+import { getPavementProject } from "../api/projectMasterApi";
 import {
   AlertCircle,
   Bot,
@@ -35,6 +41,7 @@ import {
   solveMinResources as solveMinResourcesRequest,
   solveResourceCost as solveResourceCostRequest,
   solveScenario,
+  solvePavementScenarioStream, optimizePavementIdleStream,
 } from "../api/schedulingApi";
 import {
   applyAiParameterSuggestions as applyAiParameterSuggestionsRequest,
@@ -217,7 +224,7 @@ import {
   loadScenarioWorkflow,
   scenarioFingerprintForSolve as serializeScenarioFingerprint,
 } from "./workflows/scenarioWorkflow";
-import { solveScenarioWorkflow } from "./workflows/solveWorkflow";
+import { solveScenarioWorkflow, createPavementSolveController, canOptimizePavementIdle } from "./workflows/solveWorkflow";
 import { useWorkspaceController } from "./useWorkspaceController";
 
 type ObjectiveTermDefinition = {
@@ -372,6 +379,12 @@ function editableControlLevelValue(value: ControlLevel): ControlLevel {
 }
 
 export default function App() {
+  const bridge = new URLSearchParams(window.location.search).get("engineering_domain") === "bridge";
+  useEffect(() => { document.title = bridge ? "桥梁施工计划" : "公路路面施工计划"; }, [bridge]);
+  return bridge ? <BridgeWorkspace /> : <PavementWorkspace />;
+}
+
+function BridgeWorkspace() {
   const [scenario, setScenario] = useState<ScenarioInput | null>(null);
   const [generated, setGenerated] = useState<GeneratedScheduleInput | null>(null);
   const [generatedScenarioFingerprint, setGeneratedScenarioFingerprint] = useState<string | null>(null);
@@ -3749,6 +3762,7 @@ function resourceAssistantDetailSolveResult(
 }
 
 function normalizeScenarioForWorkspace(scenario: ScenarioInput): ScenarioInput {
+  if (scenario.engineering_domain === "pavement") return scenario;
   return normalizeScenarioResourcePools({
     ...scenario,
     milestones: bridgeCompletionMilestonesForProject(scenario),
@@ -3757,6 +3771,9 @@ function normalizeScenarioForWorkspace(scenario: ScenarioInput): ScenarioInput {
 
 function localScenarioConfigFromScenario(scenario: ScenarioInput): LocalScenarioConfig {
   return {
+    ...(scenario.engineering_domain === "pavement" ? { engineering_domain: scenario.engineering_domain, project_id: scenario.project.project_id,
+      project_data_version_id: scenario.project_data_version_id, pavement_settings: scenario.pavement_settings, project_start_date: scenario.project.start_date,
+      task_overrides: scenario.task_overrides } : {}),
     process_library: scenario.process_library,
     logic_rules: scenario.logic_rules,
     upper_structure_logic_rules: scenario.upper_structure_logic_rules ?? [],
@@ -5094,4 +5111,128 @@ async function loadAllBridgeWorkpoints(versionId: string): Promise<ProjectMaster
 
 function scenarioFingerprintForSolve(scenario: ScenarioInput, workpointId: string | null = null): string {
   return serializeScenarioFingerprint(normalizeScenarioForWorkspace(scenario), workpointId);
+}
+
+
+function PavementWorkspace() {
+  const projectId = new URLSearchParams(window.location.search).get("project_id") || "pavement-project";
+  const [scenario, setScenario] = useState<ScenarioInput | null>(null);
+  const [active, setActive] = useState<TabKey>("projectFiles");
+  const [collapsed, setCollapsed] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [scope, setScope] = useState("");
+  const [preview, setPreview] = useState(emptyPavementPreview);
+  const previewController = useRef(createPavementPreviewController(generateScheduleInput)).current;
+  const previewFingerprint = scenario ? serializeScenarioFingerprint(scenario, null) : null;
+  const currentPreview = preview.fingerprint === previewFingerprint ? preview : {...emptyPavementPreview(), status: "loading" as const};
+  useEffect(() => {
+    if (!scenario || active !== "tasks") return;
+    const timer = window.setTimeout(() => { void previewController.request(scenario, setPreview); }, 250);
+    return () => { window.clearTimeout(timer); previewController.invalidate(); };
+  }, [scenario, active, previewController]);
+  const [solved, setSolved] = useState<ScenarioSolveResult | null>(null);
+  const [liveStatus, setLiveStatus] = useState<import("../contracts").PavementLiveStatus>("idle");
+  const [solveStartedAt, setSolveStartedAt] = useState<number | null>(null);
+  const [timeBudgetSeconds, setTimeBudgetSeconds] = useState<number | null>(null);
+  const liveController = useMemo(() => createPavementSolveController(solvePavementScenarioStream, optimizePavementIdleStream), []);
+  const [resultFingerprint, setResultFingerprint] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
+  const fingerprint = scenario ? serializeScenarioFingerprint(scenario, scope || null) : null;
+  const {busy,setBusy,error,setError} = useWorkspaceController({scenarioFingerprint:fingerprint,onScenarioInvalidated:()=>setNotice("输入已修改，任务视图将自动更新；历史求解结果需重新计算。")});
+  const requestToken = useRef(0);
+  const currentFingerprint = useRef(fingerprint); currentFingerprint.current = fingerprint;
+  useEffect(() => {
+    requestToken.current++;
+    liveController.cancel();
+    setLiveStatus(status => status === "running" ? "interrupted" : status);
+    setBusy(status => status === "solving" ? null : status);
+    return () => { requestToken.current++; liveController.cancel(); };
+  }, [fingerprint, liveController]);
+
+  async function load() {
+    setBusy("loading"); setError(null);
+    try {
+      let next = await getDemoScenario("pavement",projectId);
+      try {
+        const version = await getCurrentProjectMasterVersion(projectId);
+        next = await getPavementProject(next,version.version_id);
+      } catch (reason) {
+        if (!errorText(reason).includes("PROJECT_MASTER_NOT_FOUND")) throw reason;
+      }
+      setScenario(next); setDirty(false);
+    } catch(reason) { setError(errorText(reason)); }
+    finally { setBusy(null); }
+  }
+  useEffect(()=>{void load();},[]);
+  function patch(values: Partial<ScenarioInput>) { setScenario(current=>current ? {...current,...values} : current); setDirty(true); }
+  async function save() {
+    if (!scenario) return;
+    const snapshot = scenario;
+    setBusy("savingLogic"); setError(null);
+    try {
+      await saveLocalScenarioConfig(localScenarioConfigFromScenario(snapshot));
+      if (currentFingerprint.current === serializeScenarioFingerprint(snapshot,scope || null)) setDirty(false);
+      setNotice("本项目路面配置已保存。");
+    } catch(reason) { setError(errorText(reason)); }
+    finally { setBusy(null); }
+  }
+  const [solveGoal, setSolveGoal] = useState<"makespan" | "idle">("makespan");
+  const idleAvailable = canOptimizePavementIdle(solved, resultFingerprint === fingerprint, !!busy);
+  async function solveCurrent(optimizeIdle = false) {
+    if (!scenario || optimizeIdle && !idleAvailable) return;
+    const baseline = optimizeIdle && solved ? solved : undefined;
+    setSolveGoal(optimizeIdle ? "idle" : "makespan");
+    const token=++requestToken.current;
+    const expected=serializeScenarioFingerprint(scenario,scope || null);
+    setBusy("solving"); setError(null);
+    try {
+      if (!baseline) { setSolved(null); setResultFingerprint(null); }
+      setNotice("");
+      setSolveStartedAt(performance.now()); setTimeBudgetSeconds(null);
+      await liveController.request(scenario, scope || null, state => {
+        if (token !== requestToken.current || currentFingerprint.current !== expected) return;
+        setLiveStatus(state.status);
+        setTimeBudgetSeconds(state.timeBudgetSeconds);
+        setError(state.error);
+        if (state.solved) { setSolved(state.solved); setResultFingerprint(expected); }
+      }, baseline);
+    } catch(reason) {
+      if (token === requestToken.current && currentFingerprint.current === expected) setError(errorText(reason));
+    } finally {
+      if (token === requestToken.current && currentFingerprint.current === expected) setBusy(null);
+    }
+  }
+  async function confirmed(versionId: string) {
+    if (!scenario) return;
+    setBusy("loading"); setError(null);
+    try { setScenario(await getPavementProject(scenario,versionId)); setScope(""); }
+    catch(reason) { setScenario(current=>current ? {...current,project_data_version_id:versionId,project:{...current.project,bridges:[]}} : current); setError(errorText(reason)); }
+    finally { setBusy(null); }
+  }
+  const diagnostics = active === "results" ? solved?.diagnostics : null;
+  return <div className="app-shell pavement-workspace"><div className={`app-body ${collapsed ? "side-nav-collapsed" : ""}`}>
+    <SideNavigation activeTab={active} openTabs={[active]} onOpen={setActive} collapsed={collapsed} onToggleCollapsed={()=>setCollapsed(v=>!v)} engineeringDomain="pavement" />
+    <main className="workspace"><div className="workspace-tabs"><h2>公路路面施工计划</h2></div><div className="workspace-content">
+      {error && <section className="notice error" role="alert">{error}<button onClick={()=>void load()}>重新加载</button></section>}
+      {notice && <section className="notice">{notice}</section>}
+      {!scenario && <section className="panel full">{busy ? "正在读取路面项目…" : "项目未加载，请重试。"}</section>}
+      {scenario && <>
+        {active==="results" && <section className="panel full"><div className="toolbar"><label>计划开始日期 <input aria-label="计划开始日期" type="date" value={scenario.project.start_date} onChange={e=>e.target.value && patch({project:{...scenario.project,start_date:e.target.value}})} /></label>
+          <label>求解范围 <select value={scope} onChange={e=>setScope(e.target.value)}><option value="">全部路面工点</option>{scenario.project.bridges.map(w=><option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
+          <button disabled={!!busy} onClick={()=>void solveCurrent()}>{busy==="solving" ? "求解中…" : "按固定机组求解"}</button>
+          <button disabled={!idleAvailable} title={idleAvailable ? "工期不超过当前方案，继续减少机组期间空闲" : "需先获得与当前输入一致的可行方案，且没有运行中的计算"} onClick={()=>void solveCurrent(true)}>{busy==="solving" && solveGoal==="idle" ? "窝工优化中…" : "优化窝工"}</button>
+          <button disabled={!!busy || !dirty} onClick={()=>void save()}>保存配置{dirty ? "（未保存）" : ""}</button></div>
+        </section>}
+        {active==="projectFiles" && <ProjectMasterDataWorkspace key={projectId} projectId={projectId} engineeringDomain="pavement" activeVersionId={scenario.project_data_version_id} onVersionConfirmed={id=>void confirmed(id)} />}
+        {active==="process" && <ProcessTab scenario={scenario} onUpdateProcess={(i,values)=>patch({process_library:scenario.process_library.map((p,j)=>i===j ? {...p,...values} : p)})} onSaveProcessLibrary={()=>void save()} savingProcessLibrary={!!busy} processLibraryDirty={dirty} />}
+        {active==="logic" && <LogicTab scenario={scenario} onUpdateLogic={()=>{}} onUpdateUpperStructureLogic={()=>{}} onSaveLocalConfig={()=>void save()} savingLocalConfig={!!busy} localConfigDirty={dirty} onUpdatePavementSettings={settings=>patch({pavement_settings:settings})} />}
+        {active==="resources" && <PavementResources scenario={scenario} onChange={pools=>patch({resource_pools:pools})} onSave={()=>void save()} saving={!!busy} />}
+        {active==="tasks" && <PavementTaskView scenario={scenario} generated={currentPreview.generation} status={currentPreview.status} error={currentPreview.error}
+          onRetry={()=>void previewController.request(scenario,setPreview,true)} onSave={()=>void save()} dirty={dirty} saving={!!busy}
+          onSelectLayerOption={(id,option)=>patch({task_overrides:{...scenario.task_overrides,[id]:{...scenario.task_overrides?.[id],productivity_option_id:option || null}}})} />}
+        {active==="results" && <>{solved && resultFingerprint!==fingerprint && <p role="status">历史结果：输入已变化，不能作为当前计划使用。</p>}{solved ? <PavementScheduleResults result={solved.result} generated={solved.generated} liveStatus={liveStatus} progress={{startedAt:solveStartedAt,timeBudgetSeconds,goal:solveGoal}} /> : <section className="panel full">{liveStatus === "running" ? <PavementSolveProgress status={liveStatus} hasPlan={false} progress={{startedAt:solveStartedAt,timeBudgetSeconds,goal:solveGoal}} /> : <p role="status">{liveStatus === "interrupted" ? "本次优化未完成，尚未收到可展示方案。" : "完成参数配置后，点击“按固定机组求解”。"}</p>}</section>}</>}
+        {(active==="tasks" || active==="results") && !!diagnostics?.length && <section className="panel full"><h3>数据与排程诊断</h3><ul>{diagnostics.map((d,i)=><li key={i}>{d.level === "error" ? "待处理" : d.level === "warning" ? "提示" : "说明"}：{d.message} {d.subject_id && `（${d.subject_id}）`}</li>)}</ul></section>}
+      </>}
+    </div></main>
+  </div></div>;
 }

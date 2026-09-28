@@ -9,6 +9,9 @@ import { projectMasterSideLabels, projectMasterWorkpointTypeLabels } from "../..
 
 const SIDE_ORDER: ProjectMasterSide[] = ["left", "right", "shared", "none"];
 const STRUCTURE_PARAMETER_LABELS: Record<string, string> = {
+  start_chainage: "起点桩号（原文）", end_chainage: "终点桩号（原文）", construction_length_m: "确认净施工长度",
+  width_m: "宽度", roadbed_available_date: "路床最早可用日期", quantity_basis_confirmed: "净量依据已确认",
+  quantity_basis_note: "净量依据说明", quantity_basis: "数量依据", thickness_m: "厚度（统一m）",
   mileage_start_text: "起点里程",
   mileage_end_text: "终点里程",
   span_index: "跨序号",
@@ -35,10 +38,11 @@ export function WorkPointDetail({ workpoint, loading }: { workpoint: ProjectMast
             起点 {formatMileage(workpoint.start_mileage_m)} · 终点 {formatMileage(workpoint.end_mileage_m)} · {workpoint.structures.length} 个结构物
           </p>
         </div>
-        <b className={workpoint.schedule_support === "bridge_supported" ? "supported" : "unsupported"}>
-          {workpoint.schedule_support === "bridge_supported" ? "支持桥梁排程" : "当前不参与排程"}
+        <b className={workpoint.schedule_support !== "not_supported" ? "supported" : "unsupported"}>
+          {workpoint.schedule_support === "pavement_supported" ? "支持路面排程" : workpoint.schedule_support === "bridge_supported" ? "支持桥梁排程" : "当前不参与排程"}
         </b>
       </div>
+      {workpoint.workpoint_type === "pavement" && workpoint.remark && <p>{workpoint.remark}</p>}
       <div className="project-master-structure-list">
         {sideGroups.map(({ side, structures }) => (
           <section className="project-master-side-group" key={side}>
@@ -52,6 +56,7 @@ export function WorkPointDetail({ workpoint, loading }: { workpoint: ProjectMast
                   <header className="project-master-structure-heading">
                     <strong>{displayStructureName(structure)}</strong>
                   </header>
+                  {workpoint.workpoint_type === "pavement" && structure.remark && <p>{structure.remark}</p>}
                   {structure.parameters.length > 0 && (
                     <div className="project-master-parameter-grid">
                       {structure.parameters.map((parameter) => (
@@ -63,6 +68,7 @@ export function WorkPointDetail({ workpoint, loading }: { workpoint: ProjectMast
                     </div>
                   )}
                   <div className="project-master-components">
+                    {workpoint.workpoint_type === "pavement" && structure.components.length === 0 && <p>该施工段尚未配置结构层，补齐层序、厚度和工程量单位后可生成施工任务。</p>}
                     {structure.components.map((component) => {
                       const parameterSummary = component.parameters
                         .map((parameter) => formatComponentParameter(component, parameter))
@@ -135,7 +141,10 @@ function componentParameterLabel(componentType: string, parameterCode: string): 
 }
 
 function formatParameterValue(parameter: ProjectMasterParameter): string {
-  const rawValue = parameter.value == null ? "—" : String(parameter.value);
+  const rawValue = parameter.value == null ? "—" : typeof parameter.value === "boolean" ? (parameter.value ? "是" : "否") : String(parameter.value);
+  if (parameter.parameter_code === "quantity_basis") {
+    return rawValue === "entered" ? "人工确认工程量" : rawValue === "geometric" ? "按几何尺寸计算" : rawValue;
+  }
   if (parameter.parameter_code === "form" && isDimensionValue(rawValue)) {
     return `${rawValue.replace(/\s*[*×xX]\s*/g, " × ")} m`;
   }

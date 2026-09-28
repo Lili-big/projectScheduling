@@ -187,6 +187,9 @@ def generate_schedule_input_from_scenario(
     include_girder_erection: bool = False,
     workpoint_id: str | None = None,
 ) -> GeneratedScheduleInput:
+    if scenario.engineering_domain == "pavement":
+        from ..generation.pavement import generate_pavement_input
+        return generate_pavement_input(scenario, workpoint_id=workpoint_id)
     solve_scope = resolve_solve_scope(scenario, workpoint_id)
     validation: list[ValidationMessage] = []
     tasks, generated_links = _build_tasks(
@@ -299,7 +302,7 @@ def resolve_solve_scope(scenario: ScenarioInput, workpoint_id: str | None = None
     if not normalized_id:
         raise ValueError("求解工点 ID 不能为空。")
     bridge = next((item for item in scenario.project.bridges if item.id == normalized_id), None)
-    if bridge is None or bridge.workpoint_type != "bridge":
+    if bridge is None or bridge.workpoint_type != scenario.engineering_domain:
         raise ValueError(f"求解工点 {normalized_id} 不存在、不属于当前项目版本或不是桥梁工点。")
     return SolveScope(mode="WORKPOINT", workpoint_id=bridge.id, workpoint_name=bridge.name)
 
@@ -321,6 +324,9 @@ def _project_master_source_summary(bridges: list[ProjectBridge]) -> dict[str, st
 
 
 def solve_scenario(scenario: ScenarioInput, *, workpoint_id: str | None = None) -> ScenarioSolveResult:
+    if scenario.engineering_domain == "pavement":
+        from .pavement import solve_pavement_scenario
+        return solve_pavement_scenario(scenario, workpoint_id=workpoint_id)
     started_at = time.perf_counter()
     generated = generate_schedule_input_from_scenario(scenario, workpoint_id=workpoint_id)
     alternative_results: list[ScenarioAlternativeResult] = []
@@ -2521,6 +2527,7 @@ def expand_effective_resource_pools(
                         else f"{pool.label}（{pool.workpoint_id}）{index}"
                     ),
                     type=pool.resource_type,
+                    transfer_days=pool.transfer_days,
                     pool_id=pool.effective_pool_id,
                     pool_label=pool.label,
                     enabled=True,

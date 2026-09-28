@@ -1,4 +1,6 @@
+import type { EngineeringDomain, PavementSettings, PavementTaskContext, PavementReadinessCondition, PavementSummary, PavementOptimization, PavementIdleOptimization } from "./pavement";
 export type ComponentType =
+  | "granular_base" | "cement_stabilized_base" | "asphalt_course" | "pavement_preparation"
   | "pile"
   | "cap"
   | "spread_foundation"
@@ -14,7 +16,7 @@ export type ComponentType =
   | "steel_box_beam"
   | "bridge_deck_system";
 export type RelationshipType = "FS" | "SS" | "FF" | "SF";
-export type WorkPointType = "road" | "bridge" | "tunnel";
+export type WorkPointType = "road" | "bridge" | "tunnel" | "pavement";
 export type WorkSectionSide = "left" | "right" | "none";
 export type ResourceMode = "LIMITED" | "UNLIMITED";
 export type ResourceScopeMode = "PROJECT_SHARED" | "WORKPOINT_EXCLUSIVE";
@@ -252,9 +254,10 @@ export type UpperStructureModel = {
 };
 
 export type StructureModel = {
+  properties?: Record<string, unknown>;
   id: string;
   name: string;
-  structure_type: "pier" | "abutment";
+  structure_type: "pier" | "abutment" | "pavement_section";
   order: number;
   support_no?: string | null;
   support_index?: number | null;
@@ -321,7 +324,7 @@ export type ProcessTemplate = {
 export type LogicRule = {
   id: string;
   scope: "same_structure" | "structure_sequence";
-  structure_type?: "pier" | "abutment" | "upper_structure" | "continuous_beam" | null;
+  structure_type?: "pier" | "abutment" | "upper_structure" | "continuous_beam" | "pavement_section" | null;
   to_component: ComponentType;
   predecessor_candidates: ComponentType[];
   predecessor_strategy: "all" | "first_available";
@@ -355,6 +358,7 @@ export type WorkpointResourceOverride = {
 };
 
 export type ResourcePool = {
+  transfer_days?: number | null;
   id: string;
   type: string;
   label: string;
@@ -400,6 +404,8 @@ export type MilestoneConstraint = {
 };
 
 export type ScenarioInput = {
+  pavement_settings?: PavementSettings | null;
+  engineering_domain?: EngineeringDomain;
   scenario_id: string;
   scenario_name: string;
   project_data_version_id?: string | null;
@@ -550,6 +556,12 @@ export type AiParameterApplyResponse = {
 };
 
 export type LocalScenarioConfig = {
+  project_start_date?: string | null;
+  engineering_domain?: EngineeringDomain;
+  project_id?: string | null;
+  project_data_version_id?: string | null;
+  pavement_settings?: PavementSettings | null;
+  task_overrides?: Record<string, TaskOverride>;
   process_library: ProcessTemplate[];
   logic_rules: LogicRule[];
   upper_structure_logic_rules: UpperStructureLogicRule[];
@@ -571,6 +583,7 @@ export type ProjectStructureParamsApplyResponse = {
 };
 
 export type Task = {
+  pavement_context?: PavementTaskContext | null;
   id: string;
   name: string;
   bridge_id?: string | null;
@@ -619,6 +632,8 @@ export type PrecedenceLink = {
 };
 
 export type Resource = {
+  compatible_process_ids?: string[] | null;
+  transfer_days?: number | null;
   id: string;
   name: string;
   type: string;
@@ -686,6 +701,10 @@ export type ValidationMessage = {
 };
 
 export type ScheduleInput = {
+  readiness_conditions?: PavementReadinessCondition[];
+  pavement_handover_scope?: import("./pavement").PavementHandoverScope | null;
+  project_data_version_id?: string | null;
+  engineering_domain?: EngineeringDomain;
   project_name: string;
   start_date: string;
   tasks: Task[];
@@ -711,6 +730,9 @@ export type SolveScope = {
 };
 
 export type ScheduleResult = {
+  pavement_idle_optimization?: PavementIdleOptimization | null;
+  pavement_optimization?: PavementOptimization | null;
+  pavement_summary?: PavementSummary | null;
   status: "OPTIMAL" | "FEASIBLE" | "INFEASIBLE" | "UNKNOWN" | "MODEL_INVALID";
   objective_days: number | null;
   plan_start_date: string;
@@ -2006,3 +2028,5 @@ export type GirderProgressImportPreview = {
   passage_actuals: PassageActual[];
   diagnostics: ValidationMessage[];
 };
+
+export type PavementIdleOptimizeRequest = { scenario: ScenarioInput; baseline: ScenarioSolveResult };

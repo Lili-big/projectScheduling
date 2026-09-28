@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiPostFormData, apiPut } from "./client";
+import { apiGet, apiPost, apiPostFormData, apiPut, apiPostStream } from "./client";
 import type {
   AiWorkpointResourceInitializationRequest,
   AiWorkpointResourceInitializationResponse,
@@ -65,6 +65,8 @@ type ProcessNlRequest = {
 };
 
 type ProcessLibrarySaveRequest = {
+  engineering_domain?: "bridge" | "pavement";
+  project_id?: string;
   process_library: ProcessTemplate[];
 };
 
@@ -79,8 +81,8 @@ type ProjectStructureParamsSaveRequest = {
   project: ProjectModel;
 };
 
-export function getDemoScenario(): Promise<ScenarioInput> {
-  return apiGet<ScenarioInput>("/api/demo-scenario");
+export function getDemoScenario(engineeringDomain: "bridge" | "pavement" = "bridge", projectId?: string): Promise<ScenarioInput> {
+  return apiGet<ScenarioInput>(`/api/demo-scenario?engineering_domain=${engineeringDomain}${projectId ? `&project_id=${encodeURIComponent(projectId)}` : ""}`);
 }
 
 export function getProjectStructureParams(): Promise<ProjectStructureParamsResponse> {
@@ -115,6 +117,18 @@ export function generateScheduleInput(
 
 export function solveScenario(scenario: ScenarioInput, workpointId?: string | null): Promise<ScenarioSolveResult> {
   return apiPost<ScenarioSolveResult>(schedulingPath("/api/solve-scenario", workpointId), scenario);
+}
+
+export function solvePavementScenarioStream(scenario: ScenarioInput, workpointId: string | null,
+  publish: (event: unknown) => void, signal: AbortSignal): Promise<void> {
+  return apiPostStream(schedulingPath("/api/solve-scenario/stream", workpointId), scenario, publish, signal,
+    (scenario.time_limit_seconds + 30) * 1000);
+}
+
+export function optimizePavementIdleStream(scenario: ScenarioInput, workpointId: string | null,
+  baseline: ScenarioSolveResult, publish: (event: unknown) => void, signal: AbortSignal): Promise<void> {
+  return apiPostStream(schedulingPath("/api/solve-scenario/idle/stream", workpointId), {scenario, baseline}, publish, signal,
+    (scenario.time_limit_seconds + 30) * 1000);
 }
 
 export function solveMinResources(

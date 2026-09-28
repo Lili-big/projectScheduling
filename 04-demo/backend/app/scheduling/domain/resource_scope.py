@@ -9,6 +9,66 @@ from ...contracts import ProjectBridge, ResourcePool, ResourceScopeMode, Validat
 RESOURCE_SCOPE_RULE_VERSION = "workpoint-resource-scope/v1"
 InheritanceSource = Literal["global", "inherited", "overridden"]
 
+PAVEMENT_SHARED_RESOURCE_TYPE = "pavement_paving_crew"
+
+
+def pavement_pool_has_capacity(pool: ResourcePool) -> bool:
+    """Use the same quantities/enabled overrides as scope resolution, before master loading."""
+    if pool.scope_mode == "PROJECT_SHARED" or pool.workpoint_id is not None:
+        return pool.enabled and (pool.quantity or 0) > 0
+    overrides = {o.workpoint_id: o for o in pool.workpoint_overrides}
+    ids = pool.authorized_workpoint_ids
+    if ids is None:
+        if pool.enabled and (pool.quantity or 0) > 0:
+            return True
+        ids = list(overrides)
+    return any(
+        (overrides[wid].enabled if wid in overrides and overrides[wid].enabled is not None else pool.enabled)
+        and (overrides[wid].quantity if wid in overrides and overrides[wid].quantity is not None else (pool.quantity or 0)) > 0
+        for wid in ids
+    )
+
+
+def normalize_pavement_resource_pools(pools, processes, *, legacy=False, require_transfer=True):
+    """Resolve explicit process IDs; legacy empty lists retain only their original category."""
+    from ...process_library_defaults import PAVEMENT_PROCESSES
+    known = {p.id: p for p in processes if p.component_type in PAVEMENT_PROCESSES}
+    types = {v[1] for v in PAVEMENT_PROCESSES.values()}
+    normalized, diagnostics, seen = [], [], set()
+    for pool in pools:
+        def error(text, code="PAVEMENT_REFERENCE_INVALID"):
+            diagnostics.append(ValidationMessage(level="error", code=code, message=text, subject_id=pool.id))
+        if pool.id in seen:
+            error("机组ID重复。")
+        seen.add(pool.id)
+        if not pool.label.strip():
+            error("请填写机组名称。")
+        if pool.type not in types | {PAVEMENT_SHARED_RESOURCE_TYPE} or pool.resource_mode != "LIMITED":
+            error("路面机组必须为固定数量的摊铺机组。")
+        ids = list(dict.fromkeys(pool.compatible_process_ids))
+        if not ids and legacy and pool.type in types:
+            ids = [p.id for p in known.values() if p.resource_type == pool.type]
+        if set(ids) - known.keys():
+            error("机组适用工艺引用无效，请重新选择当前工艺库中的工艺。")
+        if pavement_pool_has_capacity(pool):
+            if not ids:
+                error("可用机组至少选择一种适用工艺。")
+            if require_transfer and pool.transfer_days is None:
+                error("请确认可用机组跨段转场天数，零天也需填写。", "PAVEMENT_TRANSFER_UNCONFIRMED")
+        normalized.append(pool.model_copy(update={"compatible_process_ids": ids}))
+    return normalized, diagnostics
+
+
+def pavement_resource_matches(task, resource) -> bool:
+    from ...process_library_defaults import PAVEMENT_PROCESSES
+    context = task.pavement_context
+    if not context or context.task_kind != "construction" or not resource.enabled or task.bridge_id not in resource.eligible_workpoint_ids:
+        return False
+    if resource.compatible_process_ids is not None:
+        return bool(context.process_id and context.process_id in resource.compatible_process_ids)
+    expected = PAVEMENT_PROCESSES.get(task.component_type)
+    return bool(expected and resource.type == expected[1])
+
 
 @dataclass(frozen=True)
 class EffectiveResourcePool:
@@ -30,6 +90,7 @@ class EffectiveResourcePool:
     billing_period_days: int
     same_structure_resource_binding: bool
     parallel_rule_description: str
+    transfer_days: int | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +114,7 @@ def resolve_effective_resource_pools(
     project_data_version_id: str | None,
     bridges: list[ProjectBridge],
     resource_pools: list[ResourcePool],
+    engineering_domain: str = "bridge",
 ) -> EffectiveResourceResolution:
     """Resolve the single authoritative resource configuration for scheduling.
 
@@ -62,7 +124,7 @@ def resolve_effective_resource_pools(
     """
 
     bridge_workpoint_ids = tuple(
-        sorted({bridge.id for bridge in bridges if bridge.workpoint_type == "bridge"})
+        sorted({bridge.id for bridge in bridges if bridge.workpoint_type == engineering_domain})
     )
     valid_workpoint_ids = set(bridge_workpoint_ids)
     diagnostics: list[ValidationMessage] = []
@@ -303,6 +365,7 @@ def _effective_pool(
     return EffectiveResourcePool(
         effective_pool_id=effective_pool_id,
         source_pool_id=pool.id,
+        transfer_days=pool.transfer_days,
         resource_type=pool.type,
         label=pool.label,
         resource_mode=pool.resource_mode,

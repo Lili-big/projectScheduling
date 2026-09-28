@@ -8,3 +8,6 @@ surface; ``app.models`` remains a compatibility façade.
 from ._models import *  # noqa: F401,F403
 from .girder_plan_simulation import *  # noqa: F401,F403
 from .project_master import *  # noqa: F401,F403
+
+from .pavement import *  # noqa: F401,F403
+from .pavement_stream import *  # noqa: F401,F403

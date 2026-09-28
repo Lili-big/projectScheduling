@@ -43,11 +43,14 @@ def project_model_from_master(
     snapshot: ProjectMasterSnapshot,
     project_name: str,
     start_date: date,
+    engineering_domain: str = "bridge",
 ) -> tuple[ProjectModel, list[ValidationMessage]]:
     """Create the existing scheduling projection without persisting another snapshot."""
 
     if version.status != "confirmed":
         raise ValueError("桥梁排程只能使用已确认的项目主数据版本。")
+    if engineering_domain == "pavement":
+        return _pavement_project(version, snapshot, project_name, start_date)
     diagnostics: list[ValidationMessage] = []
     bridges: list[ProjectBridge] = []
     for workpoint in sorted(snapshot.workpoints, key=lambda item: (item.sort_order, item.workpoint_id)):
@@ -123,6 +126,40 @@ def project_model_from_master(
         ),
         diagnostics,
     )
+
+
+def _pavement_project(version, snapshot, project_name, start_date):
+    from .validation import validate_snapshot, PAVEMENT_COMPONENT_TYPES
+
+    diagnostics = []
+    for issue in validate_snapshot(snapshot):
+        if issue.severity == "error" or issue.issue_code.startswith("PAVEMENT_"):
+            diagnostics.append(_message("error", issue.issue_code, issue.message, issue.object_id))
+    workpoints = []
+    for workpoint in snapshot.workpoints:
+        if workpoint.workpoint_type != "pavement":
+            diagnostics.append(_message("error", "PAVEMENT_SCOPE_NOT_SUPPORTED", f"工点 {workpoint.workpoint_name} 不属于路面范围。", workpoint.workpoint_id))
+            continue
+        sections = []
+        for structure in sorted(workpoint.structures, key=lambda x: (x.sort_order, x.structure_id)):
+            components = []
+            handover = {key: _parameters(structure.parameters).get(key) for key in (
+                "roadbed_handover_status", "roadbed_available_date", "roadbed_handover_note")}
+            for layer in sorted(structure.components, key=lambda x: (x.sort_order, x.component_id)):
+                if layer.component_type not in PAVEMENT_COMPONENT_TYPES: continue
+                properties = {**_parameters(structure.parameters), **_parameters(layer.parameters), **handover, "unit": layer.unit,
+                              "layer_order": layer.sort_order, "source": layer.source.model_dump(mode="json") if layer.source else None}
+                components.append(ComponentModel(id=layer.component_id, name=layer.component_name,
+                    component_type=layer.component_type, quantity=layer.quantity, quantity_label=f"{layer.quantity:g}{layer.unit}",
+                    enabled=layer.enabled, properties=properties))
+            sections.append(WorkSection(id=structure.structure_id, name=structure.structure_name,
+                side=structure.side if structure.side in {"left", "right"} else "none", order=structure.sort_order,
+                structures=[StructureModel(id=structure.structure_id, name=structure.structure_name,
+                    structure_type="pavement_section", order=structure.sort_order, properties=handover, components=components)]))
+        workpoints.append(ProjectBridge(id=workpoint.workpoint_id, name=workpoint.workpoint_name,
+            order=workpoint.sort_order, workpoint_type="pavement", work_sections=sections,
+            import_source={"project_data_version_id": version.version_id, "content_fingerprint": version.content_fingerprint}))
+    return ProjectModel(project_id=version.project_id, project_name=project_name, start_date=start_date, bridges=workpoints), diagnostics
 
 
 def _lower_structure(structure, diagnostics: list[ValidationMessage]) -> StructureModel:

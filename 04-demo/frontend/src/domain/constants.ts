@@ -18,6 +18,10 @@ export const resourceCostTypeLabels: Record<ResourceCostType, string> = {
 export const keyResourceComponentTypes = new Set<ComponentType>(["pile", "cap", "pier_body", "cap_beam", "cast_in_place_continuous_beam"]);
 
 export const defaultResourceTypeByComponent: Partial<Record<ComponentType, string>> = {
+  granular_base: "granular_paving_crew",
+  cement_stabilized_base: "water_stable_paving_crew",
+  asphalt_course: "asphalt_paving_crew",
+
   spread_foundation: "spread_foundation_team",
   ground_tie_beam: "tie_beam_team",
   middle_tie_beam: "tie_beam_team",
@@ -34,6 +38,7 @@ export const defaultResourceTypeByComponent: Partial<Record<ComponentType, strin
 };
 
 export const standardResourceTypeLabels: Record<string, string> = {
+  granular_paving_crew: "碎石机组", water_stable_paving_crew: "水稳机组", asphalt_paving_crew: "沥青机组",
   rotary_drill: "旋挖钻机",
   circulation_drill: "回旋钻机",
   impact_drill: "冲击钻机",
@@ -60,6 +65,10 @@ export const excludedResourceCatalogTypes = new Set([
 ]);
 
 export const projectMasterComponentTypeProjection: Record<string, ComponentType> = {
+  granular_base: "granular_base",
+  cement_stabilized_base: "cement_stabilized_base",
+  asphalt_course: "asphalt_course",
+
   pile: "pile",
   cap: "cap",
   spread_foundation: "spread_foundation",

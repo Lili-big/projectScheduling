@@ -561,8 +561,10 @@ test("fingerprint distinguishes workpoint identity but ignores pool ordering", a
   );
 });
 
-test("resource page keeps the workpoint-local editor and omits shared-pool configuration", () => {
-  const source = readFileSync(resolve(root, "src/features/resources/ResourcesTab.tsx"), "utf8");
+test("bridge resource page keeps the workpoint-local editor and omits shared-pool configuration", () => {
+  const fullSource = readFileSync(resolve(root, "src/features/resources/ResourcesTab.tsx"), "utf8");
+  // The explicitly separate pavement editor supports shared fleets; bridge behavior stays frozen.
+  const source = fullSource.replace(/export function PavementResources[\s\S]*?(?=type AiInitializationState)/, "");
   const styles = readFileSync(resolve(root, "src/features/resources/styles.css"), "utf8");
   assert.match(source, /工点资源配置/);
   assert.match(source, /scope_mode:\s*"WORKPOINT_EXCLUSIVE"/);

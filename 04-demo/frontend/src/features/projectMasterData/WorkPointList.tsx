@@ -51,7 +51,7 @@ export function WorkPointList({
             </span>
             <span>
               <b>{projectMasterWorkpointTypeLabels[item.workpoint_type]}</b>
-              <small>{item.schedule_support === "bridge_supported" ? "支持桥梁排程" : "暂不参与排程"}</small>
+              <small>{item.schedule_support === "pavement_supported" ? "支持路面排程" : item.schedule_support === "bridge_supported" ? "支持桥梁排程" : "暂不参与排程"}</small>
             </span>
           </button>
         ))}

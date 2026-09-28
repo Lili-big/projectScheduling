@@ -22,6 +22,7 @@ import {
   type ResourceCatalogItem,
 } from "../../domain/resources";
 import "./styles.css";
+import { newPavementFleet, pavementFleetErrors, togglePavementFleetProcess } from "../../domain/pavement";
 
 export type ResourceWorkpointState =
   | { status: "loading"; versionId: string }
@@ -33,6 +34,30 @@ type ResourceWorkpointDetailState =
   | { status: "loading"; versionId: string; workpointId: string }
   | { status: "error"; versionId: string; workpointId: string; message: string }
   | { status: "ready"; versionId: string; workpointId: string; workpoint: ProjectMasterWorkpoint };
+
+export function PavementResources({ scenario, onChange, onSave, saving }: {
+  scenario: ScenarioInput; onChange: (pools: ResourcePool[]) => void; onSave: () => void; saving: boolean;
+}) {
+  const patch = (id: string, values: Partial<ResourcePool>) => onChange(scenario.resource_pools.map(p => p.id === id ? { ...p, ...values } : p));
+  const errors = pavementFleetErrors(scenario);
+  return <section className="panel full pavement-fleets"><PanelTitle title="路面关键机组" subtitle="同一套机组可承担多种工艺，同一时间只施工一个任务。" action={<button disabled={saving || errors.length > 0} onClick={onSave}>{saving ? "正在保存…" : "保存配置"}</button>} />
+    <div className="pavement-fleet-toolbar"><span>养生不占机组；同段同幅换层不转场，跨段/幅按实际作业顺序转场。</span><button disabled={saving} onClick={() => onChange([...scenario.resource_pools, newPavementFleet(crypto.randomUUID())])}>新增机组</button></div>
+    {errors.length > 0 && <ul className="pavement-fleet-errors" role="alert">{errors.map((error, i) => <li key={i}>{error}</li>)}</ul>}
+    <fieldset disabled={saving}><div className="table-wrap"><table><thead><tr><th>机组名称</th><th>适用工艺（可多选）</th><th>数量（套）</th><th>跨段转场（天）</th><th>适用工点</th><th>状态</th></tr></thead><tbody>
+      {scenario.resource_pools.map(pool => <tr key={pool.id}><td><input className="pavement-fleet-name" aria-label={`${pool.label}名称`} value={pool.label} onChange={e => patch(pool.id, {label:e.target.value})} /></td>
+        <td><div className="pavement-fleet-processes">{scenario.process_library.map(process => <label key={process.id}><input type="checkbox" aria-label={`${pool.label}适用${process.process_name}`} checked={pool.compatible_process_ids.includes(process.id)} onChange={e => patch(pool.id, togglePavementFleetProcess(pool, process.id, e.target.checked))} />{process.process_name}</label>)}
+          {pool.compatible_process_ids.filter(id => !scenario.process_library.some(p => p.id === id)).map(id => <label key={id}><input type="checkbox" checked onChange={() => patch(pool.id,togglePavementFleetProcess(pool,id,false))} />失效工艺（{id}）</label>)}
+        </div></td>
+        <td><input aria-label={`${pool.label}数量`} type="number" min="0" step="1" value={pool.quantity ?? 0} onChange={e => patch(pool.id,{quantity:Number(e.target.value),max_quantity:Number(e.target.value),resource_mode:"LIMITED"})} /></td>
+        <td><input aria-label={`${pool.label}转场天数`} type="number" min="0" step="1" placeholder="待确认" value={pool.transfer_days ?? ""} onChange={e => patch(pool.id,{transfer_days:e.target.value === "" ? null : Number(e.target.value)})} /></td>
+        <td><label><input type="checkbox" checked={pool.authorized_workpoint_ids == null} onChange={e => patch(pool.id,{authorized_workpoint_ids:e.target.checked ? null : []})} />全部路面工点共享</label>
+          {pool.authorized_workpoint_ids != null && scenario.project.bridges.map(w => <label key={w.id}><input type="checkbox" checked={pool.authorized_workpoint_ids?.includes(w.id)} onChange={e => patch(pool.id,{authorized_workpoint_ids:e.target.checked ? [...pool.authorized_workpoint_ids!,w.id] : pool.authorized_workpoint_ids!.filter(id=>id!==w.id)})} />{w.name}</label>)}</td>
+        <td><label><input type="checkbox" checked={pool.enabled} onChange={e=>patch(pool.id,{enabled:e.target.checked})} />启用</label>{!pool.quantity && <small>无可用机组</small>}</td>
+      </tr>)}
+    </tbody></table></div></fieldset>
+    {!scenario.resource_pools.length && <p>尚未配置机组，请新增机组并选择适用工艺。</p>}
+  </section>;
+}
 
 type AiInitializationState =
   | { status: "idle" }

@@ -274,3 +274,14 @@
   font-weight: 700;
 }
 
+.pavement-task-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.pavement-task-heading h2 { margin: 0; }
+.pavement-task-preview small { font-size: 12px; font-weight: 400; color: #64748b; margin-left: 8px; }
+.pavement-task-preview th, .pavement-task-preview td { padding: 6px 8px; vertical-align: middle; }
+.pavement-task-preview thead th, .pavement-task-duration, .pavement-task-quantity { white-space: nowrap; }
+.pavement-task-preview .pavement-task-quantity, .pavement-task-preview .pavement-task-duration { text-align: center; }
+.pavement-task-preview select { max-width: 220px; }
+.pavement-task-group th { background: #eff6ff; text-align: left; }
+.pavement-task-group button { border: 0; background: transparent; color: inherit; padding: 2px 0; text-align: left; }
+.pavement-task-preview .pavement-task-pending { color: #b45309; }
+.pavement-task-diagnostics { margin-top: 12px; }

@@ -1,1 +1,1 @@
-export { compareScenarios, generateScheduleInput, solveMinResources, solveResourceCost, solveScenario } from "./_schedulerApi";
+export { compareScenarios, generateScheduleInput, solveMinResources, solveResourceCost, solveScenario, solvePavementScenarioStream, optimizePavementIdleStream } from "./_schedulerApi";

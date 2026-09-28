@@ -794,7 +794,7 @@ class ProjectMasterRepository:
                     object_kind,
                     object_id,
                     parameter_code,
-                    batch_id,
+                    source.batch_id or batch_id,
                     source.sheet_name,
                     source.row_no,
                     source.column_name,
