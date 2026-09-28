@@ -1,8 +1,11 @@
 from __future__ import annotations
 import math
 
+import json
+from urllib.parse import quote
+
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from ...contracts import (
     GeneratedScheduleInput,
@@ -28,6 +31,7 @@ from ...scenario import (
 from ...solver import solve_schedule
 from ...wbs import generate_wbs
 from ...project_master.repository import ProjectMasterRepositoryError
+from ...services.zpert_plan_export import ZpertPlanExportError, ZpertPlanExportRequest, export_zpert_plan
 from ...project_master.scheduling_adapter import project_model_from_master
 from ...project_master.service import default_project_master_service
 from ...scenario_data import bridge_completion_milestones
@@ -184,6 +188,29 @@ def compare_scenarios_endpoint(request: ScenarioCompareRequest) -> ScenarioCompa
             status_code=422,
             detail={"code": "SOLVE_SCOPE_COMPARISON_NOT_ALLOWED", "message": str(exc)},
         ) from exc
+
+
+@router.post("/api/zpert-plan/export")
+def export_zpert_plan_endpoint(payload: ZpertPlanExportRequest) -> Response:
+    try:
+        document, file_name = export_zpert_plan(
+            payload.project,
+            payload.generated,
+            payload.result,
+            payload.plan_name,
+        )
+    except ZpertPlanExportError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "ZPERT_PLAN_NOT_EXPORTABLE", "message": str(exc)},
+        ) from exc
+    body = json.dumps(document, ensure_ascii=False, indent=2).encode("utf-8")
+    encoded = quote(file_name, safe="")
+    return Response(
+        content=body,
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f"attachment;filename=\"{encoded}\";filename*=UTF-8''{encoded}"},
+    )
 
 
 def _solve_scope_http_error(exc: ValueError, workpoint_id: str | None) -> HTTPException:

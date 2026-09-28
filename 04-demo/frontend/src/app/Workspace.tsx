@@ -34,9 +34,11 @@ import {
   getCurrentProjectMasterVersion,
   getProjectMasterTaskViewDisplayMap,
   listProjectMasterWorkpoints,
+  saveBlob,
 } from "../api/projectMasterApi";
 import {
   compareScenarios,
+  exportZpertPlan,
   generateScheduleInput,
   solveMinResources as solveMinResourcesRequest,
   solveResourceCost as solveResourceCostRequest,
@@ -1667,6 +1669,8 @@ function ResultsTab({
   const [planWindowStart, setPlanWindowStart] = useState("");
   const [planWindowFinish, setPlanWindowFinish] = useState("");
   const [planWindowMode, setPlanWindowMode] = useState<PlanWindowMode>("detail");
+  const [exportingZpert, setExportingZpert] = useState(false);
+  const [zpertExportError, setZpertExportError] = useState<string | null>(null);
   const [selectedPlanTaskId, setSelectedPlanTaskId] = useState<string | null>(null);
   const [selectedResourceId, setSelectedResourceId] = useState<string | null>(null);
   const predecessorHoverOpenTimerRef = useRef<number | null>(null);
@@ -1820,6 +1824,29 @@ function ResultsTab({
       objective_terms: defaultObjectiveTermsConfig(),
       enable_balance_objective: false,
     });
+  }
+
+  const canExportZpert = Boolean(
+    scenario && generatedForDetails && result && result.tasks.length > 0 && (result.status === "OPTIMAL" || result.status === "FEASIBLE"),
+  );
+
+  async function exportCurrentZpertPlan() {
+    if (!scenario || !generatedForDetails || !result || !canExportZpert) return;
+    setExportingZpert(true);
+    setZpertExportError(null);
+    try {
+      const downloaded = await exportZpertPlan({
+        project: scenario.project,
+        generated: generatedForDetails,
+        result,
+        plan_name: scenario.project.project_name,
+      });
+      saveBlob(downloaded.blob, downloaded.fileName || `${scenario.project.project_name || "斑马进度计划"}.json`);
+    } catch (err) {
+      setZpertExportError(errorText(err));
+    } finally {
+      setExportingZpert(false);
+    }
   }
 
   function predecessorDetails(task: ScheduledTask): PredecessorDetail[] {
@@ -2535,6 +2562,11 @@ function ResultsTab({
           subtitle={result?.plan_finish_date ? `${result.plan_start_date} 至 ${result.plan_finish_date} · ${planSortLabel}` : "等待求解"}
           action={(
             <div className="schedule-view-actions">
+              {canExportZpert && (
+                <button type="button" className="secondary" onClick={() => void exportCurrentZpertPlan()} disabled={exportingZpert}>
+                  {exportingZpert ? "导出中…" : "导出斑马计划"}
+                </button>
+              )}
               <div className="segmented plan-sort-switcher" aria-label="计划排序">
                 {planListSortOptions.map((option) => (
                   <button
@@ -2566,6 +2598,7 @@ function ResultsTab({
             </div>
           )}
         />
+        {zpertExportError && <p role="alert">{zpertExportError}</p>}
         {activePlanWindowMode === "gantt" ? (
           <PlanTimelineView
             tasks={filteredPlanTasks}
@@ -5177,7 +5210,27 @@ function PavementWorkspace() {
     finally { setBusy(null); }
   }
   const [solveGoal, setSolveGoal] = useState<"makespan" | "idle">("makespan");
+  const [exportingZpert, setExportingZpert] = useState(false);
   const idleAvailable = canOptimizePavementIdle(solved, resultFingerprint === fingerprint, !!busy);
+  const canExportZpert = Boolean(scenario && solved && solved.result.tasks.length > 0 && (solved.result.status === "OPTIMAL" || solved.result.status === "FEASIBLE"));
+  async function exportCurrentZpertPlan() {
+    if (!scenario || !solved || !canExportZpert) return;
+    setExportingZpert(true);
+    setError(null);
+    try {
+      const downloaded = await exportZpertPlan({
+        project: scenario.project,
+        generated: solved.generated,
+        result: solved.result,
+        plan_name: scenario.project.project_name,
+      });
+      saveBlob(downloaded.blob, downloaded.fileName || `${scenario.project.project_name || "斑马进度计划"}.json`);
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setExportingZpert(false);
+    }
+  }
   async function solveCurrent(optimizeIdle = false) {
     if (!scenario || optimizeIdle && !idleAvailable) return;
     const baseline = optimizeIdle && solved ? solved : undefined;
@@ -5230,7 +5283,7 @@ function PavementWorkspace() {
         {active==="tasks" && <PavementTaskView scenario={scenario} generated={currentPreview.generation} status={currentPreview.status} error={currentPreview.error}
           onRetry={()=>void previewController.request(scenario,setPreview,true)} onSave={()=>void save()} dirty={dirty} saving={!!busy}
           onSelectLayerOption={(id,option)=>patch({task_overrides:{...scenario.task_overrides,[id]:{...scenario.task_overrides?.[id],productivity_option_id:option || null}}})} />}
-        {active==="results" && <>{solved && resultFingerprint!==fingerprint && <p role="status">历史结果：输入已变化，不能作为当前计划使用。</p>}{solved ? <PavementScheduleResults result={solved.result} generated={solved.generated} liveStatus={liveStatus} progress={{startedAt:solveStartedAt,timeBudgetSeconds,goal:solveGoal}} /> : <section className="panel full">{liveStatus === "running" ? <PavementSolveProgress status={liveStatus} hasPlan={false} progress={{startedAt:solveStartedAt,timeBudgetSeconds,goal:solveGoal}} /> : <p role="status">{liveStatus === "interrupted" ? "本次优化未完成，尚未收到可展示方案。" : "完成参数配置后，点击“按固定机组求解”。"}</p>}</section>}</>}
+        {active==="results" && <>{solved && resultFingerprint!==fingerprint && <p role="status">历史结果：输入已变化，不能作为当前计划使用。</p>}{solved ? <PavementScheduleResults result={solved.result} generated={solved.generated} liveStatus={liveStatus} progress={{startedAt:solveStartedAt,timeBudgetSeconds,goal:solveGoal}} onExportZpert={canExportZpert ? () => void exportCurrentZpertPlan() : undefined} exportingZpert={exportingZpert} /> : <section className="panel full">{liveStatus === "running" ? <PavementSolveProgress status={liveStatus} hasPlan={false} progress={{startedAt:solveStartedAt,timeBudgetSeconds,goal:solveGoal}} /> : <p role="status">{liveStatus === "interrupted" ? "本次优化未完成，尚未收到可展示方案。" : "完成参数配置后，点击“按固定机组求解”。"}</p>}</section>}</>}
         {(active==="tasks" || active==="results") && !!diagnostics?.length && <section className="panel full"><h3>数据与排程诊断</h3><ul>{diagnostics.map((d,i)=><li key={i}>{d.level === "error" ? "待处理" : d.level === "warning" ? "提示" : "说明"}：{d.message} {d.subject_id && `（${d.subject_id}）`}</li>)}</ul></section>}
       </>}
     </div></main>

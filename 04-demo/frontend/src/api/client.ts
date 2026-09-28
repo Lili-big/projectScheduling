@@ -84,6 +84,24 @@ export async function apiPostFormData<T>(path: string, payload: FormData): Promi
   return response.json() as Promise<T>;
 }
 
+export async function apiPostBlob(path: string, payload: unknown): Promise<{ blob: Blob; fileName: string | null }> {
+  const response = await apiFetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(await responseErrorText(response));
+  return { blob: await response.blob(), fileName: fileNameFromDisposition(response.headers.get("Content-Disposition")) };
+}
+
+function fileNameFromDisposition(header: string | null): string | null {
+  if (!header) return null;
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (encoded) return decodeURIComponent(encoded[1]);
+  const plain = /filename="([^"]*)"/.exec(header);
+  return plain ? decodeURIComponent(plain[1]) : null;
+}
+
 export async function apiGetBlob(path: string): Promise<Blob> {
   const response = await apiFetch(path);
   if (!response.ok) throw new Error(await responseErrorText(response));

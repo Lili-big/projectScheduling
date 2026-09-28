@@ -10,13 +10,14 @@ export function ScheduleResultsWorkspace({ children }: { children: ReactNode }) 
   return <div className="results-grid" data-resource-pool-results="pool-id">{children}</div>;
 }
 
-export function PavementScheduleResults({ result, generated, liveStatus, progress }: { result: ScheduleResult; generated?: GeneratedScheduleInput; liveStatus?: PavementLiveStatus; progress?: PavementProgress }) {
+export function PavementScheduleResults({ result, generated, liveStatus, progress, onExportZpert, exportingZpert = false }: { result: ScheduleResult; generated?: GeneratedScheduleInput; liveStatus?: PavementLiveStatus; progress?: PavementProgress; onExportZpert?: () => void; exportingZpert?: boolean }) {
   const display = pavementResultPresentation(result, liveStatus);
   const summary = display.hasPlan ? result.pavement_summary : null;
   const scope = display.handoverScope;
   const idle = result.pavement_idle_optimization;
   const taskName = (id: string) => result.tasks.find(t => t.id === id)?.name ?? id;
   return <section className="panel full pavement-results"><h2>路面排程结果 · {display.noSchedulableSection ? "暂无可开工施工段" : display.status}</h2>
+    {display.hasPlan && onExportZpert && <div className="actions inline"><button type="button" onClick={() => void onExportZpert()} disabled={exportingZpert}>{exportingZpert ? "导出中…" : "导出斑马计划"}</button></div>}
     {display.optimizationText && <p className="pavement-objective"><b>{display.optimizationText}</b></p>}
     <PavementSolveProgress status={liveStatus} progress={progress} hasPlan={display.hasPlan} improvementCount={progress?.goal === "idle" ? (liveStatus === "running" && !idle ? 0 : idle?.improvement_count) : result.pavement_optimization?.improvement_count} />
     {display.summaryText && <p className="pavement-result-summary" role="status">{display.summaryText}</p>}
