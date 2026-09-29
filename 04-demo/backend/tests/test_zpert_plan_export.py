@@ -10,6 +10,7 @@ sys.path.insert(0, str(BACKEND_ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from app.contracts import (  # noqa: E402
+    ComponentModel,
     GeneratedScheduleInput,
     PrecedenceLink,
     ProjectBridge,
@@ -78,6 +79,91 @@ def test_export_builds_wbs_duration_depends_and_start_times() -> None:
         assert "depends" not in summary
         assert summary["ask_start_time"] == summary["plan_start_time"]
     assert by_name["乙桥"]["id"] > by_name["甲桥"]["id"]
+
+
+def test_pavement_collapses_duplicate_section_and_uses_component_name() -> None:
+    section_name = "01段 · 左幅 · K666+910-K668+700"
+    next_section = "02段 · 左幅 · K668+700-K669+120"
+    project = ProjectModel(
+        project_id="road",
+        project_name="公路路面工程",
+        start_date=date(2026, 9, 28),
+        bridges=[
+            ProjectBridge(
+                id="ROAD",
+                name="公路路面工程（25个施工段）",
+                workpoint_type="pavement",
+                work_sections=[
+                    WorkSection(
+                        id="SEC1",
+                        name=section_name,
+                        structures=[StructureModel(
+                            id="SEC1",
+                            name=section_name,
+                            structure_type="pavement_section",
+                            components=[
+                                ComponentModel(id="C1", name="碎石垫层", component_type="granular_base", quantity=1),
+                                ComponentModel(id="C2", name="水稳底基层", component_type="cement_stabilized_base", quantity=1),
+                            ],
+                        )],
+                    ),
+                    WorkSection(
+                        id="SEC2",
+                        name=next_section,
+                        order=2,
+                        structures=[StructureModel(
+                            id="SEC2",
+                            name=next_section,
+                            structure_type="pavement_section",
+                            order=2,
+                            components=[ComponentModel(id="C3", name="碎石垫层", component_type="granular_base", quantity=1)],
+                        )],
+                    ),
+                ],
+            )
+        ],
+    )
+    generated = GeneratedScheduleInput(schedule_input=ScheduleInput(
+        project_name="公路路面工程",
+        start_date=date(2026, 9, 28),
+        tasks=[],
+        precedence_links=[PrecedenceLink(
+            id="L1", predecessor_id="base", successor_id="cement", relationship="FS", lag_days=7, source_rule_id="layer",
+        )],
+        resources=[],
+    ))
+    result = ScheduleResult(
+        status="FEASIBLE",
+        plan_start_date=date(2026, 9, 28),
+        tasks=[
+            _pavement_task("base", f"{section_name} · 碎石垫层", "SEC1", section_name, "C1", "碎石垫层", 1, 5, date(2026, 10, 26)),
+            _pavement_task("cement", f"{section_name} · 水稳底基层", "SEC1", section_name, "C2", "水稳底基层", 2, 3, date(2026, 11, 9)),
+            _pavement_task("base2", f"{next_section} · 碎石垫层", "SEC2", next_section, "C3", "碎石垫层", 1, 1, date(2026, 11, 10)),
+        ],
+    )
+    document, _file_name = export_zpert_plan(project, generated, result)
+    names = [item["name"] for item in document["tasks"]]
+    assert names == [
+        "公路路面工程",
+        "公路路面工程（25个施工段）",
+        section_name,
+        "碎石垫层",
+        "水稳底基层",
+        next_section,
+        "碎石垫层",
+    ]
+    by_id = {item["id"]: item for item in document["tasks"]}
+    gravel = next(item for item in document["tasks"] if item["name"] == "碎石垫层" and item["parent_id"] == next(row["id"] for row in document["tasks"] if row["name"] == section_name))
+    cement = next(item for item in document["tasks"] if item["name"] == "水稳底基层")
+    section = next(item for item in document["tasks"] if item["name"] == section_name)
+    assert gravel["parent_id"] == section["id"]
+    assert cement["parent_id"] == section["id"]
+    assert gravel["duration"] == 5 * 28800
+    assert cement["depends"] == f"{gravel['id']}FS+7"
+    assert cement["plan_start_time"] == cement["ask_start_time"]
+    assert "duration" not in section
+    assert names.count(section_name) == 1
+    assert by_id[section["id"]]["level"] == 2
 
 
 def test_missing_section_hangs_structure_on_bridge() -> None:
@@ -195,6 +281,30 @@ def _result() -> ScheduleResult:
             _task("cap", "承台", "B1", "S1", "P0", "0号墩", 2, 3, date(2026, 3, 3)),
             _task("pile", "钻孔桩", "B1", "S1", "P0", "0号墩", 1, 2, date(2026, 3, 1)),
         ],
+    )
+
+
+def _pavement_task(task_id: str, name: str, section_id: str, structure_name: str, component_id: str, process_name: str, sequence: int, duration: int, start: date) -> ScheduledTask:
+    return ScheduledTask(
+        id=task_id,
+        name=name,
+        bridge_id="ROAD",
+        work_section_id=section_id,
+        component_id=component_id,
+        sequence_order=sequence,
+        structure_id=section_id,
+        structure_name=structure_name,
+        structure_type="pavement_section",
+        component_type="granular_base",
+        process_name=process_name,
+        productivity_rule_id="rule",
+        quantity=1,
+        quantity_label="m",
+        duration_days=duration,
+        start_offset=0,
+        end_offset=duration,
+        start_date=start,
+        finish_date=start,
     )
 
 

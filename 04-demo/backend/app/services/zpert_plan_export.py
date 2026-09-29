@@ -68,7 +68,7 @@ def _task_documents(
     plan_name: str,
 ) -> list[dict[str, Any]]:
     catalog = _ProjectCatalog(project)
-    roots = _summary_nodes(tasks, catalog)
+    roots = _collapse_same_name_summaries(_summary_nodes(tasks, catalog))
     _assign_ids(roots)
     zebra_by_task_id = {
         node.task.id: node.zebra_id
@@ -111,6 +111,7 @@ class _ProjectCatalog:
         self.section_order: dict[str, tuple[int, int]] = {}
         self.structure_names: dict[str, str] = {}
         self.structure_order: dict[str, tuple[int, int]] = {}
+        self.component_names: dict[str, str] = {}
         for bridge_index, bridge in enumerate(project.bridges):
             self.bridge_names[bridge.id] = bridge.name or bridge.id
             self.bridge_order[bridge.id] = (bridge.order, bridge_index)
@@ -120,6 +121,8 @@ class _ProjectCatalog:
                 for structure_index, structure in enumerate(section.structures):
                     self.structure_names.setdefault(structure.id, structure.name or structure.id)
                     self.structure_order.setdefault(structure.id, (structure.order, structure_index))
+                    for component in structure.components:
+                        self.component_names.setdefault(component.id, component.name or component.id)
                 for upper_index, upper in enumerate(section.upper_structures):
                     self.structure_names.setdefault(upper.id, upper.name or upper.id)
                     self.structure_order.setdefault(upper.id, (upper.span_index, upper_index))
@@ -141,7 +144,7 @@ def _summary_nodes(tasks: list[ScheduledTask], catalog: _ProjectCatalog) -> list
                 key_fn=lambda task: task.structure_id,
                 name_fn=lambda key, structure_tasks: catalog.structure_names.get(key, _structure_label(structure_tasks)),
                 sort_fn=lambda key: (*catalog.structure_order.get(key, (10**9, 10**8)), key),
-                child_fn=_task_nodes,
+                child_fn=lambda structure_tasks: _task_nodes(structure_tasks, catalog),
             ),
         ),
     )
@@ -161,9 +164,35 @@ def _group(tasks, *, key_fn, name_fn, sort_fn, child_fn) -> list[_Node]:
     return nodes
 
 
-def _task_nodes(tasks: list[ScheduledTask]) -> list[_Node]:
+def _collapse_same_name_summaries(nodes: list[_Node], parent_name: str | None = None) -> list[_Node]:
+    collapsed: list[_Node] = []
+    for node in nodes:
+        if node.task is None:
+            node.children = _collapse_same_name_summaries(node.children, node.name)
+        if node.task is None and parent_name is not None and node.name == parent_name:
+            collapsed.extend(node.children)
+        else:
+            collapsed.append(node)
+    return collapsed
+
+
+def _task_nodes(tasks: list[ScheduledTask], catalog: _ProjectCatalog) -> list[_Node]:
     ordered = sorted(tasks, key=lambda task: (task.sequence_order, task.id))
-    return [_Node(task.name, task=task) for task in ordered]
+    return [_Node(_leaf_name(task, catalog), task=task) for task in ordered]
+
+
+def _leaf_name(task: ScheduledTask, catalog: _ProjectCatalog) -> str:
+    if task.structure_type != "pavement_section":
+        return task.name
+    if task.pavement_context is not None and task.pavement_context.task_kind == "preparation" and task.process_name:
+        return task.process_name
+    component_name = catalog.component_names.get(task.component_id or "")
+    if component_name:
+        return component_name
+    prefix = f"{task.structure_name} · "
+    if task.structure_name and task.name.startswith(prefix):
+        return task.name[len(prefix):]
+    return task.name
 
 
 def _structure_label(tasks: list[ScheduledTask]) -> str:
