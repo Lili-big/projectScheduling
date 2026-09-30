@@ -1168,6 +1168,7 @@ tbody tr:hover {
 .pv-legend span { display: inline-flex; align-items: center; gap: 7px; }
 .pv-key-work { width: 20px; height: 9px; background: #0d9488; border-radius: 2px; }
 .pv-key-wait { width: 24px; height: 9px; background: #fef3c7; border: 1px dashed #b98a32; }
+.pv-key-double { width: 20px; height: 9px; background: rgba(245, 158, 11, .25); border: 1px solid #f59e0b; border-radius: 2px; }
 .pv-empty { color: var(--muted); padding: 20px; background: #f8fafc; text-align: center; }
 .pv-plan-scroll { max-height: 560px; overflow: auto; border: 1px solid var(--border); border-radius: 7px; isolation: isolate; }
 .pv-plan-grid { min-width: 1500px; width: 100%; font-size: 12px; }

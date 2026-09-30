@@ -1,4 +1,4 @@
-import type { ScenarioInput, ProjectMasterWorkpoint, PavementSettings, PavementProcessType, PavementDependencyRule, ResourcePool, GeneratedScheduleInput, Task } from "../contracts";
+import type { ScenarioInput, ProjectMasterWorkpoint, PavementSettings, PavementProcessType, PavementDependencyRule, PavementShiftRegime, ResourcePool, GeneratedScheduleInput, Task } from "../contracts";
 
 export const pavementUnits = ["m/天", "m2/天", "m3/天", "t/天"];
 export const pavementProcessTypes = ["granular_base", "cement_stabilized_base", "asphalt_course"] as const;
@@ -212,4 +212,94 @@ export function pavementHandover(properties: Record<string, unknown>) {
   const invalid = !["dated", "handed_over", "pending"].includes(status) || (status === "dated" ? !validDate : !!date);
   const note = String(properties.roadbed_handover_note || (status === "pending" ? properties.roadbed_handover_status ? "移交日期未定，暂不可开工" : "尚未明确移交条件" : ""));
   return { status, date, note, invalid, label: invalid ? "移交条件无效" : status === "dated" ? date : status === "handed_over" ? "已移交（按计划开始日）" : "移交待定" };
+}
+
+// ---- 班制区间（076）：与后端 scheduling/domain/shift_regime.py 同口径的纯函数 ----
+
+const SHIFT_QUANTITY_EPSILON = 1e-9;
+
+const dayOffset = (day: string, startDate: string) =>
+  Math.round((Date.parse(day) - Date.parse(startDate)) / 86400000);
+
+const offsetDate = (startDate: string, offset: number) =>
+  new Date(Date.parse(startDate) + offset * 86400000).toISOString().slice(0, 10);
+
+export function pavementShiftRuns(regimes: PavementShiftRegime[], startDate: string) {
+  const spans = regimes.map(r => ({
+    first: dayOffset(r.start_date, startDate),
+    last: r.end_date ? dayOffset(r.end_date, startDate) : null,
+    shifts: r.shifts,
+  })).filter(s => s.last == null || s.last >= s.first)
+    .sort((a, b) => a.first - b.first || (a.last ?? Infinity) - (b.last ?? Infinity));
+  const merged: { first: number; last: number | null; shifts: number }[] = [];
+  for (const span of spans) {
+    const previous = merged[merged.length - 1];
+    if (previous && (previous.last == null || span.first <= previous.last)) throw new Error("班制区间重叠");
+    merged.push(span);
+  }
+  return merged;
+}
+
+export function shiftsForDay(regimes: PavementShiftRegime[], day: string): number {
+  for (const regime of regimes) {
+    if (regime.start_date <= day && (!regime.end_date || day <= regime.end_date)) return regime.shifts;
+  }
+  return 1;
+}
+
+const daysFor = (remaining: number, dailyOutput: number) =>
+  Math.max(1, Math.ceil((remaining - SHIFT_QUANTITY_EPSILON) / dailyOutput));
+
+export function taskDurationForStart(quantity: number | null, durationDays: number, productivityValue: number | null | undefined,
+  startOffset: number, regimes: PavementShiftRegime[] | null | undefined, startDate: string): number {
+  if (!regimes?.length || productivityValue == null || quantity == null || !(productivityValue > 0)) return durationDays;
+  const baseOutput = productivityValue;
+  let remaining = quantity, duration = 0, offset = startOffset;
+  const runs = pavementShiftRuns(regimes, startDate);
+  let index = 0;
+  while (index < runs.length && runs[index].last != null && (runs[index].last as number) < offset) index += 1;
+  for (;;) {
+    if (index >= runs.length) return duration + daysFor(remaining, baseOutput);
+    const run = runs[index];
+    if (offset < run.first) {
+      const gapDays = run.first - offset;
+      if (gapDays * baseOutput >= remaining - SHIFT_QUANTITY_EPSILON) return duration + daysFor(remaining, baseOutput);
+      remaining -= gapDays * baseOutput;
+      duration += gapDays;
+      offset = run.first;
+    }
+    const daysHere = run.last == null ? null : run.last - offset + 1;
+    const daily = baseOutput * run.shifts;
+    if (daysHere == null || daysHere * daily >= remaining - SHIFT_QUANTITY_EPSILON) return duration + daysFor(remaining, daily);
+    remaining -= daysHere * daily;
+    duration += daysHere;
+    offset = (run.last as number) + 1;
+    index += 1;
+  }
+}
+
+export function splitShiftDays(startOffset: number, endOffset: number, regimes: PavementShiftRegime[], startDate: string): Record<number, number> {
+  const split: Record<number, number> = {};
+  for (let offset = startOffset; offset < endOffset; offset += 1) {
+    const shifts = shiftsForDay(regimes, offsetDate(startDate, offset));
+    split[shifts] = (split[shifts] ?? 0) + 1;
+  }
+  return Object.keys(split).length ? split : { 1: 0 };
+}
+
+export function pavementShiftConfigErrors(regimes: PavementShiftRegime[]): string[] {
+  const errors: string[] = [];
+  for (const regime of regimes) {
+    if (regime.end_date && regime.end_date < regime.start_date) errors.push("班制区间的结束日不能早于起始日。");
+  }
+  const ordered = [...regimes].sort((a, b) => a.start_date.localeCompare(b.start_date));
+  for (const [previous, current] of ordered.slice(1).map((c, i) => [ordered[i], c] as const)) {
+    if (!previous.end_date || current.start_date <= previous.end_date) { errors.push("班制区间相互重叠或起点重复，请合并或调整区间。"); break; }
+  }
+  return [...new Set(errors)];
+}
+
+export function shiftSplitText(startOffset: number, endOffset: number, regimes: PavementShiftRegime[], startDate: string): string {
+  const split = splitShiftDays(startOffset, endOffset, regimes, startDate);
+  return [split[1] ? `单班 ${split[1]} 天` : "", split[2] ? `双班 ${split[2]} 天` : ""].filter(Boolean).join(" + ") || "0 天";
 }

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { getProjectMasterWorkpoint, listProjectMasterWorkpoints, initializePavementLayers, savePavementSectionLayers, savePavementHandover } from "../../api/projectMasterApi";
 import type { PavementLayerEdit, ProjectMasterParameter, ProjectMasterWorkpoint, SavePavementHandoverRequest } from "../../contracts/projectMaster";
@@ -7,13 +7,19 @@ import { pavementLayerQuantityT, pavementHandover } from "../../domain/pavement"
 import { PavementSectionLayers } from "./PavementSectionLayers";
 import { PavementSectionHandover } from "./PavementSectionHandover";
 
-export function PavementMasterBrowser({ versionId, editable, onVersionSaved, expandedSectionId, onExpand }: {
+export function PavementMasterBrowser({ versionId, editable, onVersionSaved, expandedSectionId, onExpand, onDirtyChange }: {
   versionId: string; editable: boolean; onVersionSaved: (versionId: string) => Promise<void>;
   expandedSectionId: string | null | undefined; onExpand: (id: string | null) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [items, setItems] = useState<ProjectMasterWorkpoint[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const dirtyEditors = useRef(new Set<string>());
+  const reportDirty = useCallback((key: string, dirty: boolean) => {
+    if (dirty) dirtyEditors.current.add(key); else dirtyEditors.current.delete(key);
+    onDirtyChange?.(dirtyEditors.current.size > 0);
+  }, [onDirtyChange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,7 +51,7 @@ export function PavementMasterBrowser({ versionId, editable, onVersionSaved, exp
     <p>施工段读取失败：{error}</p><button type="button" onClick={() => setAttempt(value => value + 1)}>重新加载</button>
   </section>;
   if (!items) return <section className="panel full pavement-master-state" role="status">正在读取施工段…</section>;
-  return <PavementMasterTable workpoints={items} readOnly={!editable} expandedSectionId={expandedSectionId} onExpand={onExpand} onSaveLayers={async (sectionId, layers) => {
+  return <PavementMasterTable workpoints={items} readOnly={!editable} expandedSectionId={expandedSectionId} onExpand={onExpand} onDirtyChange={reportDirty} onSaveLayers={async (sectionId, layers) => {
     const saved = await savePavementSectionLayers(versionId, sectionId, layers);
     await onVersionSaved(saved.version_id);
     if (saved.version_id === versionId) setAttempt(value => value + 1);
@@ -96,10 +102,11 @@ function formatParameter(parameter: ProjectMasterParameter): string {
   return `${parameterLabels[parameter.parameter_code] || parameter.parameter_code}：${value}${unit ? ` ${unit}` : ""}`;
 }
 
-export function PavementMasterTable({ workpoints, readOnly = true, expandedSectionId, onExpand, onSaveLayers, onSaveHandover }: {
+export function PavementMasterTable({ workpoints, readOnly = true, expandedSectionId, onExpand, onSaveLayers, onSaveHandover, onDirtyChange }: {
   workpoints: ProjectMasterWorkpoint[]; readOnly?: boolean; expandedSectionId?: string | null;
   onExpand?: (id: string | null) => void; onSaveLayers?: (sectionId: string, layers: PavementLayerEdit[]) => Promise<void>;
   onSaveHandover?: (sectionId: string, values: SavePavementHandoverRequest) => Promise<void>;
+  onDirtyChange?: (key: string, dirty: boolean) => void;
 }) {
   const sortedWorkpoints = sortProjectMasterHierarchy(workpoints);
   const rows = sortedWorkpoints.flatMap(workpoint => workpoint.structures
@@ -141,8 +148,8 @@ export function PavementMasterTable({ workpoints, readOnly = true, expandedSecti
             <td className={`numeric${width == null ? " unconfirmed" : ""}`}>{formatNumber(width)}</td>
             <td className="pavement-master-date">{handover.label}{handover.status === "pending" && `：${handover.note}`}</td>
           </tr>{onExpand && expanded === structure.structure_id && <tr className="pavement-section-detail-row"><td colSpan={multipleWorkpoints ? 8 : 7}>
-            <PavementSectionHandover section={structure} readOnly={readOnly} onSave={onSaveHandover} />
-            <PavementSectionLayers section={structure} readOnly={readOnly} onSave={onSaveLayers} />
+            <PavementSectionHandover section={structure} readOnly={readOnly} onSave={onSaveHandover} onDirtyChange={onDirtyChange} />
+            <PavementSectionLayers section={structure} readOnly={readOnly} onSave={onSaveLayers} onDirtyChange={onDirtyChange} />
           </td></tr>}</Fragment>;
         })}</tbody>
       </table>

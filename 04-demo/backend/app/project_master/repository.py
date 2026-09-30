@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
@@ -434,9 +434,12 @@ class ProjectMasterRepository:
             )
         return self.get_version_detail(version_id)
 
-    def load_snapshot(self, version_id: str) -> ProjectMasterSnapshot:
-        self.get_version_summary(version_id)
-        with self.connection() as connection:
+    def load_snapshot(self, version_id: str, *, connection: sqlite3.Connection | None = None) -> ProjectMasterSnapshot:
+        if connection is None:
+            self.get_version_summary(version_id)
+        elif not connection.execute("SELECT 1 FROM project_master_versions WHERE version_id=?", (version_id,)).fetchone():
+            raise ProjectMasterNotFoundError(f"项目主数据版本 {version_id} 不存在。")
+        with nullcontext(connection) if connection is not None else self.connection() as connection:
             workpoint_rows = connection.execute(
                 "SELECT * FROM workpoints WHERE version_id=? ORDER BY sort_order, workpoint_id", (version_id,)
             ).fetchall()

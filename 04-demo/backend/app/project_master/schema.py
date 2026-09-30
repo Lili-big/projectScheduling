@@ -12,7 +12,26 @@ from .definitions import (
 )
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+
+PROGRESS_DDL = """
+CREATE TABLE IF NOT EXISTS pavement_progress_revisions (
+    project_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL CHECK(revision >= 0),
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pavement_daily_progress (
+    project_id TEXT NOT NULL,
+    component_id TEXT NOT NULL,
+    progress_date TEXT NOT NULL,
+    completed_length_m TEXT NOT NULL,
+    source_version_id TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(project_id, component_id, progress_date),
+    FOREIGN KEY(source_version_id, component_id)
+        REFERENCES components(version_id, component_id) ON DELETE RESTRICT
+);
+"""
 
 
 DDL = """
@@ -230,10 +249,15 @@ def initialize_schema(connection: sqlite3.Connection) -> None:
     if current > SCHEMA_VERSION:
         raise RuntimeError(f"项目主数据数据库版本 {current} 高于当前支持版本 {SCHEMA_VERSION}。")
     if current < SCHEMA_VERSION:
-        connection.executescript(DDL)
-        _seed_definitions(connection)
-        connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-        connection.commit()
+        try:
+            connection.executescript("BEGIN IMMEDIATE;\n" + (DDL if current < 2 else "") + PROGRESS_DDL)
+            if current < 2:
+                _seed_definitions(connection)
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
 
 
 def _seed_definitions(connection: sqlite3.Connection) -> None:

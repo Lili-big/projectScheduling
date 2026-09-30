@@ -139,3 +139,62 @@ test("idle entry needs matching current feasible input and is disabled during an
   assert.equal(workflow.canOptimizePavementIdle(baseline,true,true),false);
   assert.equal(workflow.canOptimizePavementIdle(null,true,false),false);
 });
+
+test("budget draft accepts finite positive seconds including above 15 and rejects empty or invalid input",()=>{
+  for (const value of ["", " ", "0", "-1", "Infinity", "NaN", "bad"]) assert.equal(workflow.parsePavementSolveBudget(value),null);
+  for (const value of ["15", "30", "60", "0.5"]) assert.equal(workflow.parsePavementSolveBudget(value),Number(value));
+});
+
+test("per-run budgets create request snapshots and retain the idle baseline identity",async()=>{
+  const scenario={time_limit_seconds:15,resource_pools:[{quantity:2}]};
+  const baseline=idlePlan(4);
+  baseline.generated={schedule_input:{time_limit_seconds:30,pavement_handover_scope:handover}};
+  const before=JSON.stringify({scenario,baseline});
+  for (const budget of [15,30,60]) {
+    const normal=[], idle=[];
+    const controller=workflow.createPavementSolveController(async(s,scope,publish)=>{
+      assert.notEqual(s,scenario);assert.equal(s.time_limit_seconds,budget);
+      assert.deepEqual(s.resource_pools,scenario.resource_pools);
+      publish({...event("started",1),time_budget_seconds:budget});publish(event("complete",2));
+    },async(s,scope,base,publish,signal,seconds)=>{
+      assert.equal(base,baseline);assert.equal(s.time_limit_seconds,30);assert.equal(seconds,budget);
+      assert.deepEqual(s.resource_pools,scenario.resource_pools);
+      publish({...event("started",1),time_budget_seconds:seconds});
+      publish(idleEvent("solution",2,4));publish(idleEvent("complete",3,2));
+    });
+    await controller.request(scenario,null,s=>normal.push(s),undefined,budget);
+    await controller.request(scenario,null,s=>idle.push(s),baseline,budget);
+    assert.equal(normal.at(-1).status,"complete");assert.equal(normal.at(-1).timeBudgetSeconds,budget);
+    assert.equal(idle.at(-1).status,"complete");assert.equal(idle.at(-1).timeBudgetSeconds,budget);
+    assert.equal(idle[0].solved,baseline);
+  }
+  assert.equal(JSON.stringify({scenario,baseline}),before);
+});
+
+test("invalid explicit budget does not dispatch and a mismatching server budget preserves baseline",async()=>{
+  const controller=workflow.createPavementSolveController(()=>assert.fail("invalid request dispatched"));
+  for (const value of [0,-1,Infinity,NaN]) await assert.rejects(controller.request({},null,()=>{},undefined,value),/秒数/);
+  const baseline=idlePlan(4),states=[];
+  baseline.generated={schedule_input:{time_limit_seconds:15}};
+  await workflow.createPavementSolveController(()=>{},async(s,scope,base,publish)=>publish(event("started",1)))
+    .request({time_limit_seconds:15},null,s=>states.push(s),baseline,60);
+  assert.equal(states.at(-1).status,"interrupted");assert.equal(states.at(-1).solved,baseline);
+});
+
+test("API idle budget controls request payload and connection wait, with legacy fallback",async()=>{
+  const stubUrl=url(`export const calls=[]; export const apiPostStream=(...args)=>{calls.push(args);return Promise.resolve()};
+    export const apiGet=()=>{}; export const apiPost=()=>{}; export const apiPostFormData=()=>{}; export const apiPut=()=>{};`);
+  const stub=await import(stubUrl);
+  const api=await import(url(compile("src/api/_schedulerApi.ts").replace('from "./client"',`from "${stubUrl}"`)));
+  const scenario={time_limit_seconds:15},baseline=idlePlan(4);
+  for(const budget of [undefined,30,60]) {
+    await api.optimizePavementIdleStream(scenario,null,baseline,()=>{},new AbortController().signal,budget);
+    const [path,payload,,,wait]=stub.calls.at(-1);
+    assert.equal(path,"/api/solve-scenario/idle/stream");
+    assert.equal(payload.scenario,scenario);assert.equal(payload.baseline,baseline);
+    assert.equal(payload.time_budget_seconds,budget);
+    assert.equal(wait,((budget ?? 15)+30)*1000);
+  }
+  await api.solvePavementScenarioStream({...scenario,time_limit_seconds:60},null,()=>{},new AbortController().signal);
+  assert.equal(stub.calls.at(-1)[4],90000);
+});

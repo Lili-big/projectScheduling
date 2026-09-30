@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { PavementLayerEdit, ProjectMasterStructure } from "../../contracts/projectMaster";
 import { pavementLayerQuantityT } from "../../domain/pavement";
 
@@ -7,10 +7,11 @@ type LayerRow = Omit<PavementLayerEdit, "thickness_m" | "density_t_m3"> & { key:
 const tonnageFormat = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 0 });
 const validDimension = (value: string) => !value.trim() || (Number.isFinite(Number(value)) && Number(value) > 0);
 
-export function PavementSectionLayers({ section, readOnly, onSave }: {
+export function PavementSectionLayers({ section, readOnly, onSave, onDirtyChange }: {
   section: ProjectMasterStructure;
   readOnly: boolean;
   onSave?: (sectionId: string, layers: PavementLayerEdit[]) => Promise<void>;
+  onDirtyChange?: (key: string, dirty: boolean) => void;
 }) {
   const initialRows = (): LayerRow[] => [...section.components].sort((a, b) => a.sort_order - b.sort_order).map(c => ({
     key: c.component_id, component_id: c.component_id, name: c.component_name,
@@ -22,6 +23,8 @@ export function PavementSectionLayers({ section, readOnly, onSave }: {
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  useEffect(() => { onDirtyChange?.(`${section.structure_id}:layers`, dirty || busy); }, [onDirtyChange, section.structure_id, dirty, busy]);
+  useEffect(() => () => onDirtyChange?.(`${section.structure_id}:layers`, false), [onDirtyChange, section.structure_id]);
   const length = section.parameters.find(p => p.parameter_code === "construction_length_m")?.value;
   const width = section.parameters.find(p => p.parameter_code === "width_m")?.value;
   const valid = rows.length > 0 && rows.every(r => r.name.trim() && validDimension(r.thickness) && validDimension(r.density));

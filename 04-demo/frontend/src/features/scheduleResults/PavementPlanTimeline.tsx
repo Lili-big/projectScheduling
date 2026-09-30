@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import type { GeneratedScheduleInput, ScheduleResult, ScheduledTask } from "../../contracts";
+import { shiftSplitText } from "../../domain/pavement";
 import { buildPavementPlan, dateAt, taskLabel, validTaskRange } from "./pavementViewModel";
 
 const ROW = 40;
@@ -27,6 +28,12 @@ export function PavementPlanTimeline({ result, generated, pendingIds = [] }: {
   const detailLinks = selected ? plan.links.filter(e => e.link.predecessor_id === selected.id || e.link.successor_id === selected.id) : [];
   const detailWaits = selected ? plan.waits.filter(w => w.taskId === selected.id) : [];
   const unlocatedWaits = plan.waits.filter(w => !w.taskId);
+  const regimes = generated?.schedule_input.shift_regimes ?? [];
+  const dayOffset = (day: string) => Math.round((Date.parse(day) - Date.parse(result.plan_start_date)) / 86400000);
+  const doubleBands = regimes.filter(r => r.shifts === 2).map(r => ({
+    key: r.start_date, start: Math.max(0, dayOffset(r.start_date)),
+    end: Math.min(plan.end, r.end_date ? dayOffset(r.end_date) + 1 : plan.end),
+  })).filter(band => band.end > band.start);
   const toggle = (key: string) => setCollapsed(old => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; });
   return <section className="pv-section" aria-label="施工计划表格与横道图">
     <div className="pv-section-heading"><div><h3>施工计划</h3><p>施工段 / 工序 · 按日历时间查看施工与衔接</p></div>
@@ -34,7 +41,8 @@ export function PavementPlanTimeline({ result, generated, pendingIds = [] }: {
         <button type="button" onClick={() => setCollapsed(new Set(plan.groups.map(g => g.key)))}>全部收起</button>
         <label><input type="checkbox" checked={showLinks} onChange={e => setShowLinks(e.target.checked)} />工序逻辑</label></div>
     </div>
-    <div className="pv-legend"><span><i className="pv-key-work" />施工</span><span><i className="pv-key-wait" />工艺等待（不占主机组）</span><span>→ 工序逻辑关系</span><span>点击工序查看详情</span></div>
+    <div className="pv-legend"><span><i className="pv-key-work" />施工</span><span><i className="pv-key-wait" />工艺等待（不占主机组）</span>
+      {!!doubleBands.length && <span><i className="pv-key-double" />双班区间（日产出×2）</span>}<span>→ 工序逻辑关系</span><span>点击工序查看详情</span></div>
     {plan.issues.map(issue => <p className="pv-note" key={issue}>{issue}</p>)}
     {!rows.length ? <p className="pv-empty">暂无可展示任务。</p> : <div className="pv-plan-scroll" tabIndex={0} aria-label="施工计划，可横向及纵向滚动">
       <div className="pv-plan-grid" role="treegrid" aria-label="施工段与工序计划" aria-rowcount={rows.length + 1} aria-colcount={6}>
@@ -43,6 +51,7 @@ export function PavementPlanTimeline({ result, generated, pendingIds = [] }: {
         <div className="pv-plan-body">
           <div className="pv-link-layer" aria-hidden="true"><svg width="100%" height={rows.length * ROW} viewBox={`0 0 ${WIDTH} ${rows.length * ROW}`} preserveAspectRatio="none">
             <defs><marker id={arrowId} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 Z" fill="context-stroke" /></marker></defs>
+            {doubleBands.map(band => <rect key={band.key} x={x(band.start)} width={Math.max(1, x(band.end) - x(band.start))} y="0" height={rows.length * ROW} fill="#f59e0b" opacity={0.12} />)}
             {ticks.map(day => <line key={day} x1={x(day)} x2={x(day)} y1="0" y2={rows.length * ROW} stroke="#dfe7ef" strokeDasharray="2 4" />)}
             {showLinks && visibleLinks.map(({ link, from, to }) => {
               const y1 = indices.get(link.predecessor_id)! * ROW + ROW / 2, y2 = indices.get(link.successor_id)! * ROW + ROW / 2;
@@ -66,10 +75,10 @@ export function PavementPlanTimeline({ result, generated, pendingIds = [] }: {
             const valid = validTaskRange(task) && dateAt(result.plan_start_date, task.start_offset) !== "—";
             return <div key={key} className={`pv-plan-row ${selected?.id === task.id ? "is-selected" : ""}`} role="row" aria-level={2} aria-selected={selected?.id === task.id} data-task-id={task.id}>
               <div className="pv-cells"><div role="gridcell" className="pv-task-cell"><button type="button" className="pv-task-label" title={task.name} onClick={() => setSelectedId(task.id)}>{taskLabel(task)}{task.pavement_context?.task_kind === "preparation" && "（配套）"}</button></div>
-                <span role="gridcell">{task.start_date}</span><span role="gridcell">{task.finish_date}</span><span role="gridcell">{task.duration_days}</span><span role="gridcell" title={task.assigned_resource_name ?? "辅助资源未约束"}>{task.assigned_resource_name ?? "辅助资源未约束"}</span></div>
+                <span role="gridcell">{task.start_date}</span><span role="gridcell">{task.finish_date}</span><span role="gridcell">{task.end_offset - task.start_offset}</span><span role="gridcell" title={task.assigned_resource_name ?? "辅助资源未约束"}>{task.assigned_resource_name ?? "辅助资源未约束"}</span></div>
               <div className="pv-track" role="gridcell">
                 {plan.waits.filter(w => w.taskId === task.id).map(w => <button type="button" key={w.key} className="pv-wait-band" style={{ left: `${pct(w.start_offset)}%`, width: `${pct(w.end_offset) - pct(w.start_offset)}%` }} title={`${w.reason} · ${w.end_offset - w.start_offset} 天；不占主机组`} aria-label={`${taskLabel(task)}：${w.reason} ${w.end_offset - w.start_offset} 天`} onClick={() => setSelectedId(task.id)} />)}
-                {valid && <button type="button" className="pv-work-bar" data-task-bar={task.id} style={{ left: `${pct(task.start_offset)}%`, width: `${pct(task.end_offset) - pct(task.start_offset)}%`, backgroundColor: colors[task.component_type] ?? "#0d9488" }} title={`${task.name}\n${task.start_date} ～ ${task.finish_date} · ${task.duration_days}天`} aria-label={`${task.name}，${task.start_date}至${task.finish_date}`} onClick={() => setSelectedId(task.id)} />}
+                {valid && <button type="button" className="pv-work-bar" data-task-bar={task.id} style={{ left: `${pct(task.start_offset)}%`, width: `${pct(task.end_offset) - pct(task.start_offset)}%`, backgroundColor: colors[task.component_type] ?? "#0d9488" }} title={`${task.name}\n${task.start_date} ～ ${task.finish_date} · ${task.end_offset - task.start_offset}天${regimes.length ? `（${shiftSplitText(task.start_offset, task.end_offset, regimes, result.plan_start_date)}）` : ""}`} aria-label={`${task.name}，${task.start_date}至${task.finish_date}`} onClick={() => setSelectedId(task.id)} />}
               </div>
             </div>;
           })}
@@ -77,7 +86,7 @@ export function PavementPlanTimeline({ result, generated, pendingIds = [] }: {
       </div>
     </div>}
     {showLinks && visibleLinks.length < plan.links.length && <p className="pv-note">部分关系连接到已收起工序，展开施工段后可查看。</p>}
-    {selected && <div className="pv-task-detail" aria-label="选中工序详情"><strong>{selected.name}</strong><p>{selected.start_date} ～ {selected.finish_date} · {selected.duration_days} 天 · {selected.assigned_resource_name ?? "辅助资源未约束"}</p>
+    {selected && <div className="pv-task-detail" aria-label="选中工序详情"><strong>{selected.name}</strong><p>{selected.start_date} ～ {selected.finish_date} · {selected.end_offset - selected.start_offset} 天{!!regimes.length && `（${shiftSplitText(selected.start_offset, selected.end_offset, regimes, result.plan_start_date)}）`} · {selected.assigned_resource_name ?? "辅助资源未约束"}</p>
       {detailLinks.map(({ link }) => <p key={link.id}>{taskLabel(result.tasks.find(t => t.id === link.predecessor_id)!)} → {taskLabel(result.tasks.find(t => t.id === link.successor_id)!)}：{link.relationship} {link.lag_days >= 0 ? "+" : ""}{link.lag_days} 天{link.max_finish_gap_days != null && `；最大完成间隔 ${link.max_finish_gap_days} 天`}{link.severity === "warning" && "（提醒关系）"}</p>)}
       {detailWaits.map(w => <p key={w.key}>{w.reason}：{dateAt(result.plan_start_date, w.start_offset)} ～ {dateAt(result.plan_start_date, w.end_offset - 1)}，{w.end_offset - w.start_offset} 天；期间主机组可去其他段施工。</p>)}
       {!detailWaits.length && <p className="pv-note">本工序没有可定位的技术等待。横道之间的空白不自动视为养生或转场。</p>}

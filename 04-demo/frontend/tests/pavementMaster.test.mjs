@@ -100,12 +100,13 @@ test("failed handover save retains the draft; non-dated transition clears the ef
     compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.ReactJSX},
   }).outputText;
   new Function("require","module","exports",compiled)(name => {
-    if(name === "react") return {useState(initial) {const i=cursor++; if(!(i in state)) state[i]=initial; return [state[i],value=>{state[i]=typeof value==='function'?value(state[i]):value;}];}};
+    if(name === "react") return {useEffect(effect) { effect(); },useState(initial) {const i=cursor++; if(!(i in state)) state[i]=initial; return [state[i],value=>{state[i]=typeof value==='function'?value(state[i]):value;}];}};
     if(name === "../../domain/pavement") return loadSource("domain/pavement.ts");
     return require(name);
   },module,module.exports);
   let submitted;
-  const props = {section:section(1,{roadbed_available_date:"2026-10-25"}),readOnly:false,onSave:async(id,values)=>{submitted={id,values}; throw new Error("主数据已更新，请重新加载当前版本后再编辑。");}};
+  let reportedDirty = false;
+  const props = {section:section(1,{roadbed_available_date:"2026-10-25"}),readOnly:false,onDirtyChange:(_key,dirty)=>{reportedDirty=dirty;},onSave:async(id,values)=>{submitted={id,values}; throw new Error("主数据已更新，请重新加载当前版本后再编辑。");}};
   const renderEditor=()=>{cursor=0;return module.exports.PavementSectionHandover(props);};
   const nodes=root=>!root||typeof root!=='object'?[]:[root,...[root.props?.children].flat(Infinity).flatMap(nodes)];
   const find=(root,key,value)=>nodes(root).find(n=>n.props?.[key]===value);
@@ -123,6 +124,7 @@ test("failed handover save retains the draft; non-dated transition clears the ef
   assert.equal(find(tree,'aria-label','路床移交说明').props.value,'征地未解决');
   assert.match(find(tree,'role','alert').props.children,/主数据已更新/);
   assert.equal(nodes(tree).find(n=>n.type==='button').props.disabled,false);
+  assert.equal(reportedDirty,true);
 });
 
 test("layer table derives tonnes from layer attributes and retains missing density and disabled state", () => {

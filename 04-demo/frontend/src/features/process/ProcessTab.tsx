@@ -1,4 +1,4 @@
-import { pavementUnits } from "../../domain/pavement";
+import { pavementUnits, emptyPavementSettings, pavementShiftConfigErrors } from "../../domain/pavement";
 import { Loader2, Save } from "lucide-react";
 import { PanelTitle } from "../../components/common/PanelTitle";
 import { componentLabels, componentSortIndex, durationMethodLabels, quantitySourceLabels } from "../../domain/labels";
@@ -12,7 +12,7 @@ import {
   supportsSegmentedPierUnits,
 } from "../../domain/productivity";
 import { processResourceLabel } from "../../domain/resources";
-import type { ProcessTemplate, ProductivityOption, ScenarioInput } from "../../contracts";
+import type { ProcessTemplate, ProductivityOption, ScenarioInput, PavementSettings, PavementShiftRegime } from "../../contracts";
 
 export function ProcessTab({
   scenario,
@@ -20,13 +20,21 @@ export function ProcessTab({
   onSaveProcessLibrary,
   savingProcessLibrary,
   processLibraryDirty,
+  onUpdatePavementSettings,
 }: {
   scenario: ScenarioInput;
   onUpdateProcess: (index: number, patch: Partial<ProcessTemplate>) => void;
   onSaveProcessLibrary: () => void;
   savingProcessLibrary: boolean;
   processLibraryDirty: boolean;
+  onUpdatePavementSettings?: (settings: PavementSettings) => void;
 }) {
+  const pavementSettings = scenario.pavement_settings ?? emptyPavementSettings();
+  const regimes = pavementSettings.shift_regimes ?? [];
+  const hasIncompleteShift = scenario.engineering_domain === "pavement" && regimes.some(regime => !regime.start_date);
+  const shiftErrors = scenario.engineering_domain === "pavement"
+    ? pavementShiftConfigErrors(regimes.filter(regime => regime.start_date)) : [];
+
   function productivityOptions(process: ProcessTemplate): ProductivityOption[] {
     return process.productivity_options?.length
       ? process.productivity_options
@@ -117,8 +125,8 @@ export function ProcessTab({
             className="secondary"
             type="button"
             onClick={onSaveProcessLibrary}
-            disabled={savingProcessLibrary || !processLibraryDirty}
-            title="保存到后端本地 JSON 配置文件"
+            disabled={savingProcessLibrary || !processLibraryDirty || hasIncompleteShift || shiftErrors.length > 0}
+            title={hasIncompleteShift ? "填写班制起始日期后即可保存" : "保存到后端本地 JSON 配置文件"}
             aria-label="保存工艺工效库"
           >
             {savingProcessLibrary ? <Loader2 className="spin" size={16} /> : <Save size={16} />}
@@ -256,6 +264,49 @@ export function ProcessTab({
           </tbody>
         </table>
       </div>
+      {scenario.engineering_domain === "pavement" && <PavementShiftRegimes settings={pavementSettings}
+        onChange={onUpdatePavementSettings} saving={savingProcessLibrary} errors={shiftErrors} />}
     </section>
   );
+}
+
+function PavementShiftRegimes({ settings, onChange, saving, errors }: {
+  settings: PavementSettings;
+  onChange?: (settings: PavementSettings) => void;
+  saving: boolean;
+  errors: string[];
+}) {
+  const regimes = settings.shift_regimes ?? [];
+  const disabled = saving || !onChange;
+  const update = (next: PavementShiftRegime[]) => onChange?.({ ...settings, shift_regimes: next });
+  const edit = (index: number, patch: Partial<PavementShiftRegime>) => update(regimes.map((regime, i) => i === index ? { ...regime, ...patch } : regime));
+
+  return <section className="pavement-shift-regimes" aria-labelledby="pavement-shift-title">
+    <h3 id="pavement-shift-title">班制配置（单／双班）</h3>
+    <p id="pavement-shift-help">在表格内直接编辑，修改后点击上方“保存”。结束日期留空表示持续生效，未覆盖日期按单班。</p>
+    {!!errors.length && <ul className="notice error" role="alert">{errors.map(error => <li key={error}>{error}</li>)}</ul>}
+    <div className="table-wrap"><table className="pavement-relation-table pavement-shift-table" aria-label="班制区间" aria-describedby="pavement-shift-help">
+      <thead><tr><th scope="col">序号</th><th scope="col">起始日期</th><th scope="col">结束日期（可留空）</th><th scope="col">班制</th><th scope="col">操作</th></tr></thead>
+      <tbody>
+        {regimes.map((regime, i) => <tr key={i}>
+          <th scope="row">{i + 1}</th>
+          <td><div className="pavement-shift-start"><input type="date" aria-required="true" disabled={disabled} aria-label={`第${i + 1}行起始日期`}
+            aria-describedby={!regime.start_date ? `pavement-shift-pending-${i}` : undefined}
+            value={regime.start_date} onChange={event => edit(i, { start_date: event.target.value })} />
+            {!regime.start_date && <span id={`pavement-shift-pending-${i}`}>待填写</span>}</div></td>
+          <td><div className="pavement-shift-end"><input type="date" disabled={disabled} aria-label={`第${i + 1}行结束日期`}
+            value={regime.end_date ?? ""} onChange={event => edit(i, { end_date: event.target.value || null })} />
+            {!regime.end_date && <span>持续生效</span>}</div></td>
+          <td><select disabled={disabled} aria-label={`第${i + 1}行班制`} value={regime.shifts} onChange={event => edit(i, { shifts: Number(event.target.value) })}>
+            <option value="1">单班</option><option value="2">双班（日产出×2）</option>
+          </select></td>
+          <td><button type="button" disabled={disabled} aria-label={`删除第${i + 1}行班制区间`} onClick={() => update(regimes.filter((_, j) => j !== i))}>删除</button></td>
+        </tr>)}
+        {!regimes.length && <tr><td colSpan={5} className="pavement-shift-empty">暂未配置，全部按单班计算。可在下方新增一行。</td></tr>}
+      </tbody>
+      <tfoot><tr><td colSpan={5}><button type="button" className="pavement-shift-add" disabled={disabled} aria-label="新增班制区间"
+        onClick={() => update([...regimes, { start_date: "", end_date: null, shifts: 2 }])}>＋ 新增一行</button></td></tr></tfoot>
+    </table></div>
+    <p>双班为每台机械增配 1 组班组，白班＋夜班作业，日产出按基准工效翻倍；养生和转场天数不变。</p>
+  </section>;
 }

@@ -1,0 +1,86 @@
+{
+ "fingerprint": "24a2b94aa79783a4048e60e991fb5f3893c6be2ef59a6afaacc1309d454e9af2",
+ "strategies": {
+  "earliest_start": {
+   "assignments": {
+    "pavement:A-1": "pavement-cement_stabilized_base-pool::instance::1",
+    "pavement:A-2": "pavement-cement_stabilized_base-pool::instance::1",
+    "pavement:B-1": "pavement-cement_stabilized_base-pool::instance::1",
+    "pavement:B-2": "pavement-cement_stabilized_base-pool::instance::1",
+    "pavement:C-1": "pavement-cement_stabilized_base-pool::instance::1",
+    "pavement:C-2": "pavement-cement_stabilized_base-pool::instance::1"
+   },
+   "ends": {
+    "pavement:A-1": 8,
+    "pavement:A-2": 11,
+    "pavement:B-1": 2,
+    "pavement:B-2": 4,
+    "pavement:C-1": 15,
+    "pavement:C-2": 18
+   },
+   "makespan": 18,
+   "starts": {
+    "pavement:A-1": 5,
+    "pavement:A-2": 8,
+    "pavement:B-1": 0,
+    "pavement:B-2": 2,
+    "pavement:C-1": 12,
+    "pavement:C-2": 15
+   }
+  },
+  "least_transfer": {
+   "assignments": {
+    "pavement:A-1": "pavement-cement_stabilized_base-pool::instance::1",
+    "pavement:A-2": "pavement-cement_stabilized_base-pool::instance::1",
+    "pavement:B-1": "pavement-cement_stabilized_base-pool::instance::1",
+    "pavement:B-2": "pavement-cement_stabilized_base-pool::instance::1",
+    "pavement:C-1": "pavement-cement_stabilized_base-pool::instance::1",
+    "pavement:C-2": "pavement-cement_stabilized_base-pool::instance::1"
+   },
+   "ends": {
+    "pavement:A-1": 3,
+    "pavement:A-2": 6,
+    "pavement:B-1": 16,
+    "pavement:B-2": 18,
+    "pavement:C-1": 10,
+    "pavement:C-2": 13
+   },
+   "makespan": 18,
+   "starts": {
+    "pavement:A-1": 0,
+    "pavement:A-2": 3,
+    "pavement:B-1": 14,
+    "pavement:B-2": 16,
+    "pavement:C-1": 7,
+    "pavement:C-2": 10
+   }
+  },
+  "longest_chain": {
+   "assignments": {
+    "pavement:A-1": "pavement-cement_stabilized_base-pool::instance::1",
+    "pavement:A-2": "pavement-cement_stabilized_base-pool::instance::1",
+    "pavement:B-1": "pavement-cement_stabilized_base-pool::instance::1",
+    "pavement:B-2": "pavement-cement_stabilized_base-pool::instance::1",
+    "pavement:C-1": "pavement-cement_stabilized_base-pool::instance::1",
+    "pavement:C-2": "pavement-cement_stabilized_base-pool::instance::1"
+   },
+   "ends": {
+    "pavement:A-1": 3,
+    "pavement:A-2": 14,
+    "pavement:B-1": 10,
+    "pavement:B-2": 21,
+    "pavement:C-1": 7,
+    "pavement:C-2": 18
+   },
+   "makespan": 21,
+   "starts": {
+    "pavement:A-1": 0,
+    "pavement:A-2": 11,
+    "pavement:B-1": 8,
+    "pavement:B-2": 19,
+    "pavement:C-1": 4,
+    "pavement:C-2": 15
+   }
+  }
+ }
+}

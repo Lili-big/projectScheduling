@@ -64,5 +64,7 @@
 | [`072-pavement-crew-tl-flow`](./072-pavement-crew-tl-flow/spec.md) | completed | 8/8；双幅共享固定里程轴、镜像实际日期、全程箭线及局部高亮/缩放/导航已接入；27项测试、构建和真实76工序宽窄屏验证通过，100工序投影/双机渲染及浏览器限制见任务证据 |
 | [`073-pavement-fleet-pending-last`](./073-pavement-fleet-pending-last/spec.md) | completed | 8/8；初解、CP-SAT 与校验统一按实际机组后置，144 项后端及 21 项前端用例通过；既有架构/治理差异详见 tasks.md |
 | [`074-pavement-idle-optimization`](./074-pavement-idle-optimization/spec.md) | completed | 11/11；独立窝工优化、固定工期上限与实时保底已接入，144项后端/47项前端验收及构建通过；既有架构/治理差异见tasks.md |
+| [`076-pavement-shift-productivity`](./076-pavement-shift-productivity/spec.md) | completed | 24/24；项目级单/双班区间、变量工期求解与结果拆分展示已接入，20项后端/6项前端新测试及等价快照验证通过；既有架构漂移已随基线重捕获对齐，历史失败集合与HEAD完全一致 |
+| [`077-pavement-actual-progress`](./077-pavement-actual-progress/spec.md) | completed | 14/14；月度实际进度表、独立每日台账、跨月累计/超量负剩余、历史及并发保护已接入；新增16项后端测试、27项前端相关用例及隔离浏览器验证通过，既有失败见tasks.md |
 
 使用规则：先读目标目录的 `spec.md`、`plan.md` 和 `tasks.md`。`completed` 只表示该规格任务清单已勾选，不替代当前代码验证；`active_partial` 中未完成项不得在 README/agent 中写成已实现。

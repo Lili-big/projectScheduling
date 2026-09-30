@@ -7,7 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-from .pavement import EngineeringDomain, PavementSettings, PavementTaskContext, PavementReadinessCondition, PavementSummary, PavementHandoverScope, PavementOptimization, PavementIdleOptimization
+from .pavement import EngineeringDomain, PavementSettings, PavementShiftRegime, PavementTaskContext, PavementReadinessCondition, PavementSummary, PavementHandoverScope, PavementOptimization, PavementIdleOptimization
 
 StructureType = Literal["pier", "abutment", "upper_structure", "continuous_beam", "pavement_section"]
 ComponentType = Literal[
@@ -1038,6 +1038,7 @@ class TaskExecutionConstraint(BaseModel):
 class ScheduleInput(BaseModel):
     readiness_conditions: list[PavementReadinessCondition] = Field(default_factory=list, exclude_if=lambda value: not value)
     pavement_handover_scope: PavementHandoverScope | None = Field(default=None, exclude_if=lambda value: value is None)
+    shift_regimes: list[PavementShiftRegime] = Field(default_factory=list, exclude_if=lambda value: not value)
     project_data_version_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
     engineering_domain: EngineeringDomain = Field(default="bridge", exclude_if=lambda value: value == "bridge")
     project_name: str
@@ -1183,6 +1184,7 @@ class ResourceCostSolveRequest(BaseModel):
 class PavementIdleOptimizeRequest(BaseModel):
     scenario: ScenarioInput
     baseline: ScenarioSolveResult
+    time_budget_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
 
 
 class ScenarioCompareResponse(BaseModel):

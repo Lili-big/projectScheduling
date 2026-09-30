@@ -71,6 +71,14 @@ class ProjectMasterService:
     def template_bytes(self, engineering_domain: str = "bridge") -> bytes:
         return create_template_bytes(engineering_domain)
 
+    def get_pavement_progress(self, project_id: str):
+        from .pavement_progress import read_progress
+        return read_progress(self.repository, project_id)
+
+    def save_pavement_progress(self, project_id: str, payload):
+        from .pavement_progress import save_progress
+        return save_progress(self.repository, project_id, payload)
+
     def import_workbook(
         self,
         *,

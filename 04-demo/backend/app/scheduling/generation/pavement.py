@@ -5,9 +5,16 @@ from graphlib import TopologicalSorter, CycleError
 
 from ...contracts import (GeneratedScheduleInput, ScheduleInput, Task, ProductivityRule, ValidationMessage, SolveScope, PrecedenceLink, TaskExecutionConstraint)
 from ...contracts.pavement import PavementTaskContext, PavementHandoverScope, PavementPendingSection
+from ..domain.shift_regime import shift_config_errors
 from ...process_library_defaults import PAVEMENT_PROCESSES
 from ...project_master.validation import pavement_quantity_errors, resolve_roadbed_handover, roadbed_start_offset
 from ...wbs import calculate_duration
+
+
+SHIFT_ISSUE_TEXT = {
+    "shift_range": "班制区间的结束日不能早于起始日。",
+    "shift_overlap": "班制区间相互重叠或起点重复，请合并或调整区间。",
+}
 
 
 def message(code, text, subject=None):
@@ -24,6 +31,10 @@ def generate_pavement_input(scenario, *, workpoint_id=None):
     settings = scenario.pavement_settings
     if settings is None:
         validation.append(message("PAVEMENT_DATA_INCOMPLETE", "请配置路面工序条件。"))
+    else:
+        for issue in shift_config_errors(settings.shift_regimes):
+            validation.append(message("PAVEMENT_SHIFT_INVALID",
+                SHIFT_ISSUE_TEXT.get(issue.split(":", 1)[0], "班制区间配置无效。")))
     for workpoint in selected:
         if workpoint.workpoint_type != "pavement":
             validation.append(message("PAVEMENT_SCOPE_NOT_SUPPORTED", "选中工点不属于路面。", workpoint.id))
@@ -99,6 +110,7 @@ def generate_pavement_input(scenario, *, workpoint_id=None):
         validation.append(message("PAVEMENT_DATA_INCOMPLETE", "尚无可生成的路面结构层，请导入并完善主数据。"))
     schedule_input = ScheduleInput(engineering_domain="pavement", project_name=scenario.project.project_name,
         start_date=scenario.project.start_date, tasks=tasks, precedence_links=[], resources=[], pavement_handover_scope=scope,
+        shift_regimes=list(settings.shift_regimes) if settings else [],
         project_data_version_id=scenario.project_data_version_id, milestones=scenario.milestones,
         time_limit_seconds=scenario.time_limit_seconds, schedule_strategy=scenario.schedule_strategy)
     _expand_resources(scenario, schedule_input, validation)

@@ -10,8 +10,16 @@ from time import perf_counter
 
 from ....project_master.validation import resolve_roadbed_handover, roadbed_start_offset
 from ...domain.milestone_scope import task_ids_for_milestone
+from ...domain.shift_regime import task_duration_for_start
 
 STRATEGIES = ("earliest_start", "longest_chain", "least_transfer")
+
+
+def pavement_duration(task, start, schedule):
+    """Task duration when starting at `start`; baseline value without regimes."""
+    if not schedule.shift_regimes:
+        return task.duration_days
+    return task_duration_for_start(task, start, schedule.shift_regimes, schedule.start_date)
 
 
 class BudgetExpired(Exception):
@@ -89,7 +97,7 @@ def validate_candidate(schedule, candidates, candidate, checkpoint=lambda: None)
     for tid, task in tasks.items():
         checkpoint()
         s, e = candidate.starts[tid], candidate.ends[tid]
-        if type(s) is not int or type(e) is not int or s < 0 or e != s + task.duration_days:
+        if type(s) is not int or type(e) is not int or s < 0 or e != s + pavement_duration(task, s, schedule):
             errors.append(f"duration/time:{tid}")
     if errors:
         return errors
@@ -210,7 +218,21 @@ def construct_candidate(schedule, candidates, strategy, deadline, clock=perf_cou
                         if constraint.fixed_start_offset < s:
                             continue
                         s = constraint.fixed_start_offset
-                    e = s + task.duration_days
+                    # Variable shift durations: the F-successor bounds above are
+                    # only a floor computed with the baseline duration; push the
+                    # start until every F boundary holds at the actual duration.
+                    if schedule.shift_regimes:
+                        for link in incoming[tid]:
+                            if link.relationship[1] != "F":
+                                continue
+                            required = (plan.ends[link.predecessor_id] if link.relationship[0] == "F"
+                                        else plan.starts[link.predecessor_id]) + link.lag_days
+                            while s + pavement_duration(task, s, schedule) < required:
+                                checkpoint()
+                                s += 1
+                        if constraint and constraint.fixed_start_offset is not None and s != constraint.fixed_start_offset:
+                            continue
+                    e = s + pavement_duration(task, s, schedule)
                     if strategy == "earliest_start": key = (s, e, transfer, tid, rid)
                     elif strategy == "longest_chain": key = (-chain[tid], s, transfer, tid, rid)
                     elif strategy == "least_transfer": key = (transfer, s, -chain[tid], tid, rid)

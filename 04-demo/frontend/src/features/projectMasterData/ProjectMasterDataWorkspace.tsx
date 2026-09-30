@@ -31,11 +31,13 @@ export function ProjectMasterDataWorkspace({
   engineeringDomain = "bridge",
   activeVersionId,
   onVersionConfirmed,
+  onDirtyChange,
 }: {
   projectId: string;
   engineeringDomain?: "bridge" | "pavement";
   activeVersionId?: string | null;
   onVersionConfirmed: (versionId: string) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [versions, setVersions] = useState<ProjectMasterVersionSummary[]>([]);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(activeVersionId ?? null);
@@ -166,7 +168,7 @@ export function ProjectMasterDataWorkspace({
           <span className="project-master-hero-icon"><Database size={22} /></span>
           <div><h2>项目主数据</h2>{engineeringDomain !== "pavement" && <p>统一维护工点、结构物、构件与参数。</p>}</div>
         </div>
-        <div className="project-master-actions">
+        {engineeringDomain !== "pavement" && <div className="project-master-actions">
           <button type="button" onClick={downloadTemplate}><Download size={16} />下载 Excel 模板</button>
           <label className="primary">
             {busy ? <Loader2 className="spin" size={16} /> : <Upload size={16} />}
@@ -177,14 +179,14 @@ export function ProjectMasterDataWorkspace({
               event.currentTarget.value = "";
             }} />
           </label>
-        </div>
+        </div>}
       </section>
       {error && <div className="project-master-error">{error}</div>}
       {batch && <ImportPreview batch={batch} version={draftVersion} busy={busy} onConfirm={confirmDraft} onCancel={cancelDraft} />}
       {selectedVersionId ? (
         engineeringDomain === "pavement" ? <PavementMasterBrowser key={selectedVersionId} versionId={selectedVersionId}
           editable={versions.some(v => v.version_id === selectedVersionId && v.status === "confirmed")}
-          expandedSectionId={expandedPavementSection} onExpand={setExpandedPavementSection}
+          expandedSectionId={expandedPavementSection} onExpand={setExpandedPavementSection} onDirtyChange={onDirtyChange}
           onVersionSaved={async versionId => {
             setSelectedVersionId(versionId); setError(null); onVersionConfirmed(versionId);
             try { await loadVersions(); } catch (reason) { setError(`结构层已保存，版本列表读取失败：${errorText(reason)}`); }
@@ -206,7 +208,7 @@ export function ProjectMasterDataWorkspace({
         )
       ) : (
         <section className="panel full project-master-first-empty">
-          <Database size={32} /><h3>尚未建立项目主数据</h3><p>{engineeringDomain === "pavement" ? "先下载路面模板，填写施工段、幅别和实际结构层后导入完整快照。" : "先下载模板，按“一个物理工点 + 工点下结构物”填写后导入完整快照。"}</p>
+          <Database size={32} /><h3>尚未建立项目主数据</h3><p>{engineeringDomain === "pavement" ? "当前项目暂无可用的施工段及结构层数据。" : "先下载模板，按“一个物理工点 + 工点下结构物”填写后导入完整快照。"}</p>
         </section>
       )}
       {engineeringDomain !== "pavement" && <VersionHistory versions={versions} engineeringDomain={engineeringDomain} selectedId={selectedVersionId} onSelect={(version) => { setSelectedVersionId(version.version_id); setSelectedWorkpoint(null); }} onExport={(version) => void exportVersion(version)} />}

@@ -31,10 +31,14 @@ export type PavementDependencyRule = {
   structure_id?: string | null; predecessor_key: string; successor_key: string;
   relationship: "FS" | "SS" | "FF" | "SF"; lag_days: number | null;
 };
+export type PavementShiftRegime = {
+  start_date: string; end_date?: string | null; shifts: number;
+};
 export type PavementSettings = {
   layer_conditions: PavementLayerCondition[]; ancillary_steps: PavementAncillaryStep[];
   fixed_sequences: PavementFixedSequence[]; input_kind: "customer" | "demo";
   dependency_rules?: PavementDependencyRule[];
+  shift_regimes?: PavementShiftRegime[];
 };
 export type PavementTaskContext = {
   process_id?: string | null;

@@ -95,6 +95,7 @@
       "LogicRule",
       "MilestoneConstraint",
       "MilestoneResult",
+      "MinimumResourceVerification",
       "NormalBalanceBucket",
       "NormalBalanceMetrics",
       "ObjectiveContribution",
@@ -206,6 +207,7 @@
       "TaskViewMode",
       "TaskViewParentGroup",
       "TaskViewRow",
+      "UnifiedSolveMetadata",
       "UpperStructureLogicRule",
       "UpperStructureModel",
       "ValidationMessage",
@@ -268,16 +270,16 @@
     "04-demo/frontend/src/app/App.tsx": 7,
     "04-demo/frontend/src/types/scheduler.ts": 3,
     "04-demo/frontend/src/api/schedulerApi.ts": 3,
-    "04-demo/frontend/src/styles.css": 13
+    "04-demo/frontend/src/styles.css": 29
   },
   "build": {
     "output_path": "04-demo/frontend/dist",
-    "total_bytes": 6172110
+    "total_bytes": 6349630
   },
   "npm_locks": [
     {
       "path": "package-lock.json",
-      "sha256": "ffb8f04fac6e6eb1c9036d84b9ac24434776fd04f76651cb0445de537d9b2ac8",
+      "sha256": "b090f7d243e5ff5555578fa2b72173533a1ad7dafd4688532103a7f31158bf47",
       "packages": [
         {
           "path": "04-demo/frontend",

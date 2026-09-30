@@ -23,6 +23,8 @@ from ...contracts.project_master import (
     ProjectMasterWorkpointPage,
     TaskViewDisplayMapRequest,
     TaskViewDisplayMapResponse,
+    PavementProgressView,
+    SavePavementProgressRequest,
 )
 from ...project_master.repository import ProjectMasterRepositoryError
 from ...project_master.service import ProjectMasterService, ProjectMasterServiceError, default_project_master_service
@@ -36,6 +38,22 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 def _service(request: Request) -> ProjectMasterService:
     return getattr(request.app.state, "project_master_service", None) or default_project_master_service()
+
+
+@router.get("/api/projects/{project_id}/pavement-progress", response_model=PavementProgressView)
+def get_pavement_progress_endpoint(project_id: str, request: Request) -> PavementProgressView:
+    try:
+        return _service(request).get_pavement_progress(project_id)
+    except (ProjectMasterRepositoryError, ProjectMasterServiceError) as exc:
+        raise project_master_http_error(exc) from exc
+
+
+@router.put("/api/projects/{project_id}/pavement-progress", response_model=PavementProgressView)
+def save_pavement_progress_endpoint(project_id: str, payload: SavePavementProgressRequest, request: Request) -> PavementProgressView:
+    try:
+        return _service(request).save_pavement_progress(project_id, payload)
+    except (ProjectMasterRepositoryError, ProjectMasterServiceError) as exc:
+        raise project_master_http_error(exc) from exc
 
 
 @router.get("/api/project-master/template")

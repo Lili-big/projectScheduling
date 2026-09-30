@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, date
+from decimal import Decimal
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -344,6 +346,77 @@ class ConfirmProjectMasterVersionRequest(BaseModel):
 class CancelProjectMasterImportRequest(BaseModel):
     cancelled_by: str
     cancel_reason: str | None = Field(default=None, max_length=500)
+
+
+class PavementDailyProgressEntry(BaseModel):
+    model_config = {"extra": "forbid"}
+    component_id: str = Field(min_length=1)
+    progress_date: str
+    completed_length_m: float
+
+
+class PavementProgressCell(PavementDailyProgressEntry):
+    completed_length_m: float | None
+
+    @field_validator("progress_date", mode="before")
+    @classmethod
+    def valid_date(cls, value):
+        if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            raise ValueError("日期须为 YYYY-MM-DD。")
+        date.fromisoformat(value)
+        return value
+
+    @field_validator("completed_length_m", mode="before")
+    @classmethod
+    def valid_length(cls, value):
+        if value is None:
+            return None
+        if type(value) not in (int, float):
+            raise ValueError("每日完成长度须为数值。")
+        amount = Decimal(str(value))
+        if not amount.is_finite() or amount < 0 or amount > Decimal("9007199254740.991"):
+            raise ValueError("每日完成长度须为可安全表示的非负有限数值。")
+        if amount * 1000 != (amount * 1000).to_integral_value():
+            raise ValueError("每日完成长度最多填写3位小数。")
+        return value
+
+
+class SavePavementProgressRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    expected_master_version_id: str = Field(min_length=1)
+    expected_revision: int = Field(ge=0, strict=True)
+    cells: list[PavementProgressCell]
+
+
+class PavementProgressRow(BaseModel):
+    component_id: str
+    workpoint_id: str
+    structure_id: str
+    section_name: str
+    component_name: str
+    side: StructureSide
+    section_code: str | None = None
+    start_chainage: str | None = None
+    end_chainage: str | None = None
+    start_mileage_m: float | None = None
+    end_mileage_m: float | None = None
+    source_version_id: str
+    status: Literal["active", "disabled", "removed"]
+    design_length_m: float | None = None
+    width_m: float | None = None
+    thickness_m: float | None = None
+    completed_length_m: float = 0
+    remaining_length_m: float | None = None
+    overrun_length_m: float | None = None
+
+
+class PavementProgressView(BaseModel):
+    project_id: str
+    master_version_id: str
+    revision: int
+    rows: list[PavementProgressRow]
+    historical_rows: list[PavementProgressRow]
+    entries: list[PavementDailyProgressEntry]
 
 
 __all__ = [name for name in globals() if not name.startswith("_")]

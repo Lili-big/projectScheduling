@@ -187,7 +187,7 @@ test("result table renders conditional dates and never leaks them into failed re
   function loadComponent(path) {
     const compiled=ts.transpileModule(readFileSync(path,"utf8"),{fileName:path,compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
     const module={exports:{}};
-    new Function("require","module","exports",compiled)(name=>name==="./presenter" ? {pavementResultPresentation} : name.startsWith("./") ? loadComponent(resolve(root,"src/features/scheduleResults",name+(name==="./pavementViewModel" ? ".ts" : ".tsx"))) : require(name),module,module.exports);
+    new Function("require","module","exports",compiled)(name=>name==="./presenter" ? {pavementResultPresentation} : name.startsWith(".") ? loadComponent(resolve(root,"src/features/scheduleResults",name+((name=="./pavementViewModel"||name.includes("domain/")) ? ".ts" : ".tsx"))) : require(name),module,module.exports);
     return module.exports;
   }
   const module={exports:loadComponent(path)};

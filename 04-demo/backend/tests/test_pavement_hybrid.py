@@ -429,6 +429,31 @@ def test_idle_zero_bound_and_budget_keep_valid_baseline(monkeypatch):
     assert limited.tasks==baseline.tasks
 
 
+def test_idle_runtime_budget_sets_remaining_search_without_changing_baseline(monkeypatch):
+    s, r, seed, baseline = idle_case()
+    before = s.model_dump_json(), baseline.model_dump_json()
+    observed = []
+    def optimize(model, remaining, callback, control):
+        observed.append(remaining)
+        return None, "UNKNOWN", .01
+    monkeypatch.setattr(hybrid, "_optimize", optimize)
+    for budget in [None, 15, 30, 60]:
+        expected = s.time_limit_seconds if budget is None else budget
+        result = hybrid.solve_pavement_idle(s, baseline, began=perf_counter()-2, time_budget_seconds=budget)
+        assert expected-3 < observed[-1] <= expected-2
+        assert result.pavement_idle_optimization.time_budget_seconds == expected
+        assert result.tasks == baseline.tasks and result.objective_days == baseline.objective_days
+        assert result.pavement_summary.input_fingerprint == baseline.pavement_summary.input_fingerprint
+    for budget in [0, -1, float("inf"), float("nan")]:
+        with pytest.raises(ValueError):
+            hybrid.solve_pavement_idle(s, baseline, time_budget_seconds=budget)
+    limited = hybrid.solve_pavement_idle(s, baseline, began=perf_counter()-2, time_budget_seconds=1)
+    assert len(observed) == 4
+    assert limited.pavement_idle_optimization.optimizer_not_run_reason == "budget_exhausted"
+    assert limited.tasks == baseline.tasks
+    assert before == (s.model_dump_json(), baseline.model_dump_json())
+
+
 @pytest.mark.parametrize("mutation", ["task", "duplicate", "time", "duration", "resource", "date", "cap", "fingerprint"])
 def test_idle_baseline_rejects_untrusted_result(mutation):
     s,r,seed,baseline=idle_case(); bad=baseline.model_copy(deep=True)

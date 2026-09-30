@@ -15,7 +15,12 @@ export type PavementLiveState = {
 type PavementStream = (scenario: ScenarioInput, scope: string | null, publish: (event: unknown) => void, signal: AbortSignal) => Promise<void>;
 
 type PavementIdleStream = (scenario: ScenarioInput, scope: string | null, baseline: ScenarioSolveResult,
-  publish: (event: unknown) => void, signal: AbortSignal) => Promise<void>;
+  publish: (event: unknown) => void, signal: AbortSignal, timeBudgetSeconds?: number) => Promise<void>;
+
+export function parsePavementSolveBudget(draft: string): number | null {
+  const seconds = Number(draft);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+}
 
 export function canOptimizePavementIdle(solved: ScenarioSolveResult | null, matchesInput: boolean, busy: boolean) {
   return !!(matchesInput && !busy && solved && ["FEASIBLE", "OPTIMAL"].includes(solved.result.status)
@@ -28,7 +33,18 @@ export function createPavementSolveController(stream: PavementStream, idleStream
   let controller: AbortController | null = null;
   return {
     cancel() { token++; controller?.abort(); controller = null; },
-    async request(scenario: ScenarioInput, scope: string | null, publish: (state: PavementLiveState) => void, baseline?: ScenarioSolveResult) {
+    async request(scenario: ScenarioInput, scope: string | null, publish: (state: PavementLiveState) => void,
+      baseline?: ScenarioSolveResult, timeBudgetSeconds?: number) {
+      let requestScenario = scenario;
+      if (timeBudgetSeconds !== undefined) {
+        if (!Number.isFinite(timeBudgetSeconds) || timeBudgetSeconds <= 0) throw new Error("请输入大于 0 的有效秒数。");
+        // Budget changes do not alter the business input or the baseline's full identity.
+        const originalBudget = baseline?.generated?.schedule_input?.time_limit_seconds;
+        if (baseline && (originalBudget == null || !Number.isFinite(originalBudget) || originalBudget <= 0)) {
+          throw new Error("基准方案缺少有效求解时限，请重新求解。");
+        }
+        requestScenario = {...scenario, time_limit_seconds: baseline ? originalBudget! : timeBudgetSeconds};
+      }
       const current = ++token;
       controller?.abort();
       const requestController = new AbortController();
@@ -50,7 +66,8 @@ export function createPavementSolveController(stream: PavementStream, idleStream
             || (state.sequence === 0 && event.type !== "started")) throw new Error("实时求解事件顺序异常，本次优化未完成。");
           state = { ...state, sequence: event.sequence, elapsed: event.elapsed_seconds };
           if (event.type === "started") {
-            if (event.sequence !== 1 || !Number.isFinite(event.time_budget_seconds) || event.time_budget_seconds <= 0) {
+            if (event.sequence !== 1 || !Number.isFinite(event.time_budget_seconds) || event.time_budget_seconds <= 0
+              || timeBudgetSeconds !== undefined && event.time_budget_seconds !== timeBudgetSeconds) {
               throw new Error("实时求解启动数据无效。");
             }
             state = { ...state, timeBudgetSeconds: event.time_budget_seconds };
@@ -113,8 +130,8 @@ export function createPavementSolveController(stream: PavementStream, idleStream
         };
         if (baseline) {
           if (!idleStream) throw new Error("窝工优化接口不可用。");
-          await idleStream(scenario, scope, baseline, receive, requestController.signal);
-        } else await stream(scenario, scope, receive, requestController.signal);
+          await idleStream(requestScenario, scope, baseline, receive, requestController.signal, timeBudgetSeconds);
+        } else await stream(requestScenario, scope, receive, requestController.signal);
         if (current !== token) return;
         if (!terminal) throw new Error("实时连接已中断，本次优化未完成；保留最后收到的方案。");
       } catch (reason) {

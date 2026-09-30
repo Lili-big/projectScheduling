@@ -54,6 +54,7 @@ const navigationGroups: NavigationGroup[] = [
     key: "planExecution",
     label: "计划执行",
     items: [
+      { key: "pavementProgress", label: "实际进度统计", icon: <ClipboardList size={15} /> },
       { key: "planControl", label: "进度反馈与预测", icon: <ChartNoAxesCombined size={15} /> },
       { key: "progressVisualization", label: "进度可视化", icon: <ChartSpline size={15} /> },
     ],
@@ -88,8 +89,8 @@ export function SideNavigation({
         ...group,
         expanded: expandedGroups[group.key],
         items: engineeringDomain === "pavement"
-          ? group.items.filter((tab) => ["projectFiles", "process", "logic", "resources", "tasks", "results"].includes(tab.key))
-          : group.items,
+          ? group.items.filter((tab) => ["projectFiles", "process", "logic", "resources", "tasks", "results", "pavementProgress"].includes(tab.key))
+          : group.items.filter((tab) => tab.key !== "pavementProgress"),
       }))
       .filter((group) => group.items.length > 0),
     [engineeringDomain, expandedGroups],

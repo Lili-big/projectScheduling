@@ -219,3 +219,25 @@ export type SavePavementHandoverRequest = {
   status: import("./pavement").PavementHandoverStatus;
   available_date: string | null; note: string; created_by: string;
 };
+export type PavementProgressEntry = {
+  component_id: string;
+  progress_date: string;
+  completed_length_m: number;
+};
+export type PavementProgressCell = Omit<PavementProgressEntry, "completed_length_m"> & { completed_length_m: number | null };
+export type PavementProgressRow = {
+  component_id: string; workpoint_id: string; structure_id: string;
+  section_name: string; component_name: string; side: "left" | "right" | "shared" | "none";
+  section_code: string | null; start_chainage: string | null; end_chainage: string | null;
+  start_mileage_m: number | null; end_mileage_m: number | null;
+  source_version_id: string; status: "active" | "disabled" | "removed";
+  design_length_m: number | null; width_m: number | null; thickness_m: number | null;
+  completed_length_m: number; remaining_length_m: number | null; overrun_length_m: number | null;
+};
+export type PavementProgressView = {
+  project_id: string; master_version_id: string; revision: number;
+  rows: PavementProgressRow[]; historical_rows: PavementProgressRow[]; entries: PavementProgressEntry[];
+};
+export type SavePavementProgressRequest = {
+  expected_master_version_id: string; expected_revision: number; cells: PavementProgressCell[];
+};

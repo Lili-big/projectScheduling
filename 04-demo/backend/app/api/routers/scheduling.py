@@ -128,6 +128,7 @@ def optimize_pavement_idle_endpoint(payload: PavementIdleOptimizeRequest, reques
     if payload.scenario.engineering_domain != "pavement":
         raise HTTPException(status_code=422,detail={"code":"PAVEMENT_IDLE_UNSUPPORTED_DOMAIN","message":"窝工优化仅支持路面方案。"})
     _check_pavement_budget(payload.scenario)
+    budget = payload.time_budget_seconds if payload.time_budget_seconds is not None else payload.scenario.time_limit_seconds
     scenario,diagnostics=_materialize_project_master(payload.scenario,request,workpoint_id=workpoint_id)
     try:
         generated=generate_schedule_input_from_scenario(scenario,workpoint_id=workpoint_id)
@@ -140,7 +141,8 @@ def optimize_pavement_idle_endpoint(payload: PavementIdleOptimizeRequest, reques
     except IdleBaselineError as exc:
         raise HTTPException(status_code=422,detail={"code":exc.code,"message":str(exc)}) from exc
     return pavement_stream_response(lambda publish,control:solve_pavement_idle_scenario(
-        scenario,generated,payload.baseline,prepared,began,on_solution=publish,control=control),scenario.time_limit_seconds)
+        scenario,generated,payload.baseline,prepared,began,on_solution=publish,control=control,
+        time_budget_seconds=budget),budget)
 
 
 @router.post("/api/solve-min-resources", response_model=ScenarioSolveResult)

@@ -517,6 +517,18 @@
 .pavement-relation-date summary { cursor: pointer; color: #64748b; }
 .pavement-relation-date input { margin-top: 4px; }
 
+.pavement-shift-regimes { margin: 20px 16px 16px; flex-shrink: 0; }
+.pavement-shift-regimes h3 { margin: 0 0 8px; font-size: 16px; }
+.pavement-shift-regimes p { margin: 8px 0; color: #64748b; font-size: 13px; line-height: 1.6; }
+.pavement-shift-regimes .table-wrap { border: 1px solid #dbe4ed; border-radius: 6px; }
+.pavement-shift-table { min-width: 680px; }
+.pavement-shift-table th:first-child { width: 56px; }
+.pavement-shift-table input[type="date"] { width: 160px; }
+.pavement-shift-start, .pavement-shift-end { display: flex; align-items: center; gap: 10px; }
+.pavement-shift-start span, .pavement-shift-end span, .pavement-shift-empty { color: #64748b; font-size: 13px; }
+.pavement-shift-table tfoot td { padding: 0; }
+.pavement-shift-table .pavement-shift-add { width: 100%; border: 0; border-radius: 0; padding: 10px 12px; text-align: left; color: #0369a1; background: #f8fafc; }
+
 /* The existing narrow navigation stacks above the workspace; it must not consume the viewport. */
 @media (max-width: 980px) {
   .pavement-workspace .app-body { grid-template-rows: auto minmax(0, 1fr); }

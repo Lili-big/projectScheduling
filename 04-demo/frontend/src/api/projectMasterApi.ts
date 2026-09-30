@@ -1,5 +1,13 @@
 import { withPavementMaster } from "../domain/pavement";
 import type { SavePavementHandoverRequest } from "../contracts/projectMaster";
+import type { PavementProgressView, SavePavementProgressRequest } from "../contracts/projectMaster";
+
+export function getPavementProgress(projectId: string): Promise<PavementProgressView> {
+  return apiGet(`/api/projects/${encodeURIComponent(projectId)}/pavement-progress`);
+}
+export function savePavementProgress(projectId: string, payload: SavePavementProgressRequest): Promise<PavementProgressView> {
+  return apiPut(`/api/projects/${encodeURIComponent(projectId)}/pavement-progress`, payload);
+}
 
 export function savePavementHandover(versionId: string, sectionId: string, values: SavePavementHandoverRequest): Promise<ProjectMasterVersionDetail> {
   return apiPut(`/api/project-master/versions/${encodeURIComponent(versionId)}/pavement-sections/${encodeURIComponent(sectionId)}/handover`, values);

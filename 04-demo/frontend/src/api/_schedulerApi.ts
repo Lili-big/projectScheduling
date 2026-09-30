@@ -35,6 +35,7 @@ import type {
   AdoptAdjustmentResponse,
   ScenarioInput,
   ScenarioSolveResult,
+  PavementIdleOptimizeRequest,
   CreatePlanningScenarioVersionRequest,
   CreateProjectDataVersionRequest,
   GirderPlanningReadiness,
@@ -126,9 +127,10 @@ export function solvePavementScenarioStream(scenario: ScenarioInput, workpointId
 }
 
 export function optimizePavementIdleStream(scenario: ScenarioInput, workpointId: string | null,
-  baseline: ScenarioSolveResult, publish: (event: unknown) => void, signal: AbortSignal): Promise<void> {
-  return apiPostStream(schedulingPath("/api/solve-scenario/idle/stream", workpointId), {scenario, baseline}, publish, signal,
-    (scenario.time_limit_seconds + 30) * 1000);
+  baseline: ScenarioSolveResult, publish: (event: unknown) => void, signal: AbortSignal, timeBudgetSeconds?: number): Promise<void> {
+  const payload: PavementIdleOptimizeRequest = {scenario, baseline, time_budget_seconds: timeBudgetSeconds};
+  return apiPostStream(schedulingPath("/api/solve-scenario/idle/stream", workpointId), payload, publish, signal,
+    ((timeBudgetSeconds ?? scenario.time_limit_seconds) + 30) * 1000);
 }
 
 export function solveMinResources(

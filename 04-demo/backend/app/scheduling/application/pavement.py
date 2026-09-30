@@ -33,7 +33,8 @@ def prepare_pavement_idle(scenario, generated, baseline):
     return validate_idle_baseline(generated.schedule_input, baseline.result)
 
 
-def solve_pavement_idle_scenario(scenario, generated, baseline, prepared, began, *, on_solution=None, control=None):
+def solve_pavement_idle_scenario(scenario, generated, baseline, prepared, began, *, on_solution=None, control=None,
+                               time_budget_seconds=None):
     from ..solver.strategies.pavement import solve_pavement_idle
     def wrap(result):
         return ScenarioSolveResult(scenario_id=scenario.scenario_id,scenario_name=scenario.scenario_name,
@@ -42,5 +43,6 @@ def solve_pavement_idle_scenario(scenario, generated, baseline, prepared, began,
             metrics={"engineering_domain":"pavement","ready_days":result.objective_days,
                 "idle_days":result.pavement_idle_optimization.final_idle_days})
     result=solve_pavement_idle(generated.schedule_input,baseline.result,prepared=prepared,began=began,
-        on_solution=(lambda result:on_solution(wrap(result))) if on_solution else None,control=control)
+        on_solution=(lambda result:on_solution(wrap(result))) if on_solution else None,control=control,
+        time_budget_seconds=time_budget_seconds)
     return wrap(result)

@@ -31,7 +31,8 @@ def forbidden_fleet_edges(tasks, links, checkpoint=lambda: None):
 
 
 def add_pavement_fleet_paths(model, tasks, resources, candidates, starts, ends, horizon,
-                             links=(), checkpoint=lambda: None):
+                             links=(), checkpoint=lambda: None, durations=None):
+    """Route each fleet as one circuit; durations map task ids to (variable) days."""
     assignments, arcs = {}, []
     route_vars = {}
     forbidden = forbidden_fleet_edges(tasks, links, checkpoint)
@@ -66,7 +67,8 @@ def add_pavement_fleet_paths(model, tasks, resources, candidates, starts, ends, 
             route_vars[resource.id, task.id, None] = last
             circuit.append((0, i, first))
             circuit.append((i, 0, last))
-            intervals.append(model.NewOptionalIntervalVar(starts[task.id], task.duration_days, ends[task.id], assigned, f"fleet:{resource.id}:{i}"))
+            intervals.append(model.NewOptionalIntervalVar(starts[task.id],
+                durations[task.id] if durations else task.duration_days, ends[task.id], assigned, f"fleet:{resource.id}:{i}"))
             for j, following in enumerate(eligible, 1):
                 checkpoint()
                 if i == j or (task.id, following.id) in forbidden: continue

@@ -411,7 +411,7 @@ def idle_api_payload():
 
 def test_idle_api_rejects_stale_and_corrupt_baselines_before_streaming(tmp_path):
     from copy import deepcopy
-    app=_app(tmp_path); original=idle_api_payload()
+    app=_app(tmp_path); original={**idle_api_payload(), "time_budget_seconds":30}
     for kind in ["scope","scenario","fingerprint","task","cap","version","old_policy","budget"]:
         payload=deepcopy(original); path="/api/solve-scenario/idle/stream"
         if kind=="scope": path+="?workpoint_id=road"
@@ -426,3 +426,12 @@ def test_idle_api_rejects_stale_and_corrupt_baselines_before_streaming(tmp_path)
         assert status==422,(kind,response)
     mirror=Path(__file__).resolve().parents[2]/"tools/demo-api-mirror/api.mts"
     assert '/solve-scenario/idle/stream' in mirror.read_text(encoding="utf-8")
+
+
+def test_idle_api_rejects_invalid_runtime_budget_before_streaming(tmp_path):
+    app = _app(tmp_path)
+    original = idle_api_payload()
+    for value in [0, -1, "Infinity", "NaN", "invalid"]:
+        status, response = json_request(app, "POST", "/api/solve-scenario/idle/stream",
+                                        {**original, "time_budget_seconds": value})
+        assert status == 422, response

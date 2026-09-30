@@ -2,11 +2,23 @@
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 EngineeringDomain = Literal["bridge", "pavement"]
 PavementProcessType = Literal["granular_base", "cement_stabilized_base", "asphalt_course"]
 PavementHandoverStatus = Literal["dated", "handed_over", "pending"]
+
+
+class PavementShiftRegime(BaseModel):
+    start_date: date
+    end_date: date | None = None
+    shifts: int = Field(ge=1, le=2, strict=True)
+
+    @model_validator(mode="after")
+    def check_range(self):
+        if self.end_date is not None and self.end_date < self.start_date:
+            raise ValueError("班制区间起始日不能晚于结束日。")
+        return self
 
 
 class PavementOptimization(BaseModel):
@@ -122,6 +134,7 @@ class PavementSettings(BaseModel):
     fixed_sequences: list[PavementFixedSequence] = Field(default_factory=list)
     input_kind: Literal["customer", "demo"] = "customer"
     dependency_rules: list[PavementDependencyRule] = Field(default_factory=list)
+    shift_regimes: list[PavementShiftRegime] = Field(default_factory=list)
 
 
 class PavementTaskContext(BaseModel):

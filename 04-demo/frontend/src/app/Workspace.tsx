@@ -1,6 +1,7 @@
 import { createPavementPreviewController, emptyPavementPreview } from "./workflows/scenarioWorkflow";
 import { PavementResources } from "../features/resources/ResourcesTab";
 import { PavementTaskView } from "../features/taskView/TaskViewWorkspace";
+import { PavementProgressPanel } from "../features/pavementProgress/PavementProgressPanel";
 import { PavementScheduleResults } from "../features/scheduleResults/ScheduleResultsWorkspace";
 import { PavementSolveProgress } from "../features/scheduleResults/PavementSolveProgress";
 import { getPavementProject } from "../api/projectMasterApi";
@@ -226,7 +227,7 @@ import {
   loadScenarioWorkflow,
   scenarioFingerprintForSolve as serializeScenarioFingerprint,
 } from "./workflows/scenarioWorkflow";
-import { solveScenarioWorkflow, createPavementSolveController, canOptimizePavementIdle } from "./workflows/solveWorkflow";
+import { solveScenarioWorkflow, createPavementSolveController, canOptimizePavementIdle, parsePavementSolveBudget } from "./workflows/solveWorkflow";
 import { useWorkspaceController } from "./useWorkspaceController";
 
 type ObjectiveTermDefinition = {
@@ -5151,6 +5152,9 @@ function PavementWorkspace() {
   const projectId = new URLSearchParams(window.location.search).get("project_id") || "pavement-project";
   const [scenario, setScenario] = useState<ScenarioInput | null>(null);
   const [active, setActive] = useState<TabKey>("projectFiles");
+  const [progressVisited, setProgressVisited] = useState(false);
+  const [masterEditorDirty, setMasterEditorDirty] = useState(false);
+  useEffect(() => { if (active === "pavementProgress") setProgressVisited(true); }, [active]);
   const [collapsed, setCollapsed] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [scope, setScope] = useState("");
@@ -5167,6 +5171,8 @@ function PavementWorkspace() {
   const [liveStatus, setLiveStatus] = useState<import("../contracts").PavementLiveStatus>("idle");
   const [solveStartedAt, setSolveStartedAt] = useState<number | null>(null);
   const [timeBudgetSeconds, setTimeBudgetSeconds] = useState<number | null>(null);
+  const [solveBudgetDraft, setSolveBudgetDraft] = useState("15");
+  const solveBudget = parsePavementSolveBudget(solveBudgetDraft);
   const liveController = useMemo(() => createPavementSolveController(solvePavementScenarioStream, optimizePavementIdleStream), []);
   const [resultFingerprint, setResultFingerprint] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
@@ -5232,7 +5238,7 @@ function PavementWorkspace() {
     }
   }
   async function solveCurrent(optimizeIdle = false) {
-    if (!scenario || optimizeIdle && !idleAvailable) return;
+    if (!scenario || busy || solveBudget === null || optimizeIdle && !idleAvailable) return;
     const baseline = optimizeIdle && solved ? solved : undefined;
     setSolveGoal(optimizeIdle ? "idle" : "makespan");
     const token=++requestToken.current;
@@ -5248,7 +5254,7 @@ function PavementWorkspace() {
         setTimeBudgetSeconds(state.timeBudgetSeconds);
         setError(state.error);
         if (state.solved) { setSolved(state.solved); setResultFingerprint(expected); }
-      }, baseline);
+      }, baseline, solveBudget);
     } catch(reason) {
       if (token === requestToken.current && currentFingerprint.current === expected) setError(errorText(reason));
     } finally {
@@ -5264,7 +5270,13 @@ function PavementWorkspace() {
   }
   const diagnostics = active === "results" ? solved?.diagnostics : null;
   return <div className="app-shell pavement-workspace"><div className={`app-body ${collapsed ? "side-nav-collapsed" : ""}`}>
-    <SideNavigation activeTab={active} openTabs={[active]} onOpen={setActive} collapsed={collapsed} onToggleCollapsed={()=>setCollapsed(v=>!v)} engineeringDomain="pavement" />
+    <SideNavigation activeTab={active} openTabs={[active]} onOpen={tab => {
+      if (active === "projectFiles" && masterEditorDirty && tab !== active) {
+        setNotice("项目主数据还有未保存的修改，请先保存或撤销，再切换页面。"); return;
+      }
+      setNotice(current => current === "项目主数据还有未保存的修改，请先保存或撤销，再切换页面。" ? "" : current);
+      setActive(tab);
+    }} collapsed={collapsed} onToggleCollapsed={()=>setCollapsed(v=>!v)} engineeringDomain="pavement" />
     <main className="workspace"><div className="workspace-tabs"><h2>公路路面施工计划</h2></div><div className="workspace-content">
       {error && <section className="notice error" role="alert">{error}<button onClick={()=>void load()}>重新加载</button></section>}
       {notice && <section className="notice">{notice}</section>}
@@ -5272,12 +5284,19 @@ function PavementWorkspace() {
       {scenario && <>
         {active==="results" && <section className="panel full"><div className="toolbar"><label>计划开始日期 <input aria-label="计划开始日期" type="date" value={scenario.project.start_date} onChange={e=>e.target.value && patch({project:{...scenario.project,start_date:e.target.value}})} /></label>
           <label>求解范围 <select value={scope} onChange={e=>setScope(e.target.value)}><option value="">全部路面工点</option>{scenario.project.bridges.map(w=><option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
-          <button disabled={!!busy} onClick={()=>void solveCurrent()}>{busy==="solving" ? "求解中…" : "按固定机组求解"}</button>
-          <button disabled={!idleAvailable} title={idleAvailable ? "工期不超过当前方案，继续减少机组期间空闲" : "需先获得与当前输入一致的可行方案，且没有运行中的计算"} onClick={()=>void solveCurrent(true)}>{busy==="solving" && solveGoal==="idle" ? "窝工优化中…" : "优化窝工"}</button>
+          <label>求解时限（秒） <input type="number" min={0} step="any" style={{width:100}} value={solveBudgetDraft}
+            aria-invalid={solveBudget === null} aria-describedby="pavement-budget-note" disabled={!!busy}
+            onChange={e=>setSolveBudgetDraft(e.target.value)} /></label>
+          <button disabled={!!busy || solveBudget === null} onClick={()=>void solveCurrent()}>{busy==="solving" ? "求解中…" : "按固定机组求解"}</button>
+          <button disabled={!idleAvailable || solveBudget === null} title={idleAvailable ? "工期不超过当前方案，继续减少机组期间空闲" : "需先获得与当前输入一致的可行方案，且没有运行中的计算"} onClick={()=>void solveCurrent(true)}>{busy==="solving" && solveGoal==="idle" ? "窝工优化中…" : "优化窝工"}</button>
           <button disabled={!!busy || !dirty} onClick={()=>void save()}>保存配置{dirty ? "（未保存）" : ""}</button></div>
+          <p id="pavement-budget-note" className={solveBudget === null ? "notice error" : "pv-note"} role={solveBudget === null ? "alert" : undefined}>
+            {solveBudget === null ? "请输入大于 0 的有效秒数。" : "求解时限用于本次工期求解或窝工优化；到时返回已找到的最好方案。"}
+          </p>
         </section>}
-        {active==="projectFiles" && <ProjectMasterDataWorkspace key={projectId} projectId={projectId} engineeringDomain="pavement" activeVersionId={scenario.project_data_version_id} onVersionConfirmed={id=>void confirmed(id)} />}
-        {active==="process" && <ProcessTab scenario={scenario} onUpdateProcess={(i,values)=>patch({process_library:scenario.process_library.map((p,j)=>i===j ? {...p,...values} : p)})} onSaveProcessLibrary={()=>void save()} savingProcessLibrary={!!busy} processLibraryDirty={dirty} />}
+        {active==="projectFiles" && <ProjectMasterDataWorkspace key={projectId} projectId={projectId} engineeringDomain="pavement" activeVersionId={scenario.project_data_version_id} onVersionConfirmed={id=>void confirmed(id)} onDirtyChange={setMasterEditorDirty} />}
+        {(progressVisited || active === "pavementProgress") && <PavementProgressPanel key={projectId} projectId={projectId} scenario={scenario} active={active === "pavementProgress"} onRefreshMaster={confirmed} />}
+        {active==="process" && <ProcessTab scenario={scenario} onUpdateProcess={(i,values)=>patch({process_library:scenario.process_library.map((p,j)=>i===j ? {...p,...values} : p)})} onSaveProcessLibrary={()=>void save()} savingProcessLibrary={!!busy} processLibraryDirty={dirty} onUpdatePavementSettings={settings=>patch({pavement_settings:settings})} />}
         {active==="logic" && <LogicTab scenario={scenario} onUpdateLogic={()=>{}} onUpdateUpperStructureLogic={()=>{}} onSaveLocalConfig={()=>void save()} savingLocalConfig={!!busy} localConfigDirty={dirty} onUpdatePavementSettings={settings=>patch({pavement_settings:settings})} />}
         {active==="resources" && <PavementResources scenario={scenario} onChange={pools=>patch({resource_pools:pools})} onSave={()=>void save()} saving={!!busy} />}
         {active==="tasks" && <PavementTaskView scenario={scenario} generated={currentPreview.generation} status={currentPreview.status} error={currentPreview.error}

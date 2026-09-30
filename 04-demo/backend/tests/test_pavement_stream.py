@@ -128,9 +128,13 @@ def test_stream_api_domain_error_complete_and_read_only(tmp_path):
     assert final["type"] == "complete" and final["solved"]["result"]["status"] == "MODEL_INVALID"
 
 
-def test_idle_stream_improves_under_ten_day_cap_and_preserves_state(tmp_path):
+@pytest.mark.parametrize("budget", [None, 15, 30, 60])
+def test_idle_stream_improves_under_ten_day_cap_and_preserves_state(tmp_path, budget):
     from test_pavement_api import idle_api_payload
-    payload=idle_api_payload(); before=json.dumps(payload,sort_keys=True)
+    payload=idle_api_payload()
+    if budget is not None:
+        payload["time_budget_seconds"] = budget
+    before=json.dumps(payload,sort_keys=True)
     app=_app(tmp_path)
     state_before={str(p):p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
     async def streaming_app(scope,receive,send):
@@ -140,12 +144,24 @@ def test_idle_stream_improves_under_ten_day_cap_and_preserves_state(tmp_path):
     assert status==200,body
     events=[json.loads(line) for line in body.decode().splitlines()]
     assert [events[0]["type"],events[1]["solution_kind"],events[-1]["type"]]==["started","initial","complete"]
+    expected_budget = budget if budget is not None else payload["scenario"]["time_limit_seconds"]
+    assert events[0]["time_budget_seconds"] == expected_budget
     plans=[e["solved"]["result"] for e in events if "solved" in e]
     assert plans[0]["pavement_idle_optimization"]["final_idle_days"]==8
     assert plans[-1]["pavement_idle_optimization"]["final_idle_days"]==0
     assert plans[-1]["pavement_idle_optimization"]["proved_optimal"]
     assert all(p["objective_days"]<=10 for p in plans)
     assert all(p["pavement_idle_optimization"]["makespan_cap_days"]==10 for p in plans)
+    fingerprint = payload["baseline"]["result"]["pavement_summary"]["input_fingerprint"]
+    for event in events:
+        if "solved" not in event:
+            continue
+        assert event["solved"]["generated"] == payload["baseline"]["generated"]
+        result = event["solved"]["result"]
+        assert result["pavement_summary"]["input_fingerprint"] == fingerprint
+        assert result["pavement_idle_optimization"]["baseline_input_fingerprint"] == fingerprint
+        assert result["pavement_idle_optimization"]["time_budget_seconds"] == expected_budget
+        assert result.get("pavement_optimization") == payload["baseline"]["result"].get("pavement_optimization")
     assert json.dumps(payload,sort_keys=True)==before
     assert {str(p):p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}==state_before
 

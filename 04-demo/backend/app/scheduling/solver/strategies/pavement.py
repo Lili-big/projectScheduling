@@ -18,9 +18,11 @@ from ....process_library_defaults import PAVEMENT_PROCESSES
 from ....project_master.validation import pavement_quantity_errors, resolve_roadbed_handover, roadbed_start_offset
 from ...domain.milestone_scope import task_ids_for_milestone
 from ...domain.resource_scope import pavement_resource_matches, PAVEMENT_SHARED_RESOURCE_TYPE
+from ...domain.shift_regime import shift_config_errors, task_duration_for_start
 from ..constraints.pavement import add_pavement_fleet_paths
 from .pavement_heuristic import (Candidate, ready_offset, milestone_offsets, terminal_task_ids, transfer_days,
-    generate_initial_candidates, validate_candidate, idle_metrics, Candidate, BudgetExpired, check_deadline)
+    generate_initial_candidates, validate_candidate, idle_metrics, Candidate, BudgetExpired, check_deadline,
+    pavement_duration)
 
 
 def validate_pavement_schedule(schedule):
@@ -29,6 +31,9 @@ def validate_pavement_schedule(schedule):
         errors.append(ValidationMessage(level="error", code=code, message=text, subject_id=subject))
     if schedule.schedule_strategy != ScheduleStrategyConfig():
         error("PAVEMENT_STRATEGY_NOT_SUPPORTED", "路面首版仅支持固定机组、最早施工完成目标，不支持桥梁策略参数。")
+    for issue in shift_config_errors(schedule.shift_regimes):
+        error("PAVEMENT_SHIFT_INVALID", {"shift_range": "班制区间的结束日不能早于起始日。",
+            "shift_overlap": "班制区间相互重叠或起点重复，请合并或调整区间。"}.get(issue.split(":", 1)[0], "班制区间配置无效。"))
     tasks = {t.id: t for t in schedule.tasks}
     if not tasks or len(tasks) != len(schedule.tasks): error("PAVEMENT_DATA_INCOMPLETE", "任务为空或ID重复。")
     if len({r.id for r in schedule.resources}) != len(schedule.resources): error("PAVEMENT_REFERENCE_INVALID", "机组ID重复。")
@@ -173,15 +178,23 @@ def _build_model(schedule, candidates, initial, deadline, control=None, *, minim
     horizon = latest + sum(t.duration_days + int(t.properties.get("wait_days", 0)) for t in schedule.tasks) + sum(max(0, l.lag_days) for l in schedule.precedence_links) + max([0] + [r.transfer_days or 0 for r in schedule.resources]) * max(0, len(schedule.tasks)-1) + 1
     horizon = max(horizon, initial.makespan if initial else 0)
     model = cp_model.CpModel()
-    starts, ends = {}, {}
+    starts, ends, dvars = {}, {}, {}
     for task in schedule.tasks:
         checkpoint()
         starts[task.id] = model.NewIntVar(0, horizon, f"start:{task.id}")
         ends[task.id] = model.NewIntVar(0, horizon, f"end:{task.id}")
-        model.Add(ends[task.id] == starts[task.id] + task.duration_days)
+        if schedule.shift_regimes:
+            durations = [task_duration_for_start(task, offset, schedule.shift_regimes, schedule.start_date)
+                         for offset in range(horizon + 1)]
+            duration = model.NewIntVar(min(durations), max(durations), f"duration:{task.id}")
+            model.AddAllowedAssignments([starts[task.id], duration], list(enumerate(durations)))
+        else:
+            duration = task.duration_days
+        dvars[task.id] = duration
+        model.Add(ends[task.id] == starts[task.id] + duration)
     # The selected route of each actual fleet enforces normal-before-pending.
     # Other fleets' normal tasks do not impose a global start boundary.
-    assignments, arcs, route_vars = add_pavement_fleet_paths(model, schedule.tasks, schedule.resources, candidates, starts, ends, horizon, schedule.precedence_links, checkpoint)
+    assignments, arcs, route_vars = add_pavement_fleet_paths(model, schedule.tasks, schedule.resources, candidates, starts, ends, horizon, schedule.precedence_links, checkpoint, durations=dvars)
     _add_execution_constraints(model, schedule, starts, candidates, assignments)
     for link in schedule.precedence_links:
         checkpoint()
@@ -234,7 +247,11 @@ def _build_model(schedule, candidates, initial, deadline, control=None, *, minim
                     continue
                 model.Add(first == starts[task.id]).OnlyEnforceIf(route_vars[resource.id, None, task.id])
                 model.Add(last == ends[task.id]).OnlyEnforceIf(route_vars[resource.id, task.id, None])
-                work.append(task.duration_days * assigned)
+                # Variable shift durations cannot multiply into a BoolVar; linearize.
+                work_var = model.NewIntVar(0, horizon, f"work:{resource.id}:{task.id}")
+                model.Add(work_var == dvars[task.id]).OnlyEnforceIf(assigned)
+                model.Add(work_var == 0).OnlyEnforceIf(assigned.Not())
+                work.append(work_var)
             transfer = sum(days * arc for r, a, b, days, arc in arcs if r.id == resource.id)
             idle = model.NewIntVar(0, horizon, f"fleet_idle:{resource.id}")
             model.Add(idle == last - first - sum(work) - transfer)
@@ -470,6 +487,12 @@ def solve_pavement_schedule(schedule, *, on_solution=None, control=None):
     return result
 
 
+def _shift_assumption(regimes):
+    spans = "；".join(f"{regime.start_date} ~ {regime.end_date or '长期'}{'双班' if regime.shifts == 2 else '单班'}"
+        for regime in sorted(regimes, key=lambda r: r.start_date))
+    return f"已配置班制区间（{spans}）：双班日按基准工效×2计算日产出，区间外按单班。"
+
+
 def result_from_candidate(schedule, candidates, candidate, status_name, stats):
     """One conversion path for optimized and fallback plans, including all dates."""
     by_id = {t.id: t for t in schedule.tasks}
@@ -516,7 +539,8 @@ def result_from_candidate(schedule, candidates, candidate, status_name, stats):
         construction_finish_date=schedule.start_date+timedelta(days=construction_finish-1),ready_offset=ready,
         ready_date=schedule.start_date+timedelta(days=ready),readiness=[],wait_intervals=waits,transfers=transfers,
         pending_section_dates=pending_dates,
-        resource_assumptions=["透层/封层/黏层等辅助班组及养生管理资源按充足考虑。", "工效为每套机组综合日工效；连续日历天，不含天气和温度窗口优化。"])
+        resource_assumptions=["透层/封层/黏层等辅助班组及养生管理资源按充足考虑。", "工效为每套机组综合日工效；连续日历天，不含天气和温度窗口优化。"]
+            + ([_shift_assumption(schedule.shift_regimes)] if schedule.shift_regimes else []))
     milestones = []
     milestone_values = milestone_offsets(schedule, candidate)
     for m in schedule.milestones:
@@ -559,7 +583,8 @@ def validate_idle_baseline(schedule, baseline):
         if any(getattr(task, field) != getattr(original, field) for field in Task.model_fields):
             raise IdleBaselineError("基准任务定义与当前输入不一致。")
         if (type(task.start_offset) is not int or type(task.end_offset) is not int
-                or task.start_offset < 0 or task.end_offset != task.start_offset + original.duration_days):
+                or task.start_offset < 0
+                or task.end_offset != task.start_offset + pavement_duration(original, task.start_offset, schedule)):
             raise IdleBaselineError("基准任务时刻或工期无效。")
         if (task.start_date != schedule.start_date + timedelta(days=task.start_offset)
                 or task.finish_date != schedule.start_date + timedelta(days=task.end_offset-1)):
@@ -579,12 +604,14 @@ def validate_idle_baseline(schedule, baseline):
     return candidates, initial
 
 
-def solve_pavement_idle(schedule, baseline, *, on_solution=None, control=None, began=None, prepared=None):
+def solve_pavement_idle(schedule, baseline, *, on_solution=None, control=None, began=None, prepared=None,
+                        time_budget_seconds=None):
     """Optimize internal fleet idle time under an immutable, verified makespan cap."""
-    if not math.isfinite(schedule.time_limit_seconds) or schedule.time_limit_seconds <= 0:
+    budget = schedule.time_limit_seconds if time_budget_seconds is None else time_budget_seconds
+    if not math.isfinite(budget) or budget <= 0:
         raise ValueError("求解预算必须为大于0的有限秒数。")
     began = perf_counter() if began is None else began
-    deadline = began + schedule.time_limit_seconds
+    deadline = began + budget
     if control:
         control.check()
     candidates, initial = prepared if prepared is not None else validate_idle_baseline(schedule, baseline)
@@ -593,7 +620,7 @@ def solve_pavement_idle(schedule, baseline, *, on_solution=None, control=None, b
     meta = PavementIdleOptimization(baseline_input_fingerprint=schedule_fingerprint(schedule),
         makespan_cap_days=initial.makespan, baseline_idle_days=initial_idle, final_idle_days=initial_idle,
         baseline_transfer_days=initial_transfer, final_transfer_days=initial_transfer,
-        time_budget_seconds=schedule.time_limit_seconds)
+        time_budget_seconds=budget)
     stats = {"pavement_handover": _result_handover_scope(schedule).model_dump(mode="json"),
         "solve_mode":"pavement_idle_optimization", "hard_constraints_relaxed":False}
 

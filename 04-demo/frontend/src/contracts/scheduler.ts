@@ -40,6 +40,7 @@ export type TabKey =
   | "girderPlanSimulation"
   | "resourceAssistant"
   | "planControl"
+  | "pavementProgress"
   | "progressVisualization";
 export type GanttMode = "by_time" | "by_structure" | "by_process";
 export type TaskViewMode = "by_structure" | "by_process";
@@ -703,6 +704,7 @@ export type ValidationMessage = {
 export type ScheduleInput = {
   readiness_conditions?: PavementReadinessCondition[];
   pavement_handover_scope?: import("./pavement").PavementHandoverScope | null;
+  shift_regimes?: import("./pavement").PavementShiftRegime[];
   project_data_version_id?: string | null;
   engineering_domain?: EngineeringDomain;
   project_name: string;
@@ -2029,4 +2031,4 @@ export type GirderProgressImportPreview = {
   diagnostics: ValidationMessage[];
 };
 
-export type PavementIdleOptimizeRequest = { scenario: ScenarioInput; baseline: ScenarioSolveResult };
+export type PavementIdleOptimizeRequest = { scenario: ScenarioInput; baseline: ScenarioSolveResult; time_budget_seconds?: number | null };

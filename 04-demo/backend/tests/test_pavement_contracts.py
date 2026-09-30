@@ -141,3 +141,17 @@ def test_idle_metadata_is_optional_and_has_explicit_units_and_bounds():
     assert meta.metric=="fleet_internal_idle_v1" and not meta.proved_optimal
     for key,value in [("makespan_cap_days",0),("final_idle_days",-1),("baseline_idle_days",1.5),("time_budget_seconds",float("inf"))]:
         with pytest.raises(ValidationError): PavementIdleOptimization(**{**data,key:value})
+
+
+def test_idle_request_optional_runtime_budget_is_positive_and_finite():
+    from app.contracts import PavementIdleOptimizeRequest
+    from test_pavement_api import idle_api_payload
+    from pydantic import ValidationError
+    import pytest
+    payload = idle_api_payload()
+    assert PavementIdleOptimizeRequest(**payload).time_budget_seconds is None
+    for value in [None, 15, 30, 60, .5]:
+        assert PavementIdleOptimizeRequest(**payload, time_budget_seconds=value).time_budget_seconds == value
+    for value in [0, -1, float("inf"), float("nan"), "invalid"]:
+        with pytest.raises(ValidationError):
+            PavementIdleOptimizeRequest(**payload, time_budget_seconds=value)

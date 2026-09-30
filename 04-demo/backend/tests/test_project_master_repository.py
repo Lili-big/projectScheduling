@@ -17,6 +17,7 @@ from app.contracts.project_master import (  # noqa: E402
     ProjectMasterWorkpoint,
 )
 from app.project_master.repository import ProjectMasterRepository  # noqa: E402
+from app.project_master.schema import SCHEMA_VERSION
 
 
 def _snapshot() -> ProjectMasterSnapshot:
@@ -99,7 +100,7 @@ def test_schema_enables_foreign_keys_indexes_and_version(tmp_path: Path) -> None
     path = tmp_path / "project-master.db"
     ProjectMasterRepository(path)
     connection = sqlite3.connect(path)
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     assert {row[1] for row in connection.execute("PRAGMA index_list(project_master_versions)")} >= {
         "uq_project_master_current"
     }
@@ -119,7 +120,7 @@ def test_schema_v1_database_adds_route_placements_without_rewriting_workpoints(t
     ProjectMasterRepository(path)
 
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert connection.execute("SELECT workpoint_name FROM workpoints WHERE version_id=?", (version.version_id,)).fetchone()[0] == before
         assert connection.execute("SELECT COUNT(*) FROM route_placements").fetchone()[0] == 0
 
